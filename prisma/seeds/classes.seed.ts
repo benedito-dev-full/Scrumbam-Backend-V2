@@ -4,11 +4,11 @@
  * Composicao do seed (ADR-V2-019: monolitico):
  *   - 45 classes fixas universais Devari-Core (range -1..-110), via spread de
  *     `templates/classes-base-template.ts`.
- *   - 80 classes especificas Scrumban-V2 (range -150..-527), declaradas
+ *   - 83 classes especificas Scrumban-V2 (range -150..-527), declaradas
  *     neste arquivo, agrupadas por seccao (DEntidade, DVincula, DPedido,
  *     DTabela, DEvento, DTabela secundario) com comentarios `// === ... ===`.
  *
- * Total: 125 DClasses.
+ * Total: 128 DClasses.
  *
  * Validacao automatica:
  *   `validateHierarchy(classes)` e chamado no topo deste modulo. Qualquer
@@ -31,7 +31,7 @@
  * @see prisma/seeds/validate-hierarchy.ts (validador puro)
  * @see prisma/seeds/seed-runner.ts (runner UPSERT)
  * @see templates/classes-base-template.ts (45 classes fixas)
- * @see docs/plano/00-PLANO-MESTRE.md §3 (auditoria das 125 classes)
+ * @see docs/plano/00-PLANO-MESTRE.md §3 (auditoria das 128 classes)
  * @see docs/decisions/ADR-V2-019-seed-monolitico.md
  */
 
@@ -73,7 +73,7 @@ function esp(
 }
 
 /**
- * Array de classes especificas Scrumban-V2 (80 entradas).
+ * Array de classes especificas Scrumban-V2 (83 entradas).
  *
  * Ordem:
  *   1. DEntidade — 5 (sub-tipos de Pessoa: USER, PLATFORM_SCRUMBAN,
@@ -81,12 +81,14 @@ function esp(
  *   2. DVincula — 11 (relacoes Org-User, Project-User, Team, Project-Agent,
  *      Telegram).
  *   3. DPedido — 4 (EXECUTION + EXEC_LOW/MED/HIGH para Pilar 1 / F6).
- *   4. DTabela principal — 32 (SPRINT, PRIORITY, TASK_TYPE, STATUS V3,
+ *   4. DTabela principal — 35 (SPRINT, PRIORITY, TASK_TYPE, STATUS V3,
  *      CHANNEL, WEBHOOK, API_KEY, MCP_KEY, INSTALL_TOKEN, PAIRING_TOKEN,
  *      ISSUE_COUNTER).
  *   5. DEvento — 12 (NOTIFICATION, WEBHOOK_ATTEMPT, AGENT_HEARTBEAT,
  *      TELEGRAM_*, MCP_CALL, EXECUTION_LOG, audit logs).
  *   6. DTabela secundario — 16 (AGENT_STATUS, EXEC_STATUS, RISK_LEVEL).
+ *
+ * Soma: 5 + 11 + 4 + 35 + 12 + 16 = 83.
  */
 const classesEspecificas: DClasseSeed[] = [
   // === DEntidade — sub-tipos de Pessoa (5) ===
@@ -192,7 +194,7 @@ const classesEspecificas: DClasseSeed[] = [
 ];
 
 /**
- * Array completo do seed (45 fixas + 80 especificas = 125 DClasses).
+ * Array completo do seed (45 fixas + 83 especificas = 128 DClasses).
  * Validado automaticamente em time de import (validateHierarchy abaixo).
  */
 export const classes: DClasseSeed[] = [...classesFixas, ...classesEspecificas];
