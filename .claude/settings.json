@@ -1,0 +1,133 @@
+{
+  "hooks": {
+    "SubagentStop": [
+      {
+        "matcher": "strategist",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/scripts/update-status-after-agent.sh strategist",
+            "timeout": 30,
+            "statusMessage": "Registrando conclusão Strategist V2..."
+          }
+        ]
+      },
+      {
+        "matcher": "implementer",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/scripts/validate-implementer-build.sh",
+            "timeout": 180,
+            "statusMessage": "V2 double-check: build do Implementer..."
+          },
+          {
+            "type": "command",
+            "command": "./.claude/scripts/update-status-after-agent.sh implementer",
+            "timeout": 30,
+            "statusMessage": "Registrando conclusão Implementer V2..."
+          }
+        ]
+      },
+      {
+        "matcher": "reviewer",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/scripts/validate-review-score.sh",
+            "timeout": 30,
+            "statusMessage": "V2 score gate: APPROVED ≥ 7.0..."
+          },
+          {
+            "type": "command",
+            "command": "./.claude/scripts/update-status-after-agent.sh reviewer",
+            "timeout": 30,
+            "statusMessage": "Registrando conclusão Reviewer V2..."
+          }
+        ]
+      },
+      {
+        "matcher": "documenter",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/scripts/update-status-after-agent.sh documenter",
+            "timeout": 30,
+            "statusMessage": "Registrando conclusão Documenter V2..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/scripts/block-destructive-commands.sh",
+            "timeout": 10,
+            "statusMessage": "V2: checando comandos destrutivos..."
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/scripts/enforce-canonical-tables.sh",
+            "timeout": 10,
+            "statusMessage": "V2: enforcing 17 tabelas canônicas (ADR-V2-001)..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path' | { read file_path; if echo \"$file_path\" | grep -qE '\\.(js|jsx|ts|tsx)$'; then dir=\"$(dirname \"$file_path\")\"; while [ \"$dir\" != \"/\" ] && [ ! -f \"$dir/package.json\" ]; do dir=\"$(dirname \"$dir\")\"; done; if [ -f \"$dir/package.json\" ]; then cd \"$dir\" && npx prettier --write \"$file_path\" 2>&1; fi; fi; }",
+            "async": true,
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path' | { read file_path; if echo \"$file_path\" | grep -qE '\\.(js|jsx|ts|tsx)$'; then dir=\"$(dirname \"$file_path\")\"; while [ \"$dir\" != \"/\" ] && [ ! -f \"$dir/package.json\" ]; do dir=\"$(dirname \"$dir\")\"; done; if [ -f \"$dir/package.json\" ]; then cd \"$dir\" && output=$(npx eslint \"$file_path\" --max-warnings 0 2>&1); exit_code=$?; if [ $exit_code -ne 0 ]; then echo \"V2 ESLint issues em $file_path:\" >&2; echo \"$output\" >&2; exit 2; fi; fi; fi; }",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path' | { read file_path; if echo \"$file_path\" | grep -qE '\\.(ts|tsx)$'; then dir=\"$(dirname \"$file_path\")\"; while [ \"$dir\" != \"/\" ] && [ ! -f \"$dir/package.json\" ]; do dir=\"$(dirname \"$dir\")\"; done; if [ -f \"$dir/package.json\" ]; then cd \"$dir\" && npx tsc --noEmit 2>&1 || true; fi; fi; }",
+            "async": true,
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/scripts/session-setup.sh",
+            "timeout": 30,
+            "statusMessage": "Verificando ambiente Scrumban-Backend-V2..."
+          }
+        ]
+      }
+    ]
+  }
+}

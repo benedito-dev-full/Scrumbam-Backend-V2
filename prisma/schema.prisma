@@ -1,0 +1,606 @@
+// =====================================================================
+// Scrumban-Backend-V2 — Schema Prisma Canônico Devari-Core
+// =====================================================================
+// Este arquivo contém EXATAMENTE as 17 tabelas canônicas Devari-Core.
+// Adicionar tabela nova aqui é proibido (ADR-V2-001 + hook
+// `enforce-canonical-tables.sh`).
+//
+// Referências:
+// - 17 tabelas: devari-polymorphic-engine.md §2
+// - Padrões de campo: devari-backend-patterns.md §1, §2, §8
+// - Pilares: devari-3-pilares.md
+// - Plano Mestre: docs/plano/00-PLANO-MESTRE.md §3 (DClasses)
+//
+// Convenções:
+// - Todas PKs são BigInt (BIGSERIAL no Postgres) com `chave` como nome canônico
+// - Todos os IDs polimórficos usam `idClasse: BigInt` apontando para DClasse
+// - Json fields chamados `dados` (estrutural) ou `metaDados` (audit/lookup)
+// - Decimal(19,4) para valores monetários (DPedido, DTitulo, DMovDispo)
+// - Timestamps padrão: criadoEm + atualizadoEm (timestamptz)
+// - Soft delete: excluido bool default false
+// =====================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =====================================================================
+// 1. DClasse — TAXONOMIA (sistema de tipos polimórfico)
+// =====================================================================
+// Governa TODAS as outras tabelas via idClasse. Hierarquia em árvore
+// via idPai. Chaves negativas = seeds (do template ou do projeto).
+// Chaves positivas = runtime (reservado, não usado em produção típica).
+// =====================================================================
+
+model DClasse {
+  chave        BigInt   @id
+  codigo       String?  @db.VarChar(64)
+  nome         String   @db.VarChar(255)
+  idPai        BigInt?
+  agrupamento  Boolean  @default(false)
+  inativo      Boolean  @default(false)
+  excluido     Boolean  @default(false)
+  excluivel    Boolean  @default(true)
+  editavel     Boolean  @default(true)
+  tableFields  Json?
+  baseFields   Boolean  @default(false)
+  criadoEm     DateTime @default(now()) @db.Timestamptz(6)
+  atualizadoEm DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+
+  // Self-referencing hierarchy
+  pai     DClasse?  @relation("DClasseHierarchy", fields: [idPai], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  filhos  DClasse[] @relation("DClasseHierarchy")
+
+  // Reverse relations (criadas pelas FKs nas outras tabelas)
+  entidades  DEntidade[]
+  tabelas    DTabela[]
+  vinculos   DVincula[]
+  eventos    DEvento[]
+  recursos   DRecurso[]
+  userGroups DUserGroup[]
+  permissoes DPermissao[]
+  tasks      DTask[]
+  projects   DProject[]
+  pedidos    DPedido[]
+  titulos    DTitulo[]
+  movDispos  DMovDispo[]
+  movDepos   DMovDepos[]
+  solicitas  DSolicita[]
+  requisics  DRequisic[]
+
+  @@index([idPai])
+  @@index([codigo])
+  @@index([excluido, inativo])
+}
+
+// =====================================================================
+// 2. DEntidade — CADASTRO UNIVERSAL POLIMÓRFICO
+// =====================================================================
+// Pessoas, organizações, locais, contas — qualquer cadastro com quem o
+// sistema se relaciona. idClasse define o tipo. Campos não usados ficam
+// NULL por design.
+// =====================================================================
+
+model DEntidade {
+  chave         BigInt    @id @default(autoincrement())
+  idClasse      BigInt
+  codigo        String?   @db.VarChar(64)
+  nome          String    @db.VarChar(255)
+  nomeFantasia  String?   @db.VarChar(255)
+  cpfCnpj       String?   @db.VarChar(20)
+  email         String?   @db.VarChar(255)
+  telefone      String?   @db.VarChar(32)
+  celular       String?   @db.VarChar(32)
+  endereco      String?   @db.VarChar(255)
+  bairro        String?   @db.VarChar(128)
+  cep           String?   @db.VarChar(16)
+  idUF          BigInt?
+  idCidade      BigInt?
+  idBanco       BigInt?
+  agencia       String?   @db.VarChar(16)
+  conta         String?   @db.VarChar(32)
+  codigoFebraban String?  @db.VarChar(8)
+  limiteCredito Decimal?  @db.Decimal(19, 4)
+
+  // Hierarquia + escrituração
+  idEstab       BigInt?   // entidade pai (Platform → Marketplace → Seller, etc.)
+  idLocEscritu  BigInt?   // local de escrituração (dono operacional)
+  dUserGroupId  BigInt?   // FK para login (DUserGroup)
+
+  // Json polimórfico — atributos arbitrários por tipo
+  dados         Json?     // ex: {hostname,sshHost,...} para AGENT; {V3 fields} se DTask casual
+  metaDados     Json?
+
+  inativo       Boolean   @default(false)
+  excluido      Boolean   @default(false)
+  criadoEm      DateTime  @default(now()) @db.Timestamptz(6)
+  atualizadoEm  DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  // Relations
+  classe        DClasse   @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  estabPai      DEntidade?  @relation("DEntidadeEstab", fields: [idEstab], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  estabFilhos   DEntidade[] @relation("DEntidadeEstab")
+  locEscPai     DEntidade?  @relation("DEntidadeLocEsc", fields: [idLocEscritu], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  locEscFilhos  DEntidade[] @relation("DEntidadeLocEsc")
+  userGroup     DUserGroup? @relation(fields: [dUserGroupId], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+
+  // Reverse relations
+  tabelas       DTabela[]
+  vinculosAsLoc DVincula[]  @relation("VinculaLocEscritu")
+  vinculosAsEnt DVincula[]  @relation("VinculaEntidade")
+  eventos       DEvento[]
+  pedidosAsPessoa DPedido[]
+  titulosAsPessoa DTitulo[]
+  movDispos     DMovDispo[]
+  movDepos      DMovDepos[]
+
+  @@index([idClasse])
+  @@index([idEstab])
+  @@index([idLocEscritu])
+  @@index([dUserGroupId])
+  @@index([cpfCnpj])
+  @@index([excluido, idClasse])
+}
+
+// =====================================================================
+// 3. DTabela — LOOKUPS, CONFIGURAÇÕES, CATÁLOGOS
+// =====================================================================
+// Catálogos (dEntidadeId NULL) ou configs por entidade (dEntidadeId
+// preenchido). Sprint, Status, Priority, Webhook config, etc.
+// =====================================================================
+
+model DTabela {
+  chave         BigInt    @id @default(autoincrement())
+  idClasse      BigInt
+  codigo        String?   @db.VarChar(64)
+  nome          String    @db.VarChar(255)
+  descricao     String?   @db.Text
+  percentual    Decimal?  @db.Decimal(19, 4)
+  recurso       String?   @db.VarChar(128)
+  uf            String?   @db.VarChar(2)
+
+  // Vínculo opcional a uma entidade (config por org/projeto/team)
+  dEntidadeId       BigInt?
+  idLocEscrituracao BigInt?
+
+  // Json polimórfico
+  dados      Json?
+  metaDados  Json?
+
+  inativo       Boolean   @default(false)
+  excluido      Boolean   @default(false)
+  criadoEm      DateTime  @default(now()) @db.Timestamptz(6)
+  atualizadoEm  DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  // Relations
+  classe    DClasse    @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  entidade  DEntidade? @relation(fields: [dEntidadeId], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+
+  // Reverse
+  vinculos  DVincula[]
+
+  @@index([idClasse])
+  @@index([dEntidadeId])
+  @@index([idLocEscrituracao])
+  @@index([excluido, idClasse])
+}
+
+// =====================================================================
+// 4. DVincula — RELAÇÕES GENÉRICAS
+// =====================================================================
+// N:N, 1:N, documentos. idLocEscritu = dono do vínculo (regra universal).
+// =====================================================================
+
+model DVincula {
+  chave        BigInt    @id @default(autoincrement())
+  idClasse     BigInt
+  idLocEscritu BigInt    // dono do vínculo
+  idEntidade   BigInt?   // lado B (entidade)
+  idTabela     BigInt?   // lado B (lookup)
+
+  percentual   Decimal?  @db.Decimal(19, 4)
+  tipo         String?   @db.VarChar(64)
+  nome         String?   @db.VarChar(255)
+  referencia   String?   @db.VarChar(512)
+  descricao    String?   @db.Text
+  metaDados    Json?
+
+  excluido     Boolean   @default(false)
+  criadoEm     DateTime  @default(now()) @db.Timestamptz(6)
+  atualizadoEm DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  classe       DClasse   @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  locEscritu   DEntidade @relation("VinculaLocEscritu", fields: [idLocEscritu], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  entidade     DEntidade? @relation("VinculaEntidade", fields: [idEntidade], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  tabela       DTabela?  @relation(fields: [idTabela], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([idClasse])
+  @@index([idLocEscritu])
+  @@index([idEntidade])
+  @@index([idTabela])
+  @@index([idLocEscritu, idClasse])
+  @@index([excluido, idClasse])
+}
+
+// =====================================================================
+// 5. DEvento — AUDIT TRAIL
+// =====================================================================
+
+model DEvento {
+  chave                BigInt    @id @default(autoincrement())
+  idClasse             BigInt
+  idEntidade           BigInt?
+  identificadorExterno String?   @db.VarChar(255)
+  descricao            String?   @db.Text
+  metaDados            Json?
+  criadoEm             DateTime  @default(now()) @db.Timestamptz(6)
+
+  classe   DClasse    @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  entidade DEntidade? @relation(fields: [idEntidade], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([idClasse])
+  @@index([idEntidade])
+  @@index([criadoEm])
+  @@index([idClasse, criadoEm(sort: Desc)])
+}
+
+// =====================================================================
+// 6. DRecurso — PRODUTOS, SERVIÇOS, ATIVOS, DESPESAS, RECEITAS
+// =====================================================================
+
+model DRecurso {
+  chave        BigInt    @id @default(autoincrement())
+  idClasse     BigInt
+  codigo       String?   @db.VarChar(64)
+  nome         String    @db.VarChar(255)
+  descricao    String?   @db.Text
+  preco        Decimal?  @db.Decimal(19, 4)
+  custo        Decimal?  @db.Decimal(19, 4)
+  unidade      String?   @db.VarChar(16)
+  metaDados    Json?
+
+  inativo      Boolean   @default(false)
+  excluido     Boolean   @default(false)
+  criadoEm     DateTime  @default(now()) @db.Timestamptz(6)
+  atualizadoEm DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  classe DClasse @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([idClasse])
+  @@index([excluido, idClasse])
+}
+
+// =====================================================================
+// 7. DUserGroup — USUÁRIOS E GRUPOS (login)
+// =====================================================================
+// Mesma tabela para users e groups, diferenciados por idClasse.
+// Refresh tokens, MCP keys e outros tokens vão em `dados` Json.
+// =====================================================================
+
+model DUserGroup {
+  chave        BigInt    @id @default(autoincrement())
+  idClasse     BigInt
+  usuario      String    @unique @db.VarChar(128)
+  senha        String    @db.VarChar(255) // bcrypt hash
+  nome         String?   @db.VarChar(255)
+  email        String?   @db.VarChar(255)
+  ativo        Boolean   @default(true)
+  excluido     Boolean   @default(false)
+  ultimoLogin  DateTime? @db.Timestamptz(6)
+
+  // Json: refresh tokens, MCP keys, MFA state, etc.
+  dados        Json?
+
+  criadoEm     DateTime  @default(now()) @db.Timestamptz(6)
+  atualizadoEm DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  classe     DClasse     @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  entidades  DEntidade[]
+  permissoes DPermissao[]
+
+  @@index([idClasse])
+  @@index([usuario])
+  @@index([email])
+}
+
+// =====================================================================
+// 8. DPermissao — PERMISSÕES POR GRUPO
+// =====================================================================
+
+model DPermissao {
+  chave         BigInt    @id @default(autoincrement())
+  idClasse      BigInt
+  dUserGroupId  BigInt
+  recurso       String    @db.VarChar(128)
+  acao          String    @db.VarChar(64)
+  permitido     Boolean   @default(true)
+  metaDados     Json?
+
+  excluido      Boolean   @default(false)
+  criadoEm      DateTime  @default(now()) @db.Timestamptz(6)
+  atualizadoEm  DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  classe    DClasse    @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  userGroup DUserGroup @relation(fields: [dUserGroupId], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([dUserGroupId])
+  @@index([recurso])
+}
+
+// =====================================================================
+// 9. DTask — ATIVIDADES, ETAPAS, TAREFAS
+// =====================================================================
+// Tasks polimórficas via idClasse. Campos V3 (intentions, telemetria,
+// identifier público, workSessions[]) vivem em `dados` Json.
+// =====================================================================
+
+model DTask {
+  chave        BigInt    @id @default(autoincrement())
+  idClasse     BigInt
+  idProject    BigInt?
+  nome         String    @db.VarChar(512)
+  descricao    String?   @db.Text
+
+  // FKs polimórficas (DTabela) — preenchidas conforme necessário
+  idStatus     BigInt?   // → DTabela idClasse=-44X
+  idPriority   BigInt?   // → DTabela idClasse=-42X
+  idTaskType   BigInt?   // → DTabela idClasse=-43X
+  idSprint     BigInt?   // → DTabela idClasse=-40X
+  idAssignee   BigInt?   // → DEntidade (User)
+  idCreator    BigInt?   // → DEntidade (User)
+
+  // Json polimórfico — V3 intentions, telemetria, workSessions[], etc.
+  dados        Json?
+
+  excluido     Boolean   @default(false)
+  criadoEm     DateTime  @default(now()) @db.Timestamptz(6)
+  atualizadoEm DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  classe  DClasse  @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  project DProject? @relation(fields: [idProject], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([idClasse])
+  @@index([idProject])
+  @@index([idStatus])
+  @@index([idAssignee])
+  @@index([idSprint])
+  @@index([excluido, idProject])
+}
+
+// =====================================================================
+// 10. DProject — PROJETOS, BOARDS, NEGÓCIOS, OBRAS
+// =====================================================================
+
+model DProject {
+  chave         BigInt    @id @default(autoincrement())
+  idClasse      BigInt
+  idEstab       BigInt?   // organização pai
+  nome          String    @db.VarChar(255)
+  descricao     String?   @db.Text
+
+  // Json polimórfico — git deploy keys, automation config, etc.
+  dados         Json?
+
+  excluido      Boolean   @default(false)
+  criadoEm      DateTime  @default(now()) @db.Timestamptz(6)
+  atualizadoEm  DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  classe DClasse @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  tasks  DTask[]
+
+  @@index([idClasse])
+  @@index([idEstab])
+  @@index([excluido, idEstab])
+}
+
+// =====================================================================
+// 11. DPedido — TRANSACIONAL (Engine OBRIGATÓRIO para INSERT)
+// =====================================================================
+// Compras, vendas, PIX, execuções Claude Code (idClasse -300..-303).
+// Workflow: nova → calcula → aprova → grava (via OperacaoPedido).
+// =====================================================================
+
+model DPedido {
+  chave         BigInt    @id @default(autoincrement())
+  idClasse      BigInt
+  idLocEscritu  BigInt?
+  idPessoa      BigInt?   // → DEntidade
+
+  valor         Decimal?  @db.Decimal(19, 4)
+  desconto      Decimal?  @db.Decimal(19, 4)
+  valorTotal    Decimal?  @db.Decimal(19, 4)
+
+  dataEmissao   DateTime? @db.Timestamptz(6)
+  dataAprovacao DateTime? @db.Timestamptz(6)
+  dataBaixa     DateTime? @db.Timestamptz(6)
+  aprovado      Boolean   @default(false)
+  baixado       Boolean   @default(false)
+
+  // Json polimórfico — command, stdout, exitCode, riskLevel, prUrl, etc.
+  dados         Json?
+  metaDados     Json?
+
+  excluido      Boolean   @default(false)
+  criadoEm      DateTime  @default(now()) @db.Timestamptz(6)
+  atualizadoEm  DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  classe  DClasse    @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  pessoa  DEntidade? @relation(fields: [idPessoa], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([idClasse])
+  @@index([idLocEscritu])
+  @@index([idPessoa])
+  @@index([aprovado, baixado])
+  @@index([excluido, idClasse, aprovado])
+}
+
+// =====================================================================
+// 12. DTitulo — FINANCEIRO (contas a pagar/receber)
+// =====================================================================
+
+model DTitulo {
+  chave         BigInt    @id @default(autoincrement())
+  idClasse      BigInt
+  idPedido      BigInt?
+  idPessoa      BigInt?
+
+  tipo          String    @db.VarChar(8) // PAG | REC
+  valor         Decimal   @db.Decimal(19, 4)
+  valorPago     Decimal?  @db.Decimal(19, 4)
+  dataEmissao   DateTime  @db.Timestamptz(6)
+  dataVencimento DateTime @db.Timestamptz(6)
+  dataPagamento DateTime? @db.Timestamptz(6)
+  baixado       Boolean   @default(false)
+
+  metaDados     Json?
+
+  excluido      Boolean   @default(false)
+  criadoEm      DateTime  @default(now()) @db.Timestamptz(6)
+  atualizadoEm  DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  classe DClasse    @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  pessoa DEntidade? @relation(fields: [idPessoa], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([idClasse])
+  @@index([idPessoa])
+  @@index([tipo, baixado])
+  @@index([dataVencimento])
+}
+
+// =====================================================================
+// 13. DMovDispo — LEDGER FINANCEIRO (extrato dinheiro)
+// =====================================================================
+
+model DMovDispo {
+  chave        BigInt    @id @default(autoincrement())
+  idClasse     BigInt
+  idDisponivel BigInt    // → DEntidade (conta bancária/caixa)
+  idTitulo     BigInt?
+  tipo         String    @db.VarChar(8) // CRED | DEB
+  valor        Decimal   @db.Decimal(19, 4)
+  saldoApos    Decimal?  @db.Decimal(19, 4)
+  data         DateTime  @db.Timestamptz(6)
+  descricao    String?   @db.Text
+  metaDados    Json?
+
+  excluido     Boolean   @default(false)
+  criadoEm     DateTime  @default(now()) @db.Timestamptz(6)
+
+  classe       DClasse   @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  disponivel   DEntidade @relation(fields: [idDisponivel], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([idClasse])
+  @@index([idDisponivel, data])
+  @@index([data])
+}
+
+// =====================================================================
+// 14. DMovDepos — MOVIMENTAÇÃO DE ESTOQUE
+// =====================================================================
+
+model DMovDepos {
+  chave        BigInt    @id @default(autoincrement())
+  idClasse     BigInt
+  idDeposito   BigInt    // → DEntidade (almoxarifado)
+  idRecurso    BigInt?
+  tipo         String    @db.VarChar(8) // ENT | SAI
+  quantidade   Decimal   @db.Decimal(19, 4)
+  custo        Decimal?  @db.Decimal(19, 4)
+  data         DateTime  @db.Timestamptz(6)
+  descricao    String?   @db.Text
+  metaDados    Json?
+
+  excluido     Boolean   @default(false)
+  criadoEm     DateTime  @default(now()) @db.Timestamptz(6)
+
+  classe    DClasse   @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  deposito  DEntidade @relation(fields: [idDeposito], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([idClasse])
+  @@index([idDeposito, data])
+  @@index([idRecurso])
+}
+
+// =====================================================================
+// 15. DSolicita — SOLICITAÇÕES (transferência entre depósitos)
+// =====================================================================
+
+model DSolicita {
+  chave         BigInt    @id @default(autoincrement())
+  idClasse      BigInt
+  idOrigem      BigInt?   // depósito origem
+  idDestino     BigInt?   // depósito destino
+  idSolicitante BigInt?
+  status        String    @db.VarChar(16) // PEND | APROV | BAIX
+  data          DateTime  @default(now()) @db.Timestamptz(6)
+  observacao    String?   @db.Text
+  metaDados     Json?
+
+  excluido      Boolean   @default(false)
+  criadoEm      DateTime  @default(now()) @db.Timestamptz(6)
+  atualizadoEm  DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  classe DClasse @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([idClasse])
+  @@index([idOrigem])
+  @@index([idDestino])
+  @@index([status])
+}
+
+// =====================================================================
+// 16. DRequisic — REQUISIÇÕES INTERNAS (consumo)
+// =====================================================================
+
+model DRequisic {
+  chave           BigInt    @id @default(autoincrement())
+  idClasse        BigInt
+  idDeposito      BigInt?
+  idCentroCusto   BigInt?
+  idSolicitante   BigInt?
+  status          String    @db.VarChar(16) // PEND | APROV | BAIX
+  data            DateTime  @default(now()) @db.Timestamptz(6)
+  observacao      String?   @db.Text
+  metaDados       Json?
+
+  excluido        Boolean   @default(false)
+  criadoEm        DateTime  @default(now()) @db.Timestamptz(6)
+  atualizadoEm    DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  classe DClasse @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([idClasse])
+  @@index([idDeposito])
+  @@index([idCentroCusto])
+  @@index([status])
+}
+
+// =====================================================================
+// 17. DVFS — VIRTUAL FILE SYSTEM (scripts de cálculo dos Engines)
+// =====================================================================
+// Scripts de pré/pós cálculo + pré/pós gravação chamados pelo Engine.
+// Permite trocar comportamento por projeto sem alterar código.
+// chaveScript: 3=preCalc, 4=calc, 5=posCalc, 6=preGrav, 7=posGrav
+// =====================================================================
+
+model DVFS {
+  chave        BigInt    @id @default(autoincrement())
+  idClasse     BigInt    // associa a uma DClasse de pedido/operação
+  chaveScript  Int       // 3..7 (ver acima)
+  nome         String    @db.VarChar(255)
+  conteudo     String    @db.Text   // código JS/TS executável
+  versao       Int       @default(1)
+  ativo        Boolean   @default(true)
+  metaDados    Json?
+
+  criadoEm     DateTime  @default(now()) @db.Timestamptz(6)
+  atualizadoEm DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  @@index([idClasse, chaveScript, ativo])
+  @@unique([idClasse, chaveScript, versao])
+}
