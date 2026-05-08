@@ -11,7 +11,14 @@
  * Bonus: chave positiva (DoD-09 / DoD-10).
  */
 
-import { validateHierarchy, CANONICAL_RESERVED, type DClasseSeed } from '../validate-hierarchy';
+import {
+  validateHierarchy,
+  CANONICAL_RESERVED,
+  FIXED_RANGE_MIN,
+  FIXED_RANGE_MAX,
+  isInFixedRange,
+  type DClasseSeed,
+} from '../validate-hierarchy';
 import { classesFixas } from '../../../templates/classes-base-template';
 
 /** Helper para criar seed minimo com defaults sensatos. */
@@ -109,5 +116,22 @@ describe('validateHierarchy', () => {
 
   it('rejeita array vazio', () => {
     expect(() => validateHierarchy([])).toThrow(/\[validate-hierarchy\] array de classes vazio/);
+  });
+
+  it('expoe FIXED_RANGE_MIN/MAX e isInFixedRange para validacoes externas', () => {
+    expect(FIXED_RANGE_MIN).toBe(-110n);
+    expect(FIXED_RANGE_MAX).toBe(-1n);
+    // chaves no range fixo Devari-Core
+    expect(isInFixedRange(-1)).toBe(true);
+    expect(isInFixedRange(-43)).toBe(true);
+    expect(isInFixedRange(-110)).toBe(true);
+    expect(isInFixedRange(-43n)).toBe(true);
+    // chaves fora do range fixo (especificas Scrumban-V2 ou runtime)
+    expect(isInFixedRange(-150)).toBe(false);
+    expect(isInFixedRange(-300)).toBe(false);
+    expect(isInFixedRange(-527)).toBe(false);
+    expect(isInFixedRange(0)).toBe(false);
+    expect(isInFixedRange(100)).toBe(false);
+    expect(isInFixedRange(-111)).toBe(false);
   });
 });

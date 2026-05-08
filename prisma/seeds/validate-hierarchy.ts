@@ -12,6 +12,9 @@
  *  - Nao ha ciclos na arvore (DFS marcado por estado).
  *  - Classes especificas-de-dominio NAO sequestram chaves canonicas
  *    Devari-Core (CANONICAL_RESERVED — protegidas por allowlist).
+ *  - Classes especificas-de-dominio (chaves NAO presentes nas classesFixas
+ *    do template) NAO entram no range [-110..-1] reservado ao template
+ *    universal (FIXED_RANGE — anti-colisao com fixas universais).
  *
  * Uso:
  *   ```ts
@@ -66,16 +69,36 @@ export const CANONICAL_RESERVED: ReadonlyArray<bigint> = Object.freeze([
 const SEQUESTRABLE_KEYS: ReadonlyArray<bigint> = Object.freeze([-45n, -47n, -49n, -50n]);
 
 /**
- * Chaves canonicas (range -1..-110) que JA estao no template fixo do
- * Devari-Core. Geradas dinamicamente para evitar drift quando o template
- * crescer — o consumidor do validador passa o array completo (fixas +
- * especificas), e o validador identifica fixas pela origem (range).
+ * Range reservado a classesFixas universais Devari-Core.
  *
- * Regra operacional: chaves no range [-110, -1] sao consideradas pertencentes
- * ao template fixo. Especificas Scrumban-V2 vivem no range -150..-999.
+ * Convencao operacional do plano-mestre §3 e devari-polymorphic-engine.md §3:
+ *   - chaves no range [-110, -1] sao do template universal Devari-Core
+ *   - especificas Scrumban-V2 vivem em [-150, -527] (e podem crescer ate -999)
+ *
+ * Exportados para uso em testes anti-regressao e validacoes futuras
+ * (ex: `isInFixedRange(-200n) === false`).
  */
-const FIXED_RANGE_MIN = -110n;
-const FIXED_RANGE_MAX = -1n;
+export const FIXED_RANGE_MIN: bigint = -110n;
+export const FIXED_RANGE_MAX: bigint = -1n;
+
+/**
+ * Determina se uma chave esta dentro do range reservado a classesFixas
+ * universais ([-110, -1]).
+ *
+ * @param chave - chave da DClasse (number ou bigint).
+ * @returns true se chave pertence ao range fixo, false caso contrario.
+ *
+ * @example
+ * ```ts
+ * isInFixedRange(-43);   // true  (PESSOAS, classe fixa)
+ * isInFixedRange(-150);  // false (USER, classe especifica Scrumban-V2)
+ * isInFixedRange(0);     // false (chaves >=0 sao runtime)
+ * ```
+ */
+export function isInFixedRange(chave: number | bigint): boolean {
+  const k = toBigInt(chave);
+  return k >= FIXED_RANGE_MIN && k <= FIXED_RANGE_MAX;
+}
 
 /**
  * Estados de marcacao usados no DFS de deteccao de ciclos.
@@ -245,9 +268,10 @@ export function validateHierarchy(classes: ReadonlyArray<DClasseSeed>): void {
     );
   }
 
-  // FIXED_RANGE_MIN/MAX permanecem documentando o range das fixas e podem
-  // ser usados em validacoes futuras (ex: alertar se classes especificas
-  // acidentalmente caem dentro da faixa do template).
-  void FIXED_RANGE_MIN;
-  void FIXED_RANGE_MAX;
+  // (g) Nota: FIXED_RANGE_MIN/MAX e isInFixedRange sao exportados para
+  //     consumidores externos (testes, futuros validadores). Nao usamos
+  //     aqui dentro porque o array recebido mistura fixas+especificas e
+  //     o validador nao tem como distinguir origem; mas helpers ficam
+  //     disponiveis para ferramentas que tem essa visao (ex: lint do
+  //     `classes.seed.ts` antes do spread, ou auditoria SQL).
 }
