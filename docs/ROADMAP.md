@@ -42,7 +42,7 @@
 
 ## F1 — Schema 17 tabelas + Seed DClasses (Pilar 3)
 
-### Task #1: Pilar 3 — Schema canonico + Seed de DClasses — COMPLETA
+### Task 1: Pilar 3 — Schema canonico + Seed de DClasses — ✅ COMPLETA
 
 **Status:** Completo
 **Modulo V2:** seeds (+ schema)
