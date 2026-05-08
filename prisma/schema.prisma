@@ -53,8 +53,8 @@ model DClasse {
   atualizadoEm DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
   // Self-referencing hierarchy
-  pai     DClasse?  @relation("DClasseHierarchy", fields: [idPai], references: [chave], onDelete: NoAction, onUpdate: NoAction)
-  filhos  DClasse[] @relation("DClasseHierarchy")
+  pai    DClasse?  @relation("DClasseHierarchy", fields: [idPai], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  filhos DClasse[] @relation("DClasseHierarchy")
 
   // Reverse relations (criadas pelas FKs nas outras tabelas)
   entidades  DEntidade[]
@@ -87,57 +87,61 @@ model DClasse {
 // =====================================================================
 
 model DEntidade {
-  chave         BigInt    @id @default(autoincrement())
-  idClasse      BigInt
-  codigo        String?   @db.VarChar(64)
-  nome          String    @db.VarChar(255)
-  nomeFantasia  String?   @db.VarChar(255)
-  cpfCnpj       String?   @db.VarChar(20)
-  email         String?   @db.VarChar(255)
-  telefone      String?   @db.VarChar(32)
-  celular       String?   @db.VarChar(32)
-  endereco      String?   @db.VarChar(255)
-  bairro        String?   @db.VarChar(128)
-  cep           String?   @db.VarChar(16)
-  idUF          BigInt?
-  idCidade      BigInt?
-  idBanco       BigInt?
-  agencia       String?   @db.VarChar(16)
-  conta         String?   @db.VarChar(32)
+  chave          BigInt   @id @default(autoincrement())
+  idClasse       BigInt
+  codigo         String?  @db.VarChar(64)
+  nome           String   @db.VarChar(255)
+  nomeFantasia   String?  @db.VarChar(255)
+  cpfCnpj        String?  @db.VarChar(20)
+  email          String?  @db.VarChar(255)
+  telefone       String?  @db.VarChar(32)
+  celular        String?  @db.VarChar(32)
+  endereco       String?  @db.VarChar(255)
+  bairro         String?  @db.VarChar(128)
+  cep            String?  @db.VarChar(16)
+  idUF           BigInt?
+  idCidade       BigInt?
+  idBanco        BigInt?
+  agencia        String?  @db.VarChar(16)
+  conta          String?  @db.VarChar(32)
   codigoFebraban String?  @db.VarChar(8)
-  limiteCredito Decimal?  @db.Decimal(19, 4)
+  limiteCredito  Decimal? @db.Decimal(19, 4)
 
   // Hierarquia + escrituração
-  idEstab       BigInt?   // entidade pai (Platform → Marketplace → Seller, etc.)
-  idLocEscritu  BigInt?   // local de escrituração (dono operacional)
-  dUserGroupId  BigInt?   // FK para login (DUserGroup)
+  idEstab      BigInt? // entidade pai (Platform → Marketplace → Seller, etc.)
+  idLocEscritu BigInt? // local de escrituração (dono operacional)
+  dUserGroupId BigInt? // FK para login (DUserGroup)
 
   // Json polimórfico — atributos arbitrários por tipo
-  dados         Json?     // ex: {hostname,sshHost,...} para AGENT; {V3 fields} se DTask casual
-  metaDados     Json?
+  dados     Json? // ex: {hostname,sshHost,...} para AGENT; {V3 fields} se DTask casual
+  metaDados Json?
 
-  inativo       Boolean   @default(false)
-  excluido      Boolean   @default(false)
-  criadoEm      DateTime  @default(now()) @db.Timestamptz(6)
-  atualizadoEm  DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  inativo      Boolean  @default(false)
+  excluido     Boolean  @default(false)
+  criadoEm     DateTime @default(now()) @db.Timestamptz(6)
+  atualizadoEm DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
   // Relations
-  classe        DClasse   @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
-  estabPai      DEntidade?  @relation("DEntidadeEstab", fields: [idEstab], references: [chave], onDelete: NoAction, onUpdate: NoAction)
-  estabFilhos   DEntidade[] @relation("DEntidadeEstab")
-  locEscPai     DEntidade?  @relation("DEntidadeLocEsc", fields: [idLocEscritu], references: [chave], onDelete: NoAction, onUpdate: NoAction)
-  locEscFilhos  DEntidade[] @relation("DEntidadeLocEsc")
-  userGroup     DUserGroup? @relation(fields: [dUserGroupId], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  classe       DClasse     @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  estabPai     DEntidade?  @relation("DEntidadeEstab", fields: [idEstab], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  estabFilhos  DEntidade[] @relation("DEntidadeEstab")
+  locEscPai    DEntidade?  @relation("DEntidadeLocEsc", fields: [idLocEscritu], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  locEscFilhos DEntidade[] @relation("DEntidadeLocEsc")
+  userGroup    DUserGroup? @relation(fields: [dUserGroupId], references: [chave], onDelete: NoAction, onUpdate: NoAction)
 
   // Reverse relations
-  tabelas       DTabela[]
-  vinculosAsLoc DVincula[]  @relation("VinculaLocEscritu")
-  vinculosAsEnt DVincula[]  @relation("VinculaEntidade")
-  eventos       DEvento[]
-  pedidosAsPessoa DPedido[]
-  titulosAsPessoa DTitulo[]
-  movDispos     DMovDispo[]
-  movDepos      DMovDepos[]
+  tabelas             DTabela[]
+  vinculosAsLoc       DVincula[]  @relation("VinculaLocEscritu")
+  vinculosAsEnt       DVincula[]  @relation("VinculaEntidade")
+  eventos             DEvento[]
+  pedidosAsPessoa     DPedido[]
+  pedidosAsLocEscritu DPedido[]   @relation("PedidoLocEscritu")
+  titulosAsPessoa     DTitulo[]
+  movDispos           DMovDispo[]
+  movDepos            DMovDepos[]
+  tasksAssigned       DTask[]     @relation("TaskAssignee")
+  tasksCreated        DTask[]     @relation("TaskCreator")
+  projetos            DProject[]  @relation("ProjectEstab")
 
   @@index([idClasse])
   @@index([idEstab])
@@ -155,34 +159,34 @@ model DEntidade {
 // =====================================================================
 
 model DTabela {
-  chave         BigInt    @id @default(autoincrement())
-  idClasse      BigInt
-  codigo        String?   @db.VarChar(64)
-  nome          String    @db.VarChar(255)
-  descricao     String?   @db.Text
-  percentual    Decimal?  @db.Decimal(19, 4)
-  recurso       String?   @db.VarChar(128)
-  uf            String?   @db.VarChar(2)
+  chave      BigInt   @id @default(autoincrement())
+  idClasse   BigInt
+  codigo     String?  @db.VarChar(64)
+  nome       String   @db.VarChar(255)
+  descricao  String?  @db.Text
+  percentual Decimal? @db.Decimal(19, 4)
+  recurso    String?  @db.VarChar(128)
+  uf         String?  @db.VarChar(2)
 
   // Vínculo opcional a uma entidade (config por org/projeto/team)
   dEntidadeId       BigInt?
   idLocEscrituracao BigInt?
 
   // Json polimórfico
-  dados      Json?
-  metaDados  Json?
+  dados     Json?
+  metaDados Json?
 
-  inativo       Boolean   @default(false)
-  excluido      Boolean   @default(false)
-  criadoEm      DateTime  @default(now()) @db.Timestamptz(6)
-  atualizadoEm  DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  inativo      Boolean  @default(false)
+  excluido     Boolean  @default(false)
+  criadoEm     DateTime @default(now()) @db.Timestamptz(6)
+  atualizadoEm DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
   // Relations
-  classe    DClasse    @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
-  entidade  DEntidade? @relation(fields: [dEntidadeId], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  classe   DClasse    @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  entidade DEntidade? @relation(fields: [dEntidadeId], references: [chave], onDelete: NoAction, onUpdate: NoAction)
 
   // Reverse
-  vinculos  DVincula[]
+  vinculos DVincula[]
 
   @@index([idClasse])
   @@index([dEntidadeId])
@@ -197,27 +201,27 @@ model DTabela {
 // =====================================================================
 
 model DVincula {
-  chave        BigInt    @id @default(autoincrement())
+  chave        BigInt  @id @default(autoincrement())
   idClasse     BigInt
-  idLocEscritu BigInt    // dono do vínculo
-  idEntidade   BigInt?   // lado B (entidade)
-  idTabela     BigInt?   // lado B (lookup)
+  idLocEscritu BigInt // dono do vínculo
+  idEntidade   BigInt? // lado B (entidade)
+  idTabela     BigInt? // lado B (lookup)
 
-  percentual   Decimal?  @db.Decimal(19, 4)
-  tipo         String?   @db.VarChar(64)
-  nome         String?   @db.VarChar(255)
-  referencia   String?   @db.VarChar(512)
-  descricao    String?   @db.Text
-  metaDados    Json?
+  percentual Decimal? @db.Decimal(19, 4)
+  tipo       String?  @db.VarChar(64)
+  nome       String?  @db.VarChar(255)
+  referencia String?  @db.VarChar(512)
+  descricao  String?  @db.Text
+  metaDados  Json?
 
-  excluido     Boolean   @default(false)
-  criadoEm     DateTime  @default(now()) @db.Timestamptz(6)
-  atualizadoEm DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  excluido     Boolean  @default(false)
+  criadoEm     DateTime @default(now()) @db.Timestamptz(6)
+  atualizadoEm DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
-  classe       DClasse   @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
-  locEscritu   DEntidade @relation("VinculaLocEscritu", fields: [idLocEscritu], references: [chave], onDelete: NoAction, onUpdate: NoAction)
-  entidade     DEntidade? @relation("VinculaEntidade", fields: [idEntidade], references: [chave], onDelete: NoAction, onUpdate: NoAction)
-  tabela       DTabela?  @relation(fields: [idTabela], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  classe     DClasse    @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  locEscritu DEntidade  @relation("VinculaLocEscritu", fields: [idLocEscritu], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  entidade   DEntidade? @relation("VinculaEntidade", fields: [idEntidade], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  tabela     DTabela?   @relation(fields: [idTabela], references: [chave], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([idClasse])
   @@index([idLocEscritu])
@@ -232,13 +236,13 @@ model DVincula {
 // =====================================================================
 
 model DEvento {
-  chave                BigInt    @id @default(autoincrement())
+  chave                BigInt   @id @default(autoincrement())
   idClasse             BigInt
   idEntidade           BigInt?
-  identificadorExterno String?   @db.VarChar(255)
-  descricao            String?   @db.Text
+  identificadorExterno String?  @db.VarChar(255)
+  descricao            String?  @db.Text
   metaDados            Json?
-  criadoEm             DateTime  @default(now()) @db.Timestamptz(6)
+  criadoEm             DateTime @default(now()) @db.Timestamptz(6)
 
   classe   DClasse    @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
   entidade DEntidade? @relation(fields: [idEntidade], references: [chave], onDelete: NoAction, onUpdate: NoAction)
@@ -254,20 +258,20 @@ model DEvento {
 // =====================================================================
 
 model DRecurso {
-  chave        BigInt    @id @default(autoincrement())
-  idClasse     BigInt
-  codigo       String?   @db.VarChar(64)
-  nome         String    @db.VarChar(255)
-  descricao    String?   @db.Text
-  preco        Decimal?  @db.Decimal(19, 4)
-  custo        Decimal?  @db.Decimal(19, 4)
-  unidade      String?   @db.VarChar(16)
-  metaDados    Json?
+  chave     BigInt   @id @default(autoincrement())
+  idClasse  BigInt
+  codigo    String?  @db.VarChar(64)
+  nome      String   @db.VarChar(255)
+  descricao String?  @db.Text
+  preco     Decimal? @db.Decimal(19, 4)
+  custo     Decimal? @db.Decimal(19, 4)
+  unidade   String?  @db.VarChar(16)
+  metaDados Json?
 
-  inativo      Boolean   @default(false)
-  excluido     Boolean   @default(false)
-  criadoEm     DateTime  @default(now()) @db.Timestamptz(6)
-  atualizadoEm DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  inativo      Boolean  @default(false)
+  excluido     Boolean  @default(false)
+  criadoEm     DateTime @default(now()) @db.Timestamptz(6)
+  atualizadoEm DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
   classe DClasse @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
 
@@ -283,23 +287,23 @@ model DRecurso {
 // =====================================================================
 
 model DUserGroup {
-  chave        BigInt    @id @default(autoincrement())
-  idClasse     BigInt
-  usuario      String    @unique @db.VarChar(128)
-  senha        String    @db.VarChar(255) // bcrypt hash
-  nome         String?   @db.VarChar(255)
-  email        String?   @db.VarChar(255)
-  ativo        Boolean   @default(true)
-  excluido     Boolean   @default(false)
-  ultimoLogin  DateTime? @db.Timestamptz(6)
+  chave       BigInt    @id @default(autoincrement())
+  idClasse    BigInt
+  usuario     String    @unique @db.VarChar(128)
+  senha       String    @db.VarChar(255) // bcrypt hash
+  nome        String?   @db.VarChar(255)
+  email       String?   @db.VarChar(255)
+  ativo       Boolean   @default(true)
+  excluido    Boolean   @default(false)
+  ultimoLogin DateTime? @db.Timestamptz(6)
 
   // Json: refresh tokens, MCP keys, MFA state, etc.
-  dados        Json?
+  dados Json?
 
-  criadoEm     DateTime  @default(now()) @db.Timestamptz(6)
-  atualizadoEm DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  criadoEm     DateTime @default(now()) @db.Timestamptz(6)
+  atualizadoEm DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
-  classe     DClasse     @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  classe     DClasse      @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
   entidades  DEntidade[]
   permissoes DPermissao[]
 
@@ -313,17 +317,17 @@ model DUserGroup {
 // =====================================================================
 
 model DPermissao {
-  chave         BigInt    @id @default(autoincrement())
-  idClasse      BigInt
-  dUserGroupId  BigInt
-  recurso       String    @db.VarChar(128)
-  acao          String    @db.VarChar(64)
-  permitido     Boolean   @default(true)
-  metaDados     Json?
+  chave        BigInt  @id @default(autoincrement())
+  idClasse     BigInt
+  dUserGroupId BigInt
+  recurso      String  @db.VarChar(128)
+  acao         String  @db.VarChar(64)
+  permitido    Boolean @default(true)
+  metaDados    Json?
 
-  excluido      Boolean   @default(false)
-  criadoEm      DateTime  @default(now()) @db.Timestamptz(6)
-  atualizadoEm  DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  excluido     Boolean  @default(false)
+  criadoEm     DateTime @default(now()) @db.Timestamptz(6)
+  atualizadoEm DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
   classe    DClasse    @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
   userGroup DUserGroup @relation(fields: [dUserGroupId], references: [chave], onDelete: NoAction, onUpdate: NoAction)
@@ -340,29 +344,31 @@ model DPermissao {
 // =====================================================================
 
 model DTask {
-  chave        BigInt    @id @default(autoincrement())
-  idClasse     BigInt
-  idProject    BigInt?
-  nome         String    @db.VarChar(512)
-  descricao    String?   @db.Text
+  chave     BigInt  @id @default(autoincrement())
+  idClasse  BigInt
+  idProject BigInt?
+  nome      String  @db.VarChar(512)
+  descricao String? @db.Text
 
   // FKs polimórficas (DTabela) — preenchidas conforme necessário
-  idStatus     BigInt?   // → DTabela idClasse=-44X
-  idPriority   BigInt?   // → DTabela idClasse=-42X
-  idTaskType   BigInt?   // → DTabela idClasse=-43X
-  idSprint     BigInt?   // → DTabela idClasse=-40X
-  idAssignee   BigInt?   // → DEntidade (User)
-  idCreator    BigInt?   // → DEntidade (User)
+  idStatus   BigInt? // → DTabela idClasse=-44X
+  idPriority BigInt? // → DTabela idClasse=-42X
+  idTaskType BigInt? // → DTabela idClasse=-43X
+  idSprint   BigInt? // → DTabela idClasse=-40X
+  idAssignee BigInt? // → DEntidade (User)
+  idCreator  BigInt? // → DEntidade (User)
 
   // Json polimórfico — V3 intentions, telemetria, workSessions[], etc.
-  dados        Json?
+  dados Json?
 
-  excluido     Boolean   @default(false)
-  criadoEm     DateTime  @default(now()) @db.Timestamptz(6)
-  atualizadoEm DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  excluido     Boolean  @default(false)
+  criadoEm     DateTime @default(now()) @db.Timestamptz(6)
+  atualizadoEm DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
-  classe  DClasse  @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
-  project DProject? @relation(fields: [idProject], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  classe   DClasse    @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  project  DProject?  @relation(fields: [idProject], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  assignee DEntidade? @relation("TaskAssignee", fields: [idAssignee], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  creator  DEntidade? @relation("TaskCreator", fields: [idCreator], references: [chave], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([idClasse])
   @@index([idProject])
@@ -377,20 +383,21 @@ model DTask {
 // =====================================================================
 
 model DProject {
-  chave         BigInt    @id @default(autoincrement())
-  idClasse      BigInt
-  idEstab       BigInt?   // organização pai
-  nome          String    @db.VarChar(255)
-  descricao     String?   @db.Text
+  chave     BigInt  @id @default(autoincrement())
+  idClasse  BigInt
+  idEstab   BigInt? // organização pai
+  nome      String  @db.VarChar(255)
+  descricao String? @db.Text
 
   // Json polimórfico — git deploy keys, automation config, etc.
-  dados         Json?
+  dados Json?
 
-  excluido      Boolean   @default(false)
-  criadoEm      DateTime  @default(now()) @db.Timestamptz(6)
-  atualizadoEm  DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  excluido     Boolean  @default(false)
+  criadoEm     DateTime @default(now()) @db.Timestamptz(6)
+  atualizadoEm DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
-  classe DClasse @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  classe DClasse    @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  estab  DEntidade? @relation("ProjectEstab", fields: [idEstab], references: [chave], onDelete: NoAction, onUpdate: NoAction)
   tasks  DTask[]
 
   @@index([idClasse])
@@ -406,14 +413,14 @@ model DProject {
 // =====================================================================
 
 model DPedido {
-  chave         BigInt    @id @default(autoincrement())
-  idClasse      BigInt
-  idLocEscritu  BigInt?
-  idPessoa      BigInt?   // → DEntidade
+  chave        BigInt  @id @default(autoincrement())
+  idClasse     BigInt
+  idLocEscritu BigInt?
+  idPessoa     BigInt? // → DEntidade
 
-  valor         Decimal?  @db.Decimal(19, 4)
-  desconto      Decimal?  @db.Decimal(19, 4)
-  valorTotal    Decimal?  @db.Decimal(19, 4)
+  valor      Decimal? @db.Decimal(19, 4)
+  desconto   Decimal? @db.Decimal(19, 4)
+  valorTotal Decimal? @db.Decimal(19, 4)
 
   dataEmissao   DateTime? @db.Timestamptz(6)
   dataAprovacao DateTime? @db.Timestamptz(6)
@@ -422,15 +429,16 @@ model DPedido {
   baixado       Boolean   @default(false)
 
   // Json polimórfico — command, stdout, exitCode, riskLevel, prUrl, etc.
-  dados         Json?
-  metaDados     Json?
+  dados     Json?
+  metaDados Json?
 
-  excluido      Boolean   @default(false)
-  criadoEm      DateTime  @default(now()) @db.Timestamptz(6)
-  atualizadoEm  DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  excluido     Boolean  @default(false)
+  criadoEm     DateTime @default(now()) @db.Timestamptz(6)
+  atualizadoEm DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
-  classe  DClasse    @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
-  pessoa  DEntidade? @relation(fields: [idPessoa], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  classe     DClasse    @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  pessoa     DEntidade? @relation(fields: [idPessoa], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  locEscritu DEntidade? @relation("PedidoLocEscritu", fields: [idLocEscritu], references: [chave], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([idClasse])
   @@index([idLocEscritu])
@@ -444,24 +452,24 @@ model DPedido {
 // =====================================================================
 
 model DTitulo {
-  chave         BigInt    @id @default(autoincrement())
-  idClasse      BigInt
-  idPedido      BigInt?
-  idPessoa      BigInt?
+  chave    BigInt  @id @default(autoincrement())
+  idClasse BigInt
+  idPedido BigInt?
+  idPessoa BigInt?
 
-  tipo          String    @db.VarChar(8) // PAG | REC
-  valor         Decimal   @db.Decimal(19, 4)
-  valorPago     Decimal?  @db.Decimal(19, 4)
-  dataEmissao   DateTime  @db.Timestamptz(6)
-  dataVencimento DateTime @db.Timestamptz(6)
-  dataPagamento DateTime? @db.Timestamptz(6)
-  baixado       Boolean   @default(false)
+  tipo           String    @db.VarChar(8) // PAG | REC
+  valor          Decimal   @db.Decimal(19, 4)
+  valorPago      Decimal?  @db.Decimal(19, 4)
+  dataEmissao    DateTime  @db.Timestamptz(6)
+  dataVencimento DateTime  @db.Timestamptz(6)
+  dataPagamento  DateTime? @db.Timestamptz(6)
+  baixado        Boolean   @default(false)
 
-  metaDados     Json?
+  metaDados Json?
 
-  excluido      Boolean   @default(false)
-  criadoEm      DateTime  @default(now()) @db.Timestamptz(6)
-  atualizadoEm  DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  excluido     Boolean  @default(false)
+  criadoEm     DateTime @default(now()) @db.Timestamptz(6)
+  atualizadoEm DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
   classe DClasse    @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
   pessoa DEntidade? @relation(fields: [idPessoa], references: [chave], onDelete: NoAction, onUpdate: NoAction)
@@ -477,22 +485,22 @@ model DTitulo {
 // =====================================================================
 
 model DMovDispo {
-  chave        BigInt    @id @default(autoincrement())
+  chave        BigInt   @id @default(autoincrement())
   idClasse     BigInt
-  idDisponivel BigInt    // → DEntidade (conta bancária/caixa)
+  idDisponivel BigInt // → DEntidade (conta bancária/caixa)
   idTitulo     BigInt?
-  tipo         String    @db.VarChar(8) // CRED | DEB
-  valor        Decimal   @db.Decimal(19, 4)
-  saldoApos    Decimal?  @db.Decimal(19, 4)
-  data         DateTime  @db.Timestamptz(6)
-  descricao    String?   @db.Text
+  tipo         String   @db.VarChar(8) // CRED | DEB
+  valor        Decimal  @db.Decimal(19, 4)
+  saldoApos    Decimal? @db.Decimal(19, 4)
+  data         DateTime @db.Timestamptz(6)
+  descricao    String?  @db.Text
   metaDados    Json?
 
-  excluido     Boolean   @default(false)
-  criadoEm     DateTime  @default(now()) @db.Timestamptz(6)
+  excluido Boolean  @default(false)
+  criadoEm DateTime @default(now()) @db.Timestamptz(6)
 
-  classe       DClasse   @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
-  disponivel   DEntidade @relation(fields: [idDisponivel], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  classe     DClasse   @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  disponivel DEntidade @relation(fields: [idDisponivel], references: [chave], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([idClasse])
   @@index([idDisponivel, data])
@@ -504,22 +512,22 @@ model DMovDispo {
 // =====================================================================
 
 model DMovDepos {
-  chave        BigInt    @id @default(autoincrement())
-  idClasse     BigInt
-  idDeposito   BigInt    // → DEntidade (almoxarifado)
-  idRecurso    BigInt?
-  tipo         String    @db.VarChar(8) // ENT | SAI
-  quantidade   Decimal   @db.Decimal(19, 4)
-  custo        Decimal?  @db.Decimal(19, 4)
-  data         DateTime  @db.Timestamptz(6)
-  descricao    String?   @db.Text
-  metaDados    Json?
+  chave      BigInt   @id @default(autoincrement())
+  idClasse   BigInt
+  idDeposito BigInt // → DEntidade (almoxarifado)
+  idRecurso  BigInt?
+  tipo       String   @db.VarChar(8) // ENT | SAI
+  quantidade Decimal  @db.Decimal(19, 4)
+  custo      Decimal? @db.Decimal(19, 4)
+  data       DateTime @db.Timestamptz(6)
+  descricao  String?  @db.Text
+  metaDados  Json?
 
-  excluido     Boolean   @default(false)
-  criadoEm     DateTime  @default(now()) @db.Timestamptz(6)
+  excluido Boolean  @default(false)
+  criadoEm DateTime @default(now()) @db.Timestamptz(6)
 
-  classe    DClasse   @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
-  deposito  DEntidade @relation(fields: [idDeposito], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  classe   DClasse   @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  deposito DEntidade @relation(fields: [idDeposito], references: [chave], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([idClasse])
   @@index([idDeposito, data])
@@ -531,19 +539,19 @@ model DMovDepos {
 // =====================================================================
 
 model DSolicita {
-  chave         BigInt    @id @default(autoincrement())
+  chave         BigInt   @id @default(autoincrement())
   idClasse      BigInt
-  idOrigem      BigInt?   // depósito origem
-  idDestino     BigInt?   // depósito destino
+  idOrigem      BigInt? // depósito origem
+  idDestino     BigInt? // depósito destino
   idSolicitante BigInt?
-  status        String    @db.VarChar(16) // PEND | APROV | BAIX
-  data          DateTime  @default(now()) @db.Timestamptz(6)
-  observacao    String?   @db.Text
+  status        String   @db.VarChar(16) // PEND | APROV | BAIX
+  data          DateTime @default(now()) @db.Timestamptz(6)
+  observacao    String?  @db.Text
   metaDados     Json?
 
-  excluido      Boolean   @default(false)
-  criadoEm      DateTime  @default(now()) @db.Timestamptz(6)
-  atualizadoEm  DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  excluido     Boolean  @default(false)
+  criadoEm     DateTime @default(now()) @db.Timestamptz(6)
+  atualizadoEm DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
   classe DClasse @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
 
@@ -558,19 +566,19 @@ model DSolicita {
 // =====================================================================
 
 model DRequisic {
-  chave           BigInt    @id @default(autoincrement())
-  idClasse        BigInt
-  idDeposito      BigInt?
-  idCentroCusto   BigInt?
-  idSolicitante   BigInt?
-  status          String    @db.VarChar(16) // PEND | APROV | BAIX
-  data            DateTime  @default(now()) @db.Timestamptz(6)
-  observacao      String?   @db.Text
-  metaDados       Json?
+  chave         BigInt   @id @default(autoincrement())
+  idClasse      BigInt
+  idDeposito    BigInt?
+  idCentroCusto BigInt?
+  idSolicitante BigInt?
+  status        String   @db.VarChar(16) // PEND | APROV | BAIX
+  data          DateTime @default(now()) @db.Timestamptz(6)
+  observacao    String?  @db.Text
+  metaDados     Json?
 
-  excluido        Boolean   @default(false)
-  criadoEm        DateTime  @default(now()) @db.Timestamptz(6)
-  atualizadoEm    DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  excluido     Boolean  @default(false)
+  criadoEm     DateTime @default(now()) @db.Timestamptz(6)
+  atualizadoEm DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
   classe DClasse @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)
 
@@ -589,18 +597,18 @@ model DRequisic {
 // =====================================================================
 
 model DVFS {
-  chave        BigInt    @id @default(autoincrement())
-  idClasse     BigInt    // associa a uma DClasse de pedido/operação
-  chaveScript  Int       // 3..7 (ver acima)
-  nome         String    @db.VarChar(255)
-  conteudo     String    @db.Text   // código JS/TS executável
-  versao       Int       @default(1)
-  ativo        Boolean   @default(true)
-  metaDados    Json?
+  chave       BigInt  @id @default(autoincrement())
+  idClasse    BigInt // associa a uma DClasse de pedido/operação
+  chaveScript Int // 3..7 (ver acima)
+  nome        String  @db.VarChar(255)
+  conteudo    String  @db.Text // código JS/TS executável
+  versao      Int     @default(1)
+  ativo       Boolean @default(true)
+  metaDados   Json?
 
-  criadoEm     DateTime  @default(now()) @db.Timestamptz(6)
-  atualizadoEm DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  criadoEm     DateTime @default(now()) @db.Timestamptz(6)
+  atualizadoEm DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
-  @@index([idClasse, chaveScript, ativo])
   @@unique([idClasse, chaveScript, versao])
+  @@index([idClasse, chaveScript, ativo])
 }

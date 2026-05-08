@@ -579,13 +579,13 @@ Antes de tocar em qualquer arquivo de domínio, garantir:
 **Repositório base:**
 - [x] Pasta `Scrumban-Backend-V2/` criada
 - [x] `CLAUDE.md` na raiz do V2 declarando submissão ao template
-- [ ] `package.json` minimalista (NestJS + Prisma + class-validator + class-transformer + bullmq)
-- [ ] `tsconfig.json` strict mode
-- [ ] `Makefile` com `dev`, `build`, `seed`, `test`, `lint`, `typecheck`
-- [ ] `docker-compose.yml` (Postgres + Redis local)
-- [ ] `.env.example` com TODAS as variáveis (sem secrets)
-- [ ] `prisma/schema.prisma` com as 17 tabelas canônicas (cópia fiel do Devari-Core)
-- [ ] `git init` + commit inicial conforme Conventional Commits: `chore(setup): inicializa Scrumban-Backend-V2 com esqueleto canônico Devari-Core`
+- [x] `package.json` minimalista (NestJS + Prisma + class-validator + class-transformer + bullmq) ✅ F0 fechada (commit 690d7c1)
+- [x] `tsconfig.json` strict mode ✅ F0 fechada
+- [x] `Makefile` com `dev`, `build`, `seed`, `test`, `lint`, `typecheck` ✅ F0 fechada
+- [x] `docker-compose.yml` (Postgres + Redis local) ✅ F0 fechada
+- [x] `.env.example` com TODAS as variáveis (sem secrets) ✅ F0 fechada
+- [x] `prisma/schema.prisma` com as 17 tabelas canônicas (cópia fiel do Devari-Core) ✅ F1 Task #1 (commit 7af80d2 — 17 tabelas + 4 relations FK pré-F1 + Migration `20260508204157_initial_canonical`)
+- [x] `git init` + commit inicial conforme Conventional Commits: `chore(setup): inicializa Scrumban-Backend-V2 com esqueleto canônico Devari-Core` ✅ F0 fechada
 
 **Multi-agent infra (Bloco 2 da remediação):**
 - [x] `.claude/rules/` ancoradas (8 rules canônicas Devari-Core copiadas)
@@ -603,15 +603,17 @@ Antes de tocar em qualquer arquivo de domínio, garantir:
 **Bloco 4 da remediação (Generator feedback loop):**
 - [x] `docs/spec/README.md` declarando fontes primárias (SYSTEM-OVERVIEW para escopo, 3 PARTES para arquitetura)
 - [x] `docs/decisions/ADR-V2-017-generator-feedback-loop.md` redigido
-- [ ] **`docs/lessons/` criado** com `metrics-fase-template.md` (template para coletar métricas Generator ao longo das 17 fases — implementação do ADR-V2-017 e §8 V2↔Generator Feedback Loop)
-- [ ] **`docs/lessons/issues-evolution-from-v2.md` criado** (índice mestre que rastreia issues `evolution-from-v2` abertas no Devari-Core)
-- [ ] **Hook `validate-evolution-impact.sh` instalado** em `.claude/scripts/` (PreCommit valida `Generator-impact:` no body do commit quando PR tem label `evolution-candidate`)
+- [x] **`docs/lessons/` criado** com `metrics-fase-template.md` ✅ F0 fechada (template); primeira instância `metrics-fase-1.md` produzida em F1 Task #1
+- [x] **`docs/lessons/issues-evolution-from-v2.md` criado** ✅ F0 fechada
+- [x] **Hook `validate-evolution-impact.sh` instalado** em `.claude/scripts/` ✅ F0 fechada
 
 **Auditoria de fechamento (Bloco 5 da remediação):**
-- [ ] Reviewer audita os 3 sub-planos pós-remediação (PARTE-1, PARTE-2, PARTE-3) — meta: score ≥ 8.0 em cada
-- [ ] Veredicto unânime ✅ APROVAR → fechar plano e iniciar F0
+- [x] Reviewer audita os 3 sub-planos pós-remediação (PARTE-1, PARTE-2, PARTE-3) — meta: score ≥ 8.0 em cada ✅
+- [x] Veredicto unânime ✅ APROVAR → fechar plano e iniciar F0 ✅
 
 Quando todos os checks acima estiverem ✅, **F0 está concluída** e podemos iniciar **F1 — Schema + Seed**.
+
+**Estado atual (2026-05-08):** F0 ✅ FECHADA. F1 Task #1 ✅ COMPLETA (Pilar 3 ATIVADO PLENAMENTE — 128 DClasses, score 9.0/10, commit Implementer `7af80d2`). Próximo: F2 Task #1 (`EntidadeController`).
 
 ---
 
