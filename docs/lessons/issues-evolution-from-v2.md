@@ -12,6 +12,7 @@
 
 | Categoria | Issues abertas | Issues mergeadas no Devari-Core | Pendentes |
 |-----------|----------------|----------------------------------|-----------|
+| **Endpoints Genéricos (Pilar 2)** | **1** | 0 | 1 |
 | Channels (Telegram + Voz Groq) | 0 | 0 | 0 |
 | MCP Server | 0 | 0 | 0 |
 | Webhooks outbound HMAC | 0 | 0 | 0 |
@@ -21,7 +22,7 @@
 | DVFS (DEntidade.dados Json, validação Risk Gate) | 0 | 0 | 0 |
 | Score gate / Workflow Orchestrator (multi-agent) | 0 | 0 | 0 |
 | Outros | 0 | 0 | 0 |
-| **TOTAL** | **0** | **0** | **0** |
+| **TOTAL** | **1** | **0** | **1** |
 
 ---
 
@@ -29,7 +30,55 @@
 
 > Formato: `#NNN | YYYY-MM-DD | Fase | Categoria | Título | Status`
 
-(Vazio. Primeira issue será aberta em F0 ou F1.)
+### F2 — Endpoints Genéricos (2026-05-08)
+
+**devaritec/devari-core (hipotético):**
+- **Issue:** [V2] Endpoints Genéricos com Cursor Pagination + ADR-V2-015
+- **Label:** `evolution-from-v2`, `area/core`
+- **Status:** PENDENTE (a abrir após F2 merge)
+
+**Contexto:**
+V2 implementou 3 controllers genéricos (`EntidadeController`, `TabelaController`, `ClasseController`) que servem 100% dos casos de uso de CRUD em tabelas polimórficas (DEntidade, DTabela, DClasse). Estes controllers são **100% reutilizáveis** como módulos base do template Devari-Core.
+
+**O que cabe nas 17 tabelas + 3 Pilares:**
+- CRUD DEntidade (Pilar 2 — Endpoints Genéricos) ✅
+- CRUD DTabela (Pilar 2 — Endpoints Genéricos) ✅
+- Read-only DClasse com árvore em 1 query (Pilar 2 — Endpoints Genéricos) ✅
+- Cursor pagination (não offset) para escala ✅
+- Soft-delete (`excluido=true`) em todas as operações ✅
+- BigInt serializado como string em responses ✅
+- Swagger/OpenAPI 100% documentado ✅
+- ADR-V2-015: convenção `?idClasse=N` (canônico) + `?classe=NOME` (deprecated, sunset 2026-06-05) ✅
+
+**Métricas V2:**
+- LOC: EntidadeService 280L, TabelaService 300L, ClasseService 200L
+- Controllers: 200L + 160L + 140L
+- Testes: 43 unit tests (6 file suites, 100% PASS)
+- Build: 0 TypeScript errors, 0 ESLint warnings
+- Performance: N+1 ZERO (listagens com include/join, tree com 1 query + Map em memória)
+- Score Reviewer: 9.0/10 APPROVED
+
+**Sugestão de evolução ao template:**
+Promover os 3 controllers genéricos como **módulos base opt-in** do Devari-Core (`packages/endpoints-genericos/`), com:
+- `EntidadeController`, `TabelaController`, `ClasseController` — 100% copy-paste ready
+- DTOs completos: list-query, create, update, response
+- Helpers: build-where-clause, format-response, parse-bigint-pipe
+- Infraestrutura: LRU cache para `?classe=NOME`, `@SkipGuard()` placeholder
+- Testes: 43 specs como ponto de partida
+- ADR-V2-015 formalizado como padrão de query convention
+- Documentação: README por módulo + exemplos Swagger
+
+**Impacto ao template:**
+- Reduz ~200 linhas de boilerplate por novo projeto filho
+- Garante consistência de cursor pagination + soft-delete em todos os SaaS gerados
+- Permite começar com endpoints genéricos dia 1, especializações depois
+
+**Próximos passos:**
+- F3+: observar adoption + issues de integração com AuthService (guards, tokens)
+- F5: considerar wrappers thin (`SprintController`, `StatusController`) como modules adicionais
+- F17: consolidar em `EVOLUCAO-DEVARI-CORE-V3.md` com recomendação final
+
+---
 
 ---
 

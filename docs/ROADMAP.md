@@ -87,13 +87,59 @@
 
 ---
 
-## F2 — Endpoints Genericos /entidades /tabela /classes (Pilar 2) — Em planejamento
+## F2 — Endpoints Genericos /entidades /tabela /classes (Pilar 2) — ✅ COMPLETA
 
-### Task #1: EntidadeController + EntidadeService — A INICIAR
-### Task #2: TabelaController + TabelaService — A INICIAR
-### Task #3: ClasseController — A INICIAR
-### Task #4: DTOs (cursor pagination, filtros) — A INICIAR
-### Task #5: Smoke test Pilar 2 — A INICIAR
+### Task #1: Pilar 2 — 3 Controllers Genéricos (EntidadeController + TabelaController + ClasseController) — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** endpoints
+**Fase V2:** F2
+**Tempo Real:** ~3h Implementer + ~1h Reviewer + ~30min Documenter
+**Completado em:** 2026-05-08
+**Quality Score:** 9.0/10
+
+**O Que Foi Feito:**
+- `EntidadeController` + `EntidadeService` — CRUD completo `/api/v1/entidades` com cursor pagination, soft-delete, N+1 ZERO via include/join, BigInt serializado, Swagger 100%
+- `TabelaController` + `TabelaService` — CRUD completo `/api/v1/tabelas` com filtro `dEntidadeId`, cursor pagination, soft-delete
+- `ClasseController` + `ClasseService` — Read-only `/api/v1/classes` + `/classes/tree` (1 query + Map em memória)
+- Infraestrutura comum: `ParseBigIntPipe`, `ParseOptionalBigIntPipe`, `@SkipGuard()` placeholder, LRU cache para `?classe=NOME`
+- **ADR-V2-015:** `?idClasse=N` canônico + `?classe=NOME` deprecated com headers `Deprecation` + `Sunset` (sunset: 2026-06-05)
+- Audit inline via DEvento -497 em create
+- Métodos canônicos: `getEntidadeIdFromUserGroup()`, `createSeller()`
+
+**Smoke test integrado (verde):**
+- `npm run build` PASS (0 erros TypeScript)
+- `npx tsc --noEmit` 0 erros
+- `npx eslint --max-warnings 0` 0 warnings
+- `npm run test` 43/43 PASS (mínimo 26)
+- ZERO controllers duplicados (`find src -name "*.controller.ts"` retorna APENAS: entidades, tabelas, classes)
+- ZERO console.log
+- ZERO parseInt/Number em IDs (BigInt SEMPRE)
+- N+1 ZERO (listagens com include/join, getTree = 1 findMany + Map)
+- BigInt serializado como string em todos os responses
+- `?idClasse=N` + `?classe=NOME` + ambos → testes regressão passando
+- Swagger em `/api/docs` com 3 controllers documentados
+
+**Pilares aplicados:**
+- Pilar 1: N/A (tabelas estruturais — Prisma direto correto)
+- Pilar 2: **ATIVADO PLENAMENTE** — 3 controllers genéricos canônicos (0 controllers específicos)
+- Pilar 3: RESPEITADO — 128 DClasses do seed validadas, ZERO nova criada
+
+**ADRs vinculados:** ADR-V2-015 (implementado)
+
+**Tech Debt (resolver antes de F3):**
+- `[TECH-DEBT/F3]` Mover `PaginationMetaDto` para `src/common/dto/`
+- `[TECH-DEBT/F3]` Mover `formatTabelaResponse` para `src/tabelas/helpers/`
+- `[TECH-DEBT/F3]` Extrair `validarClasse` duplicada
+- `[TECH-DEBT/F3]` Aplicar `ParseBigIntPipe` em `@Param('id')`
+- `[ADR/F3]` Redigir ADR-V2-025 (BigInt strategy)
+- `[TECH-DEBT/F3]` Cache em memória para `validarClasse`
+- `[TECH-DEBT/F3]` Remover wrapper `?classe=NOME` após sunset (2026-06-05)
+
+**Plan:** [`workspace/plans/plan-endpoints-genericos-f2-task1.md`](../workspace/plans/plan-endpoints-genericos-f2-task1.md)
+**Impl Notes:** [`workspace/implementations/impl-endpoints-genericos-f2-task1.md`](../workspace/implementations/impl-endpoints-genericos-f2-task1.md)
+**Review:** [`workspace/reviews/review-endpoints-genericos-f2-task1.md`](../workspace/reviews/review-endpoints-genericos-f2-task1.md)
+**Commit:** (a ser criado pelo Documenter)
 
 ---
 
