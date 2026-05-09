@@ -2,6 +2,7 @@ import { forwardRef, Module } from '@nestjs/common';
 import { EntidadeController } from './entidades.controller';
 import { EntidadeService } from './entidades.service';
 import { AuthModule } from '../auth/auth.module';
+import { TimezoneService } from '../common/services/timezone.service';
 
 /**
  * Módulo canônico para DEntidade (Pilar 2 — Endpoints Genéricos).
@@ -17,7 +18,7 @@ import { AuthModule } from '../auth/auth.module';
 @Module({
   imports: [forwardRef(() => AuthModule)],
   controllers: [EntidadeController],
-  providers: [EntidadeService],
+  providers: [EntidadeService, TimezoneService],
   exports: [EntidadeService],
 })
 export class EntidadesModule {}

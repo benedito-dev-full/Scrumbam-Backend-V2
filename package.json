@@ -29,41 +29,47 @@
     "seed": "ts-node prisma/seeds/seed-runner.ts"
   },
   "dependencies": {
+    "@nestjs/bullmq": "^10.0.1",
     "@nestjs/common": "^10.3.0",
     "@nestjs/config": "^3.1.1",
     "@nestjs/core": "^10.3.0",
-    "@nestjs/platform-express": "^10.3.0",
-    "@nestjs/swagger": "^7.1.17",
     "@nestjs/jwt": "^10.2.0",
     "@nestjs/passport": "^10.0.3",
-    "@nestjs/throttler": "^5.0.1",
+    "@nestjs/platform-express": "^10.3.0",
     "@nestjs/schedule": "^4.0.0",
+    "@nestjs/swagger": "^7.1.17",
+    "@nestjs/throttler": "^5.0.1",
     "@prisma/client": "^5.7.0",
+    "@sendgrid/mail": "^8.1.6",
+    "bcryptjs": "^2.4.3",
     "bullmq": "^4.15.0",
-    "@nestjs/bullmq": "^10.0.1",
-    "ioredis": "^5.3.2",
-    "class-validator": "^0.14.0",
     "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.0",
+    "date-fns": "^4.1.0",
+    "date-fns-tz": "^3.2.0",
+    "decimal.js": "^10.4.3",
+    "ioredis": "^5.3.2",
+    "luxon": "^3.4.4",
+    "nodemailer": "^8.0.7",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "passport-local": "^1.0.0",
-    "bcryptjs": "^2.4.3",
     "reflect-metadata": "^0.1.13",
-    "rxjs": "^7.8.1",
-    "luxon": "^3.4.4",
-    "decimal.js": "^10.4.3"
+    "resend": "^6.12.3",
+    "rxjs": "^7.8.1"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.3.0",
     "@nestjs/schematics": "^10.0.3",
     "@nestjs/testing": "^10.3.0",
+    "@types/bcryptjs": "^2.4.6",
     "@types/express": "^4.17.21",
     "@types/jest": "^29.5.11",
+    "@types/luxon": "^3.3.7",
     "@types/node": "^20.10.5",
+    "@types/nodemailer": "^8.0.0",
     "@types/passport-jwt": "^4.0.0",
     "@types/passport-local": "^1.0.38",
-    "@types/bcryptjs": "^2.4.6",
-    "@types/luxon": "^3.3.7",
     "@typescript-eslint/eslint-plugin": "^6.15.0",
     "@typescript-eslint/parser": "^6.15.0",
     "eslint": "^8.56.0",
@@ -80,14 +86,24 @@
     "typescript": "^5.3.3"
   },
   "jest": {
-    "moduleFileExtensions": ["js", "json", "ts"],
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
     "rootDir": ".",
-    "roots": ["<rootDir>/src", "<rootDir>/prisma/seeds"],
+    "roots": [
+      "<rootDir>/src",
+      "<rootDir>/prisma/seeds"
+    ],
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },
-    "collectCoverageFrom": ["src/**/*.(t|j)s", "prisma/seeds/**/*.(t|j)s"],
+    "collectCoverageFrom": [
+      "src/**/*.(t|j)s",
+      "prisma/seeds/**/*.(t|j)s"
+    ],
     "coverageDirectory": "./coverage",
     "testEnvironment": "node"
   },

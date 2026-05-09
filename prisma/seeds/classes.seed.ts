@@ -4,11 +4,11 @@
  * Composicao do seed (ADR-V2-019: monolitico):
  *   - 45 classes fixas universais Devari-Core (range -1..-110), via spread de
  *     `templates/classes-base-template.ts`.
- *   - 83 classes especificas Scrumban-V2 (range -150..-527), declaradas
+ *   - 85 classes especificas Scrumban-V2 (range -150..-527), declaradas
  *     neste arquivo, agrupadas por seccao (DEntidade, DVincula, DPedido,
  *     DTabela, DEvento, DTabela secundario) com comentarios `// === ... ===`.
  *
- * Total: 128 DClasses.
+ * Total: 130 DClasses.
  *
  * Validacao automatica:
  *   `validateHierarchy(classes)` e chamado no topo deste modulo. Qualquer
@@ -76,8 +76,8 @@ function esp(
  * Array de classes especificas Scrumban-V2 (83 entradas).
  *
  * Ordem:
- *   1. DEntidade — 5 (sub-tipos de Pessoa: USER, PLATFORM_SCRUMBAN,
- *      ORGANIZATION, AGENT, TEAM).
+ *   1. DEntidade — 7 (sub-tipos de Pessoa: USER, PLATFORM_SCRUMBAN,
+ *      ORGANIZATION, SCRUMBAN_PROJECT, SCRUMBAN_TASK, AGENT, TEAM).
  *   2. DVincula — 11 (relacoes Org-User, Project-User, Team, Project-Agent,
  *      Telegram).
  *   3. DPedido — 4 (EXECUTION + EXEC_LOW/MED/HIGH para Pilar 1 / F6).
@@ -88,14 +88,16 @@ function esp(
  *      TELEGRAM_*, MCP_CALL, EXECUTION_LOG, audit logs).
  *   6. DTabela secundario — 16 (AGENT_STATUS, EXEC_STATUS, RISK_LEVEL).
  *
- * Soma: 5 + 11 + 4 + 35 + 12 + 16 = 83.
+ * Soma: 7 + 11 + 4 + 35 + 12 + 16 = 85.
  */
 const classesEspecificas: DClasseSeed[] = [
-  // === DEntidade — sub-tipos de Pessoa (5) ===
+  // === DEntidade — sub-tipos de Pessoa (5) + DProject/DTask (2) ===
   // Filhos de PESSOAS (-43)
   esp(-150, 'USER', 'Usuario Scrumban', -43),
   esp(-151, 'PLATFORM_SCRUMBAN', 'Platform Scrumban', -43),
   esp(-152, 'ORGANIZATION', 'Organizacao', -43),
+  esp(-153, 'SCRUMBAN_PROJECT', 'Projeto Scrumban', -37),
+  esp(-154, 'SCRUMBAN_TASK', 'Task Scrumban', -37),
   esp(-156, 'AGENT', 'Agente Claude Code', -43),
   esp(-180, 'TEAM', 'Time', -43),
 
@@ -194,7 +196,7 @@ const classesEspecificas: DClasseSeed[] = [
 ];
 
 /**
- * Array completo do seed (45 fixas + 83 especificas = 128 DClasses).
+ * Array completo do seed (45 fixas + 85 especificas = 130 DClasses).
  * Validado automaticamente em time de import (validateHierarchy abaixo).
  */
 export const classes: DClasseSeed[] = [...classesFixas, ...classesEspecificas];

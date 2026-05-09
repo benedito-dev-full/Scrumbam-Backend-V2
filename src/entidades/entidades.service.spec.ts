@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { EntidadeService } from './entidades.service';
 import { PrismaService } from '../prisma.service';
+import { TimezoneService } from '../common/services/timezone.service';
 
 /** Mock de DEntidade retornado pelo Prisma */
 const mockEntidade = {
@@ -54,6 +55,7 @@ describe('EntidadeService', () => {
       providers: [
         EntidadeService,
         { provide: PrismaService, useValue: mockPrisma },
+        TimezoneService,
       ],
     }).compile();
 

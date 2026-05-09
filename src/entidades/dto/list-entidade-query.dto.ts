@@ -6,6 +6,7 @@ import {
   Min,
   Max,
   IsInt,
+  Matches,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -106,6 +107,36 @@ export class ListEntidadeQueryDto {
   @IsOptional()
   @IsNumberString({}, { message: 'cursor deve ser um número inteiro' })
   cursor?: string;
+
+  /**
+   * Data inicial do filtro por data de criação (formato: YYYY-MM-DD).
+   *
+   * Aplicada no timezone America/Sao_Paulo via TimezoneService.
+   * Ambos `dateFrom` e `dateTo` devem ser fornecidos juntos.
+   */
+  @ApiPropertyOptional({
+    description: 'Data inicial do filtro (formato: YYYY-MM-DD, timezone: America/Sao_Paulo)',
+    example: '2026-01-01',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'dateFrom deve estar no formato YYYY-MM-DD' })
+  dateFrom?: string;
+
+  /**
+   * Data final do filtro por data de criação (formato: YYYY-MM-DD).
+   *
+   * Aplicada no timezone America/Sao_Paulo via TimezoneService.
+   * Ambos `dateFrom` e `dateTo` devem ser fornecidos juntos.
+   */
+  @ApiPropertyOptional({
+    description: 'Data final do filtro (formato: YYYY-MM-DD, timezone: America/Sao_Paulo)',
+    example: '2026-12-31',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'dateTo deve estar no formato YYYY-MM-DD' })
+  dateTo?: string;
 
   /**
    * Número de itens por página (padrão: 20, máximo: 100).

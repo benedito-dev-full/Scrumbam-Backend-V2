@@ -6,6 +6,9 @@ import { PrismaService } from '../prisma.service';
 import { EntidadesModule } from '../entidades/entidades.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+// OrganizationsModule importado via forwardRef para evitar circular dependency
+// AuthModule → OrganizationsModule → AuthModule (guards)
+import { OrganizationsModule } from '../organizations/organizations.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { ApiKeyGuard } from './guards/api-key.guard';
@@ -51,6 +54,7 @@ import { RoleResolverService } from './services/role-resolver.service';
       }),
     }),
     forwardRef(() => EntidadesModule),
+    forwardRef(() => OrganizationsModule),
   ],
   controllers: [AuthController],
   providers: [

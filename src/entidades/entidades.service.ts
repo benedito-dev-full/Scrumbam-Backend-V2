@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { Response } from 'express';
 import { PrismaService } from '../prisma.service';
 import { LRUCache } from '../common/helpers/lru-cache';
+import { TimezoneService } from '../common/services/timezone.service';
 import { buildEntidadeWhereClause } from './helpers/build-where-clause';
 import { formatEntidadeResponse, formatEntidadeList } from './helpers/format-entidade-response';
 import { ListEntidadeQueryDto } from './dto/list-entidade-query.dto';
@@ -37,7 +38,10 @@ const CLASSE_ALIAS_SUNSET = new Date('2026-06-05T00:00:00.000Z').toISOString();
 export class EntidadeService {
   private readonly logger = new Logger(EntidadeService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly timezoneService: TimezoneService,
+  ) {}
 
   /**
    * Valida a existência de uma DClasse no banco.
@@ -171,6 +175,11 @@ export class EntidadeService {
 
     const take = Math.min(query.pageSize ?? 20, 100);
     const where = buildEntidadeWhereClause(idClasse, query);
+
+    // Filtros de data via TimezoneService (America/Sao_Paulo — canônico devari-backend-patterns §4)
+    if (query.dateFrom && query.dateTo) {
+      where.criadoEm = this.timezoneService.applyDateFilters(query.dateFrom, query.dateTo);
+    }
 
     this.logger.debug(`listarPorClasse idClasse=${idClasse} take=${take}`);
 

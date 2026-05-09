@@ -1,5 +1,7 @@
 import {
   ConflictException,
+  forwardRef,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -15,6 +17,8 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto, UserProfileDto } from './dto/auth-response.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
+// forwardRef para evitar circular dependency AuthModule ↔ OrganizationsModule
+import { OrganizationsService } from '../organizations/organizations.service';
 
 /** Bcrypt rounds — NUNCA abaixo de 12 (ADR-V2-003). */
 const BCRYPT_ROUNDS = 12;
@@ -22,8 +26,6 @@ const BCRYPT_ROUNDS = 12;
 /** idClasses usados no register. */
 const ID_CLASSE_USER_GROUP = BigInt(-46);
 const ID_CLASSE_USER = BigInt(-150);
-const ID_CLASSE_ORGANIZATION = BigInt(-152);
-const ID_CLASSE_ORG_ADMIN = BigInt(-161);
 const ID_CLASSE_USER_LOGIN_EVENT = BigInt(-501);
 
 /**
@@ -52,17 +54,29 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly refreshTokenService: RefreshTokenService,
+    @Inject(forwardRef(() => OrganizationsService))
+    private readonly organizationsService: OrganizationsService,
   ) {}
 
   /**
-   * Registra novo usuário e cria organização padrão.
+   * Registra novo usuário e cria organização completa (com Default Team + Issue Counter).
    *
-   * Transaction atômica:
-   * 1. DUserGroup (-46) — credenciais (bcrypt hash rounds=12)
-   * 2. DEntidade (-150) — perfil do usuário
-   * 3. DEntidade (-152) — organização
-   * 4. DVincula (-161) — user é ADMIN da org
-   * 5. DEvento (-501) — audit trail de register
+   * Fluxo refatorado (F5 — Opção A aprovada):
+   * Transaction 1 (atomica):
+   *   1. DUserGroup (-46) — credenciais (bcrypt hash rounds=12)
+   *   2. DEntidade (-150) — perfil do usuário
+   *   3. DEvento (-501) — audit trail de register
+   *
+   * Pós-commit: OrganizationsService.create() — transaction separada:
+   *   4. DEntidade (-152) — organização
+   *   5. DEntidade (-180) — Default Team
+   *   6. DTabela (-475) — Issue Counter
+   *   7. DVincula (-161) — user é ADMIN da org
+   *   8. DVincula (-181) — user é LEAD do Default Team
+   *
+   * Separar as duas transactions garante que:
+   * - Criação de usuário e org são independentes
+   * - OrganizationsService permanece canônico (reutilizável via POST /organizations)
    *
    * @param dto - Dados de cadastro
    * @returns AuthResponseDto com JWT + refresh token
@@ -83,7 +97,8 @@ export class AuthService {
 
     this.logger.log(`Registrando usuário email="${dto.email}"`);
 
-    const result = await this.prisma.$transaction(async (tx) => {
+    // Transaction 1: criar usuário (DUserGroup + DEntidade + DEvento)
+    const userResult = await this.prisma.$transaction(async (tx) => {
       // 1. Criar DUserGroup (credenciais)
       const userGroup = await tx.dUserGroup.create({
         data: {
@@ -105,24 +120,7 @@ export class AuthService {
         },
       });
 
-      // 3. Criar DEntidade (-152 ORGANIZATION)
-      const org = await tx.dEntidade.create({
-        data: {
-          idClasse: ID_CLASSE_ORGANIZATION,
-          nome: orgNome,
-        },
-      });
-
-      // 4. DVincula (-161 ORG_ROLE_ADMIN): user é ADMIN da org
-      await tx.dVincula.create({
-        data: {
-          idClasse: ID_CLASSE_ORG_ADMIN,
-          idLocEscritu: org.chave,
-          idEntidade: entidade.chave,
-        },
-      });
-
-      // 5. DEvento (-501 USER_LOGIN) — audit register
+      // 3. DEvento (-501 USER_LOGIN) — audit register
       await tx.dEvento.create({
         data: {
           idClasse: ID_CLASSE_USER_LOGIN_EVENT,
@@ -135,24 +133,32 @@ export class AuthService {
         },
       });
 
-      return { userGroup, entidade, org };
+      return { userGroup, entidade };
     });
+
+    // Transaction 2 (via OrganizationsService): criar org completa + default team + memberships
+    const org = await this.organizationsService.create(
+      { nome: orgNome },
+      userResult.entidade.chave,
+    );
+
+    const orgIdBigInt = BigInt(org.id);
 
     // Gerar tokens APÓS persistência bem-sucedida
     const accessToken = this.generateAccessToken(
-      result.userGroup.chave,
-      result.entidade.chave,
-      result.org.chave,
+      userResult.userGroup.chave,
+      userResult.entidade.chave,
+      orgIdBigInt,
       dto.email.toLowerCase(),
     );
-    const refreshToken = await this.refreshTokenService.generate(result.userGroup.chave);
+    const refreshToken = await this.refreshTokenService.generate(userResult.userGroup.chave);
 
     return this.buildAuthResponse(
       accessToken,
       refreshToken,
-      result.userGroup.chave,
-      result.entidade.chave,
-      result.org.chave,
+      userResult.userGroup.chave,
+      userResult.entidade.chave,
+      orgIdBigInt,
       dto.email.toLowerCase(),
       dto.name,
       orgNome,

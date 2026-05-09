@@ -6,6 +6,7 @@ import * as bcrypt from 'bcryptjs';
 import { AuthService } from './auth.service';
 import { RefreshTokenService } from './services/refresh-token.service';
 import { PrismaService } from '../prisma.service';
+import { OrganizationsService } from '../organizations/organizations.service';
 
 /** Mock factory para PrismaService. */
 const makePrismaMock = () => ({
@@ -37,6 +38,7 @@ describe('AuthService', () => {
   let prisma: ReturnType<typeof makePrismaMock>;
   let jwtService: { sign: jest.Mock };
   let refreshTokenService: { generate: jest.Mock; validate: jest.Mock; rotate: jest.Mock; revoke: jest.Mock };
+  let organizationsService: { create: jest.Mock };
 
   beforeEach(async () => {
     prisma = makePrismaMock();
@@ -47,6 +49,16 @@ describe('AuthService', () => {
       rotate: jest.fn().mockResolvedValue('new-refresh-token'),
       revoke: jest.fn().mockResolvedValue(undefined),
     };
+    organizationsService = {
+      create: jest.fn().mockResolvedValue({
+        id: '3',
+        nome: "João Silva's Org",
+        description: null,
+        memberCount: 1,
+        criadoEm: new Date().toISOString(),
+        atualizadoEm: new Date().toISOString(),
+      }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -55,6 +67,7 @@ describe('AuthService', () => {
         { provide: JwtService, useValue: jwtService },
         { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('900') } },
         { provide: RefreshTokenService, useValue: refreshTokenService },
+        { provide: OrganizationsService, useValue: organizationsService },
       ],
     }).compile();
 
@@ -62,27 +75,26 @@ describe('AuthService', () => {
   });
 
   describe('register', () => {
-    it('deve criar usuário, org e DVincula ADMIN em transaction (happy path)', async () => {
+    it('deve criar usuário e delegar criação de org ao OrganizationsService (happy path)', async () => {
       prisma.dUserGroup.findFirst.mockResolvedValue(null); // email disponível
 
       const mockUserGroup = { chave: BigInt(1), usuario: 'joao@test.com' };
       const mockEntidade = { chave: BigInt(2), nome: 'João Silva', email: 'joao@test.com' };
-      const mockOrg = { chave: BigInt(3), nome: "João Silva's Org" };
 
+      // Transaction 1: cria DUserGroup + DEntidade + DEvento
       prisma.$transaction.mockImplementation(async (fn: (tx: typeof prisma) => Promise<unknown>) => {
         return fn({
           ...prisma,
           dUserGroup: { ...prisma.dUserGroup, create: jest.fn().mockResolvedValue(mockUserGroup) },
           dEntidade: {
             ...prisma.dEntidade,
-            create: jest.fn()
-              .mockResolvedValueOnce(mockEntidade) // USER
-              .mockResolvedValueOnce(mockOrg),     // ORG
+            create: jest.fn().mockResolvedValueOnce(mockEntidade), // USER
           },
-          dVincula: { ...prisma.dVincula, create: jest.fn().mockResolvedValue({ chave: BigInt(4) }) },
           dEvento: { create: jest.fn().mockResolvedValue({ chave: BigInt(5) }) },
         });
       });
+
+      // Transaction 2 (OrganizationsService.create) já mockado no beforeEach
 
       const result = await service.register({
         name: 'João Silva',
@@ -94,6 +106,11 @@ describe('AuthService', () => {
       expect(result.refreshToken).toBe('mock-refresh-token');
       expect(result.tokenType).toBe('Bearer');
       expect(result.user.email).toBe('joao@test.com');
+      // OrganizationsService.create deve ter sido chamado com o nome da org
+      expect(organizationsService.create).toHaveBeenCalledWith(
+        expect.objectContaining({ nome: expect.stringContaining('Org') }),
+        BigInt(2), // entidadeId do usuário
+      );
     });
 
     it('deve lançar ConflictException se email já cadastrado', async () => {
