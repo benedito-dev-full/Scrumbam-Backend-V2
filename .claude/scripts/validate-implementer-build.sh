@@ -15,7 +15,7 @@ NC='\033[0m'
 echo "Double-check V2: Validando build do Implementer..." >&2
 
 detect_build_command() {
-  if [ -f "Makefile" ] && grep -q '^build:' Makefile; then
+  if [ -f "Makefile" ] && grep -q '^build:' Makefile && command -v make > /dev/null 2>&1; then
     echo "make build"
   else
     echo "npm run build"

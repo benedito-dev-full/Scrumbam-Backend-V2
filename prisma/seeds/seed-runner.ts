@@ -32,6 +32,7 @@
 
 import { Prisma, PrismaClient } from '@prisma/client';
 import { classes, COUNTS } from './classes.seed';
+import { seedDvfs } from './dvfs.seed';
 
 /**
  * Codigo de saida usado quando o seed falha por motivo nao recuperavel.
@@ -142,6 +143,9 @@ async function main(): Promise<void> {
     console.log(
       `[seed-runner] OK — ${COUNTS.fixas} fixas + ${COUNTS.especificas} especificas = ${processed} classes upserted em ${elapsed}ms`,
     );
+
+    // Seed DVFS (F6 — Pilar 1): scripts canônicos para OperacaoExecucaoClaude
+    await seedDvfs(prisma);
   } finally {
     await prisma.$disconnect();
   }

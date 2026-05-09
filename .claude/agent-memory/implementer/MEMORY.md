@@ -1,7 +1,7 @@
 # Implementer Agent Memory — Scrumban-Backend-V2
 
-**Versão:** 1.0 (semente — bootstrap em F0)
-**Última atualização:** 2026-05-08
+**Versão:** 1.3 (F6 Task 1 — Engine + OperacaoExecucaoClaude — 2026-05-09)
+**Última atualização:** 2026-05-09
 
 ---
 
@@ -57,8 +57,55 @@ Operacao (abstract)
 
 ### Core
 - `src/prisma.service.ts` — extends PrismaClient (NUNCA usar DatabaseService — deprecated)
-- `src/common/services/timezone.service.ts` — TODAS filtros de data (`applyDateFilters`, `getPeriodDates`)
+- `src/common/services/timezone.service.ts` — TODAS filtros de data (`applyDateFilters`, `getPeriodDates`) [F4 ✓]
+- `src/common/services/correlation-id.service.ts` — AsyncLocalStorage por request (X-Correlation-Id) [F4 ✓]
+- `src/common/services/audit.service.ts` — stub MVP INSERT em DEvento idClasse=-501 [F4 ✓]
+- `src/common/middlewares/correlation-id.middleware.ts` — gera/lê X-Correlation-Id [F4 ✓]
+- `src/common/interceptors/logging.interceptor.ts` — loga method/path/status/ms [F4 ✓]
+- `src/common/filters/http-exception.filter.ts` — padroniza 4xx/5xx com correlationId [F4 ✓]
+- `src/common/health/` — checkDb/checkRedis/checkEmail, GET /health público [F4 ✓]
+- `src/email/` — EmailModule: SMTP/SendGrid/Resend + 4 templates + AuditService [F4 ✓]
 - `src/eventos/core/event-producer.service.ts` — emitir DEvento APÓS persistência
+
+### Codepaths F5
+- `src/organizations/` — OrganizationsModule (DEntidade -152 + DVincula -161/-162/-163)
+- `src/teams/` — TeamsModule (DEntidade -180 + DVincula -181 + DTabela -475)
+- `src/sprints/` — ZERO controller TS; apenas README.md + sprints.module.ts
+- `src/workflow-statuses/` — WorkflowStatusesModule (apenas seedDefaults + README)
+- `src/projects/` — ProjectsModule (DProject + DVincula -171/-172/-173 + SeedBootstrap)
+- `src/tasks/` — TasksModule (DTask + V3 Intentions + identifier atômico DEV-N + state machine)
+
+### Gotchas F6 (Engine + OperacaoExecucaoClaude)
+- **`private readonly logger` em subclasse de Engine** — NÃO redeclarar `logger` como `private` em `OperacaoExecucaoClaude`. `Operacao.ts` já declara `protected readonly logger`. Redeclarar como `private` causa TS2415 (`incorrectly extends base class`). Usar `this.logger` herdado.
+- **Scripts DVFS chave=7 no seed** — combinar `pr-auto-open.js` + `notification-dispatcher.js` em wrapper async: `(async function (op) { await prAutoOpen(op); await notificationDispatcher(op); })`. Cada script é uma `async function` nomeada.
+- **`dvfs.seed.ts` path relativo** — usar `path.join(__dirname, '..', '..', 'src', 'engine', 'dvfs')` (de `prisma/seeds/` para `src/engine/dvfs/`).
+- **Mock DvfsLoaderHelper em testes** — `DvfsLoaderHelper` faz 2 chamadas `findFirst` por chaveScript (idClasse concreto → fallback -300). Mock deve responder ao `where.chaveScript` (não ao `where.idClasse`).
+- **R-CHAVE-5 / R-CHAVE-7 são BLOQUEANTES** — testes em `OperacaoPedido.regressao-dvfs.spec.ts`. F6 não fecha sem ambos verdes. Valida que `_funcPosCalculo` (chave 5) e `_funcPosGravacao` (chave 7) são carregados e executados.
+- **`OperacaoExecucaoClaude` não reexporta IExecucaoData** — interface é importada de `IExecucaoData.ts` separado. Arquivo `OperacaoExecucaoClaude.ts` importa direto de `../interfaces/IExecucaoData`.
+- **`agentTunnelService` é `any` em F6** — STUB. Service retorna mock `{ exitCode: 0, stdout, stderr, headBefore, headAfter, ... }`. F13 tipará corretamente.
+
+### Gotchas F5 (Blocos C+E+F)
+- **zod NÃO está instalado** — não usar `import { z } from 'zod'`. Usar interfaces TypeScript + funções parse helper
+- **DTask não tem campo `codigo`** — usar `dados.identifier` para DEV-N identifier (não `DTask.codigo`)
+- **Circular dependency AuthModule ↔ OrganizationsModule** — resolver com `forwardRef()` em ambos
+- **auth.service.spec.ts** — ao injetar novo service no AuthService, adicionar mock no spec
+- **TeamsController multi-prefixo** — usar `@Controller()` sem prefixo + path completo nas rotas
+- **auth.service register()** — refatorado para 2 transactions separadas (usuário + org)
+- **WorkflowStatusesService.seedDefaults** — usa `-441` (INBOX) como sentinela de idempotência
+- **TasksIdentifierService** — receber `PrismaService` via DI mas NÃO armazenar como `private readonly` (TS6138). Usar `constructor(_prisma: PrismaService) {}` pois métodos usam `tx` passado por parâmetro
+- **idClasse DProject/DTask** — sem definição explícita no plano; usados -300 e -200 como placeholder. Confirmar com seed real
+- **DTask.idStatus → DTabela.chave** — filtrar tasks por status V3 requer buscar DTabela com idClasse=-44X primeiro, depois filtrar DTask.idStatus IN ids
+- **Telemetria workSessions** — ao DONE: buscar última session sem endedAt via `.reverse().find(s => !s.endedAt)`
+- **OrganizationsService** — `buildResponse` aceita `dados` como parâmetro opcional para evitar double-read
+
+### Gotchas F4
+- **`APP_INTERCEPTOR`/`APP_FILTER`** vêm de `@nestjs/core`, NÃO de `@nestjs/common`
+- **DTOs TypeScript strict** — campos sem inicializador precisam de `campo!: tipo`
+- **`private readonly config` em providers** — se config é usado apenas no construtor e NÃO como propriedade, remover `private readonly` para evitar TS6138
+- **DEntidade usa `criadoEm`** (não `chcriacao`) para filtro de data
+- **DEvento não tem `idUsuario`** — passar userId em `metaDados` como string
+- **TimezoneService depende de `date-fns` + `date-fns-tz`** (não apenas `luxon`)
+- **Quando adicionar dependência em Service, atualizar spec** adicionando o provider no módulo de teste
 
 ### Módulos V2 (lista oficial — usar exatamente esses scope names)
 
@@ -207,7 +254,74 @@ EntidadeController aceita ambos hoje:
 - **F1 hierarquia idPai do seed:** validator automatizado (todos `idPai` existem); peer-review obrigatório.
 - **F15 cutover:** 3 ensaios cronometrados em staging; abort policy às 04:00.
 - **TypeScript com Prisma BigInt:** uso de `BigInt(id)` em wheres e tipos. Nunca `as any`.
+- **TS2564 em DTOs (strictPropertyInitialization):** tsconfig tem `strict: true`. DTOs de resposta sem construtor precisam de `!` em todos os campos obrigatórios (ex: `chave!: string`).
+- **Prisma Json + Record<string, unknown>:** Campos Json do Prisma exigem cast `as Prisma.InputJsonValue`. `Record<string, unknown>` não é compatível diretamente.
+- **Windows: `make` não disponível** — usar `npm run build` diretamente. `make build` falha com "command not found".
+- **npm install necessário** antes do primeiro build (node_modules não commitado).
+- **ESLint path para scan:** `npx eslint "src/**/*.ts" --max-warnings 0` (com aspas para glob no Windows).
+
+## CONVENÇÃO ADR-V2-015 IMPLEMENTADA (F2)
+
+**Canônico:** `?idClasse=-150` → BigInt direto, sem log
+**Deprecated:** `?classe=USER` → LRU cache (TTL 5min) + Logger.warn + headers `Deprecation: true`, `Sunset: 2026-06-05`
+**Ambos:** → 400 BadRequest
+**Nenhum:** → 400 BadRequest
+**Sunset date:** 2026-06-05 (2 sprints a partir de F2)
+
+## F2 IMPLEMENTADO — ESTRUTURA DE ARQUIVOS
+
+```
+src/common/pipes/parse-bigint.pipe.ts           # string → bigint, valida ^-?\d+$
+src/common/pipes/parse-optional-bigint.pipe.ts  # versão opcional
+src/common/decorators/skip-guard.decorator.ts   # TOMBSTONE F3 — não usar; usar @Public()
+src/common/helpers/lru-cache.ts                 # LRU genérico max:200 ttl:5min
+src/common/dto/pagination-meta.dto.ts           # movida de src/entidades/dto/ em F3
+src/common/helpers/validar-classe.helper.ts     # extraída de entidades+tabelas em F3
+
+src/entidades/entidades.service.ts              # 8 métodos (inclui getEntidadeIdFromUserGroup)
+src/entidades/entidades.controller.ts           # F3: AuthCompositeGuard + OrgTenantGuard
+src/entidades/entidades.module.ts               # F3: forwardRef(AuthModule)
+
+src/tabelas/tabelas.service.ts                  # F3: usa validarClasse helper + formatTabelaResponse
+src/tabelas/tabelas.controller.ts               # F3: AuthCompositeGuard + OrgTenantGuard
+src/tabelas/helpers/format-tabela-response.ts   # extraída de tabelas.service.ts em F3
+
+src/classes/classes.controller.ts               # F3: AuthCompositeGuard, POST retorna 403
+```
 - **DEvento.idUsuario aponta para DEntidade.chave (não DUserGroup.chave)** — usar `EntidadeService.getEntidadeIdFromUserGroup(userGroupId)` para conversão.
+
+## F3 IMPLEMENTADO — AUTH + RBAC DUPLO
+
+```
+src/auth/auth.module.ts              # JWT + Passport + forwardRef(EntidadesModule)
+src/auth/auth.service.ts             # register (tx), login, refresh, logout, getMe, updateMe, deleteMe
+src/auth/auth.controller.ts          # 13 endpoints /auth/*, /auth/me/api-key, /auth/me/mcp-key
+src/auth/strategies/jwt.strategy.ts  # PassportStrategy JWT
+src/auth/guards/jwt-auth.guard.ts    # NÃO lança; @Public() bypass
+src/auth/guards/api-key.guard.ts     # X-API-Key; popula req['project']; NÃO lança
+src/auth/guards/mcp-key.guard.ts     # X-MCP-Key; NÃO lança
+src/auth/guards/auth-composite.guard.ts # OR: MCP→APIKey→JWT; ÚNICO que lança 401
+src/auth/guards/org-tenant.guard.ts  # DProject.idEstab + LRU cache (decisão CEO Q1)
+src/auth/guards/roles.guard.ts       # DVincula role + LRU cache
+src/auth/decorators/public.decorator.ts  # @Public() substitui @SkipGuard()
+src/auth/services/role-resolver.service.ts # LRU 1000 entries TTL 5min; N+1 ZERO
+src/auth/services/api-key.service.ts # DTabela(-471): generate/validate (SHA-256)/revoke
+src/auth/services/mcp-key.service.ts # DTabela(-472) + DUserGroup.dados.mcpKeyHash
+src/auth/services/refresh-token.service.ts # rotação estrita; reuse detection
+
+src/permissoes/permissoes.module.ts
+src/permissoes/permissoes.controller.ts # @Roles('ADMIN')
+src/permissoes/permissoes.service.ts    # CRUD DPermissao
+```
+
+**Gotchas F3 críticos:**
+- **forwardRef obrigatório** entre AuthModule↔EntidadesModule/TabelasModule/ClassesModule (circular dep)
+- **Guards internos NÃO lançam** — apenas retornam false; AuthCompositeGuard é o único que lança
+- **Refresh token scan em POST /auth/refresh** — acessa DUserGroup.dados.refreshTokenHash em scan; F14 precisa indexar
+- **BCRYPT_ROUNDS = 12** — constante em auth.service.ts
+- **bcryptjs** (não bcrypt) está instalado; import `* as bcrypt from 'bcryptjs'`
+- **JwtPayload sub/entidadeId/organizationId são strings** (não BigInt) — evita BigInt serialization
+- **AuthCompositeGuard** verificar req.user após JwtAuthGuard.canActivate (JWT pode retornar true mas sem user)
 
 ---
 

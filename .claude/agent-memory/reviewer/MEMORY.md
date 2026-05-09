@@ -1,7 +1,7 @@
 # Reviewer Agent Memory — Scrumban-Backend-V2
 
-**Versão:** 1.0 (semente — bootstrap em F0)
-**Última atualização:** 2026-05-08
+**Versão:** 1.1
+**Última atualização:** 2026-05-09
 
 ---
 
@@ -224,7 +224,12 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 
 | Task | Módulo V2 | Fase | Score | Decisão | Issue principal |
 |------|-----------|------|-------|---------|-----------------|
-| (ainda nada — V2 inicia em F0) | | | | | |
+| Task 1 | endpoints | F2 | 9.0 | APPROVED | Dívidas menores (PaginationMetaDto acoplamento, ParseBigIntPipe não aplicado) |
+| Task 1 | auth | F3 | 7.8 | APPROVED | Bracket notation acesso privado + N+1 write path (ambos dívida F14) |
+| Task 1 | email+common | F4 | 8.2 | APPROVED | nestjs-pino não instalado (DoD explícito); @Public() ausente no HealthController |
+| Task 1 | domain-structural | F5 | 8.0 | APPROVED | parseInt(limit) em 4 controllers; for...of vs createMany no bootstrap; TeamsService sem AuditService |
+
+Detalhes: [F2 scores](project_f2_scores.md) | [F3 scores](project_f3_scores.md) | [F5 scores](project_f5_scores.md)
 
 ---
 
@@ -232,7 +237,12 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 
 | Padrão | Frequência | Como abordar |
 |--------|------------|--------------|
-| (vazio — primeira review ainda não rodou) | | |
+| Acoplamento horizontal entre módulos via DTO compartilhado | F2 (PaginationMetaDto) | Sempre mover DTOs compartilhados para `src/common/dto/` |
+| Acesso a campo privado de Service via bracket notation em Controller | F3 (authService['prisma']) | Controller NUNCA acessa campo privado de Service; expor método público |
+| N+1 em write path (loop com await em UPDATE/DELETE bulk) | F3 (revokeApiKeys) | Usar updateMany/deleteMany com where clause |
+| parseInt(param) para query params numéricos (limit, page) | F5 (4 controllers) | Usar Number(param) ou DTO com @Type(() => Number) |
+| for...of com await individual em seed bootstrap | F5 (seed-bootstrap) | Preferir createMany para batch INSERTs |
+| Service sem AuditService quando deveria auditar | F5 (TeamsService) | Todo service que cria/deleta entidades deve injetar AuditService |
 
 ---
 

@@ -383,6 +383,57 @@
 
 ---
 
+## F6 — Engine + OperacaoExecucaoClaude (Pilar 1)
+
+### Task #1: Engine Base + DVFS Scripts + OperacaoExecucaoClaude — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** engine
+**Fase V2:** F6
+**Tempo Real:** ~8h Implementer (2 sessões, interrompida por rate limit) + ~1.5h Reviewer
+**Completado em:** 2026-05-09
+**Quality Score:** 8.5/10 APPROVED
+
+**O Que Foi Feito:**
+
+- **Operacao.ts** (~80L): classe abstrata base do Engine — `nova()` via PostgreSQL sequence `chcriacao_seq` (BigInt), `erro()` com InternalServerErrorException + Logger estruturado
+- **OperacaoPedido.ts** (~800L): workflow polimórfico FULL — carrega DVFS chaves 3,4,5 (`_carregaScriptsCalc`) e 6,7 (`_carregaScriptsGrav`); filtro por `chaveScript` (nunca `s.id` — **ADR-V2-016 CORRIGIDO**); fallback idClasse concreto → -300; `calcula/aprova/grava` com `prisma.$transaction`
+- **OperacaoExecucaoClaude.ts** (~260L): CORAÇÃO DO V2 — `extends OperacaoPedido` (ADR-V2-005); Risk Gate (DVFS chave=3) → Command Validator (chave=4) → `calcula()` determina `idClasse` final (-301 LOW/-302 MED/-303 HIGH, ADR-V2-006); `gravarComoAwaitingApproval()` para risco HIGH; `_executarClaude()` com STUB; `grava()` emite evento APÓS `super.grava()` (Padrão #7)
+- **Auxiliares VOs puros:** `PedidoCabecalho`, `PedidoItem`, `PedidoItens` (sem import Prisma, `toJson()`, getters/setters)
+- **Interfaces:** `IOperacaoConstruct`, `IOperacaoPedidoConstruct`, `IOperacaoExecucaoClaudeConstruct`, `IExecucaoData` (command/risk/approval/claude/git/pullRequest/task/audit)
+- **Helpers:** `sequence.helper.ts` (BigInt via nextval), `dvfs-loader.helper.ts` (fallback 2 níveis: concreto → -300, cache TTL 5min), `execution-context.helper.ts`
+- **Scripts DVFS** (`src/engine/dvfs/`): `risk-gate-validator.js` (chave=3, 5 HIGH + 3 MEDIUM patterns — versão simplificada, expansão para 50 patterns na Task 2), `command-validator.js` (chave=4), `pr-auto-open.js` (chave=7), `notification-dispatcher.js` (chave=7)
+- **dvfs.seed.ts:** 5 registros DVFS upsert idempotente em `idClasse=-300`; chaves 5,6 no-op stubs; chave 7 combina pr-auto-open + notification
+- **Migration** `20260509000000_add_chcriacao_seq`: `CREATE SEQUENCE chcriacao_seq START WITH 1000000`
+- **24 testes unitários PASS:** 3 BLOQUEANTES ADR-V2-016 (R-CHAVE-5, R-CHAVE-7, DVFS-NULL-WARN) + 21 unitários OperacaoExecucaoClaude
+
+**Smoke test integrado (verde):**
+- `npm run build` PASS (0 erros TypeScript strict)
+- `npx tsc --noEmit` 0 erros
+- `npx jest src/engine` 24/24 PASS
+- `grep -rn "s\.id" src/engine/` → apenas em comentários JSDoc (zero em código funcional)
+- `grep -rn "console\.log" src/engine/` → zero resultados
+- Testes BLOQUEANTES R-CHAVE-5 e R-CHAVE-7 verdes (defesa ADR-V2-016)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): **ATIVADO** — `OperacaoExecucaoClaude extends OperacaoPedido`; Engine EXCLUSIVO em DPedido idClasse=-300..-303 (§6.16 do plano); ZERO instância de Engine fora de `src/engine/` ou `src/executions/`
+- Pilar 2 (Endpoints): N/A em Task 1 (Engine puro) — Task 2 criará `ExecutionsController`
+- Pilar 3 (Seed): ATIVADO — `dvfs.seed.ts` com 5 scripts DVFS idempotentes; classes F6 já existiam no seed da F1
+
+**ADRs vinculados:** ADR-V2-005 (OperacaoExecucaoClaude extends OperacaoPedido), ADR-V2-006 (risk via idClasse -301/-302/-303), ADR-V2-007 (DVFS portabilidade), ADR-V2-016 (s.chaveScript, corrigido + blindado por testes)
+
+**Issues para Task 2 (não bloqueantes):**
+- `[M1 — SHOULD]` `IExecucaoData.risk.matchedPatterns: string[]` → mudar para `Array<{ pattern: string; level: string }>` (type mismatch não detectado pelo TypeScript via eval)
+- `[m2 — SHOULD]` Converter `DvfsLoaderHelper` para NestJS `@Injectable()` singleton — compartilhar cache TTL entre requests
+- `[m3 — COULD]` Verificar `idOwner` em `notification-dispatcher.js` contra schema DProject
+- Task 2 MUST: `ExecutionsController` + `ExecutionsService` + `ApprovalFlowService` + `Sweeper @Cron` + 50 patterns adversariais completos + testes de integração
+
+**Plan:** [`workspace/plans/plan-engine-operacao-execucao-claude-task1.md`](../workspace/plans/plan-engine-operacao-execucao-claude-task1.md)
+**Impl Notes:** [`workspace/implementations/impl-f6-engine-task1.md`](../workspace/implementations/impl-f6-engine-task1.md)
+**Review:** (entregue na conversa principal — score 8.5/10 APPROVED — artefato não gravado em arquivo)
+
+---
+
 ## Proximas fases (preview)
 
 | Fase | Nome | Pilar dominante |

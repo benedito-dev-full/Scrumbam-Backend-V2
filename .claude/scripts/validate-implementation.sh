@@ -13,7 +13,7 @@ echo "Validando implementação V2..."
 
 # Detectar build command
 detect_build_command() {
-  if [ -f "Makefile" ] && grep -q '^build:' Makefile; then
+  if [ -f "Makefile" ] && grep -q '^build:' Makefile && command -v make > /dev/null 2>&1; then
     echo "make build"
   else
     echo "npm run build"

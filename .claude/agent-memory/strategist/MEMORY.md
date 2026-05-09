@@ -1,7 +1,7 @@
 # Strategist Agent Memory — Scrumban-Backend-V2
 
-**Versão:** 1.0 (semente — bootstrap em F0)
-**Última atualização:** 2026-05-08
+**Versão:** 1.2
+**Última atualização:** 2026-05-09 (F5 Task #1 — plan-domain-structural-f5-task1.md)
 **Atualizar:** ao concluir cada task. Limite ~200 linhas; acima disso, mover histórico antigo para `agent-memory/strategist/<topic>.md`.
 
 ---
@@ -19,7 +19,7 @@
 
 **Scrumban-Backend-V2** é a refundação canônica do Scrumban legado, sob o template Devari-Core.
 **Repositório:** `/Users/devaritecnologia/Documents/Benedito/Scrumban-Backend-V2/`
-**Estado:** F0 (Verificação canônica + Setup + Multi-agent infra) — em planejamento.
+**Estado:** F5 (Domínio Estrutural — Organizations/Teams/Projects/Tasks) — plan entregue, aguardando CEO responder Q1/Q2/Q3 antes de Implementer iniciar Bloco B.
 **Cronograma:** 24 semanas (otimista 20, pessimista 29) com 1 implementer dedicado + strategist e reviewer parciais.
 **Família depende.** Corda justa. Sem afrouxar.
 
@@ -222,3 +222,22 @@ ADRs adicionais (V2-015+):
 - Aposta arquitetural: tudo que o Scrumban legado faz CABE nas 17 tabelas via DClasse + DVincula + DEvento + DPedido + Json aditivo. Cada fase tem que manter essa aposta intacta.
 - Conventional Commits scope V2 difere do template (sem `pagamento`; com `channels`, `mcp`, `webhooks`, `automation`, `executions`, `flow-metrics`, `reports`, `email`, `permissoes`).
 - ESCOPO INDEFINIDO ≠ ESCOPO REDUZIDO. V2 mantém os 128 endpoints do legado; muda apenas COMO faz.
+
+---
+
+## HISTÓRICO DE PLANS PRODUZIDOS
+
+| Task | Plan | Data | Decisões-chave |
+|------|------|------|----------------|
+| F2-Task1 | `workspace/plans/plan-endpoints-genericos-f2-task1.md` | 2026-05-08 | Pilar 2 ativo: 3 controllers genéricos (entidades/tabelas/classes). ZERO controller específico (sem UserController, SprintController). ADR-V2-015 compat wrapper `?classe=NOME` com LRU cache 5min + Logger.warn + header Deprecation/Sunset. ClasseController READ-ONLY. F2.1→F2.6 sequência com Infraestrutura Comum PRIMEIRO. Eventos inline em DEvento até F7 criar EventProducerService. ADR-V2-025 proposto para BigInt serialization strategy. `createSeller` helper canônico incluído mesmo sem uso no Scrumban V2. |
+| F3-Task1 | `workspace/plans/plan-auth-rbac-f3-task1.md` | 2026-05-08 | AuthCompositeGuard ordem: MCP→API Key→JWT (mais específico primeiro). RoleResolverService: LRU in-memory TTL 5min (Redis não ativo em F3). Refresh token: rotação estrita (reuse detection). MCP Key: DTabela(-472) + hash duplicado em DUserGroup.dados.mcpKeyHash. API Key: DTabela(-471). Dívidas F2 resolvidas na Fase 1 do plano (antes de qualquer guard). @SkipGuard() tombstone após remoção. Pergunta aberta Q1 para CEO sobre OrgTenantGuard e PATH_PARAM strategy em F5. |
+| F6-Task1 | `workspace/plans/plan-engine-operacao-execucao-claude-task1.md` | 2026-05-09 | Pilar 1 ATIVO: Engine base Operacao.ts + OperacaoPedido.ts (FULL) + OperacaoExecucaoClaude.ts (V2). Migration chcriacao_seq START WITH 1000000 (separação de range vs BIGSERIAL). DVFS usa `chaveScript INTEGER` (campo correto no schema V2) — NUNCA `s.id` (ADR-V2-016). dvfs-loader carrega por idClasse com fallback ao pai (Q1 para CEO). Scripts seeded em idClasse=-300 (compartilhados por -301/-302/-303). 2 testes regressivos BLOQUEANTES R-CHAVE-5 e R-CHAVE-7. Task 1 = G+H+I (Engine puro); Task 2 = J+K+L (Controller/Service/testes integration). agentTunnelService e eventProducer são STUBS em F6. |
+
+## PADRÕES ESTABELECIDOS EM F2
+
+- **Serialização BigInt:** `format-entidade-response.ts` + `format-tabela-response.ts` por módulo (ou interceptor global — registrar como ADR-V2-025)
+- **LRU cache compartilhado:** `src/common/helpers/lru-cache.ts` (max 200, TTL 5min) — reutilizado por EntidadeService e TabelaService para alias `?classe=NOME`
+- **Validação DClasse:** sempre `prisma.dClasse.findFirst({ where: { chave, excluido: false } })` antes de qualquer query principal — 404 se não existe
+- **Placeholder de auth:** `@SkipGuard()` em todos os controllers F2 — F3 substitui por guards reais
+- **Tree builder:** 1 `findMany` + Map em memória — NUNCA recursão de queries (N+1 proibido)
+- **`?idClasse` obrigatório em GET /entidades e GET /tabelas** — listagem sem filtro de tipo proibida em F2
