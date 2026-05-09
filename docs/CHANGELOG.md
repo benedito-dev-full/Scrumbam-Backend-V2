@@ -14,7 +14,52 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
-- **F2 Pilar 2 — Endpoints Genéricos** (Task #1, V2 F2)
+- **F3 Auth + RBAC Duplo** (Task #1, V2 F3) — 2026-05-09
+  - `AuthModule` completo: 7 guards (JwtAuthGuard, ApiKeyGuard, McpKeyGuard, AuthCompositeGuard, OrgTenantGuard, ProjectScopeGuard, RolesGuard), 5 services (AuthService, ApiKeyService, McpKeyService, RefreshTokenService, RoleResolverService)
+  - `AuthController`: 13 endpoints (register, login, refresh, logout, /me CRUD + api-key + mcp-key) — todas com Swagger 100%, JSDoc completo
+  - `PermissoesModule`: 4 endpoints CRUD DPermissao com `@Roles('ADMIN')` guard
+  - RBAC duplo via DVincula + idClasse (ADR-V2-003): Org roles (-161 ADMIN / -162 MEMBER / -163 VIEWER); Project roles (-171 MANAGER / -172 MEMBER / -173 VIEWER)
+  - API Keys via DTabela(-471) + MCP Keys via DTabela(-472) com hash duplicado em DUserGroup.dados (ADR-V2-004)
+  - `@Public()` decorator substitui `@SkipGuard()` placeholder de F2
+  - Refresh token rotativo: cada refresh gera novo hash, token antigo invalidado (reuse detection)
+  - RoleResolverService com LRU cache 1000 entries TTL 5min — N+1 ZERO em RBAC queries
+  - OrgTenantGuard com LRU cache — isolamento multi-tenant via DProject.idEstab
+
+### Fixed (Dívidas F2 resolvidas em F3)
+- `PaginationMetaDto` movida de `src/entidades/dto/` para `src/common/dto/pagination-meta.dto.ts` (resolve cross-module dependency)
+- `formatTabelaResponse` extraída de inline em `tabelas.service.ts` para `src/tabelas/helpers/format-tabela-response.ts`
+- `validarClasse` extraída para `src/common/helpers/validar-classe.helper.ts` (elimina duplicação entre entidades e tabelas)
+- `ParseBigIntPipe` aplicado em `@Param('id')` em todos os controllers F2 (EntidadeController, TabelaController, ClasseController)
+- `POST /classes` registrado explicitamente com `@Post()` retornando `HttpStatus.FORBIDDEN` com mensagem clara
+
+### Technical Debt (Registrado para F14)
+- `findUserGroupByRefreshToken` em AuthController acessa `this.authService['prisma']` via bracket notation — refatorar para método público em AuthService
+- `revokeApiKeys` usa loop sequencial com `await` em vez de `updateMany` — refatorar para batch update
+- `ApiKeyService.validate` sem índice GIN em DTabela.dados Json — avaliar raw query ou criar índice se volume > 100 keys
+- `findUserGroupByRefreshToken` faz scan O(n) em DUserGroup — adicionar campo indexado ou userGroupId no RefreshDto
+
+### Performance
+- N+1 ZERO em `/auth/me`: 2 queries (DUserGroup+DEntidade JOIN + DVincula findFirst)
+- N+1 ZERO em RBAC queries: RoleResolverService com LRU cache TTL 5min
+- `getMe` performance: ≤3 queries verificado com DATABASE_LOGGING=true
+
+### Tests
+- 78 unit tests PASS (12 suites: auth.service, api-key.service, role-resolver.service, refresh-token.service, auth-composite.guard, roles.guard + F2 carryover)
+- Todos os bloqueadores DoD verificados: build clean, TypeScript 0 erros, ESLint 0 warnings, Swagger 100%, JSDoc completo
+- Refresh token reuse detection testado: token antigo vira inválido após rotate
+- Bcrypt rounds = 12 (constante explícita com comentário ADR)
+- Senha NUNCA logada (grep confirmado)
+
+### Security
+- Bcrypt rounds ≥ 12 para hash de senha (ADR-V2-004)
+- API Key plaintext retornado UMA VEZ ao criar (nunca reexibido)
+- MCP Key hash duplicado em DUserGroup.dados com sync em transaction
+- Refresh token rotativo com reuse detection (detecta e revoga ao ver token antigo)
+- Sem `console.log` no código auth (grep confirmado)
+
+---
+
+### Added (F2 Pilar 2 — Endpoints Genéricos)
   - `EntidadeController` + `EntidadeService` — CRUD completo `/api/v1/entidades` (GET/POST/PATCH/DELETE) com cursor pagination, soft-delete, N+1 ZERO (include com JOIN), BigInt serializado, Swagger 100%, JSDoc completo
   - `TabelaController` + `TabelaService` — CRUD completo `/api/v1/tabelas` com filtro `dEntidadeId`, cursor pagination, soft-delete
   - `ClasseController` + `ClasseService` — Read-only `/api/v1/classes` + `GET /classes/tree` (1 query + Map em memória, ZERO N+1), bloqueio 403 explícito para POST (classes do seed — imutáveis via API)

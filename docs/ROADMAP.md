@@ -143,6 +143,68 @@
 
 ---
 
+## F3 — Auth + RBAC duplo (Pilar Multi-agent) — ✅ COMPLETA
+
+### Task #1: Auth + RBAC Duplo (JwtAuthGuard + ApiKeyGuard + McpKeyGuard + RoleResolverService + RolesGuard) — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** auth
+**Fase V2:** F3
+**Tempo Real:** ~8h Implementer + ~1h Reviewer + ~30min Documenter
+**Completado em:** 2026-05-09
+**Quality Score:** 7.8/10 APPROVED
+
+**O Que Foi Feito:**
+
+- **AuthModule:** 7 guards (JwtAuthGuard, ApiKeyGuard, McpKeyGuard, AuthCompositeGuard, OrgTenantGuard, ProjectScopeGuard, RolesGuard), 5 services (AuthService, ApiKeyService, McpKeyService, RefreshTokenService, RoleResolverService)
+- **AuthController:** 13 endpoints (register, login, refresh, logout, /me CRUD, api-key CRUD, mcp-key CRUD) — todas Swagger 100%, JSDoc completo
+- **PermissoesModule:** 4 endpoints CRUD DPermissao com `@Roles('ADMIN')` guard
+- **RBAC duplo (ADR-V2-003):** Roles via DVincula + idClasse — Org (-161/-162/-163), Project (-171/-172/-173)
+- **Keys (ADR-V2-004):** API Keys em DTabela(-471), MCP Keys em DTabela(-472) com hash duplicado em DUserGroup.dados
+- **@Public() decorator:** Substitui `@SkipGuard()` placeholder de F2
+- **Refresh token rotativo:** Reuse detection — token antigo invalidado após rotate
+- **RoleResolverService:** LRU cache 1000 entries TTL 5min — N+1 ZERO em RBAC
+- **OrgTenantGuard:** Multi-tenant isolamento via DProject.idEstab + LRU cache
+
+**Dívidas F2 resolvidas:**
+- `PaginationMetaDto` movida para `src/common/dto/pagination-meta.dto.ts`
+- `formatTabelaResponse` extraída para `src/tabelas/helpers/format-tabela-response.ts`
+- `validarClasse` extraída para `src/common/helpers/validar-classe.helper.ts`
+- `ParseBigIntPipe` aplicado em `@Param('id')` dos 3 controllers F2
+- `POST /classes` → `HttpStatus.FORBIDDEN` explícito
+
+**Smoke test integrado (verde):**
+- `make build` PASS (0 TypeScript, 0 ESLint)
+- `npx jest` 78/78 PASS (12 suites)
+- ZERO `@SkipGuard()` em controllers (grep confirmado — apenas tombstone em decorator file)
+- N+1 ZERO em `/auth/me` (2 queries: DUserGroup+DEntidade + DVincula findFirst)
+- N+1 ZERO em RBAC (RoleResolverService cache)
+- Bcrypt rounds = 12 (constante explícita)
+- Senha NUNCA logada (grep confirmado)
+- Refresh token reuse detectado e revogado (spec testado)
+- Swagger 100% (13 endpoints auth + 4 endpoints permissoes)
+- BigInt em todos os IDs (ZERO parseInt)
+
+**Pilares aplicados:**
+- Pilar 1: N/A (auth é estrutural — Prisma direto correto)
+- Pilar 2: **ATIVADO** — AuthController + PermissoesController justificados
+- Pilar 3: RESPEITADO — ZERO DClasses novas (F1 tem tudo)
+
+**Issues registrados para F14:**
+- `findUserGroupByRefreshToken` acessa `this.authService['prisma']` via bracket notation — refatorar
+- `revokeApiKeys` com loop sequencial — refatorar para `updateMany`
+- `ApiKeyService.validate` sem índice GIN em dados — avaliar se volume > 100
+- `findUserGroupByRefreshToken` faz scan O(n) — adicionar campo indexado
+
+**ADRs vinculados:** ADR-V2-003 (RBAC duplo), ADR-V2-004 (Keys via DTabela)
+
+**Plan:** [`workspace/plans/plan-auth-rbac-f3-task1.md`](../workspace/plans/plan-auth-rbac-f3-task1.md)
+**Impl Notes:** [`workspace/implementations/impl-auth-rbac-f3-task1.md`](../workspace/implementations/impl-auth-rbac-f3-task1.md)
+**Review:** [`workspace/reviews/review-auth-rbac-f3-task1.md`](../workspace/reviews/review-auth-rbac-f3-task1.md)
+**Commit:** (criar neste documento)
+
+---
+
 ## Proximas fases (preview)
 
 | Fase | Nome | Pilar dominante |
