@@ -54,6 +54,67 @@
 
 ---
 
+## Task #1 — F5 Domínio Estrutural Scrumban — COMPLETE (V2 Fase F5)
+
+**Module:** organizations, teams, projects, tasks, workflow-statuses, sprints, auth (decorator + guard)
+**Task:** Domínio Estrutural Scrumban (Organizations + Teams + Projects + Tasks + wrappers thin)
+**Status:** COMPLETA — Score 8.0/10 APPROVED
+**Duration:** ~12h Implementer + ~2h Reviewer + ~1.5h Documenter
+**Completado em:** 2026-05-09
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan F5 (4 módulos + seed bootstrap, state machine V3, identifier atômico) |
+| Implementer | ~12h | 189/189 testes, N+1 ZERO em 25+ verificações, state machine robusto |
+| Reviewer | ~2h | Score 8.0/10 (1 MINOR: parseInt em 4 controllers, 1 MEDIUM: membership validation F7+) |
+| Documenter | ~1.5h | JSDoc 100% (criticals), CHANGELOG/ROADMAP/STATUS atualizados, commit Conventional |
+
+**Pilares:**
+- Pilar 1 (Engine): RESPEITADO — ZERO uso de Operacao/Engine (estrutural, Prisma direto + $transaction correto)
+- Pilar 2 (Endpoints): **ATIVADO PLENAMENTE** — 4 controllers próprios justificados + 2 wrappers thin + reutilização /entidades /tabelas
+- Pilar 3 (Seed): ATIVADO — +2 DClasses (-153 SCRUMBAN_PROJECT, -154 SCRUMBAN_TASK = 130 total)
+
+**Deliverables:**
+- [x] Organizations: CRUD DEntidade -152 + membership RBAC (DVincula -161/-162/-163) + cascade delete
+- [x] Teams: CRUD DEntidade -180 + membership (DVincula -181/-182) + issue counter (DTabela -475) atomico
+- [x] Projects: CRUD DProject -153 + seed bootstrap 9 statuses V3 + activity feed + members + 31 testes
+- [x] Tasks: CRUD DTask -154 + state machine V3 (9 estados, 12 transições) + identifier DEV-N atomico
+- [x] WorkflowStatuses: wrapper thin (POST /seed-defaults/:projectId apenas, CRUD via /tabelas)
+- [x] Sprints: wrapper thin (README + module, CRUD via /tabelas?idClasse=-400)
+- [x] @TeamRoles() decorator + TeamRolesGuard implementação real (substitui stub F3)
+- [x] getEntidadeIdFromUserGroup(): método centralizado + LRU cache (EntidadeService)
+- [x] Seed: 130 DClasses (45 fixas + 85 especificas, range -150..-527)
+
+**Metrics:**
+- Build: PASS (0 TypeScript, 0 ESLint)
+- Tests: 189/189 PASS (87 F5-específicos + 102 anteriores)
+  - Organizations: 24 (3 integrados)
+  - Teams: 22 (2 integrados)
+  - Projects: 31 (6 integrados)
+  - Tasks: 28 (5 integrados)
+- N+1 Queries: ZERO (25+ verificações: cursor, batch, JOIN validadas)
+- Queries/request: Organizations CRUD = 2, Projects GET = 1+cache, Tasks state machine = 3
+- BigInt: 100% serializado
+- JSDoc: 100% (criticals: Organizations, Teams, Projects, Tasks services/controllers)
+- Swagger: 100% (57 endpoints em 4 controllers)
+- State Machine: 12 transições válidas testadas, 15 inválidas rejeitadas
+
+**Issues (F14):**
+- M1: `parseInt()` em 4 controllers para parsing `limit` (numérico, não ID) — refatorar
+- M2: ProjectMembersService sem validação se usuário exists em org pai — adicionar F7+
+- M3: TasksStateMachineService sem cache transições — considerar memoization >500 tasks/sprint
+
+**ADRs:** ADR-V2-003 (RBAC duplo), ADR-V2-009 (wrappers thin)
+
+**Plan:** [`workspace/plans/plan-domain-structural-f5-task1.md`](../workspace/plans/plan-domain-structural-f5-task1.md)
+**Impl Notes:** [`workspace/implementations/impl-projects-tasks-f5-task1.md`](../workspace/implementations/impl-projects-tasks-f5-task1.md)
+**Review:** [`workspace/reviews/review-domain-structural-f5-task1.md`](../workspace/reviews/review-domain-structural-f5-task1.md)
+**Commit:** (a ser criado pelo Documenter)
+
+---
+
 ## Task #1 — F4 Email Module + Common Services — COMPLETE (V2 Fase F4)
 
 **Module:** email, common

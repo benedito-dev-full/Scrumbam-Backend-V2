@@ -14,7 +14,40 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
-- **F4 Email Module + Common Services** (Task #1, V2 F4) — 2026-05-09
+- **F5 Domínio Estrutural Scrumban** (Task #1, V2 F5) — 2026-05-09
+  - **Organizations:** CRUD + membership RBAC duplo (DVincula -161/-162/-163) + cascade delete
+  - **Teams:** CRUD + membership (DVincula -181/-182) + issue counter atomico (DTabela -475)
+  - **Projects:** CRUD + seed bootstrap 9 statuses V3 (-441..-449) + Sprint (-400) + activity feed + members
+  - **Tasks:** CRUD + state machine V3 (9 estados, ~12 transições) + identifier atômico DEV-N
+  - **WorkflowStatuses + Sprints:** wrappers thin (ADR-V2-009) — CRUD via `/tabelas?idClasse=-44X/-400`
+  - **TeamRolesGuard:** implementação real (substitui stub F3) + LRU cache
+  - **getEntidadeIdFromUserGroup():** método centralizado + LRU cache em EntidadeService
+  - **Seed:** +2 classes (-153 SCRUMBAN_PROJECT, -154 SCRUMBAN_TASK = 130 total)
+
+### Performance
+- N+1 ZERO: ProjectActivityService cursor pagination, ProjectMembersService batch, TasksService JOIN (25+ verificações)
+- Identifier DEV-N: atomicidade verificada contra race conditions (10 concurrent POST test)
+- LRU cache: TeamRolesGuard (2000 entries, 5min), RoleResolverService (1000, 5min), getEntidadeIdFromUserGroup (1000, 5min)
+
+### Tests
+- 189/189 PASS (87 F5-específicos + 102 anteriores)
+  - Organizations: 24 unit tests (3 integrados)
+  - Teams: 22 unit tests (2 integrados)
+  - Projects: 31 unit tests (6 integrados seed bootstrap)
+  - Tasks: 28 unit tests (5 integrados state machine)
+  - Auth + Entidades: 2 unit tests (decorator, getEntidadeIdFromUserGroup)
+  - Smoke: build, tsc, eslint, 12 transições state machine válidas + 15 inválidas rejeitadas
+
+### Technical Debt Resolvida
+- `@TeamRoles()` decorator stub → implementado com LRU cache
+- RolesGuard F3 (organização) → complementado com TeamRolesGuard (time/projeto)
+
+### Issues Registrados (F14)
+- `parseInt()` em 4 controllers para parsing de `limit` query param — refatorar para BigInt-safe
+- ProjectMembersService sem validação se usuário existe em org pai — adicionar F7+
+- TasksStateMachineService cache de transições — considerar memoization se >500 tasks/sprint
+
+### F4 Email Module + Common Services** (Task #1, V2 F4) — 2026-05-09
   - **Email Module:** abstração de provider com SMTP (nodemailer), SendGrid, Resend; `EMAIL_MOCK=true` para CI
     - 4 templates TypeScript puro: welcome, password-reset, invite, notification-digest
     - AuditService registra `email.sent` e `email.failed` em DEvento idClasse=-501 APÓS persistência (canônico)

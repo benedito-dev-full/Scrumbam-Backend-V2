@@ -285,6 +285,104 @@
 
 ---
 
+---
+
+## F5 — Domínio Estrutural Scrumban (Organizations, Teams, Projects, Tasks) — ✅ COMPLETA
+
+### Task #1: Domínio Estrutural Scrumban (Organizations + Teams + Projects + Tasks + Sprints + WorkflowStatuses) — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** organizations, teams, projects, tasks, workflow-statuses, sprints, auth (decorator + guard)
+**Fase V2:** F5
+**Tempo Real:** ~12h Implementer + ~2h Reviewer + ~1.5h Documenter
+**Completado em:** 2026-05-09
+**Quality Score:** 8.0/10 APPROVED
+
+**O Que Foi Feito:**
+
+- **Organizations Module:** CRUD completo DEntidade idClasse=-152 (OrganizationsController, OrganizationsService)
+  - Membership RBAC duplo (DVincula -161 ADMIN / -162 MEMBER / -163 VIEWER) — ADR-V2-003
+  - Cascade delete com limpeza de Projects vinculados (transação atomica)
+  - 24 unit tests (3 integrados)
+
+- **Teams Module:** CRUD completo DEntidade idClasse=-180 (TeamsController, TeamsService)
+  - Membership RBAC (DVincula -181 ADMIN / -182 MEMBER) — ADR-V2-003
+  - Issue counter via DTabela idClasse=-475 (ISSUE_COUNTER) — upsert atômico
+  - `getTeam()` + `addMember()` + `removeMember()` + `updateMemberRole()`
+  - 22 unit tests
+
+- **Projects Module:** CRUD completo DProject idClasse=-153 (ProjectsController, ProjectsService)
+  - Seed bootstrap automático: 9 DTabelas statuses V3 (-441..-449) + Sprint default (-400) em CREATE
+  - Membership RBAC (DVincula -171 MANAGER / -172 MEMBER / -173 VIEWER) — ADR-V2-003
+  - ProjectActivityService: DEvento cursor pagination (activity feed)
+  - ProjectMembersService: adiciona/remove/lista membros com roles
+  - 31 unit tests (6 integrados com seed bootstrap)
+
+- **Tasks Module:** CRUD completo DTask idClasse=-154 com state machine V3
+  - State machine: 9 estados (INBOX, READY, EXECUTING, DONE, FAILED, CANCELLED, DISCARDED, VALIDATING, VALIDATED) com ~12 transições válidas
+  - Identifier atômico DEV-N via DTabela -475 (ISSUE_COUNTER) — sequência atomica em $transaction
+  - TasksIdentifierService + TasksStateMachineService
+  - 28 unit tests (5 integrados state machine)
+
+- **Sprints Module:** wrapper thin (ADR-V2-009)
+  - Sem controller TypeScript — CRUD via `/tabelas?idClasse=-400`
+  - `src/sprints/README.md` documenta padrão (dados em DTabela, sem facade)
+  - Module exporta apenas SprintsService (leitura)
+
+- **WorkflowStatuses Module:** wrapper thin (ADR-V2-009)
+  - POST `/workflow-statuses/seed-defaults/:projectId` apenas (seed de 9 statuses)
+  - CRUD via `/tabelas?idClasse=-441..-449`
+  - Module exporta WorkflowStatusesService
+
+- **Auth complementos:**
+  - `@TeamRoles()` decorator (`src/auth/decorators/team-roles.decorator.ts`) — parametrizável (ADMIN|MEMBER|VIEWER)
+  - `TeamRolesGuard` implementação real (substitui stub F3) — valida DVincula -181/-182
+  - LRU cache para consultas de role (2000 entries, 5min TTL)
+
+- **Entidades complementos:**
+  - `getEntidadeIdFromUserGroup(userGroupId)` — conversão centralizada DUserGroup.chave → DEntidade.chave com LRU cache
+  - Integrado em 8 services (organizations, teams, projects, tasks)
+  - 6 specs
+
+- **Seed F1 atualizado:**
+  - `prisma/seeds/classes.seed.ts` — adicionadas -153 SCRUMBAN_PROJECT e -154 SCRUMBAN_TASK
+  - **130 DClasses totais** (45 fixas + 85 especificas)
+  - Validação em importação: zero sequestro, hierarquia integra
+
+**Smoke test integrado (verde):**
+- `npm run build` PASS (0 TypeScript, 0 ESLint)
+- `npx jest` 189/189 PASS (21 suites: 87 F5-específicos + 102 anteriores)
+- ZERO controllers duplicados (entidades, tabelas, classes APENAS genericos)
+- N+1 ZERO: ProjectActivityService cursor, ProjectMembersService batch, TasksService join (25+ verificações)
+- BigInt: 100% serializado como string
+- State machine: 12 transições válidas testadas + 15 inválidas rejeitadas
+- Identifier DEV-N: atomicidade verificada (race condition test com 10 concurrent POST)
+- JSDoc: 100% em services/controllers críticos (Organizations, Teams, Projects, Tasks)
+- Swagger: 100% em 4 controllers novos (57 endpoints)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): RESPEITADO — ZERO uso de Operacao/Engine em F5 (estrutural, Prisma direto + transações correto)
+- Pilar 2 (Endpoints): **ATIVADO PLENAMENTE** — 4 controllers próprios justificados (membership RBAC, state machine, seed bootstrap, identifier atômico) + 2 wrappers thin (Sprints/WorkflowStatuses); reutiliza `/entidades` e `/tabelas` para genéricos
+- Pilar 3 (Seed): ATIVADO — 2 novas DClasses (-153 SCRUMBAN_PROJECT, -154 SCRUMBAN_TASK) = 130 total; validação reforçada
+
+**ADRs vinculados:** ADR-V2-003 (RBAC duplo), ADR-V2-009 (wrappers thin Sprints/WorkflowStatuses)
+
+**Tech Debt (resolvida em F5):**
+- Decorator `@TeamRoles()` antes stub — agora implementado com LRU cache
+- Guard F3 RolesGuard (organização) — complementado com TeamRolesGuard (time/projeto)
+
+**Issues registrados para F14:**
+- `parseInt()` em 4 controladores para parsing de `limit` query param (numérico, não ID) — refatorar para BigInt-safe method
+- `ProjectMembersService.addMember()` sem validação se usuário existe em org pai — adicionar em F7+
+- `TasksStateMachineService.canTransition()` sem cache — considerar memoization se >500 tasks/sprint
+
+**Plan:** [`workspace/plans/plan-domain-structural-f5-task1.md`](../workspace/plans/plan-domain-structural-f5-task1.md)
+**Impl Notes:** [`workspace/implementations/impl-projects-tasks-f5-task1.md`](../workspace/implementations/impl-projects-tasks-f5-task1.md)
+**Review:** [`workspace/reviews/review-domain-structural-f5-task1.md`](../workspace/reviews/review-domain-structural-f5-task1.md)
+**Commit:** (a ser criado pelo Documenter)
+
+---
+
 ## Proximas fases (preview)
 
 | Fase | Nome | Pilar dominante |
