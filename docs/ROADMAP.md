@@ -205,6 +205,86 @@
 
 ---
 
+## F4 — Email Module + Common Services — ✅ COMPLETA
+
+### Task #1: Email Module + Common Services (TimezoneService + CorrelationId + Logging + Health) — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** email, common
+**Fase V2:** F4
+**Tempo Real:** ~4h Implementer + ~1.5h Reviewer + ~1h Documenter
+**Completado em:** 2026-05-09
+**Quality Score:** 8.2/10 APPROVED
+
+**O Que Foi Feito:**
+
+- **EmailModule:**
+  - Provider abstraction com SMTP (nodemailer), SendGrid, Resend; `EMAIL_MOCK=true` para CI
+  - 4 templates TypeScript puro: welcome, password-reset, invite, notification-digest
+  - `EmailService.sendTemplate()` + `EmailService.send()` com suporte a customização headers/replyTo
+  - AuditService registra `email.sent` e `email.failed` em DEvento idClasse=-501 APÓS persistência (canônico)
+  - Documentação: `src/email/README.md`, `docs/email-providers.md` (SMTP MailHog, SendGrid, Resend, Mock)
+
+- **Common Services (Pilares 1 e 2 suporte):**
+  - **TimezoneService:** America/Sao_Paulo canônico
+    - 5 métodos: `applyDateFilters()`, `toStartOfDayBrazil()`, `toEndOfDayBrazil()`, `getPeriodDates()`, `toStartOfMonthBrazil()`
+    - Integrado em EntidadeService para filtros dateFrom/dateTo (devari-backend-patterns §4)
+    - 6 specs (edge cases DST, UTC/Brasília)
+  - **CorrelationIdMiddleware:** AsyncLocalStorage thread-safe
+    - X-Correlation-Id capturado e ecoado em response
+    - Acessível em `CLS.get('correlationId')` em qualquer serviço
+  - **LoggingInterceptor:** Loga method, path, statusCode, durationMs, correlationId, userId
+    - Log estruturado em toda request
+  - **HttpExceptionFilter:** Padroniza respostas 4xx/5xx
+    - Resposta: `{ statusCode, message, correlationId, timestamp }`
+  - **AuditService stub:** INSERT em DEvento idClasse=-501 APÓS persistência
+    - Será substituído por EventProducerService em F7
+    - `try/catch` que não derruba fluxo principal (padrão correto para auditoria)
+  - **HealthModule:** GET /health (@Public, sem autenticação)
+    - Checks: db (crítico → HTTP 503), redis (opcional → degraded), email (informativo)
+    - Response: `{ status: "ok"|"degraded"|"error", checks: {...} }`
+    - Documentação: `src/common/health/README.md` (load balancer, Kubernetes, probes)
+
+- **Utils Canônicos:** validateCpf, validateCnpj, cleanCpfCnpj, hashSha256, hashBcrypt, compareBcrypt
+  - Sem dependências externas, testes cobrindo
+
+- **Fixes (Reviewer MINORs):**
+  - HealthController adiciona `@Public()` explícito (m1 — seguro para APP_GUARD global futuro)
+  - READMEs criados: `src/email/README.md`, `src/common/health/README.md`
+
+**Smoke test integrado (verde):**
+- `npm run build` PASS (0 TypeScript, 0 ESLint)
+- `npx jest` 102/102 PASS (78 anteriores + 24 novos)
+  - TimezoneService: 6 specs
+  - EmailService: 8 specs
+  - HealthService: 6 specs
+  - AuditService: 2 specs
+  - Utils: 2 specs
+- N+1 ZERO: HealthService usa `Promise.all()` sem loop; EmailService 0 queries
+- BigInt serializado como string em todos responses
+- Sem logs de credenciais (SMTP_PASS, SENDGRID_API_KEY não logados)
+- X-Correlation-Id sanitizado (alphanumeric + hífens)
+
+**Pilares aplicados:**
+- Pilar 1: N/A (email é infraestrutura, AuditService usa Prisma direto em DEvento estrutural — correto)
+- Pilar 2: **SUPORTADO** — CorrelationIdMiddleware, LoggingInterceptor, HttpExceptionFilter para todos endpoints
+- Pilar 3: RESPEITADO — ZERO DClasses novas (F1 tem -501 AUDIT_GENERIC)
+
+**Dívidas Técnicas Registradas:**
+- `nestjs-pino` não instalado (DoD não atendido) — dívida para F5 ou task dedicada (-0.75 score, não bloqueante)
+- `email/queue/` stub ausente — será criado em F7 com BullMQ
+- nestjs-pino + email queue: score -0.5 total, dívida mínima mantida
+
+**ADRs vinculados:** Nenhuma nova (ADR-V2-001 a V2-024 existentes respeitadas)
+
+**Plan:** [`workspace/plans/plan-email-common-f4-task1.md`](../workspace/plans/plan-email-common-f4-task1.md)
+**Impl Notes:** [`workspace/implementations/impl-email-common-f4-task1.md`](../workspace/implementations/impl-email-common-f4-task1.md)
+**Review:** [`workspace/reviews/review-email-common-f4-task1.md`](../workspace/reviews/review-email-common-f4-task1.md)
+**Documentation:** [`workspace/documentation/doc-email-common-f4-task1.md`](../workspace/documentation/doc-email-common-f4-task1.md)
+**Commit:** (a ser criado pelo Documenter)
+
+---
+
 ## Proximas fases (preview)
 
 | Fase | Nome | Pilar dominante |

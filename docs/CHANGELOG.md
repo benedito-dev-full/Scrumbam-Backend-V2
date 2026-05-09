@@ -14,6 +14,56 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F4 Email Module + Common Services** (Task #1, V2 F4) — 2026-05-09
+  - **Email Module:** abstração de provider com SMTP (nodemailer), SendGrid, Resend; `EMAIL_MOCK=true` para CI
+    - 4 templates TypeScript puro: welcome, password-reset, invite, notification-digest
+    - AuditService registra `email.sent` e `email.failed` em DEvento idClasse=-501 APÓS persistência (canônico)
+    - `EmailService.sendTemplate()` com suporte a customização de headers/replyTo
+  - **Common Services (Pilares 1 e 2 suporte):**
+    - TimezoneService: America/Sao_Paulo canônico com 5 métodos (applyDateFilters, toStartOfDayBrazil, toEndOfDayBrazil, getPeriodDates, toStartOfMonthBrazil) — integrado em EntidadeService
+    - CorrelationIdMiddleware: AsyncLocalStorage thread-safe com X-Correlation-Id (ecoado em response)
+    - LoggingInterceptor: loga method, path, statusCode, durationMs, correlationId, userId em toda request
+    - HttpExceptionFilter: padroniza respostas 4xx/5xx com { statusCode, message, correlationId, timestamp }
+    - AuditService stub: INSERT em DEvento idClasse=-501 pós-persistência (substituído por EventProducerService em F7)
+    - HealthModule: GET /health (@Public, sem autenticação) com checkDb + checkRedis + checkEmail; HTTP 503 se DB error
+  - **Utils canônicos:** validateCpf, validateCnpj, cleanCpfCnpj, hashSha256, hashBcrypt, compareBcrypt — sem dependências externas
+  - **Documentation:**
+    - `src/email/README.md` — guia operacional do módulo email (configuração, templates, modo mock)
+    - `src/common/health/README.md` — guia de health check (load balancer, Kubernetes, Prometheus)
+    - `docs/email-providers.md` — guia completo de configuração (SMTP local MailHog, SendGrid, Resend, Mock)
+  - **Fix (Reviewer MINOR m1):** HealthController adiciona `@Public()` explícito (seguro para APP_GUARD global futuro)
+
+### Performance
+- N+1 ZERO: HealthService usa `Promise.all()` sem loop; EmailService 0 queries (apenas provider.send)
+- Timeout health check: 5s com fallback "degraded" para Redis opcional
+- CorrelationIdMiddleware: AsyncLocalStorage garante isolamento por request (sem race conditions)
+
+### Tests
+- 102/102 PASS (78 anteriores + 24 novos em F4)
+  - TimezoneService: 6 specs (edge cases DST, UTC/Brasília)
+  - EmailService: 8 specs (providers, templates, mock, audit)
+  - HealthService: 6 specs (checks db/redis/email, timeouts, status codes)
+  - AuditService: 2 specs (insert, error handling)
+  - Utils: 2 specs (crypto, validation)
+
+### Security
+- Bcrypt com saltRounds=12 em hashBcrypt (canônico)
+- X-Correlation-Id sanitizado de XSS (alphanumeric + hífens)
+- Sem logs de credenciais de email (SMTP_PASS, SENDGRID_API_KEY não logados)
+
+### Technical Debt Registrado
+- `nestjs-pino` não instalado (DoD não atendido) — dívida para F5 ou task dedicada (-0.75 score, não bloqueante)
+- `email/queue/` stub ausente (opcional per plano, mas melhora completude) — será criado em F7 com BullMQ
+- Dívida mínima mantida: "-0.5 @Public explícito em Health" resolvida neste commit
+
+### Dívidas Técnicas Futuras (F7+)
+- BullMQ queue para processamento assíncrono de emails
+- Retry automático com exponential backoff
+- Webhooks de delivery status (SendGrid, Resend)
+- Template versioning com migrations
+
+---
+
 - **F3 Auth + RBAC Duplo** (Task #1, V2 F3) — 2026-05-09
   - `AuthModule` completo: 7 guards (JwtAuthGuard, ApiKeyGuard, McpKeyGuard, AuthCompositeGuard, OrgTenantGuard, ProjectScopeGuard, RolesGuard), 5 services (AuthService, ApiKeyService, McpKeyService, RefreshTokenService, RoleResolverService)
   - `AuthController`: 13 endpoints (register, login, refresh, logout, /me CRUD + api-key + mcp-key) — todas com Swagger 100%, JSDoc completo

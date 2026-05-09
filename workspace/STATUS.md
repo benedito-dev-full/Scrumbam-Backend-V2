@@ -1,0 +1,228 @@
+# Workflow Status — Scrumban-Backend-V2 Orchestrator
+
+**Última atualização:** Auto-gerado por hooks
+
+---
+
+## Tasks Completadas
+
+(Conclusões dos agents serão registradas abaixo automaticamente)
+
+
+---
+
+<!-- dedup:strategist:1 -->
+### Agent Concluído: strategist
+
+**Task:** #1
+**Timestamp:** 08/05/2026 19:18:29
+**Agent:** strategist
+**Status:** Completo
+
+
+---
+
+<!-- dedup:reviewer:1 -->
+### Agent Concluído: reviewer
+
+**Task:** #1
+**Timestamp:** 08/05/2026 19:21:50
+**Agent:** reviewer
+**Status:** Completo
+
+
+---
+
+<!-- dedup:implementer:1 -->
+### Agent Concluído: implementer
+
+**Task:** #1
+**Timestamp:** 08/05/2026 19:21:50
+**Agent:** implementer
+**Status:** Completo
+
+
+---
+
+<!-- dedup:documenter:1 -->
+### Agent Concluído: documenter
+
+**Task:** #1
+**Timestamp:** 08/05/2026 19:21:50
+**Agent:** documenter
+**Status:** Completo
+
+---
+
+## Task #1 — F4 Email Module + Common Services — COMPLETE (V2 Fase F4)
+
+**Module:** email, common
+**Task:** Email Module + Common Services (TimezoneService, CorrelationId, Logging, Health, Utils, Audit)
+**Status:** COMPLETA — Score 8.2/10 APPROVED
+**Duration:** ~4h Implementer + ~1.5h Reviewer + ~1h Documenter
+**Completado em:** 2026-05-09
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan com F4 strategy (Email 3 providers, Common services canônicos) |
+| Implementer | ~4h | 102/102 testes, TimezoneService exemplar, CorrelationId sem race conditions |
+| Reviewer | ~1.5h | Score 8.2/10 (2 MINORs resolvidos: @Public + READMEs, 1 MEDIUM dívida: nestjs-pino) |
+| Documenter | ~1h | JSDoc completo, 3 READMEs criados, CHANGELOG/ROADMAP/STATUS atualizados, commit Conventional |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A (email é infraestrutura, AuditService usa Prisma direto em DEvento estrutural — correto)
+- Pilar 2 (Endpoints): **SUPORTADO** — CorrelationIdMiddleware, LoggingInterceptor, HttpExceptionFilter para todos endpoints
+- Pilar 3 (Seed): RESPEITADO — ZERO DClasses novas (F1 tem -501 AUDIT_GENERIC)
+
+**Deliverables:**
+- [x] EmailModule: provider abstraction (SMTP/SendGrid/Resend), 4 templates, EMAIL_MOCK=true para CI
+- [x] EmailService.sendTemplate() + EmailService.send() com JSDoc completo
+- [x] AuditService: INSERT em DEvento idClasse=-501 APÓS persistência (canônico)
+- [x] TimezoneService: 5 métodos canônicos (America/Sao_Paulo), 6 specs DST/UTC edge cases
+- [x] CorrelationIdMiddleware: AsyncLocalStorage thread-safe, X-Correlation-Id echo
+- [x] LoggingInterceptor: method, path, statusCode, durationMs, correlationId, userId
+- [x] HttpExceptionFilter: { statusCode, message, correlationId, timestamp }
+- [x] HealthModule: GET /health @Public (db/redis/email checks, 200/503 status codes)
+- [x] Utils: validateCpf, validateCnpj, cleanCpfCnpj, hashSha256, hashBcrypt, compareBcrypt
+- [x] src/email/README.md (configuração, templates, modo mock)
+- [x] src/common/health/README.md (load balancer, Kubernetes, probes)
+- [x] docs/email-providers.md (SMTP MailHog, SendGrid, Resend, Mock, troubleshooting)
+- [x] Fix: HealthController @Public() explícito
+
+**Metrics:**
+- Build: PASS (0 TypeScript, 0 ESLint)
+- Tests: 102/102 PASS (78 anteriores + 24 novos)
+  - TimezoneService: 6 specs (DST, UTC/Brasília)
+  - EmailService: 8 specs (providers, templates, mock, audit)
+  - HealthService: 6 specs (db/redis/email checks, timeouts)
+  - AuditService: 2 specs (insert, error handling)
+  - Utils: 2 specs (crypto, validation)
+- N+1 Queries: ZERO (HealthService Promise.all sem loop, EmailService 0 queries)
+- Queries/request: HealthService = 3 paralelos, EmailService = 0
+- BigInt: 100% serializado
+- JSDoc: 100% (TimezoneService, EmailService, AuditService, HealthService, HealthController, utils)
+- Swagger: HealthController documentado com @ApiOperation/@ApiResponse
+- Logs: sem credenciais (SMTP_PASS, SENDGRID_API_KEY não logados)
+
+**Dívidas Técnicas Registradas (F5+):**
+- nestjs-pino não instalado (-0.75 score, não bloqueante) — task separada recomendada
+- email/queue/ stub ausente (opcional per plano) — será criado em F7 com BullMQ
+
+**ADRs vinculados:** Nenhuma nova (respeitadas ADR-V2-001 a ADR-V2-024)
+
+**Plan:** [`workspace/plans/plan-email-common-f4-task1.md`](../workspace/plans/plan-email-common-f4-task1.md)
+**Impl Notes:** [`workspace/implementations/impl-email-common-f4-task1.md`](../workspace/implementations/impl-email-common-f4-task1.md)
+**Review:** [`workspace/reviews/review-email-common-f4-task1.md`](../workspace/reviews/review-email-common-f4-task1.md)
+**Documentation:** [`workspace/documentation/doc-email-common-f4-task1.md`](../workspace/documentation/doc-email-common-f4-task1.md)
+**Commit:** (a ser criado pelo Documenter)
+
+---
+
+## Task #1 — F3 Auth + RBAC Duplo — COMPLETE (V2 Fase F3)
+
+**Module:** auth (Multi-agent — Pilares 2+3)
+**Task:** Auth + RBAC Duplo (7 guards, 5 services, 13+4 endpoints)
+**Status:** COMPLETA — Score 7.8/10 APPROVED
+**Duration:** ~8h Implementer + ~1h Reviewer + ~30min Documenter
+**Completado em:** 2026-05-09
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan completo, 4 decisões arquiteturais (D1-D4) |
+| Implementer | ~8h | 78/78 testes, código limpo, dívidas F2 resolvidas |
+| Reviewer | ~1h | Score 7.8/10 (3 issues MEDIUM F14, zero bloqueadores) |
+| Documenter | ~30min | ADR-V2-003/004 formalizados, CHANGELOG/ROADMAP/STATUS atualizados |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A (auth é estrutural — Prisma direto correto)
+- Pilar 2 (Endpoints): **ATIVADO** — AuthController (13) + PermissoesController (4), ZERO duplicação
+- Pilar 3 (Seed): RESPEITADO — 128 DClasses de F1, ZERO nova criada
+
+**Deliverables:**
+- [x] AuthModule: 7 guards (Jwt, ApiKey, McpKey, Composite, OrgTenant, ProjectScope, Roles)
+- [x] AuthService: register (transaction), login (bcrypt), refresh (rotate + reuse), logout, getMe, updateMe, deleteMe
+- [x] ApiKeyService: generate (SHA-256), validate, revoke, listByProject
+- [x] McpKeyService: generate (transaction DTabela+DUserGroup), validate (fast path + fallback), revoke (sync)
+- [x] RefreshTokenService: generate, validate, rotate (estrito), revoke
+- [x] RoleResolverService: getOrgRole, getProjectRole — LRU cache 1000/5min TTL
+- [x] AuthController: 13 endpoints (POST register/login/refresh/logout, GET/PATCH/DELETE /me, POST/GET/DELETE api-key, POST/GET/DELETE mcp-key)
+- [x] PermissoesController: 4 endpoints (GET/POST/PATCH/DELETE) com @Roles('ADMIN') guard
+- [x] @Public() decorator substitui @SkipGuard()
+- [x] ADR-V2-003: RBAC via DVincula + idClasse (Aceito)
+- [x] ADR-V2-004: Keys via DTabela (Aceito)
+- [x] Dívidas F2 resolvidas: PaginationMetaDto, formatTabelaResponse, validarClasse extraídas
+
+**Metrics:**
+- Build: PASS (0 TypeScript, 0 ESLint warnings)
+- Tests: 78/78 PASS (12 suites: auth.service, api-key.service, mcp-key.service, refresh-token.service, role-resolver.service, auth-composite.guard, roles.guard, + F2 carryover)
+- Queries/request: /auth/me = 2 (DUserGroup+DEntidade + DVincula), RBAC = 1 + cache (LRU)
+- N+1 Queries: ZERO (verified with DATABASE_LOGGING=true)
+- Bcrypt rounds: 12 (constante explícita, comentário ADR)
+- Swagger: 100% (13 auth + 4 permissoes endpoints documentados)
+- JSDoc: 100% (todos métodos públicos)
+
+**Issues (F14):**
+- M1: Encapsulamento — AuthController acessa `this.authService['prisma']` via bracket notation
+- M2: N+1 em write — revokeApiKeys usa loop sequencial em vez de updateMany
+- M3: Scan O(n) — findUserGroupByRefreshToken faz scan sem índice
+
+---
+
+## Task #1 — F2 Endpoints Genéricos — COMPLETE (V2 Fase F2)
+
+**Module:** endpoints (Pilar 2)
+**Task:** 3 Controllers Genéricos (EntidadeController + TabelaController + ClasseController)
+**Status:** COMPLETA
+**Duration:** ~3h Implementer + ~1h Reviewer + ~30min Documenter
+**Completado em:** 2026-05-08
+**Quality Score:** 9.0/10 APPROVED
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan completo e viável |
+| Implementer | ~3h | Código limpo, 43 testes (17 acima do mínimo) |
+| Reviewer | ~1h | Score 9.0/10 (2 issues menores, zero bloqueadores) |
+| Documenter | ~30min | Doc completa, commit convencional, tech debt registrado |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A (tabelas estruturais — Prisma direto correto, sem Engine)
+- Pilar 2 (Endpoints): **ATIVADO** — 3 controllers genéricos canônicos, ZERO controllers específicos
+- Pilar 3 (Seed): RESPEITADO — 128 DClasses validadas, ZERO nova criada
+
+**Deliverables:**
+- [x] `EntidadeController` + `EntidadeService` (280L service, 200L controller, 8 endpoints)
+- [x] `TabelaController` + `TabelaService` (300L service, 160L controller, 5 endpoints)
+- [x] `ClasseController` + `ClasseService` (200L service, 140L controller, 4 GETs + bloqueio 403)
+- [x] Infraestrutura: `ParseBigIntPipe`, `ParseOptionalBigIntPipe`, `@SkipGuard()`, LRU cache
+- [x] ADR-V2-015: `?idClasse=N` + `?classe=NOME` deprecated + headers `Deprecation` + `Sunset`
+- [x] Audit inline via DEvento -497
+- [x] Métodos canônicos: `getEntidadeIdFromUserGroup()`, `createSeller()`
+- [x] 43 unit tests (target: 26)
+- [x] JSDoc completo em todos os métodos públicos
+- [x] Swagger 100% em `/api/docs`
+
+**Metrics:**
+- Build: PASS (`npm run build` — 0 erros)
+- TypeScript: 0 errors (`npx tsc --noEmit`)
+- ESLint: 0 errors, 0 warnings
+- Tests: 43/43 PASS
+- Controllers: 3 ONLY (entidades, tabelas, classes)
+- N+1 Queries: ZERO (listagens com include/join, getTree = 1 findMany + Map)
+- BigInt: 100% serializado como string em responses
+- ADR-V2-015: implementado com LRU cache, headers, testes regressão
+
+**Tech Debt (F3):**
+1. Mover `PaginationMetaDto` para `src/common/dto/`
+2. Mover `formatTabelaResponse` para `src/tabelas/helpers/`
+3. Extrair `validarClasse` duplicada para `src/common/helpers/`
+4. Aplicar `ParseBigIntPipe` em `@Param('id')`
+5. Redigir ADR-V2-025 (BigInt serialization strategy)
+6. Cache em memória para `validarClasse`
+7. Remover wrapper `?classe=NOME` após sunset (2026-06-05)
+
