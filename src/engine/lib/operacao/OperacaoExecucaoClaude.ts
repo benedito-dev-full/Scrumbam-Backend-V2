@@ -191,6 +191,84 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
   }
 
   /**
+   * Restaura estado do Engine a partir de DPedido já persistido e executa
+   * o workflow de aprovação manual: aprova → DVFS 6,7 → UPDATE → _executarClaude.
+   *
+   * Usado por ApprovalFlowService.approve() para execuções HIGH que estavam em
+   * awaiting_approval. NÃO chama nova() — a chave já existe no banco.
+   * NÃO faz INSERT — chama UPDATE via _atualizarPedidoCompleto().
+   *
+   * Fluxo:
+   *   1. Restaura this.chcriacao e this.dados dos dados persistidos
+   *   2. Marca _operacaoCalculada=true (já foi calculado antes)
+   *   3. Chama aprova() para marcar approval.status='approved'
+   *   4. Recarrega scripts DVFS de gravação (se ainda não carregados)
+   *   5. Executa _funcPreGravacao (DVFS chave 6) se carregada
+   *   6. UPDATE DPedido.dados via _atualizarPedidoCompleto() (não INSERT)
+   *   7. Executa _funcPosGravacao (DVFS chave 7) APÓS UPDATE (pr-auto-open etc.)
+   *   8. Dispara Claude Runner via _executarClaude()
+   *
+   * @param params.aprovador - ID ou identificador do aprovador
+   * @param params.dadosExistentes - Registro DPedido já persistido no banco
+   */
+  async gravarAposAprovacaoManual(params: {
+    aprovador: string;
+    dadosExistentes: {
+      chave: bigint;
+      dados: IExecucaoData;
+      idClasse: bigint;
+      aprovado?: boolean | null;
+      baixado?: boolean | null;
+    };
+  }): Promise<void> {
+    // 1. Restaura state sem chamar nova() (chave já existe no banco)
+    this.chcriacao = params.dadosExistentes.chave;
+    this.dados = { ...(params.dadosExistentes.dados as IExecucaoData) };
+    this._classeBase = params.dadosExistentes.idClasse.toString();
+    this._operacaoCalculada = true; // já foi calculado antes do gravarComoAwaitingApproval
+
+    this.logger.log(
+      `[${this.correlationId}] gravarAposAprovacaoManual: restaurando chave=${this.chcriacao}`,
+    );
+
+    // 2. Aprova — popula dados.approval.status='approved' + decidedAt
+    await this.aprova({ aprovador: params.aprovador });
+
+    // 3. Recarrega scripts DVFS de gravação se não carregados
+    //    (necessário porque nova() não foi chamado)
+    if (!this._funcPreGravacao && !this._funcPosGravacao) {
+      await this['_carregaScriptsGrav']();
+    }
+
+    // 4. Executa pré-gravação (DVFS chave 6) se carregada
+    if (this._funcPreGravacao) {
+      await this._funcPreGravacao(this);
+    }
+
+    // 5. UPDATE DPedido — não INSERT (chave já existe)
+    await this._database.dPedido.update({
+      where: { chave: this.chcriacao },
+      data: {
+        aprovado: true,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        dados: this.dados as any,
+      },
+    });
+
+    this.logger.log(
+      `[${this.correlationId}] DPedido atualizado (aprovação manual) chave=${this.chcriacao}`,
+    );
+
+    // 6. Executa pós-gravação (DVFS chave 7) APÓS UPDATE — pr-auto-open etc.
+    if (this._funcPosGravacao) {
+      await this._funcPosGravacao(this);
+    }
+
+    // 7. Dispara Claude Runner (STUB em F6)
+    await this._executarClaude();
+  }
+
+  /**
    * Persiste DPedido com resultados da execução.
    *
    * Fluxo:

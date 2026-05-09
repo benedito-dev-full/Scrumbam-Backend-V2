@@ -228,6 +228,7 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 | Task 1 | auth | F3 | 7.8 | APPROVED | Bracket notation acesso privado + N+1 write path (ambos dívida F14) |
 | Task 1 | email+common | F4 | 8.2 | APPROVED | nestjs-pino não instalado (DoD explícito); @Public() ausente no HealthController |
 | Task 1 | domain-structural | F5 | 8.0 | APPROVED | parseInt(limit) em 4 controllers; for...of vs createMany no bootstrap; TeamsService sem AuditService |
+| Task 2 | executions (F6) | F6 | 8.5 | APPROVED | ScheduleModule.forRoot() duplicado; testes de integração I1-I4 ausentes (unit tests cobrem os casos) |
 
 Detalhes: [F2 scores](project_f2_scores.md) | [F3 scores](project_f3_scores.md) | [F5 scores](project_f5_scores.md)
 
@@ -243,6 +244,9 @@ Detalhes: [F2 scores](project_f2_scores.md) | [F3 scores](project_f3_scores.md) 
 | parseInt(param) para query params numéricos (limit, page) | F5 (4 controllers) | Usar Number(param) ou DTO com @Type(() => Number) |
 | for...of com await individual em seed bootstrap | F5 (seed-bootstrap) | Preferir createMany para batch INSERTs |
 | Service sem AuditService quando deveria auditar | F5 (TeamsService) | Todo service que cria/deleta entidades deve injetar AuditService |
+| ScheduleModule.forRoot() duplicado (app.module + feature module) | F6 (ExecutionsModule) | Feature modules com @Cron devem usar ScheduleModule.forFeature(), nunca forRoot() |
+| Testes de integração (banco real) ausentes mas plano exigia | F6 (executions.integration.spec.ts) | Plano com I1-I4 explícitos = integração obrigatória; unit tests não substituem para concorrência real |
+| (op as any).chcriacao acesso a campo protegido do Engine | F6 (ExecutionsService) | Engine deve expor getter público getChave(): bigint para evitar any cast |
 
 ---
 

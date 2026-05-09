@@ -22,7 +22,7 @@ export interface IExecucaoData {
   risk?: {
     level: 'LOW' | 'MEDIUM' | 'HIGH';
     explanation: string;
-    matchedPatterns: string[];
+    matchedPatterns: Array<{ pattern: string; level: string }>;
     classifiedAt: string; // ISO 8601
   };
 

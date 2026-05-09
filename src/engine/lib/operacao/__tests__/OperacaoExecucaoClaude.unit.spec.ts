@@ -223,14 +223,16 @@ describe('OperacaoExecucaoClaude — Risk Gate via script DVFS chave=3', () => {
     expect((op as any)._classeBase).toBe('-302');
   });
 
-  it('deve classificar MEDIUM para "TRUNCATE"', async () => {
+  it('deve classificar HIGH para "TRUNCATE TABLE" (Task 2: expandido para HIGH)', async () => {
+    // Task 2: TRUNCATE promovido para HIGH (perda total de dados, irreversível)
+    // Na Task 1 era MEDIUM mas o plano de expansão (25 HIGH) inclui TRUNCATE
     const params = buildDefaultParams({ commandText: 'TRUNCATE TABLE sessions' });
     const op = new OperacaoExecucaoClaude(params as any);
 
     await op.nova();
     await op.calcula();
 
-    expect(op.dados.risk?.level).toBe('MEDIUM');
+    expect(op.dados.risk?.level).toBe('HIGH');
   });
 
   it('deve popular matchedPatterns após classificação HIGH', async () => {

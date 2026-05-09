@@ -25,6 +25,9 @@ import { WorkflowStatusesModule } from './workflow-statuses/workflow-statuses.mo
 import { ProjectsModule } from './projects/projects.module';
 import { TasksModule } from './tasks/tasks.module';
 
+// F6 — Engine + Executions (OperacaoExecucaoClaude + ApprovalFlow + Sweeper)
+import { ExecutionsModule } from './executions/executions.module';
+
 /**
  * AppModule raiz do Scrumban-Backend-V2.
  *
@@ -78,7 +81,9 @@ import { TasksModule } from './tasks/tasks.module';
     WorkflowStatusesModule,
     ProjectsModule,
     TasksModule,
-    // Modules canônicos das fases F6-F13 restantes serão importados aqui.
+    // F6 — Automation Claude Code (Engine + Executions + ApprovalFlow)
+    ExecutionsModule,
+    // Modules canônicos das fases F7-F13 restantes serão importados aqui.
   ],
   providers: [
     PrismaService,

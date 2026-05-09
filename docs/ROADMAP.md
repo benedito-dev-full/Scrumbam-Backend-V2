@@ -385,6 +385,52 @@
 
 ## F6 — Engine + OperacaoExecucaoClaude (Pilar 1)
 
+### Task #2: ExecutionsModule + ApprovalFlow + 58 Patterns Adversariais — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** executions, engine (gravarAposAprovacaoManual)
+**Fase V2:** F6
+**Tempo Real:** ~8h Implementer + ~1.5h Reviewer
+**Completado em:** 2026-05-09
+**Quality Score:** 8.5/10 APPROVED
+
+**O Que Foi Feito:**
+
+- **Correção M1:** `IExecucaoData.risk.matchedPatterns` → `Array<{ pattern: string; level: string }>` (type mismatch resolvido)
+- **gravarAposAprovacaoManual():** novo método em `OperacaoExecucaoClaude` — restaura estado de DPedido já persistido (`awaiting_approval`), executa DVFS 6+7 via UPDATE (nunca INSERT), dispara `_executarClaude()` — Pilar 1 preservado (Opção A, decisão CEO)
+- **risk-gate-validator.js:** expandido para 25 HIGH + 15 MEDIUM patterns (total 40 patterns, 58 testes adversariais)
+- **ExecutionsModule completo:**
+  - `ExecutionsService.execute()`: LOW/MEDIUM auto-approve, HIGH → `gravarComoAwaitingApproval()`
+  - `ApprovalFlowService`: `approve()` race-safe via `$executeRaw` com condição atômica (`WHERE dados->'approval'->>'status' = 'awaiting_approval'`), `reject()`, `rollback()` (gera nova execution HIGH)
+  - `ApprovalFlowSweeperService`: `@Cron` expira `awaiting_approval` vencidos via `$executeRaw`
+  - `ExecutionHistoryService`: cursor pagination ZERO N+1
+  - `ClaudeRunnerService`: STUB F6 (F13 implementa SSH real)
+  - `ExecutionsController`: 8 endpoints Swagger 100% com `ExecutionAccessGuard` + `ExecutionThrottlerGuard`
+  - `ExecutionAccessGuard`: membership -170..-173; approve/reject/rollback exigem -171 MANAGER
+  - `ExecutionThrottlerGuard`: 30 req/min por SHA-256(projectId)
+- **79 testes PASS** (58 adversariais Risk Gate + 21 unitários executions)
+
+**Smoke test (verde):**
+- `npm run build` PASS (0 erros TypeScript strict)
+- `npx jest src/executions src/engine/dvfs` 79/79 PASS
+- `grep console.log src/executions/` → zero
+- `grep dPedido.create src/executions/` → zero
+- `grep conteudo src/executions/` → zero (nenhum endpoint aceita script via body)
+
+**Pilares aplicados:**
+- Pilar 1: **ATIVO** — `ExecutionsService` instancia Engine, `ApprovalFlowService` usa `gravarAposAprovacaoManual()` (nunca bypass direto)
+- Pilar 2: `ExecutionsController` próprio justificado (Engine + approval multi-step) — zero duplicação de `/pedidos`
+- Pilar 3: DVFS expandido (58 patterns), `IExecucaoData` corrigido
+
+**ADRs vinculados:** ADR-V2-005, ADR-V2-006, ADR-V2-007, ADR-V2-016
+
+**Tech Debt (antes de F13):**
+- `[MEDIUM]` `ScheduleModule.forRoot()` duplicado em `executions.module.ts` + `app.module.ts` → usar `forFeature()`
+- `[MEDIUM]` Testes de integração I1-I4 (banco real, race condition real) ausentes — criar antes de F13
+- `[MINOR]` `(op as any).chcriacao` em ExecutionsService → Engine expor getter `getChave(): bigint`
+
+---
+
 ### Task #1: Engine Base + DVFS Scripts + OperacaoExecucaoClaude — ✅ COMPLETA
 
 **Status:** Completo

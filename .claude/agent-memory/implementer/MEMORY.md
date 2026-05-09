@@ -1,6 +1,6 @@
 # Implementer Agent Memory — Scrumban-Backend-V2
 
-**Versão:** 1.3 (F6 Task 1 — Engine + OperacaoExecucaoClaude — 2026-05-09)
+**Versão:** 1.4 (F6 Task 2 — ExecutionsService + ApprovalFlow + Sweeper + 50 patterns — 2026-05-09)
 **Última atualização:** 2026-05-09
 
 ---
@@ -75,6 +75,17 @@ Operacao (abstract)
 - `src/projects/` — ProjectsModule (DProject + DVincula -171/-172/-173 + SeedBootstrap)
 - `src/tasks/` — TasksModule (DTask + V3 Intentions + identifier atômico DEV-N + state machine)
 
+### Codepaths F6 Task 2 (ExecutionsModule)
+- `src/executions/executions.service.ts` — execute() com Engine completo + decisão LOW/MEDIUM/HIGH
+- `src/executions/approval-flow.service.ts` — approve() race-safe ($executeRaw) + reject() + rollback()
+- `src/executions/approval-flow-sweeper.service.ts` — @Cron EVERY_MINUTE expira awaiting_approval
+- `src/executions/execution-history.service.ts` — findMany() cursor pagination ZERO N+1
+- `src/executions/claude-runner.service.ts` — STUB F6 (STUB_CLAUDE_FAIL=true para falha)
+- `src/executions/guards/execution-access.guard.ts` — membership + ADMIN para approve/reject/rollback
+- `src/executions/guards/execution-throttler.guard.ts` — 30 req/min SHA-256(projectId)
+- `src/executions/executions.controller.ts` — 8 endpoints Swagger 100%
+- `src/engine/dvfs/__tests__/risk-gate-adversarial.spec.ts` — 58 cenários adversariais
+
 ### Gotchas F6 (Engine + OperacaoExecucaoClaude)
 - **`private readonly logger` em subclasse de Engine** — NÃO redeclarar `logger` como `private` em `OperacaoExecucaoClaude`. `Operacao.ts` já declara `protected readonly logger`. Redeclarar como `private` causa TS2415 (`incorrectly extends base class`). Usar `this.logger` herdado.
 - **Scripts DVFS chave=7 no seed** — combinar `pr-auto-open.js` + `notification-dispatcher.js` em wrapper async: `(async function (op) { await prAutoOpen(op); await notificationDispatcher(op); })`. Cada script é uma `async function` nomeada.
@@ -83,6 +94,13 @@ Operacao (abstract)
 - **R-CHAVE-5 / R-CHAVE-7 são BLOQUEANTES** — testes em `OperacaoPedido.regressao-dvfs.spec.ts`. F6 não fecha sem ambos verdes. Valida que `_funcPosCalculo` (chave 5) e `_funcPosGravacao` (chave 7) são carregados e executados.
 - **`OperacaoExecucaoClaude` não reexporta IExecucaoData** — interface é importada de `IExecucaoData.ts` separado. Arquivo `OperacaoExecucaoClaude.ts` importa direto de `../interfaces/IExecucaoData`.
 - **`agentTunnelService` é `any` em F6** — STUB. Service retorna mock `{ exitCode: 0, stdout, stderr, headBefore, headAfter, ... }`. F13 tipará corretamente.
+- **`ScheduleModule.forFeature()` não existe** — usar `forRoot()` (já no AppModule). Evitar duplicar forRoot() no ExecutionsModule — NestJS singleton.
+- **`agentId` deve ser BigInt-convertível** — string numérica ('100'), não 'agent-stub-100'. OperacaoExecucaoClaude faz `BigInt(params.agentId)`.
+- **`gravarAposAprovacaoManual()` usa UPDATE** — método adicionado ao Engine em Task 2. Reconstrói state sem nova() e faz dPedido.update(), não create(). Chama `_carregaScriptsGrav()` se scripts não carregados.
+- **TRUNCATE promovido para HIGH** — Task 1 tinha TRUNCATE como MEDIUM; Task 2 o moveu para HIGH (25 patterns). Teste OperacaoExecucaoClaude.unit.spec.ts atualizado.
+- **risk-gate-adversarial spec em TypeScript** — Jest só reconhece `.spec.ts`. Usar eval IIFE: `eval('(function(){ ' + scriptContent + '; return riskGateValidator; })()')`.
+- **race condition em approve()** — `$executeRaw` com WHERE condicional. Se `updated === 0`: outro admin venceu → ConflictException. Não usar findFirst + update sequencial (não race-safe).
+- **dPedido.update mock em testes** — `_executarClaude()` → `_atualizarPedidoCompleto()` chama `dPedido.update`. Mock do Prisma em testes deve incluir `dPedido.update: jest.fn()`.
 
 ### Gotchas F5 (Blocos C+E+F)
 - **zod NÃO está instalado** — não usar `import { z } from 'zod'`. Usar interfaces TypeScript + funções parse helper
