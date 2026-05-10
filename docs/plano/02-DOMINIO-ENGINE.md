@@ -1621,20 +1621,31 @@ Implementar a infraestrutura completa de eventos do V2:
 
 ## 7.5 DClasses a criar nesta fase
 
+> **NOTA 2026-05-09:** Numeração canônica está no Plano Mestre §3.2. Esta tabela
+> foi alinhada (ADR-V2-026 + ADR-V2-027 aprovadas em 2026-05-09):
+> - Webhook config: usar `-470 WEBHOOK` (Mestre §3.3 prevalece, faixa -470..-479
+>   reservada para configs/tokens). `-460 WEBHOOK_CONFIG` foi descartado.
+> - DEvento: faixa canônica é `-489..-501` (NÃO `-490..-499` como descrito
+>   originalmente neste sub-plano). `-489 AUDIT_GENERIC` adicionado por ADR-V2-026.
+> - `-499 PROJECT_LIFECYCLE` e `-500 ORG_LIFECYCLE` (renomeados por ADR-V2-027).
+
 | Chave | Código | Nome | idPai | Agrupamento | Propósito |
 |-------|--------|------|-------|-------------|-----------|
 | -3 | EVENTOS | (existente, fixa) | -2 | true | — |
-| -460 | WEBHOOK_CONFIG | Configuração de Webhook | -51 | false | DTabela: URL + secret + events list em metaDados |
-| -490 | NOTIFICATION | Notificação in-app | -3 | true | DEvento: notificações para users |
+| -470 | WEBHOOK | Configuração de Webhook outbound | -52 | false | DTabela: URL + secret + events list em metaDados |
+| -489 | AUDIT_GENERIC | Audit genérico (fallback sem categoria) | -3 | false | DEvento: catch-all para eventos sem categoria semântica (ADR-V2-026) |
+| -490 | NOTIFICATION | Notificação in-app | -3 | false | DEvento: notificações para users |
 | -491 | WEBHOOK_ATTEMPT | Tentativa de Webhook | -3 | false | DEvento: log de cada tentativa (success/fail) |
 | -492 | AGENT_HEARTBEAT | Heartbeat de Agente | -3 | false | DEvento: telemetria de agentes |
-| -493 | TELEGRAM_MSG_IN | Mensagem Telegram | -3 | false | (preparado p/ Fase 11) |
-| -494 | TASK_CREATED | Task Criada | -3 | false | Audit |
-| -495 | TASK_STATUS_CHANGED | Task Status Mudou | -3 | false | Audit |
-| -496 | EXECUTION_LOG | Log de Execução | -3 | false | Audit (Fase 6 já gera, aqui formaliza) |
-| -497 | PROJECT_DELETED | Projeto Deletado | -3 | false | Audit |
-| -498 | ORG_DELETED | Organização Deletada | -3 | false | Audit |
-| -499 | USER_LOGIN | Login realizado | -3 | false | Audit segurança |
+| -493 | TELEGRAM_MSG_IN | Mensagem Telegram recebida | -3 | false | DEvento (Fase 11) |
+| -494 | TELEGRAM_MSG_OUT | Mensagem Telegram enviada | -3 | false | DEvento (Fase 11) |
+| -495 | MCP_CALL | Chamada MCP auditada | -3 | false | DEvento (Fase 12) |
+| -496 | EXECUTION_LOG | Log de Execução | -3 | false | DEvento (Fase 6 emite, F7 consolida) |
+| -497 | TASK_CREATED | Task Criada | -3 | false | Audit |
+| -498 | TASK_STATUS_CHANGED | Task Status Mudou | -3 | false | Audit |
+| -499 | PROJECT_LIFECYCLE | Lifecycle de projeto (created/updated/deleted via metaDados._meta.action) | -3 | false | Audit (renomeado por ADR-V2-027) |
+| -500 | ORG_LIFECYCLE | Lifecycle de organização (created/updated/deleted via metaDados._meta.action) | -3 | false | Audit (renomeado por ADR-V2-027) |
+| -501 | USER_LOGIN | Login realizado | -3 | false | Audit segurança |
 
 ## 7.6 Estrutura de arquivos esperada
 

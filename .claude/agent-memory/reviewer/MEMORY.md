@@ -169,6 +169,25 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 
 ---
 
+## HISTÓRICO DE SCORES (calibração)
+
+| Task | Módulo | Fase | Score | Decisão | Issue principal |
+|------|--------|------|-------|---------|-----------------|
+| Task#1 | endpoints-genericos | F2 | (ver arquivo) | APPROVED | — |
+| Task#1 | email-common | F4 | (ver arquivo) | APPROVED | — |
+| Task#1 | auth-rbac | F3 | (ver arquivo) | APPROVED | — |
+| Task#1 | domain-structural | F5 | (ver arquivo) | APPROVED | — |
+| Task#2 | f6-executions | F6 | (ver arquivo) | APPROVED | — |
+| Task#1 | eventos-canonicos | F7 | **8.5** | **APPROVED** | auth.service.ts com 4 prisma.dEvento.create diretos (débito, não bloqueador) |
+
+## PADRÕES APRENDIDOS F7
+
+- **`import type` para isolamento de módulos**: Engine usa `import type { IEventProducer }` de `src/eventos/interfaces/` — isso é o padrão correto para evitar dependência circular runtime. Verificar com `grep -rn "from.*eventos" src/engine/` e rejeitar qualquer import que não seja `import type`.
+- **Single point of truth para INSERT em tabela estrutural de auditoria**: DEvento deve ter APENAS 1 ponto de INSERT em `src/eventos/` (AuditLogConsumer). Qualquer `prisma.dEvento.create` fora deste ponto, EXCETO em módulos não-migrados (auth pré-F7), é REJEITAR.
+- **Grep para `prisma.dEvento.create` em toda a base**: na migração de AuditService, o grep correto é em `src/` inteiro (não só `src/eventos/`). Callsites residuais em outros módulos devem ser identificados e categorizados como HIGH se não migrados.
+- **`Promise.allSettled` vs fire-and-forget**: Producer usa `await Promise.allSettled(tasks)` — consumers não bloqueiam o caller (erros isolados) mas o Producer aguarda resolução. Padrão correto para V2 MVP.
+- **ESLint warnings de `any` em specs de engine/dvfs**: estes são warnings pré-existentes (não introduzidos por nova task). Não penalizar se todos os `any` têm `// eslint-disable-line` justificado ou são em specs de stub.
+
 ## TEMPLATE REVIEW REPORT (V2)
 
 ```markdown

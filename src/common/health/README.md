@@ -273,6 +273,7 @@ A: Sim. 503 = "Service Unavailable" = remova da pool. A instância não pode ser
 
 ## Ver Também
 
-- `src/common/` — outros serviços comuns (TimezoneService, AuditService, etc.)
+- `src/common/` — outros serviços comuns (TimezoneService, CorrelationIdService)
+- `src/eventos/` — `EventProducerService` (audit canônico — F7 substitui o antigo AuditService)
 - `src/auth/decorators/public.decorator.ts` — por que `@Public()` é necessário
-- Prometheus metrics: TBD em F7 (Eventos)
+- Prometheus metrics: TBD em F14 (hardening pós-MVP)

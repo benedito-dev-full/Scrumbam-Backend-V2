@@ -2,7 +2,7 @@
 
 **Versao:** 1.0
 **Mantido por:** Documenter Agent V2
-**Atualizado em:** 2026-05-08
+**Atualizado em:** 2026-05-10
 
 > Este documento rastreia tasks por Fase (F0..F17). Strategist abre, Implementer entrega, Reviewer valida, Documenter fecha. Cada task tem entrada com Status, Modulo, Fase, Tempo Real, Quality Score, Pilares aplicados e ADRs vinculados.
 >
@@ -350,6 +350,37 @@
 **Plan:** [`workspace/plans/plan-eventos-canonicos-f7-task1.md`](../workspace/plans/plan-eventos-canonicos-f7-task1.md)
 **Impl Notes:** [`workspace/implementations/impl-eventos-canonicos-f7-task1.md`](../workspace/implementations/impl-eventos-canonicos-f7-task1.md)
 **Review:** [`workspace/reviews/review-eventos-canonicos-f7-task1.md`](../workspace/reviews/review-eventos-canonicos-f7-task1.md)
+
+---
+
+### Task #2: NotificationConsumer + WebhookConsumer + EventRouter Ativo - COMPLETA
+
+**Status:** Completo
+**Modulo V2:** eventos
+**Fase V2:** F7
+**Tempo Real:** Implementer + Reviewer + Documenter em 2026-05-10
+**Completado em:** 2026-05-10
+**Quality Score:** 8.4/10 APPROVED
+
+**O Que Foi Feito:**
+- `NotificationConsumer` cria notificacoes in-app em `DEvento.idClasse=-490` para triggers de task e execution.
+- `WebhookConsumer` resolve escopo organizacional, le configs `DTabela.idClasse=-470` e chama dispatcher stub.
+- `WebhookDispatcherStub` fixa contrato sem HTTP real, HMAC, retry de rede ou `DEvento -491`.
+- `EventRouterService` agora roteia audit sempre e notification/webhook por trigger.
+- Testes focados cobrem notification, webhook e router: 3 suites / 19 tests PASS.
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A - eventos estruturais usam Prisma direto; zero `Operacao*` em `src/eventos`.
+- Pilar 2 (Endpoints): N/A - zero controller/endpoint novo nesta task.
+- Pilar 3 (Seed): RESPEITADO - zero migration, zero seed, zero DClasse nova; usa `-470` e `-490` existentes.
+
+**ADRs vinculados:** ADR-V2-008, ADR-V2-028, ADR-V2-029, ADR-V2-030, ADR-V2-031
+
+**Issue menor registrada:** idempotencia em `NotificationConsumer` ainda nao filtra `excluido: false`; melhoria futura para F7 Task #3.
+
+**Plan:** [`workspace/plans/plan-eventos-consumers-f7-task2.md`](../workspace/plans/plan-eventos-consumers-f7-task2.md)
+**Impl Notes:** [`workspace/implementations/impl-eventos-consumers-f7-task2.md`](../workspace/implementations/impl-eventos-consumers-f7-task2.md)
+**Review:** [`workspace/reviews/review-eventos-consumers-f7-task2.md`](../workspace/reviews/review-eventos-consumers-f7-task2.md)
 
 ---
 

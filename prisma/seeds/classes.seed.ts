@@ -4,11 +4,11 @@
  * Composicao do seed (ADR-V2-019: monolitico):
  *   - 45 classes fixas universais Devari-Core (range -1..-110), via spread de
  *     `templates/classes-base-template.ts`.
- *   - 85 classes especificas Scrumban-V2 (range -150..-527), declaradas
+ *   - 86 classes especificas Scrumban-V2 (range -150..-527), declaradas
  *     neste arquivo, agrupadas por seccao (DEntidade, DVincula, DPedido,
  *     DTabela, DEvento, DTabela secundario) com comentarios `// === ... ===`.
  *
- * Total: 130 DClasses.
+ * Total: 131 DClasses (ADR-V2-026: +1 AUDIT_GENERIC).
  *
  * Validacao automatica:
  *   `validateHierarchy(classes)` e chamado no topo deste modulo. Qualquer
@@ -73,7 +73,7 @@ function esp(
 }
 
 /**
- * Array de classes especificas Scrumban-V2 (83 entradas).
+ * Array de classes especificas Scrumban-V2 (84 entradas).
  *
  * Ordem:
  *   1. DEntidade — 7 (sub-tipos de Pessoa: USER, PLATFORM_SCRUMBAN,
@@ -84,11 +84,13 @@ function esp(
  *   4. DTabela principal — 35 (SPRINT, PRIORITY, TASK_TYPE, STATUS V3,
  *      CHANNEL, WEBHOOK, API_KEY, MCP_KEY, INSTALL_TOKEN, PAIRING_TOKEN,
  *      ISSUE_COUNTER).
- *   5. DEvento — 12 (NOTIFICATION, WEBHOOK_ATTEMPT, AGENT_HEARTBEAT,
- *      TELEGRAM_*, MCP_CALL, EXECUTION_LOG, audit logs).
+ *   5. DEvento — 13 (AUDIT_GENERIC, NOTIFICATION, WEBHOOK_ATTEMPT,
+ *      AGENT_HEARTBEAT, TELEGRAM_*, MCP_CALL, EXECUTION_LOG, audit logs).
+ *      ADR-V2-026 (+1 AUDIT_GENERIC) + ADR-V2-027 (rename
+ *      PROJECT_DELETED → PROJECT_LIFECYCLE; ORG_DELETED → ORG_LIFECYCLE).
  *   6. DTabela secundario — 16 (AGENT_STATUS, EXEC_STATUS, RISK_LEVEL).
  *
- * Soma: 7 + 11 + 4 + 35 + 12 + 16 = 85.
+ * Soma: 7 + 11 + 4 + 35 + 13 + 16 = 86.
  */
 const classesEspecificas: DClasseSeed[] = [
   // === DEntidade — sub-tipos de Pessoa (5) + DProject/DTask (2) ===
@@ -160,8 +162,9 @@ const classesEspecificas: DClasseSeed[] = [
   esp(-474, 'PAIRING_TOKEN', 'Token pairing Telegram', -52),
   esp(-475, 'ISSUE_COUNTER', 'Contador DEV-N por team', -52),
 
-  // === DEvento — auditoria (12) ===
+  // === DEvento — auditoria (13) ===
   // Filhos de EVENTOS (-3) — audit trail polimorfico
+  esp(-489, 'AUDIT_GENERIC', 'Audit generico (fallback sem categoria semantica)', -3),
   esp(-490, 'NOTIFICATION', 'Notificacao in-app', -3),
   esp(-491, 'WEBHOOK_ATTEMPT', 'Tentativa de Webhook outbound', -3),
   esp(-492, 'AGENT_HEARTBEAT', 'Heartbeat de Agent', -3),
@@ -171,8 +174,8 @@ const classesEspecificas: DClasseSeed[] = [
   esp(-496, 'EXECUTION_LOG', 'Log de execucao Claude', -3),
   esp(-497, 'TASK_CREATED', 'Audit: task criada', -3),
   esp(-498, 'TASK_STATUS_CHANGED', 'Audit: mudanca de status', -3),
-  esp(-499, 'PROJECT_DELETED', 'Audit: projeto deletado', -3),
-  esp(-500, 'ORG_DELETED', 'Audit: org deletada', -3),
+  esp(-499, 'PROJECT_LIFECYCLE', 'Audit: lifecycle de projeto (created/updated/deleted via metaDados._meta.action)', -3),
+  esp(-500, 'ORG_LIFECYCLE', 'Audit: lifecycle de organizacao (created/updated/deleted via metaDados._meta.action)', -3),
   esp(-501, 'USER_LOGIN', 'Audit: login', -3),
 
   // === DTabela — status lookups secundarios (16) ===
@@ -196,7 +199,7 @@ const classesEspecificas: DClasseSeed[] = [
 ];
 
 /**
- * Array completo do seed (45 fixas + 85 especificas = 130 DClasses).
+ * Array completo do seed (45 fixas + 86 especificas = 131 DClasses).
  * Validado automaticamente em time de import (validateHierarchy abaixo).
  */
 export const classes: DClasseSeed[] = [...classesFixas, ...classesEspecificas];

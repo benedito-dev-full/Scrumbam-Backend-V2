@@ -14,6 +14,16 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F7 Task#2: NotificationConsumer + WebhookConsumer + EventRouter Ativo** (V2 F7) - 2026-05-10
+  - **NotificationConsumer:** cria notificacoes in-app em `DEvento.idClasse=-490` para `task.status.changed`, `task.assigned`, `execution.awaiting_approval`, `execution.completed` e `execution.failed`
+  - **WebhookConsumer:** resolve `orgId` por payload, project ou task, le configs ativas `DTabela.idClasse=-470` por organizacao e chama dispatcher injetado
+  - **WebhookDispatcherStub:** contrato outbound sem HTTP real; HMAC, retry de rede, auto-disable e `DEvento -491` ficam para F7 Task #4/F12
+  - **EventRouterService:** audit continua catch-all; notification/webhook entram por trigger explicito
+  - **Pilares:** P1 N/A estrutural, P2 zero endpoint novo, P3 zero seed/migration/DClasse nova
+  - **ADRs:** ADR-V2-028, ADR-V2-029, ADR-V2-030, ADR-V2-031
+  - **Tests:** `npm.cmd run build` PASS, `npx.cmd tsc --noEmit` PASS, `npx.cmd jest src/eventos --runInBand` PASS (3 suites / 19 tests)
+  - **Review:** APPROVED 8.4/10; minor futuro em `NotificationConsumer` idempotencia sem `excluido: false`
+
 - **F7 Task#1: Eventos Canônicos — Core de Eventos + Refactor F4/F6** (V2 F7) — 2026-05-09
   - **EventProducerService:** único entry point emissão, validação `type ∈ ALL_EVENT_TYPES_SET`, metadata enriquecida (source, timestamp, correlationId)
   - **EventRouterService:** roteamento catch-all em Task#1 (AuditLogConsumer), placeholders Task#2 (NotificationConsumer, WebhookConsumer)

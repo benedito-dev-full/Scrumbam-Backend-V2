@@ -5,6 +5,10 @@ import { EventRouterService } from './core/event-router.service';
 import { CircuitBreakerService } from './core/circuit-breaker.service';
 import { IntelligentRetryService } from './core/intelligent-retry.service';
 import { AuditLogConsumer } from './consumers/audit-log.consumer';
+import { NotificationConsumer } from './consumers/notification.consumer';
+import { WebhookConsumer } from './consumers/webhook.consumer';
+import { WebhookDispatcherStub } from './dispatchers/webhook-dispatcher.stub';
+import { WEBHOOK_DISPATCHER_TOKEN } from './interfaces/webhook-dispatcher.interface';
 import { TelemetryService } from './monitoring/telemetry.service';
 import { EventHealthController } from './monitoring/event-health.controller';
 
@@ -44,6 +48,9 @@ import { EventHealthController } from './monitoring/event-health.controller';
     CircuitBreakerService,
     IntelligentRetryService,
     AuditLogConsumer,
+    NotificationConsumer,
+    WebhookConsumer,
+    { provide: WEBHOOK_DISPATCHER_TOKEN, useClass: WebhookDispatcherStub },
     TelemetryService,
   ],
   exports: [EventProducerService, TelemetryService, CircuitBreakerService],

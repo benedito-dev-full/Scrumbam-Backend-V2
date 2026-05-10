@@ -1,7 +1,10 @@
 # Implementer Agent Memory — Scrumban-Backend-V2
 
-**Versão:** 1.4 (F6 Task 2 — ExecutionsService + ApprovalFlow + Sweeper + 50 patterns — 2026-05-09)
+**Versão:** 1.5 (F7 Task#1 Bloco Q — AuditService delete + Engine typed — 2026-05-09)
 **Última atualização:** 2026-05-09
+
+**Notas por fase:**
+- F7 Eventos Canônicos: ver `f7-eventos-canonicos.md` (CommonModule Global, EventProducer pattern, Engine isolation via type-only import).
 
 ---
 

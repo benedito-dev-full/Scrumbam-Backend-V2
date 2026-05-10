@@ -189,6 +189,7 @@ SELECT chave, codigo, nome, "idPai" FROM "DClasse" ORDER BY chave DESC;
 | -473  | INSTALL_TOKEN | Token install one-shot Argus | -52 |
 | -474  | PAIRING_TOKEN | Token pairing Telegram | -52 |
 | -475  | ISSUE_COUNTER | Contador DEV-N por team | -52 |
+| -489  | AUDIT_GENERIC | Audit generico (fallback sem categoria semantica) | -3 |
 | -490  | NOTIFICATION | Notificacao in-app | -3 |
 | -491  | WEBHOOK_ATTEMPT | Tentativa de Webhook outbound | -3 |
 | -492  | AGENT_HEARTBEAT | Heartbeat de Agent | -3 |
@@ -198,8 +199,8 @@ SELECT chave, codigo, nome, "idPai" FROM "DClasse" ORDER BY chave DESC;
 | -496  | EXECUTION_LOG | Log de execucao Claude | -3 |
 | -497  | TASK_CREATED | Audit: task criada | -3 |
 | -498  | TASK_STATUS_CHANGED | Audit: mudanca de status | -3 |
-| -499  | PROJECT_DELETED | Audit: projeto deletado | -3 |
-| -500  | ORG_DELETED | Audit: org deletada | -3 |
+| -499  | PROJECT_LIFECYCLE | Audit: lifecycle de projeto (created/updated/deleted via metaDados._meta.action) | -3 |
+| -500  | ORG_LIFECYCLE | Audit: lifecycle de organizacao (created/updated/deleted via metaDados._meta.action) | -3 |
 | -501  | USER_LOGIN | Audit: login | -3 |
 | -510  | AGENT_STATUS_ONLINE | Agent: ONLINE | -52 |
 | -511  | AGENT_STATUS_OFFLINE | Agent: OFFLINE | -52 |

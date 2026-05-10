@@ -212,6 +212,7 @@ F17    │                                                                      
 #### DEvento — auditoria + eventos
 | chave | codigo | nome | idPai |
 |-------|--------|------|-------|
+| -489 | AUDIT_GENERIC | Audit genérico (fallback sem categoria semântica) | -3 |
 | -490 | NOTIFICATION | Notificação in-app | -3 |
 | -491 | WEBHOOK_ATTEMPT | Tentativa de Webhook outbound | -3 |
 | -492 | AGENT_HEARTBEAT | Heartbeat de Agent | -3 |
@@ -221,8 +222,8 @@ F17    │                                                                      
 | -496 | EXECUTION_LOG | Log de execução Claude | -3 |
 | -497 | TASK_CREATED | Audit: task criada | -3 |
 | -498 | TASK_STATUS_CHANGED | Audit: mudança de status | -3 |
-| -499 | PROJECT_DELETED | Audit: projeto deletado | -3 |
-| -500 | ORG_DELETED | Audit: org deletada | -3 |
+| -499 | PROJECT_LIFECYCLE | Audit: lifecycle de projeto (created/updated/deleted via metaDados._meta.action) | -3 |
+| -500 | ORG_LIFECYCLE | Audit: lifecycle de organização (created/updated/deleted via metaDados._meta.action) | -3 |
 | -501 | USER_LOGIN | Audit: login | -3 |
 
 #### DTabela — Status lookups secundários
@@ -256,7 +257,7 @@ Os 4 sub-planos foram escritos em paralelo e tinham conflitos. Esta seção docu
 | `-152` AGENT (C) vs ORGANIZATION (A) | Sub-planos A e C | **AGENT virou -156** (livre, próximo a Pessoa); ORGANIZATION fica em -152 |
 | `-491` EXECUCAO_CLAUDE (A) vs WEBHOOK_ATTEMPT (B) vs AGENT_STATUS_OFFLINE (C) | A, B, C | **Execution sai do range -49X**; vai para -300..-303 (Pedidos). -491 fica WEBHOOK_ATTEMPT. AGENT_STATUS vai para -510..-513 |
 | `-493` TELEGRAM_MSG_IN (B) vs AGENT_STATUS_NEVER_CONNECTED (C) | B e C | **TELEGRAM_MSG_IN fica em -493**; AGENT_STATUS_* deslocado para -510..-513 |
-| `-497` PROJECT_DELETED (B) vs EXEC_STATUS_APPROVED (C) vs MCP_CALL (C) | B e C | **TASK_CREATED fica em -497**; PROJECT_DELETED em -499; MCP_CALL em -495; EXEC_STATUS_* em -514..-522 |
+| `-497` PROJECT_DELETED (B) vs EXEC_STATUS_APPROVED (C) vs MCP_CALL (C) | B e C | **TASK_CREATED fica em -497**; PROJECT_LIFECYCLE em -499 (renomeado por ADR-V2-027); MCP_CALL em -495; EXEC_STATUS_* em -514..-522 |
 | `-301..-303` EXEC_LOW/MED/HIGH (B) vs EXECUTION_REFACTOR/FIX/FEATURE (C) | B e C | **B prevalece** — risk level via idClasse é arquiteturalmente superior (DVFS scripts diferentes). Categoria operacional vai em `dados.category` |
 | `-460` WEBHOOK_CONFIG (B) vs `-470` WEBHOOK (C) | B e C | **C prevalece**. Faixa -470..-479 reservada para configs/tokens consolidada |
 

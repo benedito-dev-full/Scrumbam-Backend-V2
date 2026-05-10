@@ -11,6 +11,57 @@
 
 ---
 
+## Task #2 - F7 Event Consumers - COMPLETE (V2 Fase F7)
+
+**Module:** eventos
+**Task:** NotificationConsumer + WebhookConsumer + dispatcher stub + EventRouter ativo
+**Status:** COMPLETA - Score 8.4/10 APPROVED
+**Duration:** Strategist + Implementer + Reviewer + Documenter em 2026-05-10
+**Quality Score:** 8.4/10
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | - | Plano F7 Task #2 com escopo fechado, zero endpoint/migration/seed |
+| Implementer | - | 3 suites / 19 tests PASS, build/typecheck PASS, 3 Pilares respeitados |
+| Reviewer | - | Score 8.4/10, APPROVED, 1 minor nao bloqueante |
+| Documenter | - | JSDoc, ROADMAP, CHANGELOG, STATUS e ADRs atualizados; commit pendente |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A - `DEvento`/`DTabela` estruturais via Prisma direto; zero `Operacao*`.
+- Pilar 2 (Endpoints): N/A - nenhum controller ou endpoint novo.
+- Pilar 3 (Seed): RESPEITADO - zero migration, zero seed, zero DClasse nova; usa `-470` e `-490`.
+
+**Deliverables:**
+- [x] `NotificationConsumer` persistindo notificacoes `DEvento -490` por trigger.
+- [x] `WebhookConsumer` lendo configs `DTabela -470` scoped por org.
+- [x] `WebhookDispatcherStub` sem HTTP real.
+- [x] `EventRouterService` roteando audit sempre e notification/webhook por trigger.
+- [x] Tests focados de notification, webhook e router.
+- [x] `src/eventos/README.md` atualizado pelo Implementer.
+- [x] ADR-V2-028, ADR-V2-029, ADR-V2-030 e ADR-V2-031 criadas.
+
+**Metrics:**
+- Build: PASS (`npm.cmd run build`)
+- TypeScript: PASS (`npx.cmd tsc --noEmit`)
+- Tests: PASS (`npx.cmd jest src/eventos --runInBand`) - 3 suites / 19 tests
+- N+1 Queries: ZERO no desenho revisado; notification usa lookup batch e webhook busca configs em lote.
+- Queries/evento: notification task = 1 read + 1 lookup + 1 createMany; webhook org direto = 1 config query.
+- Greps: zero `eventProducer.addInternalEvent` em consumers; zero `new Operacao` em `src/eventos`; zero `fetch|axios|http.request` em dispatchers.
+
+**Issue menor (F7 Task #3):**
+- `src/eventos/consumers/notification.consumer.ts:75` - lookup de idempotencia sem `excluido: false`; nao bloqueia Task #2, mas deve ser ajustado quando houver read/delete de notifications.
+
+**ADRs:** ADR-V2-008, ADR-V2-028, ADR-V2-029, ADR-V2-030, ADR-V2-031
+
+**Plan:** [`workspace/plans/plan-eventos-consumers-f7-task2.md`](../workspace/plans/plan-eventos-consumers-f7-task2.md)
+**Impl Notes:** [`workspace/implementations/impl-eventos-consumers-f7-task2.md`](../workspace/implementations/impl-eventos-consumers-f7-task2.md)
+**Review:** [`workspace/reviews/review-eventos-consumers-f7-task2.md`](../workspace/reviews/review-eventos-consumers-f7-task2.md)
+**Commit:** pendente por worktree suja e ausencia de pedido explicito de commit
+
+---
+
 <!-- dedup:strategist:1 -->
 ### Agent Concluído: strategist
 
@@ -381,4 +432,3 @@
 **Timestamp:** 09/05/2026 16:06:58
 **Agent:** strategist
 **Status:** Completo
-
