@@ -8,7 +8,8 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
-import { AuditService } from '../common/services/audit.service';
+import { EventProducerService } from '../eventos/core/event-producer.service';
+import { CorrelationIdService } from '../common/services/correlation-id.service';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { AddOrgMemberDto } from './dto/add-org-member.dto';
@@ -33,7 +34,8 @@ const ID_CLASSE_TEAM_MEMBERSHIP = BigInt(-181);
 /** idClasse DTabela para issue counter por team (seed F1). */
 const ID_CLASSE_ISSUE_COUNTER = BigInt(-475);
 
-// idClasse DEvento para audit de org deletada: -500 (usado via AuditService como eventType string)
+// idClasse DEvento para org lifecycle: -500 ORG_LIFECYCLE (ADR-V2-027)
+// type='org.created'/'org.updated'/'org.deleted' → idClasse=-500 + metaDados._meta.action
 
 /** Mapa de role string para idClasse DVincula. */
 const ROLE_TO_CLASSE: Record<string, bigint> = {
@@ -68,7 +70,7 @@ const CLASSE_TO_ROLE: Record<string, string> = {
  * 5. DVincula -181 (TEAM_MEMBERSHIP LEAD) para o criador
  *
  * @see PrismaService — acesso ao banco
- * @see AuditService — audit log pós-commit
+ * @see EventProducerService — emissão canônica de eventos (audit pós-commit)
  */
 @Injectable()
 export class OrganizationsService {
@@ -76,7 +78,8 @@ export class OrganizationsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly auditService: AuditService,
+    private readonly eventProducer: EventProducerService,
+    private readonly correlationIdService: CorrelationIdService,
   ) {}
 
   /**
@@ -164,11 +167,16 @@ export class OrganizationsService {
     });
 
     // Audit APÓS commit (nunca dentro da transaction)
-    await this.auditService.log(
+    // Tipo org.created → idClasse=-500 ORG_LIFECYCLE (ADR-V2-027)
+    await this.eventProducer.addInternalEvent(
       'org.created',
-      org.chave,
-      { nome: dto.nome },
-      userEntidadeId,
+      {
+        orgId: org.chave.toString(),
+        nome: dto.nome,
+        userId: userEntidadeId.toString(),
+      },
+      this.correlationIdService.getOrGenerate(),
+      { source: OrganizationsService.name },
     );
 
     return this.buildResponse(org, 1);
@@ -460,12 +468,16 @@ export class OrganizationsService {
       });
     });
 
-    // Audit APÓS commit
-    await this.auditService.log(
+    // Audit APÓS commit — tipo org.deleted → idClasse=-500 ORG_LIFECYCLE (ADR-V2-027)
+    await this.eventProducer.addInternalEvent(
       'org.deleted',
-      orgId,
-      { nome: org.nome, orgId: id },
-      userEntidadeId,
+      {
+        orgId: id,
+        nome: org.nome,
+        userId: userEntidadeId.toString(),
+      },
+      this.correlationIdService.getOrGenerate(),
+      { source: OrganizationsService.name },
     );
 
     this.logger.log(`Organização ${orgId} deletada por user=${userEntidadeId}`);

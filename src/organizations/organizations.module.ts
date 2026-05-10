@@ -2,8 +2,6 @@ import { forwardRef, Module } from '@nestjs/common';
 import { OrganizationsController } from './organizations.controller';
 import { OrganizationsService } from './organizations.service';
 import { AuthModule } from '../auth/auth.module';
-import { PrismaService } from '../prisma.service';
-import { AuditService } from '../common/services/audit.service';
 
 /**
  * Módulo de organizações (DEntidade idClasse=-152).
@@ -14,7 +12,9 @@ import { AuditService } from '../common/services/audit.service';
  * - Usado pelo AuthModule no register() para criar org completa
  *
  * Importa AuthModule (forwardRef para evitar circular dependency).
- * Exporta OrganizationsService para uso em AuthModule.
+ * NÃO importa CommonModule nem EventosModule explicitamente — ambos são
+ * `@Global()` (PrismaService, CorrelationIdService, EventProducerService
+ * disponíveis via DI).
  *
  * @see OrganizationsController — endpoints REST
  * @see OrganizationsService — lógica de negócio
@@ -23,7 +23,7 @@ import { AuditService } from '../common/services/audit.service';
 @Module({
   imports: [forwardRef(() => AuthModule)],
   controllers: [OrganizationsController],
-  providers: [PrismaService, AuditService, OrganizationsService],
+  providers: [OrganizationsService],
   exports: [OrganizationsService],
 })
 export class OrganizationsModule {}

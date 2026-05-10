@@ -4,7 +4,8 @@ import { ProjectsService } from './projects.service';
 import { SeedBootstrapService } from './seed-bootstrap.service';
 import { ProjectMembersService } from './project-members.service';
 import { PrismaService } from '../prisma.service';
-import { AuditService } from '../common/services/audit.service';
+import { EventProducerService } from '../eventos/core/event-producer.service';
+import { CorrelationIdService } from '../common/services/correlation-id.service';
 
 describe('ProjectsService', () => {
   let service: ProjectsService;
@@ -41,7 +42,8 @@ describe('ProjectsService', () => {
     updateMember: jest.Mock;
     removeMember: jest.Mock;
   }>;
-  let auditService: jest.Mocked<{ log: jest.Mock }>;
+  let eventProducer: jest.Mocked<{ addInternalEvent: jest.Mock }>;
+  let correlationIdService: jest.Mocked<{ getOrGenerate: jest.Mock }>;
 
   const mockProject = {
     chave: BigInt(1),
@@ -90,7 +92,8 @@ describe('ProjectsService', () => {
       updateMember: jest.fn(),
       removeMember: jest.fn(),
     };
-    const auditMock = { log: jest.fn().mockResolvedValue(undefined) };
+    const eventProducerMock = { addInternalEvent: jest.fn().mockResolvedValue(undefined) };
+    const correlationIdMock = { getOrGenerate: jest.fn().mockReturnValue('test-corr-id') };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -98,7 +101,8 @@ describe('ProjectsService', () => {
         { provide: PrismaService, useValue: prismaMock },
         { provide: SeedBootstrapService, useValue: seedBootstrapMock },
         { provide: ProjectMembersService, useValue: projectMembersMock },
-        { provide: AuditService, useValue: auditMock },
+        { provide: EventProducerService, useValue: eventProducerMock },
+        { provide: CorrelationIdService, useValue: correlationIdMock },
       ],
     }).compile();
 
@@ -106,7 +110,9 @@ describe('ProjectsService', () => {
     prisma = module.get(PrismaService) as typeof prisma;
     seedBootstrap = module.get(SeedBootstrapService) as typeof seedBootstrap;
     projectMembers = module.get(ProjectMembersService) as typeof projectMembers;
-    auditService = module.get(AuditService) as typeof auditService;
+    eventProducer = module.get(EventProducerService) as typeof eventProducer;
+    correlationIdService = module.get(CorrelationIdService) as typeof correlationIdService;
+    void correlationIdService; // referenciado para evitar TS warn
   });
 
   afterEach(() => {
@@ -143,11 +149,11 @@ describe('ProjectsService', () => {
         expect.anything(), // tx
         expect.any(BigInt), // projectId
       );
-      expect(auditService.log).toHaveBeenCalledWith(
+      expect(eventProducer.addInternalEvent).toHaveBeenCalledWith(
         'project.created',
-        expect.any(BigInt),
-        expect.objectContaining({ nome: 'Test Project' }),
-        BigInt(100),
+        expect.objectContaining({ nome: 'Test Project', userId: '100' }),
+        'test-corr-id',
+        expect.objectContaining({ source: 'ProjectsService' }),
       );
       expect(result.nome).toBe('Test Project');
       expect(result.memberCount).toBe(1);
@@ -256,11 +262,11 @@ describe('ProjectsService', () => {
         where: { chave: BigInt(1) },
         data: { excluido: true },
       });
-      expect(auditService.log).toHaveBeenCalledWith(
+      expect(eventProducer.addInternalEvent).toHaveBeenCalledWith(
         'project.deleted',
-        BigInt(1),
-        expect.objectContaining({ nome: 'Test' }),
-        BigInt(100),
+        expect.objectContaining({ nome: 'Test', projectId: '1' }),
+        'test-corr-id',
+        expect.objectContaining({ source: 'ProjectsService' }),
       );
     });
   });

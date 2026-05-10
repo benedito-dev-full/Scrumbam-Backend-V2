@@ -223,5 +223,6 @@ await this.emailService.sendTemplate(
 ## Ver Também
 
 - `docs/email-providers.md` — guia completo de configuração por provider
-- `src/common/` — serviços comuns (AuditService para registro de auditoria)
+- `src/common/` — serviços comuns (TimezoneService, CorrelationIdService)
+- `src/eventos/` — `EventProducerService` (substitui o antigo AuditService — F7 Bloco Q)
 - `.env.example` — exemplo de configuração

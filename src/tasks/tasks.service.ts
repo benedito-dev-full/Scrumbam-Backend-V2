@@ -6,7 +6,8 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
-import { AuditService } from '../common/services/audit.service';
+import { EventProducerService } from '../eventos/core/event-producer.service';
+import { CorrelationIdService } from '../common/services/correlation-id.service';
 import { TasksIdentifierService } from './tasks-identifier.service';
 import { validateTransition, isValidState } from './tasks-state-machine';
 import { TaskStatus, buildInitialTaskDados } from './schemas/task-dados.schema';
@@ -48,7 +49,7 @@ const STATUS_TO_TABELA_CLASSE: Record<string, bigint> = {
  * @see PrismaService — acesso ao banco
  * @see TasksIdentifierService — geração atômica de identifiers
  * @see validateTransition — state machine V3
- * @see AuditService — audit log pós-commit
+ * @see EventProducerService — emissão canônica de eventos (audit pós-commit)
  */
 @Injectable()
 export class TasksService {
@@ -57,7 +58,8 @@ export class TasksService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly identifierService: TasksIdentifierService,
-    private readonly auditService: AuditService,
+    private readonly eventProducer: EventProducerService,
+    private readonly correlationIdService: CorrelationIdService,
   ) {}
 
   /**
@@ -140,12 +142,18 @@ export class TasksService {
       });
     });
 
-    // Audit APÓS commit
-    await this.auditService.log(
+    // Audit APÓS commit — tipo task.created → idClasse=-497 TASK_CREATED
+    await this.eventProducer.addInternalEvent(
       'task.created',
-      task.chave,
-      { nome: dto.nome, identifier: `${prefix}-?`, projectId: dto.projectId },
-      creatorId,
+      {
+        taskId: task.chave.toString(),
+        nome: dto.nome,
+        identifier: `${prefix}-?`,
+        projectId: dto.projectId,
+        userId: creatorId.toString(),
+      },
+      this.correlationIdService.getOrGenerate(),
+      { source: TasksService.name },
     );
 
     return this.buildResponse(task);
@@ -417,15 +425,17 @@ export class TasksService {
       },
     });
 
-    // Audit APÓS commit
-    await this.auditService.log(
+    // Audit APÓS commit — tipo task.status.changed → idClasse=-498 TASK_STATUS_CHANGED
+    await this.eventProducer.addInternalEvent(
       'task.status.changed',
-      taskId,
       {
+        taskId: taskId.toString(),
         from: fromStatus,
         to: toStatus,
-        movedBy: dto.movedBy,
+        ...(dto.movedBy && { movedBy: dto.movedBy }),
       },
+      this.correlationIdService.getOrGenerate(),
+      { source: TasksService.name },
     );
 
     return this.buildResponse(updated);

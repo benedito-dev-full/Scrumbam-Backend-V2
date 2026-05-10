@@ -14,6 +14,36 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F7 Task#1: Eventos Canônicos — Core de Eventos + Refactor F4/F6** (V2 F7) — 2026-05-09
+  - **EventProducerService:** único entry point emissão, validação `type ∈ ALL_EVENT_TYPES_SET`, metadata enriquecida (source, timestamp, correlationId)
+  - **EventRouterService:** roteamento catch-all em Task#1 (AuditLogConsumer), placeholders Task#2 (NotificationConsumer, WebhookConsumer)
+  - **CircuitBreakerService:** Half-Open pattern (closed/open/half-open) com 5 falhas em 60s, timeout 30s para recuperação
+  - **IntelligentRetryService:** backoff exponencial 1/2/4/8/16s (5 tentativas máximo), state machine com `@OnModuleDestroy`
+  - **AuditLogConsumer:** único INSERT `DEvento`, mapping `type→idClasse` alinhado com seed (-489..-501), ADR-V2-026/027 aplicadas
+  - **TelemetryService:** counters emitted/succeeded/failed, gauge pendingRetries
+  - **EventHealthController:** `GET /events/health` (@Public) com status infra + métricas producer/router/circuitbreaker
+  - **Refactor F4/F6:** AuditService DELETADO; 5 services migrados (Email, Orgs, Projects, Tasks, Engine F6) para EventProducerService; OperacaoExecucaoClaude agora usa IEventProducer typed
+  - **CommonModule @Global:** centraliza PrismaService, CorrelationIdService, TimezoneService (elimina duplicate stores)
+  - **Seed F1:** -489 AUDIT_GENERIC, -499 PROJECT_LIFECYCLE, -500 ORG_LIFECYCLE = 131 DClasses total
+  - **Tests:** 292/292 PASS (26 suites), N+1 ZERO, JSDoc 100% em core eventos
+
+### Changed
+
+- **Estrutura de auditoria:** `prisma.dEvento.create` direto → `EventProducerService.addInternalEvent()` em 5 services (não inclui auth.service.ts, débito H1 para próxima task)
+- **OperacaoExecucaoClaude (F6):** `eventProducer` typed via `IEventProducer` (era `any`), event emitido APÓS super.grava()
+- **CommonModule:** novo módulo @Global exporta 3 singletons canônicos (resolve duplicate AsyncLocalStorage)
+
+### Removed
+
+- `src/common/services/audit.service.ts` — substituído por EventProducerService (0 impacto em caller — adapter pattern mantido)
+
+### Deprecated
+
+- Direct `prisma.dEvento.create()` calls — use `EventProducerService.addInternalEvent()` (deprecated per padrão #14)
+- Types `auth.login`, `auth.logout`, `auth.register`, `auth.failed` — não em EVENT_TYPES (débito H1)
+
+---
+
 - **F6 ExecutionsModule + ApprovalFlow + 58 Patterns Adversariais** (Task #2, V2 F6) — 2026-05-09
   - **gravarAposAprovacaoManual()** em `OperacaoExecucaoClaude`: restaura DPedido `awaiting_approval`, UPDATE (não INSERT), DVFS 6+7, `_executarClaude()` — Pilar 1 preservado
   - **risk-gate-validator.js:** 25 HIGH + 15 MEDIUM patterns (40 total, 58 testes adversariais PASS)

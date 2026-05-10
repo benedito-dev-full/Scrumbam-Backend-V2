@@ -39,7 +39,7 @@ const ID_CLASSE_ORG_VIEWER = BigInt(-163);
  * 3. DVincula -181 (TEAM_MEMBERSHIP, cargo=LEAD) para o criador
  *
  * @see PrismaService — acesso ao banco
- * @see AuditService — audit log
+ * @see EventProducerService — audit log canônico (F7) — não consumido neste service
  */
 @Injectable()
 export class TeamsService {

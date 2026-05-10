@@ -54,6 +54,68 @@
 
 ---
 
+## Task #1 — F7 Eventos Canônicos (Bloco M+Q+N.1) — COMPLETE (V2 Fase F7)
+
+**Module:** eventos (core/consumers/monitoring/interfaces) + refactor (email/organizations/projects/tasks/engine)
+**Task:** Eventos Canônicos — EventProducerService + EventRouter + CircuitBreaker + IntelligentRetry + AuditLogConsumer
+**Status:** COMPLETA — Score 8.5/10 APPROVED
+**Duration:** Implementer + Reviewer concluído; Documenter em progresso — 2026-05-09
+**Quality Score:** 8.5/10
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan F7 (core producer/router/consumer/monitoring, refactor 5 services) |
+| Implementer | ~16h (em 2 sessions) | 292/292 testes PASS, N+1 ZERO, JSDoc 100%, honest debt reporting |
+| Reviewer | ~2h | Score 8.5/10 (H1 auth.service.ts débito justificável, M1 specs faltando, zero bloqueadores) |
+| Documenter | ~1h | JSDoc verificado, ROADMAP/CHANGELOG/STATUS atualizados, commit Conventional |
+
+**Pilares:**
+- Pilar 1 (Engine): RESPEITADO — zero Operacao em src/eventos/, `import type` em engine (zero runtime dependency)
+- Pilar 2 (Endpoints): **ATIVADO** — EventHealthController justificado (telemetria de infra, não duplicata de polimorfico)
+- Pilar 3 (Seed): ATIVADO — 131 DClasses (45 fixas + 86 específicas), ADRs V2-026/027 aplicadas
+
+**Deliverables:**
+- [x] EventProducerService: `addInternalEvent()`, validação, metadata enriquecida, Promise.allSettled, fire-and-forget seguro
+- [x] EventRouterService: roteamento catch-all (Task#1) com placeholders Task#2
+- [x] CircuitBreakerService: Half-Open pattern, 5 falhas/60s → open, 30s timeout → half-open
+- [x] IntelligentRetryService: backoff exponencial 1/2/4/8/16s, 5 tentativas máx, `@OnModuleDestroy` cleanup
+- [x] AuditLogConsumer: único INSERT DEvento, mapping type→idClasse (-489..-501), ADR-V2-026/027
+- [x] TelemetryService: emitted/succeeded/failed counters, pendingRetries gauge
+- [x] EventHealthController: GET /events/health (@Public), status infra, métricas
+- [x] IEventProducer interface type-only (Engine isolado de runtime)
+- [x] 5 services migrados (Email, Orgs, Projects, Tasks, Engine F6)
+- [x] AuditService DELETADO (substituído por Producer)
+- [x] CommonModule @Global criado (PrismaService, CorrelationIdService, TimezoneService)
+- [x] Seed F1: -489 AUDIT_GENERIC, -499 PROJECT_LIFECYCLE, -500 ORG_LIFECYCLE
+
+**Metrics:**
+- Build: PASS (0 TypeScript, 0 ESLint new errors; 79 inherited warnings from pre-existing)
+- Tests: 292/292 PASS (26 suites: eventos core + refactor migrations)
+- N+1 Queries: ZERO (AuditLogConsumer = 1 INSERT/event, no loops)
+- Queries/request: EventHealthController = 3 parallel reads (db/redis/email health)
+- BigInt: 100% serializado
+- JSDoc: 100% em core eventos (EventProducerService, EventRouterService, CircuitBreakerService, IntelligentRetryService, TelemetryService, AuditLogConsumer, EventHealthController)
+- Swagger: 100% EventHealthController (@ApiOperation, @ApiResponse 200/401)
+- CircuitBreaker: 3 estados testados (closed→open→half-open), timeout verificado
+- Correlations: todas as mensagens Logger incluem correlationId (rastreamento distribuído)
+- Padrão #7: todos 5 services migrados emitem APÓS await da persistência (correto)
+
+**Issues (Próximas Tasks):**
+- H1 (sprint seguinte F7-Task2-extras): `src/auth/auth.service.ts` linhas 124/235/353/570 — 4 calls `prisma.dEvento.create` diretas, fora do EventProducerService. Requer: (a) adicionar AUTH_REGISTER, AUTH_LOGIN, AUTH_LOGOUT, AUTH_FAILED ao EVENT_TYPES; (b) migrar fora de $transaction; (c) integrar com EventProducerService. **Não bloqueador desta task** — escopo original não incluía auth.
+- M1 (backlog F14): specs dedicadas para EventProducerService, CircuitBreakerService, IntelligentRetryService (cobertura indireta via executions, mas lógica CB/retry merece tests isolados)
+- M2 (documentação): `email.failed` emitido dentro do catch (sem persistência prévia) — padrão aceitável para audit de falha, mas documentar em email/README.md
+
+**ADRs:** ADR-V2-005 (Engine isolado), ADR-V2-008 (DEvento substitui DNotification/DWebhook), ADR-V2-026 (AUDIT_GENERIC), ADR-V2-027 (PROJECT_LIFECYCLE/ORG_LIFECYCLE)
+
+**Plan:** [`workspace/plans/plan-eventos-canonicos-f7-task1.md`](../workspace/plans/plan-eventos-canonicos-f7-task1.md)
+**Impl Notes:** [`workspace/implementations/impl-eventos-canonicos-f7-task1.md`](../workspace/implementations/impl-eventos-canonicos-f7-task1.md)
+**Review:** [`workspace/reviews/review-eventos-canonicos-f7-task1.md`](../workspace/reviews/review-eventos-canonicos-f7-task1.md)
+**Commit:** (a ser criado pelo Documenter)
+
+---
+
 ## Task #1 — F5 Domínio Estrutural Scrumban — COMPLETE (V2 Fase F5)
 
 **Module:** organizations, teams, projects, tasks, workflow-statuses, sprints, auth (decorator + guard)
@@ -286,4 +348,37 @@
 5. Redigir ADR-V2-025 (BigInt serialization strategy)
 6. Cache em memória para `validarClasse`
 7. Remover wrapper `?classe=NOME` após sunset (2026-06-05)
+
+
+---
+
+<!-- dedup:implementer:2 -->
+### Agent Concluído: implementer
+
+**Task:** #2
+**Timestamp:** 09/05/2026 10:28:43
+**Agent:** implementer
+**Status:** Completo
+
+
+---
+
+<!-- dedup:reviewer:2 -->
+### Agent Concluído: reviewer
+
+**Task:** #2
+**Timestamp:** 09/05/2026 10:34:05
+**Agent:** reviewer
+**Status:** Completo
+
+
+---
+
+<!-- dedup:strategist:2 -->
+### Agent Concluído: strategist
+
+**Task:** #2
+**Timestamp:** 09/05/2026 16:06:58
+**Agent:** strategist
+**Status:** Completo
 

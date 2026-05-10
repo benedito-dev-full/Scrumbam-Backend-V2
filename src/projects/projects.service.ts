@@ -6,7 +6,8 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
-import { AuditService } from '../common/services/audit.service';
+import { EventProducerService } from '../eventos/core/event-producer.service';
+import { CorrelationIdService } from '../common/services/correlation-id.service';
 import { SeedBootstrapService } from './seed-bootstrap.service';
 import { ProjectMembersService } from './project-members.service';
 import { CreateProjectDto } from './dto/create-project.dto';
@@ -48,7 +49,7 @@ const PROJECT_ROLE_CLASSES = [
  * @see PrismaService — acesso ao banco
  * @see SeedBootstrapService — seed de statuses + sprint
  * @see ProjectMembersService — gestão de membros
- * @see AuditService — audit log pós-commit
+ * @see EventProducerService — emissão canônica de eventos (audit pós-commit)
  */
 @Injectable()
 export class ProjectsService {
@@ -58,7 +59,8 @@ export class ProjectsService {
     private readonly prisma: PrismaService,
     private readonly seedBootstrap: SeedBootstrapService,
     private readonly projectMembers: ProjectMembersService,
-    private readonly auditService: AuditService,
+    private readonly eventProducer: EventProducerService,
+    private readonly correlationIdService: CorrelationIdService,
   ) {}
 
   /**
@@ -112,12 +114,17 @@ export class ProjectsService {
       return proj;
     });
 
-    // Audit APÓS commit
-    await this.auditService.log(
+    // Audit APÓS commit — tipo project.created → idClasse=-499 PROJECT_LIFECYCLE (ADR-V2-027)
+    await this.eventProducer.addInternalEvent(
       'project.created',
-      project.chave,
-      { nome: dto.nome, prefix: dto.prefix ?? 'DEV' },
-      userEntidadeId,
+      {
+        projectId: project.chave.toString(),
+        nome: dto.nome,
+        prefix: dto.prefix ?? 'DEV',
+        userId: userEntidadeId.toString(),
+      },
+      this.correlationIdService.getOrGenerate(),
+      { source: ProjectsService.name },
     );
 
     return this.buildResponse(project, 1);
@@ -366,12 +373,16 @@ export class ProjectsService {
       });
     });
 
-    // Audit APÓS commit
-    await this.auditService.log(
+    // Audit APÓS commit — tipo project.deleted → idClasse=-499 PROJECT_LIFECYCLE (ADR-V2-027)
+    await this.eventProducer.addInternalEvent(
       'project.deleted',
-      projectId,
-      { nome: project.nome, projectId: id },
-      userEntidadeId,
+      {
+        projectId: id,
+        nome: project.nome,
+        userId: userEntidadeId.toString(),
+      },
+      this.correlationIdService.getOrGenerate(),
+      { source: ProjectsService.name },
     );
 
     this.logger.log(`Projeto ${projectId} deletado por user=${userEntidadeId}`);

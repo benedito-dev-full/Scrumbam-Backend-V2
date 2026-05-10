@@ -2,7 +2,6 @@ import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { APP_INTERCEPTOR, APP_FILTER } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
-import { PrismaService } from './prisma.service';
 import { EntidadesModule } from './entidades/entidades.module';
 import { TabelasModule } from './tabelas/tabelas.module';
 import { ClassesModule } from './classes/classes.module';
@@ -10,10 +9,10 @@ import { AuthModule } from './auth/auth.module';
 import { PermissoesModule } from './permissoes/permissoes.module';
 
 // F4 — Common Services + Email
+import { CommonModule } from './common/common.module';
 import { EmailModule } from './email/email.module';
 import { HealthModule } from './common/health/health.module';
 import { CorrelationIdMiddleware } from './common/middlewares/correlation-id.middleware';
-import { CorrelationIdService } from './common/services/correlation-id.service';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
@@ -27,6 +26,9 @@ import { TasksModule } from './tasks/tasks.module';
 
 // F6 — Engine + Executions (OperacaoExecucaoClaude + ApprovalFlow + Sweeper)
 import { ExecutionsModule } from './executions/executions.module';
+
+// F7 — Eventos Canônicos (EventProducerService + AuditLogConsumer + /events/health)
+import { EventosModule } from './eventos/eventos.module';
 
 /**
  * AppModule raiz do Scrumban-Backend-V2.
@@ -64,6 +66,8 @@ import { ExecutionsModule } from './executions/executions.module';
       envFilePath: ['.env.local', '.env'],
     }),
     ScheduleModule.forRoot(),
+    // F4 — CommonModule (@Global) — exporta PrismaService, CorrelationIdService, TimezoneService
+    CommonModule,
     // F2 — Pilar 2: Endpoints Genéricos (EntidadeController, TabelaController, ClasseController)
     EntidadesModule,
     TabelasModule,
@@ -83,11 +87,11 @@ import { ExecutionsModule } from './executions/executions.module';
     TasksModule,
     // F6 — Automation Claude Code (Engine + Executions + ApprovalFlow)
     ExecutionsModule,
-    // Modules canônicos das fases F7-F13 restantes serão importados aqui.
+    // F7 — Eventos Canônicos (EventProducerService global + /events/health)
+    EventosModule,
+    // Modules canônicos das fases F8-F13 restantes serão importados aqui.
   ],
   providers: [
-    PrismaService,
-    CorrelationIdService,
     // LoggingInterceptor global — loga method, path, statusCode, durationMs, correlationId
     {
       provide: APP_INTERCEPTOR,
@@ -99,7 +103,6 @@ import { ExecutionsModule } from './executions/executions.module';
       useClass: HttpExceptionFilter,
     },
   ],
-  exports: [PrismaService],
 })
 export class AppModule implements NestModule {
   /**

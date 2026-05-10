@@ -1,7 +1,8 @@
 import { Injectable, Logger, NotFoundException, Inject } from '@nestjs/common';
 
 // Services do projeto
-import { AuditService } from '../common/services/audit.service';
+import { EventProducerService } from '../eventos/core/event-producer.service';
+import { CorrelationIdService } from '../common/services/correlation-id.service';
 
 // Providers e DTOs
 import { EMAIL_PROVIDER_TOKEN, EmailProvider } from './providers/email-provider.interface';
@@ -38,11 +39,12 @@ export type TemplateName = keyof TemplateMap;
  * Responsabilidades:
  * - Delegar envio ao provider configurado
  * - Renderizar templates TypeScript puros
- * - Emitir eventos de auditoria (`email.sent`, `email.failed`) via AuditService
+ * - Emitir eventos canônicos (`email.sent`, `email.failed`) via EventProducerService
+ *   (substitui o antigo AuditService — F7 Bloco Q + ADR-V2-026)
  *
  * Ordem canônica (Pilar devari-backend-patterns §7):
- * - Enviar → SUCESSO → AuditService.log('email.sent', ...)
- * - Enviar → FALHA → AuditService.log('email.failed', ...) → relança exceção
+ * - Enviar → SUCESSO → eventProducer.addInternalEvent('email.sent', ...)
+ * - Enviar → FALHA → eventProducer.addInternalEvent('email.failed', ...) → relança exceção
  *
  * @example
  * ```typescript
@@ -67,7 +69,8 @@ export class EmailService {
   constructor(
     @Inject(EMAIL_PROVIDER_TOKEN)
     private readonly emailProvider: EmailProvider,
-    private readonly auditService: AuditService,
+    private readonly eventProducer: EventProducerService,
+    private readonly correlationIdService: CorrelationIdService,
   ) {}
 
   /**
@@ -92,6 +95,8 @@ export class EmailService {
    * ```
    */
   async send(dto: SendEmailDto, userId?: bigint): Promise<EmailResponseDto> {
+    const correlationId = this.correlationIdService.getOrGenerate();
+
     try {
       const result = await this.emailProvider.send({
         to: dto.to,
@@ -101,17 +106,19 @@ export class EmailService {
         from: dto.from,
       });
 
-      // Auditoria APÓS persistência (regra canônica)
-      await this.auditService.log(
+      // Auditoria APÓS persistência (regra canônica devari-backend-patterns §7)
+      // Tipo email.sent → idClasse=-489 AUDIT_GENERIC (ADR-V2-026)
+      await this.eventProducer.addInternalEvent(
         'email.sent',
-        BigInt(0),
         {
           to: dto.to,
           subject: dto.subject,
           provider: result.provider,
           messageId: result.id,
+          ...(userId !== undefined && { userId: userId.toString() }),
         },
-        userId,
+        correlationId,
+        { source: EmailService.name },
       );
 
       this.logger.log(`Email enviado: ${result.id} → ${dto.to} via ${result.provider}`);
@@ -122,16 +129,17 @@ export class EmailService {
         sentAt: new Date().toISOString(),
       };
     } catch (error) {
-      // Auditoria da falha
-      await this.auditService.log(
+      // Evento de falha — segue mesmo pipeline (CB + retry + audit)
+      await this.eventProducer.addInternalEvent(
         'email.failed',
-        BigInt(0),
         {
           to: dto.to,
           subject: dto.subject,
           error: error instanceof Error ? error.message : String(error),
+          ...(userId !== undefined && { userId: userId.toString() }),
         },
-        userId,
+        correlationId,
+        { source: EmailService.name },
       );
 
       this.logger.error(

@@ -2,21 +2,26 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { EmailService } from './email.service';
 import { EMAIL_PROVIDER_TOKEN, EmailProvider } from './providers/email-provider.interface';
-import { AuditService } from '../common/services/audit.service';
+import { EventProducerService } from '../eventos/core/event-producer.service';
+import { CorrelationIdService } from '../common/services/correlation-id.service';
 import { SendEmailDto } from './dto/send-email.dto';
 
 describe('EmailService', () => {
   let service: EmailService;
   let mockEmailProvider: jest.Mocked<EmailProvider>;
-  let mockAuditService: jest.Mocked<AuditService>;
+  let mockEventProducer: jest.Mocked<Pick<EventProducerService, 'addInternalEvent'>>;
+  let mockCorrelationIdService: jest.Mocked<Pick<CorrelationIdService, 'getOrGenerate'>>;
 
   beforeEach(async () => {
     mockEmailProvider = {
       send: jest.fn(),
     };
-    mockAuditService = {
-      log: jest.fn().mockResolvedValue(undefined),
-    } as unknown as jest.Mocked<AuditService>;
+    mockEventProducer = {
+      addInternalEvent: jest.fn().mockResolvedValue(undefined),
+    };
+    mockCorrelationIdService = {
+      getOrGenerate: jest.fn().mockReturnValue('test-correlation-id'),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -26,8 +31,12 @@ describe('EmailService', () => {
           useValue: mockEmailProvider,
         },
         {
-          provide: AuditService,
-          useValue: mockAuditService,
+          provide: EventProducerService,
+          useValue: mockEventProducer,
+        },
+        {
+          provide: CorrelationIdService,
+          useValue: mockCorrelationIdService,
         },
       ],
     }).compile();
@@ -52,16 +61,16 @@ describe('EmailService', () => {
       expect(result.id).toBe('msg-123');
       expect(result.provider).toBe('smtp');
       expect(result.sentAt).toBeDefined();
-      // Auditoria deve ser chamada após envio bem-sucedido
-      expect(mockAuditService.log).toHaveBeenCalledWith(
+      // Auditoria via EventProducerService deve ser chamada após envio bem-sucedido
+      expect(mockEventProducer.addInternalEvent).toHaveBeenCalledWith(
         'email.sent',
-        expect.any(BigInt),
         expect.objectContaining({ to: 'user@example.com', provider: 'smtp' }),
-        undefined,
+        'test-correlation-id',
+        expect.objectContaining({ source: 'EmailService' }),
       );
     });
 
-    it('deve logar email.failed e relançar exceção quando provider falha', async () => {
+    it('deve emitir email.failed e relançar exceção quando provider falha', async () => {
       const dto: SendEmailDto = {
         to: 'user@example.com',
         subject: 'Teste',
@@ -72,11 +81,11 @@ describe('EmailService', () => {
 
       await expect(service.send(dto)).rejects.toThrow('SMTP connection refused');
 
-      expect(mockAuditService.log).toHaveBeenCalledWith(
+      expect(mockEventProducer.addInternalEvent).toHaveBeenCalledWith(
         'email.failed',
-        expect.any(BigInt),
         expect.objectContaining({ error: 'SMTP connection refused' }),
-        undefined,
+        'test-correlation-id',
+        expect.objectContaining({ source: 'EmailService' }),
       );
     });
   });

@@ -2,13 +2,16 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenException } from '@nestjs/common';
 import { OrganizationsService } from './organizations.service';
 import { PrismaService } from '../prisma.service';
-import { AuditService } from '../common/services/audit.service';
+import { EventProducerService } from '../eventos/core/event-producer.service';
+import { CorrelationIdService } from '../common/services/correlation-id.service';
 
 /**
  * Testes unitários de OrganizationsService.
  *
- * Usa mocks de PrismaService e AuditService para testar a lógica
- * isolada da transação atômica e regras de negócio.
+ * Usa mocks de PrismaService + EventProducerService + CorrelationIdService
+ * para testar a lógica isolada da transação atômica e regras de negócio.
+ *
+ * F7 Bloco Q: AuditService DELETADO — substituído por EventProducerService.
  */
 describe('OrganizationsService', () => {
   let service: OrganizationsService;
@@ -38,7 +41,8 @@ describe('OrganizationsService', () => {
     };
     $transaction: jest.Mock;
   };
-  let auditService: { log: jest.Mock };
+  let eventProducer: { addInternalEvent: jest.Mock };
+  let correlationIdService: { getOrGenerate: jest.Mock };
 
   const mockOrg = {
     chave: BigInt(100),
@@ -85,13 +89,15 @@ describe('OrganizationsService', () => {
       $transaction: jest.fn(),
     };
 
-    auditService = { log: jest.fn().mockResolvedValue(undefined) };
+    eventProducer = { addInternalEvent: jest.fn().mockResolvedValue(undefined) };
+    correlationIdService = { getOrGenerate: jest.fn().mockReturnValue('test-corr-id') };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrganizationsService,
         { provide: PrismaService, useValue: prisma },
-        { provide: AuditService, useValue: auditService },
+        { provide: EventProducerService, useValue: eventProducer },
+        { provide: CorrelationIdService, useValue: correlationIdService },
       ],
     }).compile();
 
@@ -123,8 +129,13 @@ describe('OrganizationsService', () => {
     expect(result.id).toBe('100');
     expect(result.nome).toBe('Acme Corp');
 
-    // audit emitido APÓS commit
-    expect(auditService.log).toHaveBeenCalledWith('org.created', BigInt(100), expect.any(Object), BigInt(1));
+    // evento canônico emitido APÓS commit (substitui AuditService)
+    expect(eventProducer.addInternalEvent).toHaveBeenCalledWith(
+      'org.created',
+      expect.objectContaining({ orgId: '100', nome: 'Acme Corp' }),
+      'test-corr-id',
+      expect.objectContaining({ source: 'OrganizationsService' }),
+    );
   });
 
   /**
@@ -136,8 +147,8 @@ describe('OrganizationsService', () => {
 
     // Act & Assert
     await expect(service.create({ nome: 'Fail Corp' }, BigInt(1))).rejects.toThrow('DB connection lost');
-    // Audit NÃO deve ter sido chamado (falha antes do commit)
-    expect(auditService.log).not.toHaveBeenCalled();
+    // Evento NÃO deve ter sido emitido (falha antes do commit)
+    expect(eventProducer.addInternalEvent).not.toHaveBeenCalled();
   });
 
   /**

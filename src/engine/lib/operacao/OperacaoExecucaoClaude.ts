@@ -2,6 +2,8 @@ import { Decimal } from '@prisma/client/runtime/library';
 import OperacaoPedido from './OperacaoPedido';
 import { IExecucaoData } from '../interfaces/IExecucaoData';
 import { IOperacaoExecucaoClaudeConstruct } from '../interfaces/IOperacaoExecucaoClaudeConstruct';
+// type-only: Engine não depende em runtime de src/eventos/
+import type { IEventProducer } from '../../../eventos/interfaces/event-producer.interface';
 
 /**
  * OperacaoExecucaoClaude — Engine V2 que orquestra execução de Claude Code
@@ -54,8 +56,11 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   protected readonly agentTunnelService: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  protected readonly eventProducer: any;
+  /**
+   * Producer canônico (puro contrato `IEventProducer`).
+   * F7 Bloco Q: tipado (antes era `any` STUB).
+   */
+  protected readonly eventProducer: IEventProducer;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   protected readonly githubClient?: any;
 

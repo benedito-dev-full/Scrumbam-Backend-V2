@@ -175,14 +175,18 @@ function buildService(overrides: {
 
   const mockEntidade = buildMockEntidadeService();
   const mockClaude = buildMockClaudeRunner();
+  // F7 Bloco Q: ExecutionsService recebe EventProducerService real (4º parâmetro).
+  // Mock absorve silenciosamente — testes existentes não devem mudar comportamento.
+  const mockEventProducer = { addInternalEvent: jest.fn().mockResolvedValue(undefined) };
 
   const service = new ExecutionsService(
     mockPrisma as any,
     mockEntidade as any,
     mockClaude as any,
+    mockEventProducer as any,
   );
 
-  return { service, mockPrisma, mockEntidade, mockClaude };
+  return { service, mockPrisma, mockEntidade, mockClaude, mockEventProducer };
 }
 
 // ---- Testes ----

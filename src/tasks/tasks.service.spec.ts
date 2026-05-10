@@ -3,7 +3,8 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import { TasksIdentifierService } from './tasks-identifier.service';
 import { PrismaService } from '../prisma.service';
-import { AuditService } from '../common/services/audit.service';
+import { EventProducerService } from '../eventos/core/event-producer.service';
+import { CorrelationIdService } from '../common/services/correlation-id.service';
 import { validateTransition, validTransitions } from './tasks-state-machine';
 import { TaskStatus } from './schemas/task-dados.schema';
 
@@ -59,7 +60,7 @@ describe('TasksService', () => {
     $transaction: jest.Mock;
   };
   let identifierService: { getNextIdentifier: jest.Mock };
-  let auditService: { log: jest.Mock };
+  let eventProducer: { addInternalEvent: jest.Mock };
 
   beforeEach(async () => {
     const prismaMock = {
@@ -80,21 +81,24 @@ describe('TasksService', () => {
     };
 
     const identifierMock = { getNextIdentifier: jest.fn() };
-    const auditMock = { log: jest.fn().mockResolvedValue(undefined) };
+    const eventProducerMock = { addInternalEvent: jest.fn().mockResolvedValue(undefined) };
+    const correlationIdMock = { getOrGenerate: jest.fn().mockReturnValue('test-corr-id') };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TasksService,
         { provide: PrismaService, useValue: prismaMock },
         { provide: TasksIdentifierService, useValue: identifierMock },
-        { provide: AuditService, useValue: auditMock },
+        { provide: EventProducerService, useValue: eventProducerMock },
+        { provide: CorrelationIdService, useValue: correlationIdMock },
       ],
     }).compile();
 
     service = module.get<TasksService>(TasksService);
     prisma = module.get(PrismaService) as typeof prisma;
     identifierService = module.get(TasksIdentifierService) as typeof identifierService;
-    auditService = module.get(AuditService) as typeof auditService;
+    eventProducer = module.get(EventProducerService) as typeof eventProducer;
+    void eventProducer; // referenciado para silenciar warns sem strict
   });
 
   afterEach(() => {
@@ -325,7 +329,8 @@ describe('TasksService', () => {
           TasksService,
           { provide: PrismaService, useValue: prismaMock },
           { provide: TasksIdentifierService, useValue: identifierServiceMock },
-          { provide: AuditService, useValue: { log: jest.fn() } },
+          { provide: EventProducerService, useValue: { addInternalEvent: jest.fn() } },
+          { provide: CorrelationIdService, useValue: { getOrGenerate: jest.fn().mockReturnValue('cid') } },
         ],
       }).compile();
 

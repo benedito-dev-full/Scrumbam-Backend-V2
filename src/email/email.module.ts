@@ -1,10 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
-// Services do projeto
-import { PrismaService } from '../prisma.service';
-import { AuditService } from '../common/services/audit.service';
-
 // Providers
 import { SmtpProvider } from './providers/smtp.provider';
 import { SendgridProvider } from './providers/sendgrid.provider';
@@ -38,11 +34,14 @@ import { EmailService } from './email.service';
  * await emailService.sendTemplate('welcome', data, 'user@example.com');
  * ```
  */
+/*
+ * Nota: EmailModule não importa CommonModule nem EventosModule explicitamente.
+ * Ambos são `@Global()` — providers (PrismaService, CorrelationIdService,
+ * EventProducerService) ficam disponíveis para injeção via DI.
+ */
 @Module({
   imports: [ConfigModule],
   providers: [
-    PrismaService,
-    AuditService,
     SmtpProvider,
     SendgridProvider,
     ResendProvider,

@@ -287,6 +287,72 @@
 
 ---
 
+## F7 — Eventos Canônicos (DEvento + EventProducerService)
+
+### Task #1: Eventos Canônicos — Bloco M+Q+N.1 — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** eventos (core/consumers/monitoring/interfaces) + refactor email + organizations + projects + tasks + engine
+**Fase V2:** F7
+**Tempo Real:** Implementer + Reviewer concluído; Documenter em progresso
+**Completado em:** 2026-05-09
+**Quality Score:** 8.5/10 APPROVED
+
+**O Que Foi Feito:**
+
+- **Bloco M (Core de Eventos):**
+  - `EventProducerService`: único entry point para emissão, validação `type ∈ ALL_EVENT_TYPES_SET`, enriquecimento com metadata, roteamento via EventRouter, CircuitBreaker + IntelligentRetry
+  - `EventRouterService`: routing catch-all F7-Task#1 (só AuditLogConsumer), placeholders Task#2 (NotificationConsumer, WebhookConsumer)
+  - `CircuitBreakerService`: Half-Open pattern, 5 falhas em 60s → open, 30s timeout → half-open, 1 tentativa → decisão
+  - `IntelligentRetryService`: backoff exponencial 1/2/4/8/16s (5 tentativas), setTimeout em memória MVP, `@OnModuleDestroy` limpeza
+  - `event-types.ts`: ~25 tipos canônicos (task.*, project.*, org.*, entity.*, execution.*, email.*, user.*)
+  - Interfaces: `IEventProducer` (type-only), `IEvent<TPayload>`, `IEventConsumer`
+
+- **Bloco N.1 (AuditLogConsumer + Health):**
+  - `AuditLogConsumer`: único INSERT em `DEvento`, mapeia `type→idClasse` alinhado com seed F1 (-489 fallback, -496..-501 semânticos, ADR-V2-026/027)
+  - `TelemetryService`: emitted/succeeded/failed counters, pendingRetries gauge
+  - `EventHealthController`: `GET /events/health` (@Public) — status producer/router/circuitbreaker, métricas, pending retries
+
+- **Bloco Q (Refactor F4 + F6):**
+  - **AuditService DELETADO** (removido de `src/common/services/`)
+  - 5 services migrados para `EventProducerService.addInternalEvent()`: Email, Organizations, Projects, Tasks, Engine F6
+  - `OperacaoExecucaoClaude`: event emitido APÓS super.grava(), agora usa `IEventProducer` typed (era `any`)
+  - `ExecutionsService`: injeta `EventProducerService` real (não mais stub em testes)
+  - `src/common/common.module.ts`: criado @Global() exportando PrismaService, CorrelationIdService, TimezoneService
+
+- **Seed F1 atualizado (ADRs V2-026/027):**
+  - -489 AUDIT_GENERIC (fallback sem categoria semântica)
+  - -499 PROJECT_LIFECYCLE (renomeado de PROJECT_DELETED)
+  - -500 ORG_LIFECYCLE (renomeado de ORG_DELETED)
+  - Total: 131 DClasses (45 fixas + 86 específicas)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): RESPEITADO — zero Operacao em src/eventos/, apenas `import type` em engine (zero dependência runtime)
+- Pilar 2 (Endpoints): EventHealthController justificado (telemetria de infra, não duplicata de polimorfico)
+- Pilar 3 (Seed): ATIVADO — 131 DClasses, ADRs V2-026/027 aplicadas
+
+**Deliverables:**
+- [x] EventProducerService + EventRouterService + CircuitBreakerService + IntelligentRetryService (JSDoc 100%)
+- [x] AuditLogConsumer com mapping canônico type→idClasse
+- [x] EventHealthController @Public com métricas
+- [x] IEventProducer interface type-only (Engine isolado)
+- [x] 5 services migrados (Email, Organizations, Projects, Tasks, Engine F6)
+- [x] AuditService removido
+- [x] CommonModule @Global criado
+- [x] 292/292 testes PASS, build PASS, ZERO N+1
+
+**ADRs vinculados:** ADR-V2-005 (Engine isolado), ADR-V2-008 (DEvento substitui DNotification/DWebhook), ADR-V2-026 (AUDIT_GENERIC), ADR-V2-027 (LIFECYCLE)
+
+**Issues registrados (próximas tasks):**
+- H1 (próxima sprint): `src/auth/auth.service.ts` 4 calls `prisma.dEvento.create` diretas — migrar para EventProducerService + adicionar tipos AUTH_*
+- M1 (backlog F14): specs dedicadas para EventProducerService, CircuitBreakerService, IntelligentRetryService
+
+**Plan:** [`workspace/plans/plan-eventos-canonicos-f7-task1.md`](../workspace/plans/plan-eventos-canonicos-f7-task1.md)
+**Impl Notes:** [`workspace/implementations/impl-eventos-canonicos-f7-task1.md`](../workspace/implementations/impl-eventos-canonicos-f7-task1.md)
+**Review:** [`workspace/reviews/review-eventos-canonicos-f7-task1.md`](../workspace/reviews/review-eventos-canonicos-f7-task1.md)
+
+---
+
 ## F5 — Domínio Estrutural Scrumban (Organizations, Teams, Projects, Tasks) — ✅ COMPLETA
 
 ### Task #1: Domínio Estrutural Scrumban (Organizations + Teams + Projects + Tasks + Sprints + WorkflowStatuses) — ✅ COMPLETA

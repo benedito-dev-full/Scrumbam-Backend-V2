@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 
-import { PrismaService } from '../prisma.service';
 import { EntidadesModule } from '../entidades/entidades.module';
 
 import { ExecutionsController } from './executions.controller';
@@ -23,6 +22,9 @@ import { ExecutionThrottlerGuard } from './guards/execution-throttler.guard';
  * ThrottlerModule: 30 req/min por projectId (hash SHA-256).
  * ScheduleModule.forFeature(): cron @Cron do ApprovalFlowSweeperService.
  *
+ * F7 Bloco Q: ExecutionsService injeta EventProducerService real (sem stub).
+ * EventosModule é `@Global()` — providers disponíveis via DI sem import explícito.
+ *
  * @see ADR-V2-005 (OperacaoExecucaoClaude extends OperacaoPedido)
  * @see ADR-V2-006 (risk via idClasse -301/-302/-303)
  */
@@ -34,7 +36,6 @@ import { ExecutionThrottlerGuard } from './guards/execution-throttler.guard';
   ],
   controllers: [ExecutionsController],
   providers: [
-    PrismaService,
     ExecutionsService,
     ApprovalFlowService,
     ApprovalFlowSweeperService,

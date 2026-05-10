@@ -8,6 +8,7 @@ import {
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma.service';
 import { EntidadeService } from '../entidades/entidades.service';
+import { EventProducerService } from '../eventos/core/event-producer.service';
 import { ClaudeRunnerService } from './claude-runner.service';
 import { ExecuteCommandDto } from './dto/execute-command.dto';
 import {
@@ -49,6 +50,7 @@ export class ExecutionsService {
     private readonly prisma: PrismaService,
     private readonly entidadeService: EntidadeService,
     private readonly claudeRunnerService: ClaudeRunnerService,
+    private readonly eventProducer: EventProducerService,
   ) {}
 
   /**
@@ -140,18 +142,9 @@ export class ExecutionsService {
       },
       correlationId,
       agentTunnelService: this.claudeRunnerService,
-      eventProducer: {
-        // Stub F7 — EventProducerService real implementado em F7
-        addInternalEvent: async (
-          event: string,
-          data: unknown,
-          corrId: string,
-        ) => {
-          this.logger.debug(
-            `[${corrId}] STUB eventProducer: ${event} ${JSON.stringify(data)}`,
-          );
-        },
-      },
+      // F7 Bloco Q: EventProducerService real (decisão CEO #5)
+      // Engine recebe via interface IEventProducer (tipo) — sem dependência circular
+      eventProducer: this.eventProducer,
     });
 
     // 7. Workflow Engine
