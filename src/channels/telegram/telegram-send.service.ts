@@ -131,6 +131,22 @@ export class TelegramSendService {
     }
 
     // Logar apenas que foi bem-sucedido, sem token ou URL completa
-    this.logger.log(`Webhook Telegram registrado com sucesso em ${webhookUrl}`);
+    this.logger.log(
+      `Webhook Telegram registrado com sucesso em ${this.sanitizeLogValue(webhookUrl)}`,
+    );
+  }
+
+  /**
+   * Remove tokens Telegram de qualquer valor que seja registrado em log.
+   */
+  private sanitizeLogValue(value: string): string {
+    const token = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
+    let sanitized = value.replace(/bot[^/\s]+/g, 'bot<redacted>');
+
+    if (token) {
+      sanitized = sanitized.split(token).join('<redacted>');
+    }
+
+    return sanitized;
   }
 }

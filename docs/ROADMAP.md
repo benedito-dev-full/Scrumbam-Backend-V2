@@ -740,7 +740,7 @@
 
 ---
 
-## F10 - Channels (Telegram + Groq Whisper) — ✅ COMPLETA (Blocos A + B)
+## F10 - Channels (Telegram + Groq Whisper) — ✅ COMPLETA (Blocos A-D)
 
 ### Task #5: Channels Bloco C - Telegram Commands (create-task, tasks, status, pair) — ✅ COMPLETA
 
@@ -766,10 +766,10 @@
   * `createTaskFromText` intent registrado para mensagens de texto livre (sem barra)
   * Suporta resposta contextual por tipo: comando (text), intent (handlers injetados)
 
-- **Defeitos registrados para Bloco D (F10 Task #6):**
-  * `[DEBT-F10-C-01]` Extrair `resolveDefaultProjectId` para service compartilhado — lógica duplicada entre `CreateTaskHandler` e `CreateTaskFromTextIntent` (~15 linhas reusaveis)
-  * `[DEBT-F10-C-02]` Corrigir filtro de backlog em `/tasks` para incluir `READY` alem de `INBOX` — plano secao 9 especifica "INBOX + READY apenas" (query filtra errado hoje)
-  * `[DEBT-F10-C-03]` Corrigir `AccountLinkService.findByChat` para filtrar `chatId` no JSONB diretamente na query Prisma, sem verificacao em memoria — bug latente multi-tenant herdado dos Blocos A/B (refatorar para `raw` + `$raw` se necessario)
+- **Defeitos registrados para Bloco D (F10 Task #6) — resolvidos em 2026-05-10:**
+  * `[DEBT-F10-C-01]` `resolveDefaultProjectId` extraido para `UserProjectService`, removendo duplicacao entre handler e intent
+  * `[DEBT-F10-C-02]` `/tasks backlog` corrigido para incluir `INBOX + READY`
+  * `[DEBT-F10-C-03]` `AccountLinkService.findByChat` corrigido para filtrar `chatId` diretamente no JSONB via Prisma
 
 - **Tests:** 6 handlers + intents, todos PASS (contagem total F10 = 30 A + 32 B + 10 C = 72/72)
 
@@ -789,11 +789,37 @@
 - ✅ Bloco A (Core Channels): 30/30 tests
 - ✅ Bloco B (Telegram Webhook + Groq): 32/32 tests
 - ✅ Bloco C (Telegram Commands): 10/10 tests
-- **F10 COMPLETA (Blocos A-C): 72/72 testes**
+- ✅ Bloco D (Rate limit + observabilidade): implementado e validado no recorte F10
+- **F10 COMPLETA (Blocos A-D): recorte channels + UserProjectService validado com 16 suites / 130 tests**
 
 **Plan:** [`workspace/plans/plan-channels-bloco-c-f10-task5.md`](../workspace/plans/plan-channels-bloco-c-f10-task5.md)
 **Impl Notes:** [`workspace/implementations/impl-channels-bloco-c-f10-task5.md`](../workspace/implementations/impl-channels-bloco-c-f10-task5.md)
 **Review:** [`workspace/reviews/review-channels-bloco-c-f10-task5.md`](../workspace/reviews/review-channels-bloco-c-f10-task5.md)
+
+---
+
+### Task #6: Channels Bloco D - Rate Limit + Observabilidade — ✅ COMPLETA
+
+**Status:** Completo
+**Modulo V2:** channels
+**Fase V2:** F10
+**Completado em:** 2026-05-10
+
+**O Que Foi Feito:**
+
+- `TelegramRateLimitService`: Redis Lua atomico para `rate:telegram:{chatId}`, limite 30 mensagens/min/chat e fail-open controlado quando Redis estiver indisponivel
+- `TelegramMetricsService`: contadores em memoria/log para text, voice, command, intent e P95 de latencia de transcricao
+- `TelegramWebhookService`: rate limit aplicado antes de resolver usuario/processar mensagem; metricas ligadas ao `correlationId` baseado em `update_id`
+- `TelegramSendService`: sanitizacao de logs de webhook para mascarar `bot<TOKEN>`
+- Debts do Bloco C resolvidos: `UserProjectService`, backlog `INBOX+READY`, `findByChat` com filtro JSONB por `chatId`
+
+**Validacao:**
+- `npx.cmd tsc --noEmit` PASS
+- `npx.cmd jest src/channels src/projects/user-project.service.spec.ts --runInBand` PASS (16 suites / 130 tests)
+- `npm.cmd run build` PASS
+- `npx.cmd eslint src/channels src/projects/user-project.service.ts src/tasks --max-warnings=0` PASS
+
+**Impl Notes:** [`workspace/implementations/impl-channels-telegram-bloco-d-task-f10.md`](../workspace/implementations/impl-channels-telegram-bloco-d-task-f10.md)
 
 ---
 

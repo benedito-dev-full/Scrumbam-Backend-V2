@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { PrismaService } from '../../../prisma.service';
+import { UserProjectService } from '../../../projects/user-project.service';
 import {
   CommandHandler,
   CommandRegistryService,
@@ -7,47 +7,36 @@ import {
 import { TasksService } from '../../../tasks/tasks.service';
 
 /**
- * Handler do comando `/create <título>` do Telegram.
+ * Handler do comando `/create <titulo>` do Telegram.
  *
- * Cria uma nova task no projeto padrão do usuário via `TasksService.create`.
- * Não duplica lógica de negócio — delega inteiramente ao TasksService.
- *
- * DECISÃO DE PROJETO: `TasksService.create` exige `projectId`. Este handler
- * busca o projeto mais recente associado ao usuário (como assignee ou criador)
- * via DProject para determinar o projeto padrão. Se nenhum projeto encontrado,
- * orienta o usuário a criar um projeto no painel web primeiro.
- *
- * `userId` é `DEntidade.chave` — garantido pelo router antes de chegar aqui.
- *
- * @see TasksService — criação de task com identifier atômico DEV-N
- * @see PrismaService — busca do projeto padrão (1 query)
+ * Cria uma nova task no projeto padrao do usuario via `TasksService.create`.
+ * O projeto padrao vem de `UserProjectService`, que usa membership canonico
+ * de projeto em DVincula -171/-172/-173.
  */
 @Injectable()
 export class CreateTaskHandler implements OnModuleInit, CommandHandler {
   private readonly logger = new Logger(CreateTaskHandler.name);
 
-  /** Nome do comando sem barra — usado pelo `CommandRegistryService`. */
+  /** Nome do comando sem barra usado pelo CommandRegistryService. */
   readonly commandName = 'create';
 
   constructor(
     private readonly commandRegistry: CommandRegistryService,
     private readonly tasksService: TasksService,
-    private readonly prisma: PrismaService,
+    private readonly userProjectService: UserProjectService,
   ) {}
 
-  /** Autorregistra este handler no registry ao inicializar o módulo. */
   onModuleInit(): void {
     this.commandRegistry.register(this);
     this.logger.log('CreateTaskHandler registrado');
   }
 
   /**
-   * Cria uma nova task com o título fornecido no projeto padrão do usuário.
+   * Cria uma nova task com o titulo fornecido no projeto padrao do usuario.
    *
-   * @param chatId - ID do chat Telegram (BigInt)
-   * @param userId - DEntidade.chave do usuário (BigInt) — já resolvido pelo router
-   * @param args - args join forma o título da task
-   * @returns Confirmação de criação com identifier DEV-N ou mensagem de erro
+   * @param chatId - ID do chat Telegram
+   * @param userId - DEntidade.chave do usuario
+   * @param args - Argumentos que formam o titulo da task
    */
   async handle(chatId: bigint, userId: bigint, args: string[]): Promise<string> {
     this.logger.debug(`/create recebido de chatId=${chatId} userId=${userId}`);
@@ -56,23 +45,22 @@ export class CreateTaskHandler implements OnModuleInit, CommandHandler {
 
     if (!titulo || titulo.length < 3) {
       return (
-        `❌ *Título muito curto.*\n\n` +
-        `Uso: \`/create <título da tarefa>\`\n` +
-        `Exemplo: \`/create Revisar documentação da API\``
+        `âŒ *TÃ­tulo muito curto.*\n\n` +
+        `Uso: \`/create <tÃ­tulo da tarefa>\`\n` +
+        `Exemplo: \`/create Revisar documentaÃ§Ã£o da API\``
       );
     }
 
     if (titulo.length > 512) {
-      return `❌ Título muito longo (máximo: 512 caracteres). Encurte e tente novamente.`;
+      return `âŒ TÃ­tulo muito longo (mÃ¡ximo: 512 caracteres). Encurte e tente novamente.`;
     }
 
-    // Buscar o projeto mais recente onde o usuário é criador ou assignee
-    const projectId = await this.resolveDefaultProjectId(userId);
+    const projectId = await this.userProjectService.getDefaultProject(userId);
 
     if (!projectId) {
       return (
-        `❌ *Nenhum projeto encontrado.*\n\n` +
-        `Para criar tarefas via Telegram, você precisa ter um projeto no Scrumban.\n` +
+        `âŒ *Nenhum projeto encontrado.*\n\n` +
+        `Para criar tarefas via Telegram, vocÃª precisa ter um projeto no Scrumban.\n` +
         `Acesse o painel web para criar um projeto primeiro.`
       );
     }
@@ -95,57 +83,16 @@ export class CreateTaskHandler implements OnModuleInit, CommandHandler {
 
       const identifier = task.identifier ? `[${task.identifier}] ` : '';
       return (
-        `✅ *Tarefa criada!*\n\n` +
+        `âœ… *Tarefa criada!*\n\n` +
         `${identifier}${task.nome}\n` +
-        `Status: 📥 INBOX`
+        `Status: ðŸ“¥ INBOX`
       );
     } catch (error) {
       this.logger.error(
         `Erro ao criar task para userId=${userId}: ${(error as Error).message}`,
         (error as Error).stack,
       );
-      return `❌ Não foi possível criar a tarefa. Tente novamente em instantes.`;
+      return `âŒ NÃ£o foi possÃ­vel criar a tarefa. Tente novamente em instantes.`;
     }
-  }
-
-  // ─── Helpers privados ──────────────────────────────────────────────────────
-
-  /**
-   * Resolve o projeto padrão para o usuário buscando o mais recente
-   * associado à sua organização (`idEstab = userId` ou primeiro disponível).
-   *
-   * NOTA: DProject não tem campo `idCreator` no schema V2. Buscamos o
-   * projeto mais recente onde `idEstab` = DEntidade do usuário (org).
-   * Se não encontrado por idEstab, retornamos o projeto mais recente
-   * não excluído como fallback.
-   *
-   * 1 query — sem N+1.
-   *
-   * @param userId - DEntidade.chave do usuário
-   * @returns chave BigInt do projeto padrão, ou null se não encontrado
-   */
-  private async resolveDefaultProjectId(userId: bigint): Promise<bigint | null> {
-    // Primeiro: tentar projeto associado ao usuário via idEstab
-    const projectByEstab = await this.prisma.dProject.findFirst({
-      where: {
-        excluido: false,
-        idEstab: userId,
-      },
-      select: { chave: true },
-      orderBy: { chave: 'desc' },
-    });
-
-    if (projectByEstab) {
-      return projectByEstab.chave;
-    }
-
-    // Fallback: projeto mais recente não excluído (qualquer projeto disponível)
-    const project = await this.prisma.dProject.findFirst({
-      where: { excluido: false },
-      select: { chave: true },
-      orderBy: { chave: 'desc' },
-    });
-
-    return project?.chave ?? null;
   }
 }

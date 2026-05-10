@@ -1,13 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { CreateTaskHandler } from '../create-task.handler';
 import { CommandRegistryService } from '../../../core/command-registry.service';
+import { UserProjectService } from '../../../../projects/user-project.service';
 import { TasksService } from '../../../../tasks/tasks.service';
-import { PrismaService } from '../../../../prisma.service';
 
 const makeTaskResponse = () => ({
   id: '1',
   identifier: 'DEV-1',
-  nome: 'Revisar documentação',
+  nome: 'Revisar documentacao',
   status: 'INBOX',
   projectId: '10',
   descricao: null,
@@ -23,32 +23,23 @@ describe('CreateTaskHandler', () => {
   let handler: CreateTaskHandler;
   let commandRegistry: jest.Mocked<CommandRegistryService>;
   let tasksService: jest.Mocked<TasksService>;
-  let prisma: { dProject: { findFirst: jest.Mock } };
+  let userProjectService: jest.Mocked<Pick<UserProjectService, 'getDefaultProject'>>;
 
   const USER_ID = BigInt(100);
   const CHAT_ID = BigInt(123456789);
   const PROJECT_ID = BigInt(10);
 
   beforeEach(async () => {
-    prisma = {
-      dProject: { findFirst: jest.fn() },
+    userProjectService = {
+      getDefaultProject: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CreateTaskHandler,
-        {
-          provide: CommandRegistryService,
-          useValue: { register: jest.fn() },
-        },
-        {
-          provide: TasksService,
-          useValue: { create: jest.fn() },
-        },
-        {
-          provide: PrismaService,
-          useValue: prisma,
-        },
+        { provide: CommandRegistryService, useValue: { register: jest.fn() } },
+        { provide: TasksService, useValue: { create: jest.fn() } },
+        { provide: UserProjectService, useValue: userProjectService },
       ],
     }).compile();
 
@@ -71,39 +62,39 @@ describe('CreateTaskHandler', () => {
   });
 
   describe('handle()', () => {
-    it('deve retornar erro quando título não informado', async () => {
+    it('deve retornar erro quando titulo nao informado', async () => {
       const reply = await handler.handle(CHAT_ID, USER_ID, []);
-      expect(reply).toContain('Título muito curto');
+      expect(reply).toContain('muito curto');
     });
 
-    it('deve retornar erro quando título muito curto (< 3 chars)', async () => {
+    it('deve retornar erro quando titulo muito curto', async () => {
       const reply = await handler.handle(CHAT_ID, USER_ID, ['ab']);
-      expect(reply).toContain('Título muito curto');
+      expect(reply).toContain('muito curto');
     });
 
-    it('deve retornar erro quando título muito longo (> 512 chars)', async () => {
-      const titulo = 'a'.repeat(513);
-      const reply = await handler.handle(CHAT_ID, USER_ID, [titulo]);
+    it('deve retornar erro quando titulo muito longo', async () => {
+      const reply = await handler.handle(CHAT_ID, USER_ID, ['a'.repeat(513)]);
       expect(reply).toContain('muito longo');
     });
 
-    it('deve retornar orientação quando nenhum projeto encontrado', async () => {
-      prisma.dProject.findFirst.mockResolvedValue(null);
+    it('deve retornar orientacao quando nenhum projeto encontrado', async () => {
+      userProjectService.getDefaultProject.mockResolvedValue(null);
 
-      const reply = await handler.handle(CHAT_ID, USER_ID, ['Revisar documentação']);
+      const reply = await handler.handle(CHAT_ID, USER_ID, ['Revisar documentacao']);
 
       expect(reply).toContain('Nenhum projeto encontrado');
+      expect(tasksService.create).not.toHaveBeenCalled();
     });
 
-    it('deve criar task com sucesso e retornar confirmação', async () => {
-      prisma.dProject.findFirst.mockResolvedValue({ chave: PROJECT_ID });
+    it('deve criar task com sucesso e retornar confirmacao', async () => {
+      userProjectService.getDefaultProject.mockResolvedValue(PROJECT_ID);
       tasksService.create.mockResolvedValue(makeTaskResponse());
 
-      const reply = await handler.handle(CHAT_ID, USER_ID, ['Revisar documentação']);
+      const reply = await handler.handle(CHAT_ID, USER_ID, ['Revisar documentacao']);
 
       expect(tasksService.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          nome: 'Revisar documentação',
+          nome: 'Revisar documentacao',
           projectId: PROJECT_ID.toString(),
           source: 'telegram',
         }),
@@ -113,25 +104,24 @@ describe('CreateTaskHandler', () => {
       expect(reply).toContain('DEV-1');
     });
 
-    it('deve juntar múltiplos args como título completo', async () => {
-      prisma.dProject.findFirst.mockResolvedValue({ chave: PROJECT_ID });
+    it('deve juntar multiplos args como titulo completo', async () => {
+      userProjectService.getDefaultProject.mockResolvedValue(PROJECT_ID);
       tasksService.create.mockResolvedValue(makeTaskResponse());
 
-      await handler.handle(CHAT_ID, USER_ID, ['Revisar', 'a', 'documentação']);
+      await handler.handle(CHAT_ID, USER_ID, ['Revisar', 'a', 'documentacao']);
 
       expect(tasksService.create).toHaveBeenCalledWith(
-        expect.objectContaining({ nome: 'Revisar a documentação' }),
+        expect.objectContaining({ nome: 'Revisar a documentacao' }),
         USER_ID,
       );
     });
 
-    it('deve delegar ao TasksService sem duplicar lógica de negócio', async () => {
-      prisma.dProject.findFirst.mockResolvedValue({ chave: PROJECT_ID });
+    it('deve delegar ao TasksService sem duplicar logica de negocio', async () => {
+      userProjectService.getDefaultProject.mockResolvedValue(PROJECT_ID);
       tasksService.create.mockResolvedValue(makeTaskResponse());
 
       await handler.handle(CHAT_ID, USER_ID, ['Tarefa de teste']);
 
-      // Verifica que create foi chamado exatamente uma vez com os dados corretos
       expect(tasksService.create).toHaveBeenCalledTimes(1);
       const [dto, creatorId] = tasksService.create.mock.calls[0];
       expect(dto.source).toBe('telegram');
@@ -139,28 +129,22 @@ describe('CreateTaskHandler', () => {
       expect(creatorId).toBe(USER_ID);
     });
 
-    it('deve retornar erro amigável quando TasksService falha', async () => {
-      prisma.dProject.findFirst.mockResolvedValue({ chave: PROJECT_ID });
+    it('deve retornar erro amigavel quando TasksService falha', async () => {
+      userProjectService.getDefaultProject.mockResolvedValue(PROJECT_ID);
       tasksService.create.mockRejectedValue(new Error('Falha no banco'));
 
       const reply = await handler.handle(CHAT_ID, USER_ID, ['Tarefa com erro']);
 
-      expect(reply).toContain('Não foi possível criar');
+      expect(reply).toContain('criar a tarefa');
     });
 
-    it('deve buscar projeto associado ao usuário (idEstab = userId)', async () => {
-      prisma.dProject.findFirst.mockResolvedValue({ chave: PROJECT_ID });
+    it('deve buscar projeto padrao via UserProjectService', async () => {
+      userProjectService.getDefaultProject.mockResolvedValue(PROJECT_ID);
       tasksService.create.mockResolvedValue(makeTaskResponse());
 
       await handler.handle(CHAT_ID, USER_ID, ['Test task']);
 
-      // Primeira chamada busca por idEstab
-      expect(prisma.dProject.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ idEstab: USER_ID }),
-          orderBy: { chave: 'desc' },
-        }),
-      );
+      expect(userProjectService.getDefaultProject).toHaveBeenCalledWith(USER_ID);
     });
   });
 });

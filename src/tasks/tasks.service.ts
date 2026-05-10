@@ -178,20 +178,27 @@ export class TasksService {
     // Construir filtro where
     const where: Prisma.DTaskWhereInput = {
       excluido: false,
-      ...(query.projectId ? { idProject: BigInt(query.projectId) } : {}),
+      ...(query.projectId
+        ? { idProject: BigInt(query.projectId) }
+        : query.projectIds?.length
+          ? { idProject: { in: query.projectIds.map((projectId) => BigInt(projectId)) } }
+          : {}),
       ...(query.assigneeId ? { idAssignee: BigInt(query.assigneeId) } : {}),
       ...(query.sprintId ? { idSprint: BigInt(query.sprintId) } : {}),
       ...(query.cursor ? { chave: { lt: BigInt(query.cursor) } } : {}),
     };
 
     // Filtro por status: buscar idStatus das DTabelas correspondentes
-    if (query.status) {
-      const statusClass = STATUS_TO_TABELA_CLASSE[query.status];
-      if (statusClass) {
+    const statuses = query.statuses?.length ? query.statuses : query.status ? [query.status] : [];
+    if (statuses.length > 0) {
+      const statusClasses = statuses
+        .map((status) => STATUS_TO_TABELA_CLASSE[status])
+        .filter((statusClass): statusClass is bigint => statusClass !== undefined);
+      if (statusClasses.length > 0) {
         // Buscar todas as DTabelas deste status (podem ser de múltiplos projetos)
         const statusTabelas = await this.prisma.dTabela.findMany({
           where: {
-            idClasse: statusClass,
+            idClasse: { in: statusClasses },
             excluido: false,
             ...(query.projectId ? { dEntidadeId: BigInt(query.projectId) } : {}),
           },

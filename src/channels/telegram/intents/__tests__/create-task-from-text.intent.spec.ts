@@ -1,10 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { CreateTaskFromTextIntent } from '../create-task-from-text.intent';
+import { InboundMessage } from '../../../core/channel-adapter.interface';
 import { MessageRouterService } from '../../../core/message-router.service';
+import { UserProjectService } from '../../../../projects/user-project.service';
 import { TasksService } from '../../../../tasks/tasks.service';
 import { TelegramSendService } from '../../telegram-send.service';
-import { PrismaService } from '../../../../prisma.service';
-import { InboundMessage } from '../../../core/channel-adapter.interface';
 
 const makeTaskResponse = () => ({
   id: '1',
@@ -37,36 +37,24 @@ describe('CreateTaskFromTextIntent', () => {
   let messageRouterService: jest.Mocked<Pick<MessageRouterService, 'registerIntentHandler'>>;
   let tasksService: jest.Mocked<Pick<TasksService, 'create'>>;
   let telegramSend: jest.Mocked<Pick<TelegramSendService, 'sendMessage'>>;
-  let prisma: { dProject: { findFirst: jest.Mock } };
+  let userProjectService: jest.Mocked<Pick<UserProjectService, 'getDefaultProject'>>;
 
   const USER_ID = BigInt(100);
   const CHAT_ID = BigInt(123456789);
   const PROJECT_ID = BigInt(10);
 
   beforeEach(async () => {
-    prisma = {
-      dProject: { findFirst: jest.fn() },
+    userProjectService = {
+      getDefaultProject: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CreateTaskFromTextIntent,
-        {
-          provide: MessageRouterService,
-          useValue: { registerIntentHandler: jest.fn() },
-        },
-        {
-          provide: TasksService,
-          useValue: { create: jest.fn() },
-        },
-        {
-          provide: TelegramSendService,
-          useValue: { sendMessage: jest.fn().mockResolvedValue(undefined) },
-        },
-        {
-          provide: PrismaService,
-          useValue: prisma,
-        },
+        { provide: MessageRouterService, useValue: { registerIntentHandler: jest.fn() } },
+        { provide: TasksService, useValue: { create: jest.fn() } },
+        { provide: TelegramSendService, useValue: { sendMessage: jest.fn().mockResolvedValue(undefined) } },
+        { provide: UserProjectService, useValue: userProjectService },
       ],
     }).compile();
 
@@ -90,43 +78,30 @@ describe('CreateTaskFromTextIntent', () => {
   });
 
   describe('canHandle()', () => {
-    it('deve retornar true para mensagem do tipo "text" com texto', () => {
-      const message = makeMessage('text', 'Criar nova feature de login');
-      expect(intent.canHandle(message)).toBe(true);
+    it('deve retornar true para mensagem do tipo text com texto', () => {
+      expect(intent.canHandle(makeMessage('text', 'Criar nova feature de login'))).toBe(true);
     });
 
-    it('deve retornar false para mensagem do tipo "command"', () => {
-      const message = makeMessage('command');
-      expect(intent.canHandle(message)).toBe(false);
+    it('deve retornar false para mensagem do tipo command', () => {
+      expect(intent.canHandle(makeMessage('command'))).toBe(false);
     });
 
-    it('deve retornar false para mensagem do tipo "voice"', () => {
-      const message = makeMessage('voice');
-      expect(intent.canHandle(message)).toBe(false);
+    it('deve retornar false para mensagem do tipo voice', () => {
+      expect(intent.canHandle(makeMessage('voice'))).toBe(false);
     });
 
-    it('deve retornar false para text sem texto (undefined)', () => {
-      const message = makeMessage('text', undefined);
-      expect(intent.canHandle(message)).toBe(false);
-    });
-
-    it('deve retornar false para text vazio ""', () => {
-      const message: InboundMessage = {
-        chatId: CHAT_ID,
-        type: 'text',
-        text: '',
-      };
-      expect(intent.canHandle(message)).toBe(false);
+    it('deve retornar false para text sem texto', () => {
+      expect(intent.canHandle(makeMessage('text', undefined))).toBe(false);
+      expect(intent.canHandle({ chatId: CHAT_ID, type: 'text', text: '' })).toBe(false);
     });
   });
 
   describe('handle()', () => {
-    it('deve criar task com sucesso e enviar confirmação', async () => {
-      prisma.dProject.findFirst.mockResolvedValue({ chave: PROJECT_ID });
+    it('deve criar task com sucesso e enviar confirmacao', async () => {
+      userProjectService.getDefaultProject.mockResolvedValue(PROJECT_ID);
       (tasksService.create as jest.Mock).mockResolvedValue(makeTaskResponse());
 
-      const message = makeMessage('text', 'Criar nova feature de login');
-      await intent.handle(CHAT_ID, USER_ID, message);
+      await intent.handle(CHAT_ID, USER_ID, makeMessage('text', 'Criar nova feature de login'));
 
       expect(tasksService.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -142,9 +117,8 @@ describe('CreateTaskFromTextIntent', () => {
       );
     });
 
-    it('deve enviar erro para texto muito curto (< 3 chars)', async () => {
-      const message = makeMessage('text', 'ab');
-      await intent.handle(CHAT_ID, USER_ID, message);
+    it('deve enviar erro para texto muito curto', async () => {
+      await intent.handle(CHAT_ID, USER_ID, makeMessage('text', 'ab'));
 
       expect(tasksService.create).not.toHaveBeenCalled();
       expect(telegramSend.sendMessage).toHaveBeenCalledWith(
@@ -153,9 +127,8 @@ describe('CreateTaskFromTextIntent', () => {
       );
     });
 
-    it('deve enviar erro para texto muito longo (> 512 chars)', async () => {
-      const message = makeMessage('text', 'a'.repeat(513));
-      await intent.handle(CHAT_ID, USER_ID, message);
+    it('deve enviar erro para texto muito longo', async () => {
+      await intent.handle(CHAT_ID, USER_ID, makeMessage('text', 'a'.repeat(513)));
 
       expect(tasksService.create).not.toHaveBeenCalled();
       expect(telegramSend.sendMessage).toHaveBeenCalledWith(
@@ -164,11 +137,10 @@ describe('CreateTaskFromTextIntent', () => {
       );
     });
 
-    it('deve enviar instrução quando nenhum projeto encontrado', async () => {
-      prisma.dProject.findFirst.mockResolvedValue(null);
+    it('deve enviar instrucao quando nenhum projeto encontrado', async () => {
+      userProjectService.getDefaultProject.mockResolvedValue(null);
 
-      const message = makeMessage('text', 'Criar nova feature');
-      await intent.handle(CHAT_ID, USER_ID, message);
+      await intent.handle(CHAT_ID, USER_ID, makeMessage('text', 'Criar nova feature'));
 
       expect(tasksService.create).not.toHaveBeenCalled();
       expect(telegramSend.sendMessage).toHaveBeenCalledWith(
@@ -177,14 +149,12 @@ describe('CreateTaskFromTextIntent', () => {
       );
     });
 
-    it('deve delegar ao TasksService sem duplicar lógica de negócio', async () => {
-      prisma.dProject.findFirst.mockResolvedValue({ chave: PROJECT_ID });
+    it('deve delegar ao TasksService sem duplicar logica de negocio', async () => {
+      userProjectService.getDefaultProject.mockResolvedValue(PROJECT_ID);
       (tasksService.create as jest.Mock).mockResolvedValue(makeTaskResponse());
 
-      const message = makeMessage('text', 'Task via texto');
-      await intent.handle(CHAT_ID, USER_ID, message);
+      await intent.handle(CHAT_ID, USER_ID, makeMessage('text', 'Task via texto'));
 
-      // create chamado exatamente uma vez com source=telegram
       expect(tasksService.create).toHaveBeenCalledTimes(1);
       const [dto, creatorId] = (tasksService.create as jest.Mock).mock.calls[0];
       expect(dto.source).toBe('telegram');
@@ -192,25 +162,23 @@ describe('CreateTaskFromTextIntent', () => {
       expect(creatorId).toBe(USER_ID);
     });
 
-    it('deve enviar erro amigável quando TasksService falha', async () => {
-      prisma.dProject.findFirst.mockResolvedValue({ chave: PROJECT_ID });
+    it('deve enviar erro amigavel quando TasksService falha', async () => {
+      userProjectService.getDefaultProject.mockResolvedValue(PROJECT_ID);
       (tasksService.create as jest.Mock).mockRejectedValue(new Error('DB offline'));
 
-      const message = makeMessage('text', 'Task com falha');
-      await intent.handle(CHAT_ID, USER_ID, message);
+      await intent.handle(CHAT_ID, USER_ID, makeMessage('text', 'Task com falha'));
 
       expect(telegramSend.sendMessage).toHaveBeenCalledWith(
         CHAT_ID,
-        expect.stringContaining('Não foi possível'),
+        expect.stringContaining('criar a tarefa'),
       );
     });
 
-    it('deve incluir identifier DEV-N na confirmação', async () => {
-      prisma.dProject.findFirst.mockResolvedValue({ chave: PROJECT_ID });
+    it('deve incluir identifier DEV-N na confirmacao', async () => {
+      userProjectService.getDefaultProject.mockResolvedValue(PROJECT_ID);
       (tasksService.create as jest.Mock).mockResolvedValue(makeTaskResponse());
 
-      const message = makeMessage('text', 'Task com identifier');
-      await intent.handle(CHAT_ID, USER_ID, message);
+      await intent.handle(CHAT_ID, USER_ID, makeMessage('text', 'Task com identifier'));
 
       expect(telegramSend.sendMessage).toHaveBeenCalledWith(
         CHAT_ID,

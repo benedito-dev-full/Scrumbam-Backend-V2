@@ -1,0 +1,28 @@
+export const MCP_KEY_CLASS_ID = BigInt(-472);
+
+export const MCP_CALL_EVENT_CLASS_ID = BigInt(-495);
+
+export const MCP_KEY_CACHE_TTL_SECONDS = 30;
+
+export const MCP_RATE_LIMIT_WINDOW_SECONDS = 60;
+
+export const MCP_RATE_LIMIT_MAX_REQUESTS = 60;
+
+export const MCP_PROTOCOL_VERSION = '2024-11-05';
+
+export const MCP_SERVER_NAME = 'scrumban-mcp';
+
+export const MCP_SERVER_VERSION = '1.0.0';
+
+export const MCP_JSON_RPC_VERSION = '2.0';
+
+export const MCP_ERROR_CODES = {
+  PARSE_ERROR: -32700,
+  INVALID_REQUEST: -32600,
+  METHOD_NOT_FOUND: -32601,
+  INVALID_PARAMS: -32602,
+  RATE_LIMIT_EXCEEDED: -32000,
+  UNAUTHORIZED: -32001,
+  FORBIDDEN: -32002,
+  REQUEST_TIMEOUT: -32003,
+} as const;

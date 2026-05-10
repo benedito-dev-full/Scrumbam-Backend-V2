@@ -9,6 +9,8 @@ import { AccountLinkService } from '../core/account-link.service';
 import { MessageRouterService } from '../core/message-router.service';
 import { TelegramSendService } from './telegram-send.service';
 import { TelegramFileDownloadService } from './telegram-file-download.service';
+import { TelegramMetricsService } from './telegram-metrics.service';
+import { TelegramRateLimitService } from './telegram-rate-limit.service';
 import { GroqWhisperService } from '../../integrations/groq/groq-whisper.service';
 import { EventProducerService } from '../../eventos/core/event-producer.service';
 import { TelegramUpdateDto } from './dto/telegram-update.dto';
@@ -64,6 +66,8 @@ export class TelegramWebhookService implements OnModuleInit {
     private readonly messageRouterService: MessageRouterService,
     private readonly telegramSendService: TelegramSendService,
     private readonly fileDownloadService: TelegramFileDownloadService,
+    private readonly metricsService: TelegramMetricsService,
+    private readonly rateLimitService: TelegramRateLimitService,
     private readonly groqWhisperService: GroqWhisperService,
     private readonly eventProducer: EventProducerService,
   ) {}
@@ -141,6 +145,11 @@ export class TelegramWebhookService implements OnModuleInit {
       // Passo 3: Extrair chatId como BigInt (NUNCA parseInt/Number)
       const chatId = BigInt(message.chat.id);
 
+      const rateLimit = await this.rateLimitService.check(chatId, correlationId);
+      if (!rateLimit.allowed) {
+        return;
+      }
+
       // Passo 4: Resolver userId
       const userId = await this.accountLinkService.findByChat('telegram', chatId);
 
@@ -155,6 +164,7 @@ export class TelegramWebhookService implements OnModuleInit {
 
       // Passo 6/7: Processar por tipo
       if (message.voice) {
+        this.metricsService.recordEvent('voice', correlationId);
         await this.handleVoice(
           chatId,
           userId,
@@ -163,6 +173,11 @@ export class TelegramWebhookService implements OnModuleInit {
           correlationId,
         );
       } else if (message.text) {
+        this.metricsService.recordEvent('text', correlationId);
+        this.metricsService.recordEvent(
+          message.text.trim().startsWith('/') ? 'command' : 'intent',
+          correlationId,
+        );
         await this.handleText(
           chatId,
           userId,
@@ -277,6 +292,7 @@ export class TelegramWebhookService implements OnModuleInit {
     mimeType: string | undefined,
     correlationId: string,
   ): Promise<void> {
+    const startedAt = Date.now();
     let transcription: string | null = null;
     let transcriptError: string | null = null;
 
@@ -302,6 +318,8 @@ export class TelegramWebhookService implements OnModuleInit {
         );
       }
     }
+
+    this.metricsService.recordTranscriptionLatency(Date.now() - startedAt, correlationId);
 
     // Passo 3: Gravar DEvento SEMPRE (mesmo com falha)
     await this.prisma.dEvento.create({

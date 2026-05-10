@@ -32,6 +32,19 @@ export class ListTasksQueryDto {
   @IsEnum(['INBOX', 'READY', 'EXECUTING', 'DONE', 'FAILED', 'CANCELLED', 'DISCARDED', 'VALIDATING', 'VALIDATED'])
   status?: string;
 
+  /**
+   * Filtro interno para callers de service que precisam buscar mais de um status.
+   * O controller HTTP continua expondo `status` como contrato publico simples.
+   */
+  statuses?: string[];
+
+  /**
+   * Filtro interno para callers de service que precisam limitar a listagem a
+   * varios projetos ja autorizados. O controller HTTP continua expondo apenas
+   * `projectId` como contrato publico simples.
+   */
+  projectIds?: string[];
+
   @ApiPropertyOptional({ description: 'Filtrar por assignee (chave DEntidade)', example: '100' })
   @IsOptional()
   @IsString()

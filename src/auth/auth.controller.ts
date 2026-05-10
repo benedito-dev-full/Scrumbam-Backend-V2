@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  GoneException,
   HttpCode,
   HttpStatus,
   Patch,
@@ -18,7 +19,6 @@ import {
 } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { ApiKeyService } from './services/api-key.service';
-import { McpKeyService } from './services/mcp-key.service';
 import { AuthCompositeGuard } from './guards/auth-composite.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { Public } from './decorators/public.decorator';
@@ -29,7 +29,6 @@ import { RefreshDto } from './dto/refresh.dto';
 import { AuthResponseDto, UserProfileDto } from './dto/auth-response.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { ApiKeyResponseDto } from './dto/api-key-response.dto';
-import { McpKeyResponseDto } from './dto/mcp-key-response.dto';
 
 /**
  * Controller de autenticação e gestão de perfil.
@@ -49,7 +48,6 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly apiKeyService: ApiKeyService,
-    private readonly mcpKeyService: McpKeyService,
   ) {}
 
   /**
@@ -258,9 +256,9 @@ export class AuthController {
     summary: 'Gera MCP Key (plaintext retornado uma vez)',
     description: 'Hash duplicado em DUserGroup.dados.mcpKeyHash para latência mínima (ADR-V2-004).',
   })
-  @ApiResponse({ status: 201, description: 'MCP Key criada', type: McpKeyResponseDto })
-  async createMcpKey(@CurrentUser() user: JwtPayload): Promise<McpKeyResponseDto> {
-    return this.mcpKeyService.generate(BigInt(user.entidadeId), BigInt(user.sub));
+  @ApiResponse({ status: 410, description: 'Use POST /mcp/keys' })
+  async createMcpKey(@CurrentUser() _user: JwtPayload): Promise<never> {
+    throw new GoneException('Use POST /mcp/keys');
   }
 
   /**
@@ -272,10 +270,10 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Retorna MCP Key ativa (sem hash)' })
-  @ApiResponse({ status: 200, description: 'MCP Key ativa', type: McpKeyResponseDto })
-  @ApiResponse({ status: 404, description: 'MCP Key não encontrada' })
-  async getMcpKey(@CurrentUser() user: JwtPayload): Promise<McpKeyResponseDto | null> {
-    return this.mcpKeyService.getByUser(BigInt(user.entidadeId));
+  @ApiResponse({ status: 410, description: 'Use GET /mcp/keys' })
+  @ApiResponse({ status: 410, description: 'Endpoint legado removido' })
+  async getMcpKey(@CurrentUser() _user: JwtPayload): Promise<never> {
+    throw new GoneException('Use GET /mcp/keys');
   }
 
   /**
@@ -286,9 +284,9 @@ export class AuthController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Revoga MCP Key do usuário' })
-  @ApiResponse({ status: 204, description: 'MCP Key revogada' })
-  async revokeMcpKey(@CurrentUser() user: JwtPayload): Promise<void> {
-    return this.mcpKeyService.revoke(BigInt(user.entidadeId), BigInt(user.sub));
+  @ApiResponse({ status: 410, description: 'Use DELETE /mcp/keys/:id' })
+  async revokeMcpKey(@CurrentUser() _user: JwtPayload): Promise<never> {
+    throw new GoneException('Use DELETE /mcp/keys/:id');
   }
 
   // ─── Helper privado ─────────────────────────────────────────────────────

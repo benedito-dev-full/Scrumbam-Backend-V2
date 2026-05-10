@@ -40,6 +40,13 @@ import { PeriodResolver } from './helpers/period-resolver';
     CfdService,
     DashboardService,
   ],
-  exports: [ThroughputService, WipAgeService],
+  exports: [
+    CycleTimeService,
+    LeadTimeService,
+    ThroughputService,
+    WipAgeService,
+    CfdService,
+    DashboardService,
+  ],
 })
 export class FlowMetricsModule {}

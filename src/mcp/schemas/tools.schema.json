@@ -1,0 +1,119 @@
+{
+  "tools": [
+    {
+      "name": "list_tasks",
+      "description": "Lista tasks do usuario com filtros opcionais de projeto, status e assignee.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "ID do projeto (opcional)"
+          },
+          "status": {
+            "type": "string",
+            "description": "Codigo do status V3 (ex: INBOX, EXECUTING)"
+          },
+          "assigneeId": {
+            "type": "string",
+            "description": "ID do assignee (opcional)"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 20
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Cursor de paginacao"
+          }
+        }
+      }
+    },
+    {
+      "name": "create_task",
+      "description": "Cria uma task no projeto informado.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["projectId", "titulo"],
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "titulo": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "descricao": {
+            "type": "string",
+            "maxLength": 5000
+          },
+          "assigneeId": {
+            "type": "string"
+          },
+          "sprintId": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "update_status",
+      "description": "Atualiza o status V3 de uma task.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["taskId", "statusCode"],
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "statusCode": {
+            "type": "string",
+            "description": "Codigo V3: INBOX|READY|EXECUTING|DONE|FAILED|CANCELLED|DISCARDED|VALIDATING|VALIDATED"
+          }
+        }
+      }
+    },
+    {
+      "name": "list_projects",
+      "description": "Lista projetos acessiveis ao usuario.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 20
+          },
+          "cursor": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "list_sprints",
+      "description": "Lista sprints de um projeto.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["projectId"],
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 20
+          },
+          "cursor": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ]
+}

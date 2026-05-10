@@ -5,6 +5,8 @@ import { AccountLinkService } from '../../core/account-link.service';
 import { MessageRouterService } from '../../core/message-router.service';
 import { TelegramSendService } from '../telegram-send.service';
 import { TelegramFileDownloadService } from '../telegram-file-download.service';
+import { TelegramMetricsService } from '../telegram-metrics.service';
+import { TelegramRateLimitService } from '../telegram-rate-limit.service';
 import { GroqWhisperService } from '../../../integrations/groq/groq-whisper.service';
 import { EventProducerService } from '../../../eventos/core/event-producer.service';
 import { PrismaService } from '../../../prisma.service';
@@ -24,6 +26,8 @@ describe('TelegramWebhookService', () => {
   let mockMessageRouterService: jest.Mocked<Pick<MessageRouterService, 'handleInbound'>>;
   let mockTelegramSendService: jest.Mocked<Pick<TelegramSendService, 'sendMessage' | 'setWebhook'>>;
   let mockFileDownloadService: jest.Mocked<Pick<TelegramFileDownloadService, 'download'>>;
+  let mockMetricsService: jest.Mocked<Pick<TelegramMetricsService, 'recordEvent' | 'recordTranscriptionLatency'>>;
+  let mockRateLimitService: jest.Mocked<Pick<TelegramRateLimitService, 'check'>>;
   let mockGroqWhisperService: jest.Mocked<Pick<GroqWhisperService, 'transcribe'>>;
   let mockEventProducer: jest.Mocked<Pick<EventProducerService, 'addInternalEvent'>>;
   let mockConfigService: jest.Mocked<Pick<ConfigService, 'get'>>;
@@ -78,6 +82,15 @@ describe('TelegramWebhookService', () => {
       download: jest.fn().mockResolvedValue(Buffer.from('fake-audio-data')),
     };
 
+    mockMetricsService = {
+      recordEvent: jest.fn(),
+      recordTranscriptionLatency: jest.fn(),
+    };
+
+    mockRateLimitService = {
+      check: jest.fn().mockResolvedValue({ allowed: true, count: 1, ttlSeconds: 60 }),
+    };
+
     mockGroqWhisperService = {
       transcribe: jest.fn().mockResolvedValue('Texto transcrito do áudio'),
     };
@@ -105,6 +118,8 @@ describe('TelegramWebhookService', () => {
         { provide: MessageRouterService, useValue: mockMessageRouterService },
         { provide: TelegramSendService, useValue: mockTelegramSendService },
         { provide: TelegramFileDownloadService, useValue: mockFileDownloadService },
+        { provide: TelegramMetricsService, useValue: mockMetricsService },
+        { provide: TelegramRateLimitService, useValue: mockRateLimitService },
         { provide: GroqWhisperService, useValue: mockGroqWhisperService },
         { provide: EventProducerService, useValue: mockEventProducer },
         { provide: ConfigService, useValue: mockConfigService },
@@ -172,6 +187,19 @@ describe('TelegramWebhookService', () => {
         UPDATE_ID.toString(),
         expect.any(Object),
       );
+      expect(mockRateLimitService.check).toHaveBeenCalledWith(CHAT_ID, UPDATE_ID.toString());
+      expect(mockMetricsService.recordEvent).toHaveBeenCalledWith('text', UPDATE_ID.toString());
+      expect(mockMetricsService.recordEvent).toHaveBeenCalledWith('intent', UPDATE_ID.toString());
+    });
+
+    it('deve bloquear processamento quando rate limit estoura', async () => {
+      mockRateLimitService.check.mockResolvedValue({ allowed: false, count: 31, ttlSeconds: 45 });
+
+      const update = buildUpdate();
+      await service.handleUpdate(update);
+
+      expect(mockAccountLinkService.findByChat).not.toHaveBeenCalled();
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     });
 
     it('deve processar mensagem de voz para usuário pareado', async () => {
@@ -190,6 +218,7 @@ describe('TelegramWebhookService', () => {
       expect(mockFileDownloadService.download).toHaveBeenCalledWith('voice-file-id');
       expect(mockGroqWhisperService.transcribe).toHaveBeenCalled();
       expect(mockPrisma.dEvento.create).toHaveBeenCalled();
+      expect(mockMetricsService.recordEvent).toHaveBeenCalledWith('voice', UPDATE_ID.toString());
     });
   });
 
@@ -261,6 +290,10 @@ describe('TelegramWebhookService', () => {
             idEntidade: USER_ID,
           }),
         }),
+      );
+      expect(mockMetricsService.recordTranscriptionLatency).toHaveBeenCalledWith(
+        expect.any(Number),
+        'corr-1',
       );
     });
 

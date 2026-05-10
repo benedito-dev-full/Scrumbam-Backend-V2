@@ -14,15 +14,25 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F10 Task#6: Channels Bloco D - Rate Limit + Observabilidade** (V2 F10) - 2026-05-10
+  - **Rate limit Telegram:** `TelegramRateLimitService` com Redis Lua atomico por `rate:telegram:{chatId}`, limite 30 mensagens/min/chat e fail-open controlado
+  - **Observabilidade:** `TelegramMetricsService` com contadores text/voice/command/intent e P95 de latencia de transcricao
+  - **Webhook:** `TelegramWebhookService` aplica rate limit antes de resolver usuario/processar mensagem e registra metricas por `correlationId`
+  - **Seguranca de logs:** `TelegramSendService` mascara `bot<TOKEN>` em logs de webhook
+  - **Debts resolvidos:** [DEBT-F10-C-01] `UserProjectService`, [DEBT-F10-C-02] backlog `INBOX+READY`, [DEBT-F10-C-03] `findByChat` com filtro JSONB por `chatId`
+  - **Tests/Build/Lint:** `tsc --noEmit` PASS; jest recorte channels + UserProjectService PASS (16 suites / 130 tests); build PASS; eslint PASS
+  - **Pilares:** P1 N/A (channels infra, zero Engine); P2 reutiliza services existentes; P3 respeitado (zero migration/seed/DClasse nova)
+  - **F10 Completa (Blocos A-D)**
+
 - **F10 Task#5: Channels Bloco C - Telegram Commands (create-task, tasks, status, pair)** (V2 F10) - 2026-05-10
   - **6 command handlers com JSDoc 100%:** StartHandler, PairHandler, TasksHandler, StatusHandler, CreateTaskHandler, CreateTaskFromTextIntent
   - **Intent parsing:** MessageRouterService resolve comandos via `/` e intents sem barra automaticamente
   - **Reutilizacao:** TasksService.findMany + TasksService.create (zero duplicacao logica negocio)
   - **Period resolver:** TasksHandler filtra today/week/backlog com TimezoneService (Brasil timezone)
-  - **3 debts registrados para Bloco D:** [DEBT-F10-C-01] extrair `resolveDefaultProjectId`, [DEBT-F10-C-02] corrigir filtro backlog (READY), [DEBT-F10-C-03] corrigir findByChat JSONB
+  - **3 debts registrados e resolvidos no Bloco D:** [DEBT-F10-C-01] extrair `resolveDefaultProjectId`, [DEBT-F10-C-02] corrigir filtro backlog (READY), [DEBT-F10-C-03] corrigir findByChat JSONB
   - **Tests:** 6 handlers + intents, todos PASS
   - **Pilares:** P2 justificado (handlers decoram TasksService); P3 respeitado (zero DClasse nova)
-  - **F10 Completa (Blocos A-C):** 30/30 + 32/32 + 10/10 = 72/72 testes PASS
+  - **F10 Blocos A-C:** 30/30 + 32/32 + 10/10 = 72/72 testes PASS
   - **Review:** APPROVED 8.5/10
 
 - **F10 Task#5: Channels Bloco B - Telegram Webhook + Groq Whisper** (V2 F10) - 2026-05-10

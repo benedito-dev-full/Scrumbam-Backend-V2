@@ -21,5 +21,6 @@ import { PeriodResolver } from '../flow-metrics/helpers/period-resolver';
   imports: [AuthModule, FlowMetricsModule],
   controllers: [ForecastController],
   providers: [ForecastService, PeriodResolver],
+  exports: [ForecastService],
 })
 export class ForecastModule {}

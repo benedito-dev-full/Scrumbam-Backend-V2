@@ -69,7 +69,7 @@ export class TasksHandler implements OnModuleInit, CommandHandler {
         assigneeId: userId.toString(),
         // Para backlog: filtrar apenas estados ativos (INBOX + READY)
         // Para today/week: sem filtro de status — filtro de data é feito em memória abaixo
-        ...(period === 'backlog' ? { status: 'INBOX' } : {}),
+        ...(period === 'backlog' ? { statuses: ['INBOX', 'READY'] } : {}),
         limit: 100,
       });
 

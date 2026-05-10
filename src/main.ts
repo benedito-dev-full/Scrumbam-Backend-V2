@@ -2,10 +2,13 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { SanitizingLogger } from './mcp/logging/sanitizing-logger.service';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, {
-    logger: ['error', 'warn', 'log', 'debug', 'verbose'],
+    logger: new SanitizingLogger(undefined, {
+      logLevels: ['error', 'warn', 'log', 'debug', 'verbose'],
+    }),
   });
 
   const apiPrefix = process.env.API_PREFIX || 'api/v1';
@@ -36,7 +39,7 @@ async function bootstrap(): Promise<void> {
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup(`${apiPrefix}/docs`, app, document);
 
-  const port = parseInt(process.env.PORT || '3000', 10);
+  const port = process.env.PORT || '3000';
   await app.listen(port);
 
   const logger = new Logger('Bootstrap');

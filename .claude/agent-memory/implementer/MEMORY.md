@@ -1,12 +1,16 @@
 # Implementer Agent Memory — Scrumban-Backend-V2
 
-**Versão:** 1.7 (F8 Task#2 — Search — 2026-05-10)
+**Versão:** 2.1 (F10 Bloco C — Telegram Commands — 2026-05-10)
 **Última atualização:** 2026-05-10
 
 **Notas por fase:**
 - F7 Eventos Canônicos: ver `f7-eventos-canonicos.md` (CommonModule Global, EventProducer pattern, Engine isolation via type-only import).
 - F8 Flow Metrics + Forecast: ver gotchas abaixo (ThroughputService $queryRaw, CFD sem idProject, WipAgeService OnModuleInit).
 - F8 Task#2 Search: queryPeople via DVincula (NÃO idEstab). Ver gotchas abaixo.
+- F9 Bloco X Reports PDF: gotchas abaixo (pdfkit import, Promise.allSettled, cache payload vs buffer).
+- F10 Bloco A Core Channels: gotchas abaixo (DVincula.metaDados vs DTabela.dados, busca de token por hash).
+- F10 Bloco B Telegram Webhook: gotchas abaixo (ioredis SET NX sintaxe, fetch nativo multipart, @types/supertest ausente).
+- F10 Bloco C Telegram Commands: gotchas abaixo (DProject sem idCreator, filtro de data em memória, var TS6133 em specs).
 
 ---
 
@@ -152,6 +156,57 @@ Operacao (abstract)
 - **Forecast: WipAgeService não é necessário no ForecastService** — contagem de tasks restantes via `prisma.dTask.count` direto (sem injetar WipAgeService).
 - **Monte Carlo Mulberry32** — seed via closure funciona: `let s = seed >>> 0`. Para seeds negativos ou undefined: usar `Math.random` puro (não quebra).
 - **Coverage dos controllers** — controllers têm 0% coverage sem testes e2e. Não bloqueia DoD desta task. Testar via request HTTP em integração é responsabilidade de F14.
+
+### Codepaths F9 Bloco X (ReportsModule)
+- `src/reports/reports.module.ts` — imports: AuthModule, DashboardsModule, AnalyticsModule, ForecastModule
+- `src/reports/reports.controller.ts` — GET /reports/projects/:projectId/pdf + res.end(buffer)
+- `src/reports/reports.service.ts` — assembleReportData via Promise.allSettled + TtlCacheService 5min
+- `src/reports/pdf-generator.service.ts` — PDFKit 8 seções, sem Prisma, sem Engine
+- `src/reports/dto/report-query.dto.ts` — periodDays (1-180), periodFrom, periodTo, includeTasks, includeStakeholderSummary
+- `src/reports/dto/project-report-data.dto.ts` — payload completo com warnings[]
+
+### Codepaths F10 Bloco A (ChannelsModule — Core)
+- `src/channels/channels.module.ts` — importa EntidadesModule, AuthModule, TasksModule; exporta 4 services; `onModuleInit` verifica CHANNELS_ENABLED
+- `src/channels/pairing.controller.ts` — POST /channels/pairing/generate + /link; JwtAuthGuard; converte DUserGroup→DEntidade antes de chamar PairingService
+- `src/channels/core/channel-adapter.interface.ts` — ChannelAdapter + InboundMessage (interfaces puras)
+- `src/channels/core/pairing.service.ts` — generate() + consume() com $transaction
+- `src/channels/core/account-link.service.ts` — findByChat() com query única via metaDados JSONB
+- `src/channels/core/message-router.service.ts` — handleInbound() + registerIntentHandler() + IntentHandler interface
+- `src/channels/core/command-registry.service.ts` — CommandHandler interface + register() + resolve()
+
+### Gotchas F10 Bloco A (Core Channels)
+- **DVincula usa `metaDados` (não `dados`)** — DTabela tem AMBOS (`dados` e `metaDados`); DVincula tem APENAS `metaDados`. Verificar schema.prisma antes de usar campo polimórfico em DVincula. Erro TS2353 sinaliza campo errado.
+- **Busca de token por hash usa `findMany` + filter em memória** — não `$queryRaw` — para evitar SQL raw com JSONB path. Seguro porque o conjunto de tokens ativos é pequeno (TTL curto).
+- **`chatId` do Telegram é Int64** — SEMPRE `BigInt(chatId)` no ponto de entrada. Nunca `parseInt` ou `Number`.
+- **CHANNELS_ENABLED — módulo inerte, não ausente** — quando `!== 'true'`, loga warn mas NÃO lança. Permite que testes importem o módulo sem env var.
+- **Mocks de $transaction** — passar callback `(fn) => fn(txMock)`. txMock deve incluir TODOS os models usados dentro da tx (dTabela, dVincula). Se faltar um model no mock, o teste trava.
+- **Teste de "fail-safe" gera ERROR no logger** — esperado. O teste verifica que erros de handler são capturados sem propagar. O logger.error aparece no output do Jest mas o teste PASSA.
+
+### Gotchas F10 Bloco B (Telegram Webhook)
+- **ioredis SET NX sintaxe** — usar `redis.set(key, '1', 'PX', ttlMs, 'NX')` (PX antes de NX). A assinatura `set(key, value, 'NX', 'PX', ttl)` gera TS2769 no ioredis v5.
+- **fetch nativo Node 18+ para multipart** — Construir multipart/form-data manualmente via `Buffer.concat` sem dependência de `form-data`. Projeto usa Node 18+ com fetch global.
+- **`@types/supertest` não instalado** — Testes de controller usam TestingModule direto (sem HTTP stack real). Instalar em F14 para testes e2e. Evitar import de supertest em specs existentes.
+- **TelegramModule declara AccountLinkService como provider próprio** — Para evitar dependência circular com ChannelsModule (que importa TelegramModule), TelegramModule inclui AccountLinkService, MessageRouterService e CommandRegistryService em seus providers. NestJS cria instâncias separadas (correto).
+- **handleText usa $transaction; handleVoice não** — handleText afeta DEvento + DVincula (multi-tabela → $transaction). handleVoice afeta apenas DEvento (tabela única → create direto). Esta distinção é intencional.
+- **event-types.ts requer adição manual de novos tipos** — EventProducerService lança BadRequestException se o tipo não estiver em ALL_EVENT_TYPES_SET. Adicionar SEMPRE em event-types.ts antes de emitir novo tipo. F10 Bloco B adicionou TELEGRAM_MESSAGE_RECEIVED e TELEGRAM_VOICE_RECEIVED.
+- **isDuplicate retorna false em modo degradado** — Se Redis indisponível, permite processamento (fail-open para deduplicação). Aceitável pois Telegram tem retry limitado. Não lança exceção.
+- **TelegramWebhookService.onModuleInit inicializa Redis** — Redis deve ser inicializado apenas se CHANNELS_ENABLED=true. Testes precisam mockar `initRedis` para evitar conexão real.
+
+### Gotchas F10 Bloco C (Telegram Commands)
+- **DProject não tem `idCreator`** — Schema de DProject (F5) tem apenas `idClasse`, `idEstab`, `nome`, `descricao`, `dados`. NÃO tem `idCreator`. Para resolver projeto padrão do usuário, buscar por `idEstab = userId` e fallback para projeto mais recente não excluído.
+- **`TasksService.findMany` sem filtro de data** — `ListTasksQueryDto` não tem `dateFrom`/`dateTo`. Para handlers que precisam de filtro por período (today/week), buscar com `limit: 100` e filtrar em memória via `TimezoneService.getPeriodDates`. Aceitável pois volume via Telegram é pequeno.
+- **`PairingService` deve ser provido no TelegramModule** — `PairHandler` precisa de `PairingService`. Padrão: adicionar ao array `providers` do TelegramModule (mesma abordagem de AccountLinkService, MessageRouterService etc. do Bloco B).
+- **Variável não usada em spec gera TS6133** — TypeScript strict rejeita `let service: Type` sem uso em spec, mesmo com `_` prefix. Remover a declaração se não for usada nas asserções.
+- **`canHandle` para text livre** — verificar `message.type === 'text' && typeof message.text === 'string' && message.text.length > 0`. Checar `typeof` evita falso positivo com `undefined`.
+- **Status de erros em testes são logs esperados** — `logger.error` aparece no output do Jest quando testamos o path de erro. O teste PASSA; o log é comportamento correto do error handling.
+
+### Gotchas F9 Bloco X (Reports PDF)
+- **PDFKit import** — `const PDFDocument: new (options?) => PDFKit.PDFDocument = require('pdfkit')` é o único padrão que compila. `import * as PDFDocument from 'pdfkit'` → TS2351 (not constructable). `import PDFDocument from 'pdfkit'` sem esModuleInterop falha. Usar require com tipagem explícita.
+- **Promise.allSettled vs Promise.all** — usar allSettled para relatórios: ForecastService lança BadRequestException quando histórico insuficiente (comportamento esperado). allSettled captura e converte em warning; allSettled permite relatório parcial.
+- **Cache de payload, não de Buffer** — cachear ProjectReportDataDto (não o Buffer PDF). Buffer é gerado em <500ms; cachear Buffer consumiria mais RAM e impediria personalização futura.
+- **res.end(buffer) para PDF binário** — usar Response Express diretamente em vez de StreamableFile do NestJS. StreamableFile não permite setar Content-Disposition facilmente. Anotar parâmetro com @Res() e chamar res.setHeader() + res.end().
+- **AnalyticsService exportado via AnalyticsModule** — importar AnalyticsModule no ReportsModule (não apenas AnalyticsService diretamente). AnalyticsModule exporta AnalyticsService e reexporta DashboardsModule.
+- **DashboardsModule exporta DashboardsService** — importar DashboardsModule no ReportsModule garante acesso a DashboardsService sem reimportar FlowMetricsModule separadamente.
 
 ### Módulos V2 (lista oficial — usar exatamente esses scope names)
 

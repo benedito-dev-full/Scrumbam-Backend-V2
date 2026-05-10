@@ -35,6 +35,13 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { FlowMetricsModule } from './flow-metrics/flow-metrics.module';
 import { ForecastModule } from './forecast/forecast.module';
 import { SearchModule } from './search/search.module';
+import { DashboardsModule } from './dashboards/dashboards.module';
+import { AnalyticsModule } from './analytics/analytics.module';
+import { ReportsModule } from './reports/reports.module';
+
+// F10 — Channels (Telegram + Groq Whisper) — Bloco A: Core Channels
+import { ChannelsModule } from './channels/channels.module';
+import { McpModule } from './mcp/mcp.module';
 
 /**
  * AppModule raiz do Scrumban-Backend-V2.
@@ -101,7 +108,16 @@ import { SearchModule } from './search/search.module';
     FlowMetricsModule,
     ForecastModule,
     SearchModule,
-    // Modules canônicos das fases F9-F13 restantes serão importados aqui.
+    // F9 Bloco V - Dashboards read-only + cache TTL
+    DashboardsModule,
+    // F9 Bloco W - Analytics read-only
+    AnalyticsModule,
+    // F9 Bloco X - Reports PDF read-only
+    ReportsModule,
+    // F10 Bloco A — Core Channels (pairing, routing, command registry)
+    ChannelsModule,
+    McpModule,
+    // Modules canônicos das fases F11-F13 restantes serão importados aqui.
   ],
   providers: [
     // LoggingInterceptor global — loga method, path, statusCode, durationMs, correlationId

@@ -5,6 +5,7 @@ import { ProjectsService } from './projects.service';
 import { ProjectActivityService } from './project-activity.service';
 import { ProjectMembersService } from './project-members.service';
 import { SeedBootstrapService } from './seed-bootstrap.service';
+import { UserProjectService } from './user-project.service';
 
 /**
  * ProjectsModule — Domínio de projetos (DProject) V2.
@@ -31,7 +32,8 @@ import { SeedBootstrapService } from './seed-bootstrap.service';
     ProjectActivityService,
     ProjectMembersService,
     SeedBootstrapService,
+    UserProjectService,
   ],
-  exports: [ProjectsService, ProjectMembersService],
+  exports: [ProjectsService, ProjectMembersService, UserProjectService],
 })
 export class ProjectsModule {}

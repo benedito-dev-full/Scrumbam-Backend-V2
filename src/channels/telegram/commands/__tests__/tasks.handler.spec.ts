@@ -85,7 +85,7 @@ describe('TasksHandler', () => {
       const reply = await handler.handle(CHAT_ID, USER_ID, []);
 
       expect(tasksService.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ assigneeId: USER_ID.toString(), status: 'INBOX' }),
+        expect.objectContaining({ assigneeId: USER_ID.toString(), statuses: ['INBOX', 'READY'] }),
       );
       expect(reply).toContain('backlog');
       expect(reply).toContain('DEV-1');

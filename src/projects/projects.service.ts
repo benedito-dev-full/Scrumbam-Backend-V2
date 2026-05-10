@@ -208,6 +208,29 @@ export class ProjectsService {
   }
 
   /**
+   * Lista todos os IDs de projetos acessiveis ao usuario.
+   *
+   * Uso interno para callers que precisam aplicar escopo de projeto antes de
+   * consultar outro agregado canonico, como tools MCP de tasks.
+   *
+   * @param userEntidadeId - Chave BigInt da DEntidade do usuario
+   * @returns IDs de projetos acessiveis, serializados como string
+   */
+  async findAccessibleProjectIds(userEntidadeId: bigint): Promise<string[]> {
+    const vinculos = await this.prisma.dVincula.findMany({
+      where: {
+        idEntidade: userEntidadeId,
+        idClasse: { in: PROJECT_ROLE_CLASSES },
+        excluido: false,
+      },
+      select: { idLocEscritu: true },
+      orderBy: { idLocEscritu: 'desc' },
+    });
+
+    return [...new Set(vinculos.map((vinculo) => vinculo.idLocEscritu.toString()))];
+  }
+
+  /**
    * Busca projeto por ID, verificando membership do usuário.
    *
    * @param id - Chave BigInt do projeto (string)
