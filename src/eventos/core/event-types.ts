@@ -70,6 +70,10 @@ export const EVENT_TYPES = {
   MCP_CALL: 'mcp.call',
   TELEGRAM_MESSAGE_IN: 'telegram.message.in',
   TELEGRAM_MESSAGE_OUT: 'telegram.message.out',
+
+  // ============== TELEGRAM (F10 Bloco B) ==============
+  TELEGRAM_MESSAGE_RECEIVED: 'telegram.message.received',
+  TELEGRAM_VOICE_RECEIVED: 'telegram.voice.received',
 } as const;
 
 /**

@@ -14,6 +14,19 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F10 Task#5: Channels Bloco B - Telegram Webhook + Groq Whisper** (V2 F10) - 2026-05-10
+  - **TelegramSecretGuard:** crypto.timingSafeEqual (OWASP ASVS 2.9.2), fail-closed, zero token leak
+  - **POST /webhooks/telegram:** @HttpCode(200) + setImmediate (resposta não-bloqueante)
+  - **handleText:** prisma.$transaction (DEvento -493 + DVincula -483 lastSeenAt)
+  - **handleVoice:** DEvento -494 gravado mesmo com falha Groq; error em metaDados
+  - **Deduplicação update_id:** Redis SET NX PX 3600000 (1h TTL)
+  - **TelegramSendService:** sendMessage + setWebhook (onModuleInit, idempotente)
+  - **TelegramFileDownloadService:** download AbortController timeout 10s
+  - **GroqWhisperService:** transcribe multipart/form-data, ServiceUnavailableException sem key
+  - **Evento emitido APÓS commit:** Padrão #7 V2 verificado (callOrder)
+  - **Tests:** 32/32 PASS (unit + integration)
+  - **Review:** APPROVED 8.8/10
+
 - **F10 Task#4: Channels Bloco A - Core Channels** (V2 F10) - 2026-05-10
   - **ChannelAdapter interface:** `send()`, `parseInbound()`, `verifySignature()` + `InboundMessage` type contrato genérico para múltiplos canais
   - **PairingService:** `generate()` (CSPRNG 32-byte + SHA-256 hash) com UPSERT em DTabela -474 (PAIRING_TOKENS); `consume()` com $transaction one-shot (lookup + mark used + create DVincula)

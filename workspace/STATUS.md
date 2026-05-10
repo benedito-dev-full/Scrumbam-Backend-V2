@@ -11,6 +11,58 @@
 
 ---
 
+## Task #5 - F10 Channels Bloco B - COMPLETE (V2 Fase F10)
+
+**Module:** channels
+**Task:** Channels / Bloco B - Telegram Webhook + Groq Whisper (setWebhook, POST /webhooks/telegram, handleVoice graceful)
+**Status:** COMPLETA - Score 8.8/10 APPROVED
+**Duration:** Implementer + Reviewer + Documenter em 2026-05-10
+**Quality Score:** 8.8/10
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | - | Plano F10 Bloco B com escopo fechado para Telegram |
+| Implementer | ~4h | 32/32 tests PASS, crypto.timingSafeEqual (OWASP ASVS 2.9.2), zero N+1 |
+| Reviewer | - | Score 8.8/10, APPROVED, zero critical/medium |
+| Documenter | - | JSDoc, CHANGELOG, STATUS atualizados, commit Conventional |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A - channels são infraestrutura, zero `new Operacao*`, zero escrita transacional (só DEvento via EventProducerService).
+- Pilar 2 (Endpoints): Controller proprio justificado por integração Telegram webhook; reutiliza /eventos para auditoria.
+- Pilar 3 (Seed): RESPEITADO - zero migration, zero seed, zero DClasse nova; usa DEvento -493/-494 (TELEGRAM_MESSAGE_RECEIVED/TELEGRAM_VOICE_RECEIVED).
+
+**Deliverables:**
+- [x] `TelegramSecretGuard`: crypto.timingSafeEqual (OWASP ASVS 2.9.2 constant-time comparison), fail-closed (403 sem token/token inválido)
+- [x] `TelegramWebhookController`: POST /webhooks/telegram com @HttpCode(200) + setImmediate (resposta não-bloqueante)
+- [x] `TelegramWebhookService`: handleUpdate → handleText ($transaction DEvento-493 + DVincula-483 lastSeenAt) + handleVoice (DEvento-494 sempre, error em metaDados se Groq falhar)
+- [x] Deduplicação `update_id`: Redis SET NX PX 3600000 (1h TTL)
+- [x] `TelegramSendService`: sendMessage + setWebhook (onModuleInit, idempotente, retry exponencial)
+- [x] `TelegramFileDownloadService`: download com AbortController timeout 10s
+- [x] `GroqWhisperService`: transcribe multipart/form-data, ServiceUnavailableException sem API key
+- [x] DTOs com validações: `TelegramUpdateDto`, `TelegramMessageDto`
+- [x] Evento emitido APÓS commit (Padrão #7 V2 — callOrder verificado)
+- [x] 32/32 testes PASS (unit + integration)
+
+**Metrics:**
+- Build: PASS (`npm run build`)
+- TypeScript: PASS (`npx tsc --noEmit`)
+- ESLint: PASS (`npx eslint src/channels/`)
+- Tests: PASS (`npx jest src/channels/telegram src/integrations/groq --runInBand`) - 32/32
+- N+1 Queries: ZERO (handleText 1 evento insert + 1 vincula upsert em $transaction; handleVoice 1 evento insert)
+- Queries/request: POST /webhooks/telegram = 2 transactionais (dedup + evento + vincula) + 1 Groq API call
+- BigInt: 100% serializado em responses
+- Security: timingSafeEqual válida token em tempo constant, fail-closed, nenhum leak de TELEGRAM_BOT_TOKEN
+
+**ADRs:** ADR-V2-010 (Channels como módulo opcional)
+
+**Plan:** [`workspace/plans/plan-channels-bloco-b-f10-task5.md`](plans/plan-channels-bloco-b-f10-task5.md)
+**Impl Notes:** [`workspace/implementations/impl-channels-bloco-b-f10-task5.md`](implementations/impl-channels-bloco-b-f10-task5.md)
+**Review:** [`workspace/reviews/review-channels-bloco-b-f10-task5.md`](reviews/review-channels-bloco-b-f10-task5.md)
+
+---
+
 ## Task #4 - F10 Channels Bloco A - COMPLETE (V2 Fase F10)
 
 **Module:** channels

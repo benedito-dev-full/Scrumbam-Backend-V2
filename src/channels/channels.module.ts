@@ -8,6 +8,7 @@ import { AccountLinkService } from './core/account-link.service';
 import { MessageRouterService } from './core/message-router.service';
 import { CommandRegistryService } from './core/command-registry.service';
 import { PairingController } from './pairing.controller';
+import { TelegramModule } from './telegram/telegram.module';
 
 /**
  * ChannelsModule — Camada base de canais do Scrumban-Backend-V2 (F10 Bloco A).
@@ -35,6 +36,8 @@ import { PairingController } from './pairing.controller';
     EntidadesModule,
     AuthModule,
     TasksModule,
+    // F10 Bloco B — Telegram Webhook (guard + voz + Groq)
+    TelegramModule,
   ],
   controllers: [PairingController],
   providers: [
