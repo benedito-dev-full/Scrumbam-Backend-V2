@@ -1,6 +1,6 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Última atualização:** Auto-gerado por hooks
+**Ultima atualizacao:** 2026-05-10
 
 ---
 
@@ -8,6 +8,164 @@
 
 (Conclusões dos agents serão registradas abaixo automaticamente)
 
+
+---
+
+## Task #3 - F9 Reports PDF - COMPLETE (V2 Fase F9)
+
+**Module:** reports
+**Task:** Reports PDF / Bloco X - relatórios com 8 seções via PDFKit
+**Status:** COMPLETA - Score 8.8/10 APPROVED
+**Duration:** Implementer + Reviewer + Documenter em 2026-05-10
+**Quality Score:** 8.8/10
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | - | Plano F9 Task #3 com escopo fechado para Bloco X |
+| Implementer | ~2h | 28/28 tests PASS, 97.4% coverage em PdfGeneratorService, zero side effects |
+| Reviewer | - | Score 8.8/10, APPROVED, zero critical/medium |
+| Documenter | - | ROADMAP, CHANGELOG, STATUS e doc de fechamento F9 atualizados |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A - read-only puro; zero `new Operacao*`, zero EventProducer, zero escrita.
+- Pilar 2 (Endpoints): Controller proprio justificado por report generation com 8 seções customizáveis.
+- Pilar 3 (Seed): N/A - zero migration, zero seed, zero DClasse nova.
+
+**Deliverables:**
+- [x] `ReportsModule` registrado no `AppModule`.
+- [x] `GET /reports/projects/:projectId/pdf` com response `application/pdf`.
+- [x] `PdfGeneratorService` com 8 seções: header, resumo executivo, flow metrics, velocity, burndown, tasks-by-user, forecast, riscos.
+- [x] Cache TTL 5min via `TtlCacheService`.
+- [x] Graceful degradation via `Promise.allSettled` (forecast/analytics failures → warnings no payload).
+- [x] Tenant isolation explícita (403 org divergente).
+- [x] Dependências: `pdfkit`, `@types/pdfkit`.
+- [x] 28 testes unitários (28/28 PASS).
+
+**Metrics:**
+- Build: PASS (`npm run build`)
+- TypeScript: PASS (`npx tsc --noEmit`)
+- ESLint: PASS (`npx eslint src/reports/`)
+- Tests: PASS (`npx jest src/reports --runInBand`) - 28/28
+- Coverage: `pdf-generator.service.ts` 97.4% statements, 100% functions, 100% lines.
+- N+1 Queries: ZERO (report uses aggregated metrics + single project fetch)
+- Validacao F9: PASS (`npx.cmd jest src/dashboards src/analytics src/reports --runInBand`) - 58/58 testes.
+
+**F9 Status:**
+- ✅ Bloco V (Dashboards): 15/15 tests PASS
+- ✅ Bloco W (Analytics): 15/15 tests PASS
+- ✅ Bloco X (Reports PDF): 28/28 tests PASS
+- **F9 COMPLETA: 58/58 testes**
+
+**Issues menores:**
+- Edge case `projectId` inválido sem spec dedicado.
+- PDF buffer size não documentado para volumes altos de tarefas.
+
+**Plan:** [`workspace/plans/plan-reports-pdf-f9-task3.md`](plans/plan-reports-pdf-f9-task3.md)
+**Impl Notes:** [`workspace/implementations/impl-reports-pdf-f9-task3.md`](implementations/impl-reports-pdf-f9-task3.md)
+**Review:** [`workspace/reviews/review-reports-pdf-f9-task3.md`](reviews/review-reports-pdf-f9-task3.md)
+
+
+---
+
+## Task #2 - F8 Search - COMPLETE (V2 Fase F8)
+
+**Module:** search
+**Task:** Search / Bloco U - busca cross-entity read-only
+**Status:** COMPLETA - Score 8.8/10 APPROVED
+**Duration:** Implementer + Reviewer + Documenter em 2026-05-10
+**Quality Score:** 8.8/10
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | - | Plano F8 Task #2 com escopo fechado para Search |
+| Implementer | ~2h | 15/15 tests PASS, 97.61% coverage em service, zero side effects |
+| Reviewer | - | Score 8.8/10, APPROVED, sem critical/medium |
+| Documenter | - | ROADMAP, CHANGELOG, STATUS e doc de fechamento F8 atualizados |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A - read-only puro; zero `new Operacao*`, zero EventProducer, zero escrita.
+- Pilar 2 (Endpoints): Controller proprio justificado por busca em 3 tabelas e resposta categorizada.
+- Pilar 3 (Seed): N/A - zero migration, zero seed, zero DClasse nova.
+
+**Deliverables:**
+- [x] `SearchModule` registrado no `AppModule`.
+- [x] `GET /search` com `{ tasks, projects, people, cursors, meta }`.
+- [x] Busca em DTask, DProject e DEntidade.
+- [x] Tenant isolation por `project.idEstab`, `DProject.idEstab` e `DVincula`.
+- [x] Cursors independentes por tipo: `taskCursor`, `projectCursor`, `peopleCursor`.
+- [x] Limites por categoria 50%/30%/20%.
+- [x] 4 queries/request, sem N+1.
+
+**Metrics:**
+- Build: PASS (`npm run build`)
+- TypeScript: PASS (`npx tsc --noEmit`)
+- ESLint: PASS (`npx eslint src/search/`)
+- Tests: PASS (`npx jest src/search --runInBand`) - 15/15
+- Coverage: `search.service.ts` 97.61% statements, 100% functions, 100% lines.
+- Validacao local F8: PASS (`npx.cmd jest src/flow-metrics src/forecast src/search --runInBand`) - 8 suites / 74 tests.
+
+**Issues menores:**
+- Controller coverage depende de e2e futuro.
+- Edge case `limit=1` sem spec dedicado.
+- `ID_CLASSE_USER=-150` local deve migrar para enum central quando existir.
+- FTS/GIN index fica para F14 se volume alto.
+
+**Plan:** [`workspace/plans/plan-search-f8-task2.md`](plans/plan-search-f8-task2.md)
+**Impl Notes:** [`workspace/implementations/impl-search-f8-task2.md`](implementations/impl-search-f8-task2.md)
+**Review:** [`workspace/reviews/review-search-f8-task2.md`](reviews/review-search-f8-task2.md)
+
+---
+
+## Task #1 - F8 Flow Metrics + Forecast - COMPLETE (V2 Fase F8)
+
+**Module:** flow-metrics / forecast
+**Task:** Flow Metrics + Forecast Monte Carlo
+**Status:** COMPLETA - Score 8.5/10 APPROVED
+**Duration:** Implementer + Reviewer/re-review + Documenter em 2026-05-10
+**Quality Score:** 8.5/10
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | - | Plano F8 Task #1 cobrindo Blocos S+T |
+| Implementer | ~4h | 59/59 tests PASS no review, read-only puro |
+| Reviewer | - | Score 8.5/10, APPROVED apos correcao de 2 MAJORs |
+| Documenter | - | ROADMAP, CHANGELOG, STATUS e doc de fechamento F8 atualizados |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A - read-only puro; zero `new Operacao*`.
+- Pilar 2 (Endpoints): Controllers proprios justificados por analytics derivados.
+- Pilar 3 (Seed): N/A - zero migration, zero seed, zero DClasse nova.
+
+**Deliverables:**
+- [x] `FlowMetricsModule` registrado no `AppModule`.
+- [x] 6 endpoints `/flow-metrics/:projectId/*`: cycle-time, lead-time, throughput, wip-age, cfd, dashboard.
+- [x] `ForecastModule` registrado no `AppModule`.
+- [x] `GET /forecast/:projectId` com Monte Carlo bootstrap resample.
+- [x] Percentis p50/p75/p85/p95.
+- [x] `PeriodResolver` usando `TimezoneService`.
+- [x] `DashboardService` agrega metrics em `Promise.all`.
+- [x] Correcoes pos-review: N+1 de forecast removido; filtro `criadoEm` incorreto removido.
+
+**Metrics:**
+- Build: PASS (`npm run build`)
+- TypeScript: PASS (`npx tsc --noEmit`)
+- Tests review: PASS (`npx jest src/flow-metrics src/forecast --runInBand`) - 59/59
+- Validacao local F8: PASS (`npx.cmd jest src/flow-metrics src/forecast src/search --runInBand`) - 8 suites / 74 tests.
+- Greps: zero Engine e zero writes em `src/flow-metrics src/forecast`.
+
+**Issues menores:**
+- Comentario residual incorreto em `cycle-time.service.ts`.
+- CFD filtra eventos por projeto em memoria por falta de FK direta `DEvento -> DProject`; debito F9/F14.
+
+**Plan:** [`workspace/plans/plan-flow-metrics-forecast-f8-task1.md`](plans/plan-flow-metrics-forecast-f8-task1.md)
+**Impl Notes:** [`workspace/implementations/impl-flow-metrics-forecast-f8-task1.md`](implementations/impl-flow-metrics-forecast-f8-task1.md)
+**Review:** [`workspace/reviews/review-flow-metrics-forecast-f8-task1.md`](reviews/review-flow-metrics-forecast-f8-task1.md)
 
 ---
 
@@ -493,4 +651,3 @@
 **Timestamp:** 10/05/2026 01:54:17
 **Agent:** strategist
 **Status:** Completo
-

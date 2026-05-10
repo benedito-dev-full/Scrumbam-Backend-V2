@@ -613,6 +613,133 @@
 
 ---
 
+## F8 - Flow Metrics + Forecast + Search (runtime) - COMPLETA
+
+### Task #1: Flow Metrics + Forecast Monte Carlo - COMPLETA
+
+**Status:** Completo
+**Modulo V2:** flow-metrics, forecast
+**Fase V2:** F8
+**Tempo Real:** ~4h Implementer + Reviewer/re-review em 2026-05-10
+**Completado em:** 2026-05-10
+**Quality Score:** 8.5/10 APPROVED
+
+**O Que Foi Feito:**
+- `FlowMetricsModule` com 6 endpoints read-only: cycle-time, lead-time, throughput, wip-age, cfd e dashboard.
+- Services dedicados para `CycleTimeService`, `LeadTimeService`, `ThroughputService`, `WipAgeService`, `CfdService` e `DashboardService`.
+- `PeriodResolver` centraliza filtros de periodo via `TimezoneService`.
+- `ForecastModule` com `GET /forecast/:projectId`.
+- `MonteCarloEngine` com bootstrap resample, PRNG deterministico para testes e percentis p50/p75/p85/p95.
+- `ForecastService` usa throughput por sprints com fallback rolling-window.
+- Correcoes pos-review: N+1 de forecast removido via `groupBy` batch + fallback unico; filtro incorreto por `criadoEm` removido de cycle-time/lead-time.
+
+**Smoke test integrado (verde):**
+- `npm run build` PASS
+- `npx tsc --noEmit` PASS
+- `npx jest src/flow-metrics src/forecast --runInBand` PASS no review
+- Validacao local em 2026-05-10: F8 focada 74/74 PASS junto com search
+- ZERO `new Operacao*` em `src/flow-metrics` e `src/forecast`
+- ZERO escrita `.create/.update/.delete/.upsert` nos modulos read-only
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A - F8 e leitura pura; zero Engine.
+- Pilar 2 (Endpoints): controllers proprios justificados por analytics derivados, nao CRUD.
+- Pilar 3 (Seed): N/A - zero seed, zero DClasse nova, zero migration de F8.
+
+**Issues registrados para F9/F14:**
+- Comentario residual incorreto em `cycle-time.service.ts` sobre fallback de `criadoEm`.
+- `CfdService` filtra eventos por projeto em memoria por falta de FK direta DEvento -> DProject; monitorar performance em producao.
+
+**Plan:** [`workspace/plans/plan-flow-metrics-forecast-f8-task1.md`](../workspace/plans/plan-flow-metrics-forecast-f8-task1.md)
+**Impl Notes:** [`workspace/implementations/impl-flow-metrics-forecast-f8-task1.md`](../workspace/implementations/impl-flow-metrics-forecast-f8-task1.md)
+**Review:** [`workspace/reviews/review-flow-metrics-forecast-f8-task1.md`](../workspace/reviews/review-flow-metrics-forecast-f8-task1.md)
+
+---
+
+### Task #2: Search / Bloco U - COMPLETA
+
+**Status:** Completo
+**Modulo V2:** search
+**Fase V2:** F8
+**Tempo Real:** ~2h Implementer + Reviewer em 2026-05-10
+**Completado em:** 2026-05-10
+**Quality Score:** 8.8/10 APPROVED
+
+**O Que Foi Feito:**
+- `SearchModule` com `GET /search`.
+- Busca unificada em `DTask`, `DProject` e `DEntidade` com resposta categorizada.
+- Tenant isolation por categoria: tasks via `project.idEstab`, projects via `idEstab`, people via `DVincula` membership de organizacao.
+- Cursor pagination separado por tipo: `taskCursor`, `projectCursor`, `peopleCursor`.
+- Limite distribuido 50% tasks, 30% projects, 20% people, com minimo 1 por categoria.
+- `SearchService` usa `Promise.all`; queryPeople usa 2 queries em lote (`DVincula` + `DEntidade IN`), sem N+1.
+- `SearchModule` registrado em `AppModule`.
+
+**Smoke test integrado (verde):**
+- `npm run build` PASS
+- `npx tsc --noEmit` PASS
+- `npx eslint src/search/` PASS no review
+- `npx jest src/search --runInBand` PASS (15/15 no review)
+- Validacao local em 2026-05-10: F8 focada 74/74 PASS junto com flow/forecast
+- ZERO `new Operacao*`, ZERO `$queryRaw`, ZERO escrita no modulo search
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A - search e read-only puro.
+- Pilar 2 (Endpoints): controller proprio justificado por busca cross-entity e resposta agregada.
+- Pilar 3 (Seed): N/A - zero DClasse nova, zero migration, zero schema change de F8.
+
+**Issues registrados para F14:**
+- Coverage do controller depende de e2e.
+- Edge case `limit=1` sem spec especifico.
+- `ID_CLASSE_USER = -150` local deve migrar para enum central quando existir.
+- FTS escalavel com `to_tsvector` + GIN fica para F14.
+
+**Plan:** [`workspace/plans/plan-search-f8-task2.md`](../workspace/plans/plan-search-f8-task2.md)
+**Impl Notes:** [`workspace/implementations/impl-search-f8-task2.md`](../workspace/implementations/impl-search-f8-task2.md)
+**Review:** [`workspace/reviews/review-search-f8-task2.md`](../workspace/reviews/review-search-f8-task2.md)
+**Documentation:** [`workspace/documentation/doc-flow-metrics-forecast-search-f8.md`](../workspace/documentation/doc-flow-metrics-forecast-search-f8.md)
+
+---
+
+## F9 - Reports + Dashboards + Analytics (Análise e Visualização) — ✅ COMPLETA
+
+### Task #3: Reports PDF / Bloco X — ✅ COMPLETA
+
+**Status:** Completo
+**Modulo V2:** reports
+**Fase V2:** F9
+**Tempo Real:** ~2h Implementer + Reviewer em 2026-05-10
+**Completado em:** 2026-05-10
+**Quality Score:** 8.8/10 APPROVED
+
+**O Que Foi Feito:**
+- `ReportsModule` com `GET /reports/projects/:projectId/pdf`.
+- `PdfGeneratorService`: 8 seções (header, resumo executivo, flow metrics, velocity, burndown, tasks-by-user, forecast, riscos).
+- Cache TTL 5min via `TtlCacheService`.
+- Graceful degradation via `Promise.allSettled` (forecast/analytics failures → warnings no payload).
+- Tenant isolation explícita (403 org divergente).
+- 28 testes unitários (28/28 PASS).
+- Dependências: `pdfkit`, `@types/pdfkit`.
+
+**F9 Completa: 58/58 testes (Blocos V + W + X)**
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A - read-only puro.
+- Pilar 2 (Endpoints): Controller proprio justificado por report generation.
+- Pilar 3 (Seed): N/A - zero migration, zero DClasse nova.
+
+**Metrics:**
+- Build: PASS
+- TypeScript: 0 errors
+- Tests: PASS - 28/28 (reporte), 15/15 (dashboards), 15/15 (analytics)
+- N+1 Queries: ZERO
+- F9 Validacao: PASS - 58/58 testes
+
+**Plan:** [`workspace/plans/plan-reports-pdf-f9-task3.md`](../workspace/plans/plan-reports-pdf-f9-task3.md)
+**Impl Notes:** [`workspace/implementations/impl-reports-pdf-f9-task3.md`](../workspace/implementations/impl-reports-pdf-f9-task3.md)
+**Review:** [`workspace/reviews/review-reports-pdf-f9-task3.md`](../workspace/reviews/review-reports-pdf-f9-task3.md)
+
+---
+
 ## Proximas fases (preview)
 
 | Fase | Nome | Pilar dominante |
@@ -622,8 +749,8 @@
 | F5 | Dominio estrutural (Org/Team/Project/Sprint/Status/Task) | Pilar 2 |
 | F6 | **Engine + OperacaoExecucaoClaude** (CORACAO V2) | **Pilar 1** |
 | F7 | Eventos canonicos (DEvento + EventProducerService) | — |
-| F8 | Flow Metrics + Forecast + Search (runtime) | — |
-| F9 | Reports + Dashboards | — |
+| F8 | Flow Metrics + Forecast + Search (runtime) - COMPLETA | — |
+| F9 | Reports + Dashboards - COMPLETA | — |
 | F10 | Channels (Telegram + voz Groq) | — |
 | F11 | MCP Server (5 tools) | — |
 | F12 | Webhooks outbound (HMAC + retry + auto-disable) | — |

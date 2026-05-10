@@ -14,6 +14,38 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F9 Task#3: Reports PDF / Bloco X** (V2 F9) - 2026-05-10
+  - **ReportsModule:** `GET /reports/projects/:projectId/pdf` com response `application/pdf` via PDFKit
+  - **PdfGeneratorService:** 8 seções — header, resumo executivo, flow metrics, velocity, burndown, tasks-by-user, forecast, riscos
+  - **Cache TTL:** 5 minutos via `TtlCacheService`
+  - **Graceful degradation:** `Promise.allSettled` para forecast/analytics (failures → warnings em payload, nunca 500)
+  - **Tenant isolation:** validacao explícita (403 org divergente); nenhum vazamento de dados cross-org
+  - **Dependências:** `pdfkit`, `@types/pdfkit` adicionadas
+  - **Pilares:** P1 read-only/zero Engine, P2 controller proprio justificado, P3 zero migration/seed/DClasse nova
+  - **Tests:** 28/28 PASS (pdfkit generation, graceful degradation, caching, tenant isolation)
+  - **F9 completa:** 58/58 testes (Blocos V + W + X)
+  - **Review:** APPROVED 8.8/10
+
+- **F8 Task#2: Search / Bloco U** (V2 F8) - 2026-05-10
+  - **SearchModule:** `GET /search` com resultado categorizado `{ tasks, projects, people, cursors, meta }`
+  - **Busca cross-entity:** DTask, DProject e DEntidade em uma request, com limites 50%/30%/20%
+  - **Tenant isolation:** tasks via `project.idEstab`, projects via `idEstab`, people via `DVincula` membership de organizacao
+  - **Pagination:** cursors independentes `taskCursor`, `projectCursor`, `peopleCursor`
+  - **Performance:** 4 queries/request; branches principais em `Promise.all`; `queryPeople` usa `DVincula` + `DEntidade IN`, sem N+1
+  - **Pilares:** P1 read-only/zero Engine, P2 controller proprio justificado, P3 zero migration/seed/DClasse nova
+  - **Tests:** `npm run build` PASS, `npx tsc --noEmit` PASS, `npx eslint src/search/` PASS, `npx jest src/search --runInBand` PASS (15/15), service coverage 97.61%
+  - **Review:** APPROVED 8.8/10
+
+- **F8 Task#1: Flow Metrics + Forecast Monte Carlo** (V2 F8) - 2026-05-10
+  - **FlowMetricsModule:** 6 endpoints read-only: `cycle-time`, `lead-time`, `throughput`, `wip-age`, `cfd`, `dashboard`
+  - **ForecastModule:** `GET /forecast/:projectId` com Monte Carlo bootstrap resample e percentis p50/p75/p85/p95
+  - **PeriodResolver:** filtros de periodo centralizados via `TimezoneService`
+  - **Dashboard:** agregacao paralela via `Promise.all`
+  - **Forecast historical:** throughput por sprints com fallback rolling-window
+  - **Pilares:** P1 read-only/zero Engine, P2 endpoints proprios justificados por analytics derivados, P3 zero migration/seed/DClasse nova
+  - **Tests:** `npm run build` PASS, `npx tsc --noEmit` PASS, `npx jest src/flow-metrics src/forecast --runInBand` PASS (59/59 no review)
+  - **Review:** APPROVED 8.5/10
+
 - **F7 Task#3: Notifications endpoints `/notifications/*`** (V2 F7) - 2026-05-10
   - **NotificationsModule:** controller proprio `/notifications` para leitura e mutacao de notificacoes in-app em `DEvento.idClasse=-490`
   - **Endpoints:** `GET /notifications`, `GET /notifications/unread-count`, `PATCH /notifications/:id/read`, `PATCH /notifications/read-all`, `DELETE /notifications/:id`
@@ -54,6 +86,27 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 - **Estrutura de auditoria:** `prisma.dEvento.create` direto → `EventProducerService.addInternalEvent()` em 5 services (não inclui auth.service.ts, débito H1 para próxima task)
 - **OperacaoExecucaoClaude (F6):** `eventProducer` typed via `IEventProducer` (era `any`), event emitido APÓS super.grava()
 - **CommonModule:** novo módulo @Global exporta 3 singletons canônicos (resolve duplicate AsyncLocalStorage)
+
+### Fixed
+
+- **F8 Forecast:** N+1 em `ForecastService.getSprintThroughput` removido com `groupBy` batch + fallback unico em memoria.
+- **F8 Flow Metrics:** filtro `criadoEm` removido de cycle-time e lead-time; periodo passa a ser aplicado pela telemetria `doneAt`.
+
+### Performance
+
+- **F8 Dashboard:** services de flow metrics agregados com `Promise.all`.
+- **F8 Search:** 3 branches principais paralelas e 4 queries/request, sem query por resultado.
+- **F8 Forecast:** contagem por sprint em lote, sem loop de queries por sprint.
+
+### Tests
+
+- **F8 Task#1:** build PASS, TypeScript 0 errors, 59/59 tests PASS no review.
+- **F8 Task#2:** build PASS, TypeScript 0 errors, ESLint PASS, 15/15 tests PASS, `search.service.ts` com 97.61% statements coverage.
+
+### Technical Debt
+
+- **F8 CFD:** `DEvento` nao tem FK direta para `DProject`; filtro por projeto fica em memoria via taskId, monitorar para F9/F14.
+- **F8 Search:** controller depende de e2e futuro; FTS/GIN index fica para F14 se volume alto.
 
 ### Removed
 
