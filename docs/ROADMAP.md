@@ -376,11 +376,47 @@
 
 **ADRs vinculados:** ADR-V2-008, ADR-V2-028, ADR-V2-029, ADR-V2-030, ADR-V2-031
 
-**Issue menor registrada:** idempotencia em `NotificationConsumer` ainda nao filtra `excluido: false`; melhoria futura para F7 Task #3.
+**Issue menor registrada:** idempotencia em `NotificationConsumer` sem `excluido: false` foi resolvida na F7 Task #3.
 
 **Plan:** [`workspace/plans/plan-eventos-consumers-f7-task2.md`](../workspace/plans/plan-eventos-consumers-f7-task2.md)
 **Impl Notes:** [`workspace/implementations/impl-eventos-consumers-f7-task2.md`](../workspace/implementations/impl-eventos-consumers-f7-task2.md)
 **Review:** [`workspace/reviews/review-eventos-consumers-f7-task2.md`](../workspace/reviews/review-eventos-consumers-f7-task2.md)
+
+---
+
+### Task #3: Notifications endpoints `/notifications/*` - COMPLETA
+
+**Status:** Completo
+**Modulo V2:** notifications / eventos
+**Fase V2:** F7
+**Tempo Real:** Strategist + Implementer + Reviewer + Documenter em 2026-05-10
+**Completado em:** 2026-05-10
+**Quality Score:** 8.2/10 APPROVED
+
+**O Que Foi Feito:**
+- `NotificationsModule` criado com controller proprio `/notifications` para UI autenticada.
+- `GET /notifications` com cursor pagination, ownership por `idEntidade` e BigInt como string.
+- `GET /notifications/unread-count` tratando ausencia de `metaDados.read` como unread.
+- `PATCH /notifications/:id/read` e `PATCH /notifications/read-all` com estado em `metaDados.read/readAt`.
+- `DELETE /notifications/:id` como soft delete por `DEvento.excluido=true`.
+- Migration limitada a `DEvento.excluido Boolean @default(false)`.
+- `NotificationConsumer` corrigido para idempotencia com `excluido=false`.
+- Testes focados de notifications + consumer: 4 suites / 30 tests PASS.
+
+**Excecao controlada:**
+- `DEvento.excluido` foi autorizado explicitamente na conversa principal em 2026-05-10.
+- A excecao e pontual para suportar soft delete de notifications e nao abre precedente para novas colunas futuras.
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A - `DEvento` e estrutural; zero `Operacao*`.
+- Pilar 2 (Endpoints): Controller proprio justificado por ownership, unread count, read state e soft delete de UI.
+- Pilar 3 (Seed): RESPEITADO - zero seed e zero DClasse nova; migration somente da coluna autorizada.
+
+**ADRs vinculados:** ADR-V2-008, ADR-V2-025, ADR-V2-029, ADR-V2-032
+
+**Plan:** [`workspace/plans/plan-notifications-endpoints-f7-task3.md`](../workspace/plans/plan-notifications-endpoints-f7-task3.md)
+**Impl Notes:** [`workspace/implementations/impl-notifications-endpoints-f7-task3.md`](../workspace/implementations/impl-notifications-endpoints-f7-task3.md)
+**Review:** [`workspace/reviews/review-notifications-endpoints-f7-task3.md`](../workspace/reviews/review-notifications-endpoints-f7-task3.md)
 
 ---
 

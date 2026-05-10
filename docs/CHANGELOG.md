@@ -14,6 +14,18 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F7 Task#3: Notifications endpoints `/notifications/*`** (V2 F7) - 2026-05-10
+  - **NotificationsModule:** controller proprio `/notifications` para leitura e mutacao de notificacoes in-app em `DEvento.idClasse=-490`
+  - **Endpoints:** `GET /notifications`, `GET /notifications/unread-count`, `PATCH /notifications/:id/read`, `PATCH /notifications/read-all`, `DELETE /notifications/:id`
+  - **Soft delete:** migration pontual adiciona `DEvento.excluido Boolean @default(false)`; delete seta `excluido=true`
+  - **Read state:** `metaDados.read/readAt`; ausencia de `read` e tratada como nao lida
+  - **Ownership:** todas as queries filtram `idEntidade=user.entidadeId` e `excluido=false`
+  - **NotificationConsumer:** idempotencia passa a filtrar `excluido=false`
+  - **Pilares:** P1 N/A estrutural, P2 controller proprio justificado, P3 zero seed/DClasse nova
+  - **ADRs:** ADR-V2-032 formaliza excecao controlada sem precedente geral
+  - **Tests:** `npx.cmd prisma generate` PASS, `npm.cmd run build` PASS, `npx.cmd tsc --noEmit` PASS, `npx.cmd jest src/notifications src/eventos/consumers --runInBand` PASS (4 suites / 30 tests)
+  - **Review:** APPROVED 8.2/10
+
 - **F7 Task#2: NotificationConsumer + WebhookConsumer + EventRouter Ativo** (V2 F7) - 2026-05-10
   - **NotificationConsumer:** cria notificacoes in-app em `DEvento.idClasse=-490` para `task.status.changed`, `task.assigned`, `execution.awaiting_approval`, `execution.completed` e `execution.failed`
   - **WebhookConsumer:** resolve `orgId` por payload, project ou task, le configs ativas `DTabela.idClasse=-470` por organizacao e chama dispatcher injetado
@@ -22,7 +34,7 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
   - **Pilares:** P1 N/A estrutural, P2 zero endpoint novo, P3 zero seed/migration/DClasse nova
   - **ADRs:** ADR-V2-028, ADR-V2-029, ADR-V2-030, ADR-V2-031
   - **Tests:** `npm.cmd run build` PASS, `npx.cmd tsc --noEmit` PASS, `npx.cmd jest src/eventos --runInBand` PASS (3 suites / 19 tests)
-  - **Review:** APPROVED 8.4/10; minor futuro em `NotificationConsumer` idempotencia sem `excluido: false`
+  - **Review:** APPROVED 8.4/10; minor de idempotencia resolvido na F7 Task#3
 
 - **F7 Task#1: Eventos Canônicos — Core de Eventos + Refactor F4/F6** (V2 F7) — 2026-05-09
   - **EventProducerService:** único entry point emissão, validação `type ∈ ALL_EVENT_TYPES_SET`, metadata enriquecida (source, timestamp, correlationId)

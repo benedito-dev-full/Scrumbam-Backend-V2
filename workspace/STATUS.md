@@ -11,6 +11,57 @@
 
 ---
 
+## Task #3 - F7 Notifications Endpoints - COMPLETE (V2 Fase F7)
+
+**Module:** notifications / eventos
+**Task:** Notifications endpoints `/notifications/*` sobre `DEvento -490`
+**Status:** COMPLETA - Score 8.2/10 APPROVED
+**Duration:** Strategist + Implementer + Reviewer + Documenter em 2026-05-10
+**Quality Score:** 8.2/10
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | - | Plano F7 Task #3 com excecao controlada para `DEvento.excluido` |
+| Implementer | - | 4 suites / 30 tests PASS, build/typecheck PASS, migration limitada |
+| Reviewer | - | Score 8.2/10, APPROVED, minor documental ADR-V2-032 |
+| Documenter | - | JSDoc, ROADMAP, CHANGELOG, STATUS e ADR-V2-032 atualizados; commit pendente |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A - `DEvento` estrutural via Prisma direto; zero `Operacao*`.
+- Pilar 2 (Endpoints): Controller proprio justificado por ownership, unread count, read state e soft delete de UI.
+- Pilar 3 (Seed): RESPEITADO - zero seed e zero DClasse nova; migration somente de `DEvento.excluido`.
+
+**Deliverables:**
+- [x] `NotificationsModule` registrado no `AppModule`.
+- [x] `GET /notifications` com cursor pagination e filtro `unreadOnly`.
+- [x] `GET /notifications/unread-count`.
+- [x] `PATCH /notifications/:id/read` com `metaDados.read/readAt`.
+- [x] `PATCH /notifications/read-all` em lote via `jsonb_set`, sem N+1.
+- [x] `DELETE /notifications/:id` como soft delete por `DEvento.excluido=true`.
+- [x] Migration limitada a `ALTER TABLE "DEvento" ADD COLUMN "excluido" BOOLEAN NOT NULL DEFAULT false`.
+- [x] `NotificationConsumer` idempotencia com `excluido=false`.
+- [x] ADR-V2-032 criada para registrar a excecao sem precedente geral.
+
+**Metrics:**
+- Prisma generate: PASS (`npx.cmd prisma generate`)
+- Build: PASS (`npm.cmd run build`)
+- TypeScript: PASS (`npx.cmd tsc --noEmit`)
+- Tests: PASS (`npx.cmd jest src/notifications src/eventos/consumers --runInBand`) - 4 suites / 30 tests
+- N+1 Queries: ZERO no desenho revisado; read-all usa update em lote.
+- Queries/request: list = 1 query; count = 1 query; mark-read = transaction 1 read + 1 update; delete = 1 updateMany.
+- Greps: zero `EventProducerService` em `src/notifications`; zero `new Operacao` em `src/notifications src/eventos`; schema segue com 17 models.
+
+**ADRs:** ADR-V2-008, ADR-V2-025, ADR-V2-029, ADR-V2-032
+
+**Plan:** [`workspace/plans/plan-notifications-endpoints-f7-task3.md`](../workspace/plans/plan-notifications-endpoints-f7-task3.md)
+**Impl Notes:** [`workspace/implementations/impl-notifications-endpoints-f7-task3.md`](../workspace/implementations/impl-notifications-endpoints-f7-task3.md)
+**Review:** [`workspace/reviews/review-notifications-endpoints-f7-task3.md`](../workspace/reviews/review-notifications-endpoints-f7-task3.md)
+**Commit:** pendente por worktree suja e ausencia de pedido explicito de commit
+
+---
+
 ## Task #2 - F7 Event Consumers - COMPLETE (V2 Fase F7)
 
 **Module:** eventos
@@ -50,8 +101,8 @@
 - Queries/evento: notification task = 1 read + 1 lookup + 1 createMany; webhook org direto = 1 config query.
 - Greps: zero `eventProducer.addInternalEvent` em consumers; zero `new Operacao` em `src/eventos`; zero `fetch|axios|http.request` em dispatchers.
 
-**Issue menor (F7 Task #3):**
-- `src/eventos/consumers/notification.consumer.ts:75` - lookup de idempotencia sem `excluido: false`; nao bloqueia Task #2, mas deve ser ajustado quando houver read/delete de notifications.
+**Issue menor (resolvida na F7 Task #3):**
+- `src/eventos/consumers/notification.consumer.ts` - lookup de idempotencia passou a filtrar `excluido=false` apos a migration autorizada.
 
 **ADRs:** ADR-V2-008, ADR-V2-028, ADR-V2-029, ADR-V2-030, ADR-V2-031
 
@@ -432,3 +483,14 @@
 **Timestamp:** 09/05/2026 16:06:58
 **Agent:** strategist
 **Status:** Completo
+
+---
+
+<!-- dedup:strategist:3 -->
+### Agent Concluído: strategist
+
+**Task:** #3
+**Timestamp:** 10/05/2026 01:54:17
+**Agent:** strategist
+**Status:** Completo
+

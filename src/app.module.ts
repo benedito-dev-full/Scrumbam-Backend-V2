@@ -29,6 +29,12 @@ import { ExecutionsModule } from './executions/executions.module';
 
 // F7 — Eventos Canônicos (EventProducerService + AuditLogConsumer + /events/health)
 import { EventosModule } from './eventos/eventos.module';
+import { NotificationsModule } from './notifications/notifications.module';
+
+// F8 — Flow Metrics (read-only analytics) + Forecast Monte Carlo + Search
+import { FlowMetricsModule } from './flow-metrics/flow-metrics.module';
+import { ForecastModule } from './forecast/forecast.module';
+import { SearchModule } from './search/search.module';
 
 /**
  * AppModule raiz do Scrumban-Backend-V2.
@@ -89,7 +95,13 @@ import { EventosModule } from './eventos/eventos.module';
     ExecutionsModule,
     // F7 — Eventos Canônicos (EventProducerService global + /events/health)
     EventosModule,
-    // Modules canônicos das fases F8-F13 restantes serão importados aqui.
+    // F7 — Notifications endpoints sobre DEvento -490
+    NotificationsModule,
+    // F8 — Flow Metrics + Forecast Monte Carlo + Search (read-only analytics)
+    FlowMetricsModule,
+    ForecastModule,
+    SearchModule,
+    // Modules canônicos das fases F9-F13 restantes serão importados aqui.
   ],
   providers: [
     // LoggingInterceptor global — loga method, path, statusCode, durationMs, correlationId

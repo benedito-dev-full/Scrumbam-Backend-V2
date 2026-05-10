@@ -1,0 +1,1 @@
+ALTER TABLE "DEvento" ADD COLUMN "excluido" BOOLEAN NOT NULL DEFAULT false;

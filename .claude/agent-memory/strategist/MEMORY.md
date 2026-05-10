@@ -19,7 +19,7 @@
 
 **Scrumban-Backend-V2** é a refundação canônica do Scrumban legado, sob o template Devari-Core.
 **Repositório:** `/Users/devaritecnologia/Documents/Benedito/Scrumban-Backend-V2/`
-**Estado:** F5 (Domínio Estrutural — Organizations/Teams/Projects/Tasks) — plan entregue, aguardando CEO responder Q1/Q2/Q3 antes de Implementer iniciar Bloco B.
+**Estado:** F8 Task#2 (Search — Bloco U) — plan entregue. Aguardando Implementer. Após APPROVED, Documenter fecha F8 completa (S+T+U) num único ciclo.
 **Cronograma:** 24 semanas (otimista 20, pessimista 29) com 1 implementer dedicado + strategist e reviewer parciais.
 **Família depende.** Corda justa. Sem afrouxar.
 

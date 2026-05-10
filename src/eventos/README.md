@@ -10,6 +10,8 @@
 - `EventRouterService` decide consumers; services nao decidem fila/consumer.
 - `AuditLogConsumer` e catch-all e persiste audit trail em `DEvento`.
 - `NotificationConsumer` cria notificacoes in-app como `DEvento -490`.
+- Endpoints de leitura/mutacao de notificacoes vivem em `src/notifications`
+  e operam exclusivamente sobre `DEvento -490`.
 - `WebhookConsumer` le configs `DTabela -470` e chama `WebhookDispatcherStub`.
 - Consumers sao destinos finais do pipeline: nao chamam `EventProducerService`.
 - Zero Engine em `src/eventos`; `DEvento` e `DTabela` sao estruturais.
@@ -89,6 +91,8 @@ Regras:
 ## NotificationConsumer
 
 `NotificationConsumer` grava notificacoes in-app em `DEvento.idClasse=-490`.
+Leitura, contagem, marcar como lida e soft delete sao expostos por
+`/notifications/*` no modulo `src/notifications`.
 
 Campos principais:
 
@@ -121,7 +125,22 @@ Triggers:
 | `execution.completed`, `execution.failed` | `payload.userId`/`entidadeId` + managers quando houver `projectId` |
 
 Idempotencia: lookup em lote por `identificadorExterno` antes do insert. Sem
-unique index nesta task.
+unique index nesta task. A partir da F7 Task #3, o lookup filtra
+`excluido=false`, permitindo recriar uma notificacao equivalente se a anterior
+foi excluida logicamente.
+
+Estado de leitura:
+
+- `metaDados.read = false | true`
+- `metaDados.readAt = ISO string` quando marcada como lida
+- ausencia de `metaDados.read` e tratada como nao lida pelos endpoints
+
+Soft delete:
+
+- campo autorizado pontualmente: `DEvento.excluido Boolean @default(false)`
+- `DELETE /notifications/:id` seta `excluido=true`
+- filtros de list/count/read/read-all/delete usam `excluido=false`
+- a excecao e limitada a esta coluna e foi formalizada em ADR-V2-032
 
 ## WebhookConsumer
 
@@ -189,8 +208,7 @@ Consumers esperados:
 
 ## Nao Objetivos Desta Etapa
 
-- Endpoints `/notifications` para listar, marcar lida ou excluir.
+- Webhook HTTP real, HMAC, retry de rede, auto-disable e `DEvento -491`.
 - CRUD `/webhooks`.
-- Dispatcher externo real, HMAC, retry de rede, auto-disable e `DEvento -491`.
 - BullMQ/Redis.
-- Migration, seed ou nova DClasse.
+- Seed ou nova DClasse.

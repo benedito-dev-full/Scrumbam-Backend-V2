@@ -179,6 +179,8 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 | Task#1 | domain-structural | F5 | (ver arquivo) | APPROVED | — |
 | Task#2 | f6-executions | F6 | (ver arquivo) | APPROVED | — |
 | Task#1 | eventos-canonicos | F7 | **8.5** | **APPROVED** | auth.service.ts com 4 prisma.dEvento.create diretos (débito, não bloqueador) |
+| Task#1 | flow-metrics-forecast | F8 | **8.5** | **APPROVED** | N+1 e criadoEm corrigidos em re-review (6.5 → 8.5 após correções MAJOR) |
+| Task#2 | search | F8 | **8.8** | **APPROVED** | 4 queries/request (3 paralelas + DVincula→DEntidade justificado); zero issues bloqueantes |
 
 ## PADRÕES APRENDIDOS F7
 
@@ -187,6 +189,26 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 - **Grep para `prisma.dEvento.create` em toda a base**: na migração de AuditService, o grep correto é em `src/` inteiro (não só `src/eventos/`). Callsites residuais em outros módulos devem ser identificados e categorizados como HIGH se não migrados.
 - **`Promise.allSettled` vs fire-and-forget**: Producer usa `await Promise.allSettled(tasks)` — consumers não bloqueiam o caller (erros isolados) mas o Producer aguarda resolução. Padrão correto para V2 MVP.
 - **ESLint warnings de `any` em specs de engine/dvfs**: estes são warnings pré-existentes (não introduzidos por nova task). Não penalizar se todos os `any` têm `// eslint-disable-line` justificado ou são em specs de stub.
+
+## PADRÕES APRENDIDOS F8
+
+- **N+1 em loop de sprints (ForecastService)**: Loop `for sprint of sprints` com `prisma.dTask.count()` ou `findMany()` por sprint é N+1. Correção: 1 `groupBy(['idSprint'])` com `_count` + mapeamento JS. Auditar sempre em módulos de forecast/analytics.
+- **Filtro criadoEm vs doneAt em CycleTime/LeadTime**: Filtrar tasks por `criadoEm` quando a intenção é "tasks concluídas no período" é erro semântico — exclui tasks antigas concluídas recentemente. O filtro correto é por `doneAt` (telemetry em JS) SEM `criadoEm` no where Prisma. ThroughputService resolveu corretamente via $queryRaw.
+- **PeriodResolver como padrão F8+**: Qualquer módulo read-only com filtros de período DEVE usar PeriodResolver. Verificar que NENHUM service usa `new Date()` diretamente em filtros.
+- **DashboardService Promise.all correto**: Queries em paralelo com logging de performance + alerta >500ms é o padrão. Verificar ausência de await serial onde parallel é possível.
+- **CFD via replay DEvento -498**: Algoritmo correto: (1) buscar taskIds do projeto, (2) buscar eventos até fim do período, (3) filtrar em memória por taskIdSet, (4) aplicar transições por dia em loop. Filtro em memória é inevitável sem FK DEvento→DProject — aceitar como débito F9.
+- **Monte Carlo 3 itens obrigatórios**: (1) filtro throughput <= 0 antes do resample, (2) guard contra loop infinito (`maxPeriods`), (3) seed determinístico para testes. Faltar 1 = MAJOR.
+- **Re-review: comentário residual após correção**: ao remover filtro criadoEm, comentário "inclui pelo criadoEm já filtrado" ficou no código. É MINOR (não afeta comportamento), não REJECT. Documentar como débito de qualidade mas não bloquear.
+- **Re-review: padrão groupBy com fallback**: correção de N+1 em forecast aceita 2 queries (groupBy + findMany condicional) como pior caso — isso é correto. Verificar que o findMany do fallback NÃO está dentro de loop (deve ser 1 query única antes do loop JS).
+
+## PADRÕES APRENDIDOS F8 TASK#2 (Search)
+
+- **DVincula→DEntidade em 2 queries sequenciais NÃO é N+1**: quando o vínculo org↔user é via DVincula (não via idEstab em DEntidade), é obrigatório usar 2 queries encadeadas: (1) dVincula.findMany com select:{idEntidade} → (2) dEntidade.findMany com chave IN memberIds. Isso é 2 queries totais, não N queries. Aceitar como correto. Verificar o mecanismo de vínculo em OrganizationsService.addMember() antes de penalizar.
+- **Promise.all com branches de N queries**: cada branch do Promise.all pode ter internamente N queries sequenciais. O que importa é que (a) o total de queries por request seja ≤ 5 e (b) não haja loop com await individual. 3 branches paralelas com 4 queries total = correto para search cross-entity.
+- **Search controller próprio é SEMPRE justificado** quando acessa 3+ tabelas distintas e retorna resultado categorizado — impossível mapear para /entidades ou /tabelas. Não penalizar pelo Pilar 2.
+- **MinLength(2) em campo de busca é obrigatório** — sem isso, ILIKE '%a%' em tabelas grandes dispara full-table scan. Verificar presença em todos os endpoints de busca.
+- **Constante idClasse local no service** (ex: `ID_CLASSE_USER = BigInt(-150)`) é aceitável para read-only services sem injetar módulo externo. Evita import circular. Débito de refactoring para enum central futuro, mas não bloqueia.
+- **Coverage 0% em controller** em módulo read-only (search, flow-metrics, forecast) não bloqueia aprovação se: (a) o DoD da fase aceita e2e como futuro e (b) o service tem ≥80% coverage. Para F8, 0% controller + 97%+ service = aceitável.
 
 ## TEMPLATE REVIEW REPORT (V2)
 

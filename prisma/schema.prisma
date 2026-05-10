@@ -242,6 +242,7 @@ model DEvento {
   identificadorExterno String?  @db.VarChar(255)
   descricao            String?  @db.Text
   metaDados            Json?
+  excluido             Boolean  @default(false)
   criadoEm             DateTime @default(now()) @db.Timestamptz(6)
 
   classe   DClasse    @relation(fields: [idClasse], references: [chave], onDelete: NoAction, onUpdate: NoAction)

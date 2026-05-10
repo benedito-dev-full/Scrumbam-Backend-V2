@@ -100,6 +100,7 @@ export class NotificationConsumer implements IEventConsumer {
     const existing = await this.prisma.dEvento.findMany({
       where: {
         idClasse: NOTIFICATION_CLASSE,
+        excluido: false,
         identificadorExterno: { in: identifiers },
       },
       select: { identificadorExterno: true },

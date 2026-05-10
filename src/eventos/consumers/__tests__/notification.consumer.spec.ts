@@ -130,6 +130,34 @@ describe('NotificationConsumer', () => {
     await consumer.handle(event('task.status.changed', { taskId: '10' }));
     await consumer.handle(event('task.status.changed', { taskId: '10' }));
 
+    expect(prisma.dEvento.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ excluido: false }),
+      }),
+    );
+    expect(prisma.dEvento.createMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('nao considera notificacao excluida como bloqueio de idempotencia', async () => {
+    prisma.dTask.findFirst.mockResolvedValue({
+      chave: BigInt(10),
+      nome: 'Task',
+      idCreator: BigInt(1),
+      idAssignee: null,
+      idProject: null,
+    });
+    prisma.dEvento.findMany.mockResolvedValue([]);
+
+    await consumer.handle(event('task.status.changed', { taskId: '10' }));
+
+    expect(prisma.dEvento.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          idClasse: BigInt(-490),
+          excluido: false,
+        }),
+      }),
+    );
     expect(prisma.dEvento.createMany).toHaveBeenCalledTimes(1);
   });
 

@@ -1,10 +1,12 @@
 # Implementer Agent Memory — Scrumban-Backend-V2
 
-**Versão:** 1.5 (F7 Task#1 Bloco Q — AuditService delete + Engine typed — 2026-05-09)
-**Última atualização:** 2026-05-09
+**Versão:** 1.7 (F8 Task#2 — Search — 2026-05-10)
+**Última atualização:** 2026-05-10
 
 **Notas por fase:**
 - F7 Eventos Canônicos: ver `f7-eventos-canonicos.md` (CommonModule Global, EventProducer pattern, Engine isolation via type-only import).
+- F8 Flow Metrics + Forecast: ver gotchas abaixo (ThroughputService $queryRaw, CFD sem idProject, WipAgeService OnModuleInit).
+- F8 Task#2 Search: queryPeople via DVincula (NÃO idEstab). Ver gotchas abaixo.
 
 ---
 
@@ -127,6 +129,29 @@ Operacao (abstract)
 - **DEvento não tem `idUsuario`** — passar userId em `metaDados` como string
 - **TimezoneService depende de `date-fns` + `date-fns-tz`** (não apenas `luxon`)
 - **Quando adicionar dependência em Service, atualizar spec** adicionando o provider no módulo de teste
+
+### Codepaths F8 Task#2 (SearchModule)
+- `src/search/search.module.ts` — importa AuthModule para guards
+- `src/search/search.controller.ts` — GET /search com JwtAuthGuard + OrgTenantGuard
+- `src/search/search.service.ts` — Promise.all(queryTasks, queryProjects, queryPeople)
+- `src/search/dto/search-query.dto.ts` — SearchQueryDto com MinLength(2)
+- `src/search/dto/search-response.dto.ts` — SearchResponseDto + sub-DTOs
+
+### Gotchas F8 Task#2 (Search)
+- **queryPeople é via DVincula, NÃO via idEstab** — OrganizationsService.addMember() cria DVincula idClasse in [-161,-162,-163] com idLocEscritu=orgId. DEntidade USER (-150) NÃO tem idEstab apontando para org. Buscar membros: dVincula.findMany({ idLocEscritu: orgId, idClasse: in [...] }) → pegar idEntidade → dEntidade.findMany({ chave: in [...], idClasse: -150 }).
+- **queryPeople usa 2 queries** (DVincula + DEntidade) encapsuladas em 1 branch do Promise.all — total 4 queries por request, não 3. Ainda ZERO N+1.
+- **people=[] quando DVincula vazio** — testar edge case: se org sem membros, dEntidade.findMany não deve ser chamado (early return).
+- **Spec 13 ForbiddenException** — testar com organizationId='' para garantir guard no service (não apenas no guard).
+- **Falso-positivo grep eventProducer** — comentário em texto em spec gera match. Não é código funcional — verificar que é apenas comentário.
+
+### Gotchas F8 (Flow Metrics + Forecast — read-only analytics)
+- **ThroughputService `$queryRaw` com Prisma.sql** — `IN (${id1}, ${id2})` funciona com valores explícitos. NÃO usar `IN (${arrayDeBigInt})` — Prisma não serializa BigInt[] corretamente no template literal. Expandir manualmente.
+- **CFD sem `idProject` em DEvento -498** — DEvento -498 não tem FK para DProject. Filtrar via `metaDados.taskId` (string) comparado ao Set de taskIds do projeto. Fallback via `identificadorExterno`.
+- **WipAgeService — OnModuleInit** — carrega mapa de status (DTabela -441..-449) uma vez no boot sem TTL. Em testes, chamar `loadStatusCodes()` manualmente no `beforeEach` após `jest.clearAllMocks()`.
+- **PeriodResolver é `@Injectable()`** — deve ser declarado em `providers` do módulo (não é global). ForecastModule reusa o PeriodResolver do FlowMetricsModule via imports (registrar também como provider no ForecastModule).
+- **Forecast: WipAgeService não é necessário no ForecastService** — contagem de tasks restantes via `prisma.dTask.count` direto (sem injetar WipAgeService).
+- **Monte Carlo Mulberry32** — seed via closure funciona: `let s = seed >>> 0`. Para seeds negativos ou undefined: usar `Math.random` puro (não quebra).
+- **Coverage dos controllers** — controllers têm 0% coverage sem testes e2e. Não bloqueia DoD desta task. Testar via request HTTP em integração é responsabilidade de F14.
 
 ### Módulos V2 (lista oficial — usar exatamente esses scope names)
 
