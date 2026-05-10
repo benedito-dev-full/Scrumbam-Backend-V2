@@ -14,6 +14,21 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F10 Task#4: Channels Bloco A - Core Channels** (V2 F10) - 2026-05-10
+  - **ChannelAdapter interface:** `send()`, `parseInbound()`, `verifySignature()` + `InboundMessage` type contrato genérico para múltiplos canais
+  - **PairingService:** `generate()` (CSPRNG 32-byte + SHA-256 hash) com UPSERT em DTabela -474 (PAIRING_TOKENS); `consume()` com $transaction one-shot (lookup + mark used + create DVincula)
+  - **AccountLinkService:** `findByChat()` query única (BigInt chatId) com índice em DTabela, sem N+1
+  - **MessageRouterService:** `handleInbound()` com intent parsing a partir de `InboundMessage`, `registerIntentHandler()` para extensibilidade plugável
+  - **CommandRegistryService:** `register()` para adicionar comandos, `resolve()` para lookup por nome
+  - **PairingController:** POST `/channels/pairing/generate` (retorna token) + POST `/channels/pairing/link` (consome token + cria DVincula)
+  - **ChannelsModule:** `onModuleInit` verifica CHANNELS_ENABLED feature flag (ADR-V2-010 compliance: módulo opcional)
+  - **DTOs validados:** `LinkAccountDto` com @Matches(/^\d+$/) em chatId para validação numérica
+  - **Pilares:** P1 N/A (infraestrutura), P2 controller proprio justificado (orquestração pairing + linking), P3 zero migration/seed/DClasse nova
+  - **Tests:** 30/30 PASS (pairing, account linking, message routing, command registry)
+  - **Review:** APPROVED 8.2/10; 3 issues corrigidos (chatId validation, consume filter otimizado, dead code removido)
+
+### Added (histórico)
+
 - **F9 Task#3: Reports PDF / Bloco X** (V2 F9) - 2026-05-10
   - **ReportsModule:** `GET /reports/projects/:projectId/pdf` com response `application/pdf` via PDFKit
   - **PdfGeneratorService:** 8 seções — header, resumo executivo, flow metrics, velocity, burndown, tasks-by-user, forecast, riscos

@@ -11,6 +11,63 @@
 
 ---
 
+## Task #4 - F10 Channels Bloco A - COMPLETE (V2 Fase F10)
+
+**Module:** channels
+**Task:** Channels / Bloco A - Core Channels (pairing, account linking, message routing, command registry)
+**Status:** COMPLETA - Score 8.2/10 APPROVED
+**Duration:** Implementer + Reviewer + Documenter em 2026-05-10
+**Quality Score:** 8.2/10
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | - | Plano F10 Bloco A com escopo fechado para core channels |
+| Implementer | ~3h | 30/30 tests PASS, zero N+1, fixes de review aplicados |
+| Reviewer | - | Score 8.2/10, APPROVED, 3 issues menores corrigidos (all resolved) |
+| Documenter | - | ROADMAP, CHANGELOG, STATUS e commit Conventional atualizados |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A - channels são infraestrutura, zero `new Operacao*`, zero escrita transacional.
+- Pilar 2 (Endpoints): Controller proprio justificado por orquestração pairing + linking; reutiliza /entidades para listagem de contas.
+- Pilar 3 (Seed): RESPEITADO - zero migration, zero seed, zero DClasse nova; usa DTabela -474 (PAIRING_TOKENS) e DVincula -483 (ACCOUNT_LINKS).
+
+**Deliverables:**
+- [x] `ChannelAdapter` interface: `send()`, `parseInbound()`, `verifySignature()` + `InboundMessage` type
+- [x] `PairingService`: `generate()` (CSPRNG + SHA-256 hash) com UPSERT em DTabela -474, `consume()` ($transaction one-shot) com DTabela lookup + DVincula creation
+- [x] `AccountLinkService`: `findByChat()` (query única, BigInt chatId, sem N+1)
+- [x] `MessageRouterService`: `handleInbound()` com intent parsing, `registerIntentHandler()` para extensibilidade
+- [x] `CommandRegistryService`: `register()` para registro de comandos, `resolve()` para lookup
+- [x] `PairingController`: POST `/channels/pairing/generate` + POST `/channels/pairing/link` com validações
+- [x] `ChannelsModule`: `onModuleInit` verifica CHANNELS_ENABLED feature flag (ADR-V2-010 módulo opcional)
+- [x] DTOs com validações: `GeneratePairingDto`, `LinkAccountDto` (com @Matches numérico em chatId)
+- [x] 30/30 testes unitários (30 PASS)
+
+**Fixes aplicados pós-review (issues resolvidas):**
+- [x] Issue #1: `@Matches(/^\d+$/)` adicionado em `LinkAccountDto.chatId` (validação numérica)
+- [x] Issue #2: `consume()` filtra por `codigo: codeHash` no WHERE (elimina scan completo da tabela)
+- [x] Issue #3: `GeneratePairingDto` removido (dead code; `generate()` usa parâmetro implícito)
+
+**Metrics:**
+- Build: PASS (`npm run build`)
+- TypeScript: PASS (`npx tsc --noEmit`)
+- ESLint: PASS (`npx eslint src/channels/`)
+- Tests: PASS (`npx jest src/channels --runInBand`) - 30/30
+- N+1 Queries: ZERO (`findByChat` é query única, `consume` usa índice em codigo)
+- Queries/request: pairing generate = 1 UPSERT; pairing link = 2 (lookup + transaction); find account = 1
+- BigInt: 100% serializado em responses
+- Feature flag: ADR-V2-010 compliance verificada (CHANNELS_ENABLED env check)
+
+**ADRs:** ADR-V2-010 (Channels como módulo opcional)
+
+**Plan:** [`workspace/plans/plan-channels-bloco-a-f10-task4.md`](plans/plan-channels-bloco-a-f10-task4.md)
+**Impl Notes:** [`workspace/implementations/impl-channels-bloco-a-f10-task4.md`](implementations/impl-channels-bloco-a-f10-task4.md)
+**Review:** [`workspace/reviews/review-channels-bloco-a-f10-task4.md`](reviews/review-channels-bloco-a-f10-task4.md)
+
+
+---
+
 ## Task #3 - F9 Reports PDF - COMPLETE (V2 Fase F9)
 
 **Module:** reports
@@ -651,3 +708,14 @@
 **Timestamp:** 10/05/2026 01:54:17
 **Agent:** strategist
 **Status:** Completo
+
+---
+
+<!-- dedup:documenter:2 -->
+### Agent Concluído: documenter
+
+**Task:** #2
+**Timestamp:** 10/05/2026 09:04:44
+**Agent:** documenter
+**Status:** Completo
+
