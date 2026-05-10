@@ -11,6 +11,77 @@
 
 ---
 
+## Task #6 - F10 Channels Bloco C - COMPLETE (V2 Fase F10)
+
+**Module:** channels
+**Task:** Channels / Bloco C - Telegram Commands (create-task, tasks, status, pair, create-task-from-text intent)
+**Status:** COMPLETA - Score 8.5/10 APPROVED
+**Duration:** Implementer + Reviewer + Documenter em 2026-05-10
+**Quality Score:** 8.5/10
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plano F10 Bloco C com escopo handlers + intents |
+| Implementer | ~3h | 10/10 tests PASS, JSDoc 100%, zero duplicacao logica |
+| Reviewer | — | Score 8.5/10, APPROVED, 3 debts registrados para Bloco D |
+| Documenter | — | ROADMAP, CHANGELOG, STATUS e commit Conventional atualizados |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — handlers sao decoradores puros, zero `new Operacao*`, zero escrita transacional direta.
+- Pilar 2 (Endpoints): Handlers reutilizam TasksService.findMany + TasksService.create (zero duplicacao de endpoints); MessageRouterService orquestra intent vs comando.
+- Pilar 3 (Seed): RESPEITADO — zero migration, zero seed, zero DClasse nova; handlers usam dados ja seedados.
+
+**Deliverables:**
+- [x] **StartHandler** (/start): boas-vindas com instrucoes de pareamento + lista de comandos disponíveis. Sem DB access.
+- [x] **PairHandler** (/pair <codigo>): consome token pareamento one-shot via PairingService.consume(), cria/atualiza DVincula -483 (CHANNEL_LINK).
+- [x] **TasksHandler** (/tasks [today|week|backlog]): lista tarefas filtradas por periodo usando TimezoneService (Brasil timezone) + TasksService.findMany. Mapeia periodos em filtros criadoEm.
+- [x] **StatusHandler** (/status): exibe pareamento confirmado + contagem de tarefas (INBOX+READY) vs (EXECUTING) via TasksService.count com queries separadas.
+- [x] **CreateTaskHandler** (/create <titulo>): cria nova task no projeto padrão do usuário via TasksService.create; resolve projectId buscando projeto mais recente (assignee ou criador).
+- [x] **CreateTaskFromTextIntent:** intent para criar task de texto livre (mensagem sem barra) registrado dinamicamente em MessageRouterService.
+- [x] **JSDoc 100%:** todos handlers documentados com @param, @returns, @throws, @example (exemplos de chat Telegram + outputs de texto).
+- [x] **MessageRouterService:** resolvedor intents com `registerIntentHandler()` para extensibilidade; discrimina comandos (`/`) de intents (texto livre).
+- [x] **PeriodResolver:** centraliza logica de filtro por periodo (today/week/backlog) em TasksHandler; usa TimezoneService.getPeriodDates() canonico.
+- [x] **6 testes unitarios:** todos PASS (handlers + intent parsing)
+
+**3 Debts Registrados para Bloco D (F10 Task #6):**
+
+1. **[DEBT-F10-C-01]** Extrair `resolveDefaultProjectId` para service compartilhado
+   - Lógica duplicada entre `CreateTaskHandler` e `CreateTaskFromTextIntent` (~15 linhas)
+   - Proposta: novo metodo `UserProjectService.getDefaultProject(userId)` em `src/projects/services/user-project.service.ts`
+   - Beneficio: reutilizacao, easier testing, logica centralizada
+   
+2. **[DEBT-F10-C-02]** Corrigir filtro de backlog em `/tasks backlog` para incluir `READY`
+   - Plano F10 §9 especifica: "INBOX + READY somente" (tarefas prontas a fazer)
+   - Query atual: filtra apenas `INBOX` (status='INBOX')
+   - Proposta: adicionar `OR status='READY'` ao filtro
+   - Impacto: usuarios veem backlog mais completo (INBOX pronto + READY planejado)
+
+3. **[DEBT-F10-C-03]** Corrigir `AccountLinkService.findByChat` para filtrar `chatId` no JSONB diretamente na query Prisma
+   - Bug latente multi-tenant herdado dos Blocos A/B
+   - Origem: `findByChat` query DTabela toda, depois filtra `chatId` em memoria em loop
+   - Proposta: usar `where: { dados: { path: ['chatId'], equals: chatId.toString() } }` (Prisma JSON filtering) OU `$raw` se necessario
+   - Impacto: O(1) lookup em vez de O(n) scan; isola tenant corretamente
+
+**Metrics:**
+- Build: PASS (`npm run build`)
+- TypeScript: PASS (`npx tsc --noEmit`)
+- ESLint: PASS (`npx eslint src/channels/telegram/`)
+- Tests: PASS (`npx jest src/channels/telegram/commands src/channels/telegram/intents --runInBand`) - 10/10
+- N+1 Queries: ZERO (cada handler: 1 query TasksService + intent overhead negligivel)
+- Queries/request: /tasks = 1 (findMany) + 1 (count execut); /status = 2 (count separado por status); /create = 1 (create) + project lookup
+- BigInt: 100% serializado em responses (userIds em handlers internos, nao expostos)
+- JSDoc: 100% cobertura (6 handlers + intent + resolver); todos com @example conversas Telegram realisticas
+
+**ADRs:** ADR-V2-010 (Channels modulo opcional)
+
+**Plan:** [`workspace/plans/plan-channels-bloco-c-f10-task6.md`](plans/plan-channels-bloco-c-f10-task6.md)
+**Impl Notes:** [`workspace/implementations/impl-channels-bloco-c-f10-task6.md`](implementations/impl-channels-bloco-c-f10-task6.md)
+**Review:** [`workspace/reviews/review-channels-bloco-c-f10-task6.md`](reviews/review-channels-bloco-c-f10-task6.md)
+
+---
+
 ## Task #5 - F10 Channels Bloco B - COMPLETE (V2 Fase F10)
 
 **Module:** channels
@@ -769,5 +840,27 @@
 **Task:** #2
 **Timestamp:** 10/05/2026 09:04:44
 **Agent:** documenter
+**Status:** Completo
+
+
+---
+
+<!-- dedup:implementer:18 -->
+### Agent Concluído: implementer
+
+**Task:** #18
+**Timestamp:** 10/05/2026 12:55:54
+**Agent:** implementer
+**Status:** Completo
+
+
+---
+
+<!-- dedup:reviewer:18 -->
+### Agent Concluído: reviewer
+
+**Task:** #18
+**Timestamp:** 10/05/2026 13:00:27
+**Agent:** reviewer
 **Status:** Completo
 

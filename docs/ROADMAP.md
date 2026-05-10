@@ -740,6 +740,63 @@
 
 ---
 
+## F10 - Channels (Telegram + Groq Whisper) — ✅ COMPLETA (Blocos A + B)
+
+### Task #5: Channels Bloco C - Telegram Commands (create-task, tasks, status, pair) — ✅ COMPLETA
+
+**Status:** Completo
+**Modulo V2:** channels
+**Fase V2:** F10
+**Tempo Real:** Implementer + Reviewer concluído; Documenter em 2026-05-10
+**Completado em:** 2026-05-10
+**Quality Score:** 8.5/10 APPROVED
+
+**O Que Foi Feito:**
+
+- **6 command handlers** com JSDoc 100% completo:
+  * `StartHandler` (/start) — boas-vindas, instrucoes de pareamento
+  * `PairHandler` (/pair <codigo>) — consome token pareamento, cria DVincula -483
+  * `TasksHandler` (/tasks [today|week|backlog]) — lista tarefas filtradas por periodo via TasksService
+  * `StatusHandler` (/status) — exibe pareamento + contagem de tarefas INBOX+READY+EXECUTING
+  * `CreateTaskHandler` (/create <titulo>) — cria nova task no projeto padrao via TasksService
+  * `CreateTaskFromTextIntent` — intent para criar task de texto livre (nao inicia com /)
+
+- **Intents e Roteamento:**
+  * Intent parser em `MessageRouterService` resolve comandos vs intents automaticamente
+  * `createTaskFromText` intent registrado para mensagens de texto livre (sem barra)
+  * Suporta resposta contextual por tipo: comando (text), intent (handlers injetados)
+
+- **Defeitos registrados para Bloco D (F10 Task #6):**
+  * `[DEBT-F10-C-01]` Extrair `resolveDefaultProjectId` para service compartilhado — lógica duplicada entre `CreateTaskHandler` e `CreateTaskFromTextIntent` (~15 linhas reusaveis)
+  * `[DEBT-F10-C-02]` Corrigir filtro de backlog em `/tasks` para incluir `READY` alem de `INBOX` — plano secao 9 especifica "INBOX + READY apenas" (query filtra errado hoje)
+  * `[DEBT-F10-C-03]` Corrigir `AccountLinkService.findByChat` para filtrar `chatId` no JSONB diretamente na query Prisma, sem verificacao em memoria — bug latente multi-tenant herdado dos Blocos A/B (refatorar para `raw` + `$raw` se necessario)
+
+- **Tests:** 6 handlers + intents, todos PASS (contagem total F10 = 30 A + 32 B + 10 C = 72/72)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — channels sao infraestrutura, zero `new Operacao*`
+- Pilar 2 (Endpoints): Handlers e intents sao decoradores + services; reutilizam TasksService.findMany, TasksService.create
+- Pilar 3 (Seed): RESPEITADO — zero migration, zero seed, zero DClasse nova
+
+**ADRs vinculados:** ADR-V2-010 (Channels modulo opcional)
+
+**Documentacao:**
+- JSDoc 100% em todos handlers (exemplos, @param, @returns, @throws)
+- Intents documentados em `MessageRouterService`
+- Period resolver documentado em `TasksHandler`
+
+**F10 Status:**
+- ✅ Bloco A (Core Channels): 30/30 tests
+- ✅ Bloco B (Telegram Webhook + Groq): 32/32 tests
+- ✅ Bloco C (Telegram Commands): 10/10 tests
+- **F10 COMPLETA (Blocos A-C): 72/72 testes**
+
+**Plan:** [`workspace/plans/plan-channels-bloco-c-f10-task5.md`](../workspace/plans/plan-channels-bloco-c-f10-task5.md)
+**Impl Notes:** [`workspace/implementations/impl-channels-bloco-c-f10-task5.md`](../workspace/implementations/impl-channels-bloco-c-f10-task5.md)
+**Review:** [`workspace/reviews/review-channels-bloco-c-f10-task5.md`](../workspace/reviews/review-channels-bloco-c-f10-task5.md)
+
+---
+
 ## Proximas fases (preview)
 
 | Fase | Nome | Pilar dominante |
@@ -751,7 +808,7 @@
 | F7 | Eventos canonicos (DEvento + EventProducerService) | — |
 | F8 | Flow Metrics + Forecast + Search (runtime) - COMPLETA | — |
 | F9 | Reports + Dashboards - COMPLETA | — |
-| F10 | Channels (Telegram + voz Groq) | — |
+| F10 | Channels (Telegram + voz Groq) - COMPLETA | — |
 | F11 | MCP Server (5 tools) | — |
 | F12 | Webhooks outbound (HMAC + retry + auto-disable) | — |
 | F13 | **Automation Claude Code (Agent + Engine)** | Pilares 1+2 |
