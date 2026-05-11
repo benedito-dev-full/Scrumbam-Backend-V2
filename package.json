@@ -6,6 +6,7 @@
   "license": "UNLICENSED",
   "scripts": {
     "build": "nest build",
+    "build:seeds": "tsc -p tsconfig.seeds.json",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
@@ -21,13 +22,13 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
-    "check:production": "ts-node src/scripts/check-production.ts",
-    "seed": "ts-node prisma/seeds/seed-runner.ts",
-    "seed:classes": "ts-node prisma/seeds/seed-runner.ts",
-    "seed:classes:dry": "ts-node prisma/seeds/seed-runner.ts --dry-run"
+    "check:production": "npx ts-node src/scripts/check-production.ts",
+    "seed": "npx ts-node prisma/seeds/seed-runner.ts",
+    "seed:classes": "npx ts-node prisma/seeds/seed-runner.ts",
+    "seed:classes:dry": "npx ts-node prisma/seeds/seed-runner.ts --dry-run"
   },
   "prisma": {
-    "seed": "ts-node prisma/seeds/seed-runner.ts"
+    "seed": "node dist/prisma/seeds/seed-runner.js"
   },
   "dependencies": {
     "@nestjs/bullmq": "^10.0.1",

@@ -17,6 +17,7 @@ COPY templates ./templates
 COPY .env.example ./.env.example
 
 RUN npm run build
+RUN npm run build:seeds
 RUN npm prune --omit=dev
 
 FROM node:20-alpine AS runtime
