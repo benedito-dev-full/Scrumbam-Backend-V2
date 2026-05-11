@@ -12,6 +12,7 @@ const makeTaskResponse = () => ({
   projectId: '10',
   descricao: null,
   priority: null,
+  taskType: null,
   assigneeId: '100',
   sprintId: null,
   dados: null,

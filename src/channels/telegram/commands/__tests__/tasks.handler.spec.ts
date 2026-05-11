@@ -4,13 +4,15 @@ import { CommandRegistryService } from '../../../core/command-registry.service';
 import { TasksService } from '../../../../tasks/tasks.service';
 import { TimezoneService } from '../../../../common/services/timezone.service';
 
-const makeTask = (overrides: Partial<{
-  id: string;
-  identifier: string;
-  nome: string;
-  status: string;
-  criadoEm: string;
-}> = {}) => ({
+const makeTask = (
+  overrides: Partial<{
+    id: string;
+    identifier: string;
+    nome: string;
+    status: string;
+    criadoEm: string;
+  }> = {},
+) => ({
   id: '1',
   identifier: 'DEV-1',
   nome: 'Task de teste',
@@ -18,6 +20,7 @@ const makeTask = (overrides: Partial<{
   projectId: '1',
   descricao: null,
   priority: null,
+  taskType: null,
   assigneeId: '100',
   sprintId: null,
   dados: null,
@@ -169,9 +172,7 @@ describe('TasksHandler', () => {
 
   describe('handle() — emojis de status', () => {
     it('deve exibir emoji correto para status INBOX', async () => {
-      tasksService.findMany.mockResolvedValue(
-        makeResultWith([makeTask({ status: 'INBOX' })]),
-      );
+      tasksService.findMany.mockResolvedValue(makeResultWith([makeTask({ status: 'INBOX' })]));
 
       const reply = await handler.handle(CHAT_ID, USER_ID, ['backlog']);
 

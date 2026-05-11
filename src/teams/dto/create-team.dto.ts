@@ -62,4 +62,38 @@ export class CreateTeamDto {
   @IsString()
   @MaxLength(500)
   description?: string;
+
+  /**
+   * Cor de identificação visual do time (hex `#RRGGBB`).
+   *
+   * Persistida em `DEntidade.dados.color`. Usada pelo frontend no avatar
+   * quadrado do time. Aceita também `null` para limpar a cor.
+   */
+  @ApiPropertyOptional({
+    description: 'Cor hex do time (#RRGGBB)',
+    example: '#3B82F6',
+    pattern: '^#[0-9A-Fa-f]{6}$',
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^#[0-9A-Fa-f]{6}$/, {
+    message: 'color deve ser hex no formato #RRGGBB',
+  })
+  color?: string | null;
+
+  /**
+   * Nome de ícone Lucide (opcional).
+   *
+   * Persistido em `DEntidade.dados.icon`.
+   */
+  @ApiPropertyOptional({
+    description: 'Nome de ícone Lucide (ex: "rocket")',
+    example: 'rocket',
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  icon?: string | null;
 }

@@ -18,6 +18,7 @@ const makeResultWith = (count: number, hasMore = false) => ({
     projectId: '1',
     descricao: null,
     priority: null,
+    taskType: null,
     assigneeId: '100',
     sprintId: null,
     dados: null,
@@ -80,8 +81,8 @@ describe('StatusHandler', () => {
   describe('handle()', () => {
     it('deve exibir status de pareamento e contagens', async () => {
       tasksService.findMany
-        .mockResolvedValueOnce(makeResultWith(5))  // INBOX
-        .mockResolvedValueOnce(makeResultWith(2));  // EXECUTING
+        .mockResolvedValueOnce(makeResultWith(5)) // INBOX
+        .mockResolvedValueOnce(makeResultWith(2)); // EXECUTING
 
       prisma.dVincula.findFirst.mockResolvedValue({
         metaDados: {
@@ -124,7 +125,7 @@ describe('StatusHandler', () => {
 
     it('deve exibir "100+" quando hasMore=true', async () => {
       tasksService.findMany
-        .mockResolvedValueOnce(makeResultWith(1, true))  // INBOX com hasMore
+        .mockResolvedValueOnce(makeResultWith(1, true)) // INBOX com hasMore
         .mockResolvedValueOnce(makeEmptyResult());
 
       prisma.dVincula.findFirst.mockResolvedValue(null);

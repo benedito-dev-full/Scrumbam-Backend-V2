@@ -10,20 +10,22 @@ import { TaskStatus } from './schemas/task-dados.schema';
 
 // ─── Helpers de mock ─────────────────────────────────────────────────────────
 
-function makeTask(overrides: Partial<{
-  chave: bigint;
-  nome: string;
-  descricao: string | null;
-  idProject: bigint | null;
-  idStatus: bigint | null;
-  idPriority: bigint | null;
-  idAssignee: bigint | null;
-  idSprint: bigint | null;
-  dados: Record<string, unknown> | null;
-  excluido: boolean;
-  criadoEm: Date;
-  atualizadoEm: Date;
-}> = {}) {
+function makeTask(
+  overrides: Partial<{
+    chave: bigint;
+    nome: string;
+    descricao: string | null;
+    idProject: bigint | null;
+    idStatus: bigint | null;
+    idPriority: bigint | null;
+    idAssignee: bigint | null;
+    idSprint: bigint | null;
+    dados: Record<string, unknown> | null;
+    excluido: boolean;
+    criadoEm: Date;
+    atualizadoEm: Date;
+  }> = {},
+) {
   return {
     chave: BigInt(7),
     nome: 'Test Task',
@@ -57,6 +59,7 @@ describe('TasksService', () => {
       update: jest.Mock;
     };
     dTabela: { findFirst: jest.Mock; findMany: jest.Mock; create: jest.Mock; update: jest.Mock };
+    dEntidade: { findFirst: jest.Mock };
     $transaction: jest.Mock;
   };
   let identifierService: { getNextIdentifier: jest.Mock };
@@ -77,6 +80,8 @@ describe('TasksService', () => {
         create: jest.fn(),
         update: jest.fn(),
       },
+      // Necessário porque TasksService.create() hidrata creator via dEntidade.findFirst.
+      dEntidade: { findFirst: jest.fn().mockResolvedValue({ nome: 'Tester' }) },
       $transaction: jest.fn(),
     };
 
@@ -109,7 +114,10 @@ describe('TasksService', () => {
 
   describe('create()', () => {
     it('deve gerar identifier DEV-1 na primeira task do projeto', async () => {
-      const task = makeTask({ chave: BigInt(1), dados: { identifier: 'DEV-1', v3: { state: 'INBOX' } } });
+      const task = makeTask({
+        chave: BigInt(1),
+        dados: { identifier: 'DEV-1', v3: { state: 'INBOX' } },
+      });
 
       prisma.dProject.findFirst.mockResolvedValue({ dados: { prefix: 'DEV' } });
       prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
@@ -130,9 +138,9 @@ describe('TasksService', () => {
     it('deve lançar NotFoundException se projeto não existe', async () => {
       prisma.dProject.findFirst.mockResolvedValue(null);
 
-      await expect(
-        service.create({ nome: 'Task', projectId: '999' }, BigInt(100)),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.create({ nome: 'Task', projectId: '999' }, BigInt(100))).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('deve usar prefix "DEV" como default quando projeto não tem prefix', async () => {
@@ -175,6 +183,123 @@ describe('TasksService', () => {
         BigInt(1),
         'FEAT',
       );
+    });
+
+    it('deve persistir taskType em dados.taskType e expor no top-level do response', async () => {
+      // Persistido na DTask: dados.taskType = 'BUG'
+      const taskComBug = makeTask({
+        chave: BigInt(7),
+        dados: { identifier: 'DEV-7', v3: { state: 'INBOX' }, taskType: 'BUG' },
+      });
+
+      prisma.dProject.findFirst.mockResolvedValue({ dados: { prefix: 'DEV' } });
+
+      let createDataCaptured: Record<string, unknown> | null = null;
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const txMock = {
+          dTask: {
+            create: jest.fn().mockImplementation(({ data }: { data: Record<string, unknown> }) => {
+              createDataCaptured = data;
+              return Promise.resolve(taskComBug);
+            }),
+          },
+          dTabela: { findFirst: jest.fn().mockResolvedValue(null) },
+        };
+        identifierService.getNextIdentifier.mockResolvedValue('DEV-7');
+        return fn(txMock);
+      });
+
+      const result = await service.create(
+        { nome: 'Task com tipo', projectId: '1', taskType: 'BUG' },
+        BigInt(100),
+      );
+
+      // Persistência: dados.taskType setado
+      expect(createDataCaptured).not.toBeNull();
+      const dadosPersistido = createDataCaptured!.dados as Record<string, unknown>;
+      expect(dadosPersistido.taskType).toBe('BUG');
+      expect(dadosPersistido.identifier).toBe('DEV-7');
+
+      // Resposta: taskType no top-level
+      expect(result.taskType).toBe('BUG');
+      expect((result.dados as Record<string, unknown>).taskType).toBe('BUG');
+    });
+
+    it('deve continuar funcionando sem taskType (backward-compat) e retornar taskType=null', async () => {
+      const taskSemType = makeTask({
+        chave: BigInt(8),
+        dados: { identifier: 'DEV-8', v3: { state: 'INBOX' } },
+      });
+
+      prisma.dProject.findFirst.mockResolvedValue({ dados: { prefix: 'DEV' } });
+
+      let createDataCaptured: Record<string, unknown> | null = null;
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const txMock = {
+          dTask: {
+            create: jest.fn().mockImplementation(({ data }: { data: Record<string, unknown> }) => {
+              createDataCaptured = data;
+              return Promise.resolve(taskSemType);
+            }),
+          },
+          dTabela: { findFirst: jest.fn().mockResolvedValue(null) },
+        };
+        identifierService.getNextIdentifier.mockResolvedValue('DEV-8');
+        return fn(txMock);
+      });
+
+      const result = await service.create({ nome: 'Sem tipo', projectId: '1' }, BigInt(100));
+
+      // Persistência: dados.taskType ausente
+      expect(createDataCaptured).not.toBeNull();
+      const dadosPersistido = createDataCaptured!.dados as Record<string, unknown>;
+      expect(dadosPersistido.taskType).toBeUndefined();
+
+      // Resposta: taskType = null
+      expect(result.taskType).toBeNull();
+    });
+  });
+
+  // ─── update() ──────────────────────────────────────────────────────────────
+
+  describe('update()', () => {
+    it('deve atualizar taskType preservando identifier/v3/telemetry/capture', async () => {
+      const dadosExistentes = {
+        identifier: 'DEV-7',
+        v3: { state: 'INBOX', movedAt: '2026-05-09T00:00:00.000Z', movedBy: '100' },
+        telemetry: { readyAt: '2026-05-10T00:00:00.000Z' },
+        capture: { source: 'web', rawText: 'criada via web' },
+        taskType: 'BUG',
+      };
+
+      prisma.dTask.findFirst.mockResolvedValue({
+        chave: BigInt(7),
+        dados: dadosExistentes,
+      });
+
+      let updateDataCaptured: Record<string, unknown> | null = null;
+      prisma.dTask.update.mockImplementation(({ data }: { data: Record<string, unknown> }) => {
+        updateDataCaptured = data;
+        return Promise.resolve(
+          makeTask({
+            chave: BigInt(7),
+            dados: { ...dadosExistentes, taskType: 'FEATURE' },
+          }),
+        );
+      });
+
+      const result = await service.update('7', { taskType: 'FEATURE' });
+
+      // O update.data.dados deve conter merge superficial — todas as chaves intactas + taskType atualizado
+      expect(updateDataCaptured).not.toBeNull();
+      const dadosMerged = updateDataCaptured!.dados as Record<string, unknown>;
+      expect(dadosMerged.identifier).toBe('DEV-7');
+      expect(dadosMerged.v3).toEqual(dadosExistentes.v3);
+      expect(dadosMerged.telemetry).toEqual(dadosExistentes.telemetry);
+      expect(dadosMerged.capture).toEqual(dadosExistentes.capture);
+      expect(dadosMerged.taskType).toBe('FEATURE');
+
+      expect(result.taskType).toBe('FEATURE');
     });
   });
 
@@ -320,7 +445,13 @@ describe('TasksService', () => {
       const prismaMock = {
         dProject: { findFirst: jest.fn().mockResolvedValue({ dados: { prefix: 'DEV' } }) },
         dTask: { create: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn() },
-        dTabela: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn(), create: jest.fn(), update: jest.fn() },
+        dTabela: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          findMany: jest.fn(),
+          create: jest.fn(),
+          update: jest.fn(),
+        },
+        dEntidade: { findFirst: jest.fn().mockResolvedValue({ nome: 'Tester' }) },
         $transaction: jest.fn(),
       };
 
@@ -330,7 +461,10 @@ describe('TasksService', () => {
           { provide: PrismaService, useValue: prismaMock },
           { provide: TasksIdentifierService, useValue: identifierServiceMock },
           { provide: EventProducerService, useValue: { addInternalEvent: jest.fn() } },
-          { provide: CorrelationIdService, useValue: { getOrGenerate: jest.fn().mockReturnValue('cid') } },
+          {
+            provide: CorrelationIdService,
+            useValue: { getOrGenerate: jest.fn().mockReturnValue('cid') },
+          },
         ],
       }).compile();
 
@@ -357,8 +491,16 @@ describe('TasksService', () => {
       const uniqueIds = new Set(identifiers);
       expect(uniqueIds.size).toBe(10);
       expect(identifiers).toEqual([
-        'DEV-1', 'DEV-2', 'DEV-3', 'DEV-4', 'DEV-5',
-        'DEV-6', 'DEV-7', 'DEV-8', 'DEV-9', 'DEV-10',
+        'DEV-1',
+        'DEV-2',
+        'DEV-3',
+        'DEV-4',
+        'DEV-5',
+        'DEV-6',
+        'DEV-7',
+        'DEV-8',
+        'DEV-9',
+        'DEV-10',
       ]);
     });
   });
@@ -402,9 +544,9 @@ describe('State Machine V3 — 50 cenários', () => {
     { from: 'VALIDATING', to: 'FAILED', expected: 'valid' },
     // Contagem: 17 válidas acima + adicionar mais para completar
     // Reutilizar estados intermediários com variações já testadas
-    { from: 'INBOX', to: 'READY', expected: 'valid' },       // dup/confirmação
-    { from: 'READY', to: 'EXECUTING', expected: 'valid' },   // dup/confirmação
-    { from: 'EXECUTING', to: 'DONE', expected: 'valid' },    // dup/confirmação
+    { from: 'INBOX', to: 'READY', expected: 'valid' }, // dup/confirmação
+    { from: 'READY', to: 'EXECUTING', expected: 'valid' }, // dup/confirmação
+    { from: 'EXECUTING', to: 'DONE', expected: 'valid' }, // dup/confirmação
 
     // ─── Transições INVÁLIDAS (30 casos) ─────────────────────────────────
     // INBOX não pode ir para...
@@ -445,16 +587,13 @@ describe('State Machine V3 — 50 cenários', () => {
     { from: 'FAILED', to: 'CANCELLED', expected: 'invalid' },
   ];
 
-  test.each(scenarios)(
-    'Transição $from → $to deve ser $expected',
-    ({ from, to, expected }) => {
-      if (expected === 'valid') {
-        expect(() => validateTransition(from, to)).not.toThrow();
-      } else {
-        expect(() => validateTransition(from, to)).toThrow(BadRequestException);
-      }
-    },
-  );
+  test.each(scenarios)('Transição $from → $to deve ser $expected', ({ from, to, expected }) => {
+    if (expected === 'valid') {
+      expect(() => validateTransition(from, to)).not.toThrow();
+    } else {
+      expect(() => validateTransition(from, to)).toThrow(BadRequestException);
+    }
+  });
 
   it('deve ter exatamente 50 cenários cobertos', () => {
     expect(scenarios).toHaveLength(50);
@@ -462,8 +601,15 @@ describe('State Machine V3 — 50 cenários', () => {
 
   it('deve ter todos os 9 estados como from em algum cenário', () => {
     const estados: TaskStatus[] = [
-      'INBOX', 'READY', 'EXECUTING', 'DONE', 'FAILED',
-      'CANCELLED', 'DISCARDED', 'VALIDATING', 'VALIDATED',
+      'INBOX',
+      'READY',
+      'EXECUTING',
+      'DONE',
+      'FAILED',
+      'CANCELLED',
+      'DISCARDED',
+      'VALIDATING',
+      'VALIDATED',
     ];
     const fromStates = new Set(scenarios.map((s) => s.from));
     for (const estado of estados) {

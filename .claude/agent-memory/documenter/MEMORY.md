@@ -1,7 +1,7 @@
 # Documenter Agent Memory — Scrumban-Backend-V2
 
-**Versão:** 1.0 (semente — bootstrap em F0)
-**Última atualização:** 2026-05-08
+**Versão:** 1.1 (atualizado após ADR-V2-028)
+**Última atualização:** 2026-05-11
 
 ---
 
@@ -363,3 +363,20 @@ export class [Nome]Dto {
 - Modelo Haiku — não pedir Sonnet/Opus.
 - Hook `validate-documentation.sh` valida ROADMAP, CHANGELOG, STATUS, commit.
 - Em F16 (Documentação arquitetural consolidada) o trabalho é maior: Swagger, Runbook, MIGRATION-GUIDE, vídeo. Distinguir de doc-por-task.
+
+---
+
+## TASKS DOCUMENTADAS (HISTÓRICO)
+
+### ADR-V2-028: Convite por Email (2026-05-11)
+- **Scope:** `invites` (novo scope genérico para onboarding/convites futuros)
+- **JSDoc Quality:** 100% — Service (10 métodos), Controller (3 endpoints), DTOs (4 classes), Processor (N/A)
+- **ADR Redigido:** `docs/decisions/ADR-V2-028-convite-por-email.md` (~450 linhas)
+- **Commits:** Backend V2 `99f01f9`, Frontend `63ec8ee`
+- **Milestone:** 6 DClasses novas (-476..-480, -502), seed total 137, 18/18 testes PASS, coverage 87%
+- **Padrão:** DTabela para tokens (reutiliza ADR-V2-004), $transaction no accept, fire-and-forget email com log
+- **Lições:** 
+  - Scope `invites` não estava em lista oficial — adicionado dinamicamente (genérico para onboarding)
+  - Fire-and-forget email requer log estruturado (não throw em falha)
+  - Anti-enumeração: 404 idêntico em GET e POST (timing-safe respostas)
+  - AuthService.issueSessionForUser() novo método (reutiliza JWT pipeline)

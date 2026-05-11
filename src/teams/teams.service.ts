@@ -45,9 +45,7 @@ const ID_CLASSE_ORG_VIEWER = BigInt(-163);
 export class TeamsService {
   private readonly logger = new Logger(TeamsService.name);
 
-  constructor(
-    private readonly prisma: PrismaService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   /**
    * Cria time na organização com Issue Counter e membership LEAD.
@@ -119,6 +117,8 @@ export class TeamsService {
           dados: {
             key: prefix,
             ...(dto.description && { description: dto.description }),
+            ...(dto.color !== undefined && { color: dto.color }),
+            ...(dto.icon !== undefined && { icon: dto.icon }),
           } as Prisma.InputJsonValue,
         },
       });
@@ -146,7 +146,8 @@ export class TeamsService {
       return teamEntity;
     });
 
-    return this.buildResponse(team, orgId, prefix, 1);
+    // Quem cria vira LEAD do time — sempre pode editar/deletar
+    return this.buildResponse(team, orgId, prefix, 1, { canEdit: true, canDelete: true });
   }
 
   /**
@@ -209,12 +210,52 @@ export class TeamsService {
       },
       _count: { chave: true },
     });
-    const countMap = new Map(memberCounts.map((mc) => [mc.idLocEscritu.toString(), mc._count.chave]));
+    const countMap = new Map(
+      memberCounts.map((mc) => [mc.idLocEscritu.toString(), mc._count.chave]),
+    );
+
+    // Batch: cargo do usuário em cada time + status de ADMIN na org (para canEdit/canDelete)
+    const [userMemberships, orgAdminVinculo] = await Promise.all([
+      teamIds.length > 0
+        ? this.prisma.dVincula.findMany({
+            where: {
+              idLocEscritu: { in: teamIds },
+              idEntidade: userEntidadeId,
+              idClasse: ID_CLASSE_TEAM_MEMBERSHIP,
+              excluido: false,
+            },
+            select: { idLocEscritu: true, metaDados: true },
+          })
+        : Promise.resolve([]),
+      this.prisma.dVincula.findFirst({
+        where: {
+          idLocEscritu: orgIdBigInt,
+          idEntidade: userEntidadeId,
+          idClasse: ID_CLASSE_ORG_ADMIN,
+          excluido: false,
+        },
+        select: { chave: true },
+      }),
+    ]);
+    const cargoMap = new Map<string, string>();
+    for (const m of userMemberships) {
+      const meta = m.metaDados as Record<string, unknown> | null;
+      cargoMap.set(m.idLocEscritu.toString(), (meta?.cargo as string) ?? 'MEMBER');
+    }
+    const isOrgAdmin = !!orgAdminVinculo;
 
     const items = pageTeams.map((t) => {
       const dados = t.dados as Record<string, unknown> | null;
       const prefix = (dados?.key as string) ?? 'DEV';
-      return this.buildResponse(t, orgId, prefix, countMap.get(t.chave.toString()) ?? 0, dados);
+      const canManage = cargoMap.get(t.chave.toString()) === 'LEAD' || isOrgAdmin;
+      return this.buildResponse(
+        t,
+        orgId,
+        prefix,
+        countMap.get(t.chave.toString()) ?? 0,
+        { canEdit: canManage, canDelete: canManage },
+        dados,
+      );
     });
 
     const nextCursor = hasMore ? pageTeams[pageTeams.length - 1].chave.toString() : null;
@@ -282,7 +323,29 @@ export class TeamsService {
       },
       _count: { chave: true },
     });
-    const countMap = new Map(memberCounts.map((mc) => [mc.idLocEscritu.toString(), mc._count.chave]));
+    const countMap = new Map(
+      memberCounts.map((mc) => [mc.idLocEscritu.toString(), mc._count.chave]),
+    );
+
+    // Batch: status de ADMIN nas orgs distintas dos times (para canEdit/canDelete)
+    const orgIdsSet = new Set<string>();
+    for (const v of pageVinculos) {
+      if (v.locEscritu?.idEstab) orgIdsSet.add(v.locEscritu.idEstab.toString());
+    }
+    const orgIds = Array.from(orgIdsSet).map((s) => BigInt(s));
+    const adminVinculos =
+      orgIds.length > 0
+        ? await this.prisma.dVincula.findMany({
+            where: {
+              idLocEscritu: { in: orgIds },
+              idEntidade: userEntidadeId,
+              idClasse: ID_CLASSE_ORG_ADMIN,
+              excluido: false,
+            },
+            select: { idLocEscritu: true },
+          })
+        : [];
+    const adminOrgSet = new Set(adminVinculos.map((a) => a.idLocEscritu.toString()));
 
     const items: TeamResponseDto[] = pageVinculos
       .filter((v) => v.locEscritu && !v.locEscritu.excluido)
@@ -291,17 +354,22 @@ export class TeamsService {
         const dados = team.dados as Record<string, unknown> | null;
         const prefix = (dados?.key as string) ?? 'DEV';
         const orgId = team.idEstab?.toString() ?? '';
+        const meta = v.metaDados as Record<string, unknown> | null;
+        const cargo = (meta?.cargo as string) ?? 'MEMBER';
+        const canManage = cargo === 'LEAD' || adminOrgSet.has(orgId);
         return this.buildResponse(
           team,
           orgId,
           prefix,
           countMap.get(team.chave.toString()) ?? 0,
+          { canEdit: canManage, canDelete: canManage },
           dados,
         );
       });
 
-    const nextCursor =
-      hasMore ? pageVinculos[pageVinculos.length - 1].idLocEscritu.toString() : null;
+    const nextCursor = hasMore
+      ? pageVinculos[pageVinculos.length - 1].idLocEscritu.toString()
+      : null;
     return { items, pagination: { hasMore, nextCursor } };
   }
 
@@ -326,7 +394,14 @@ export class TeamsService {
     const [team, membership] = await Promise.all([
       this.prisma.dEntidade.findFirst({
         where: { chave: teamId, idClasse: ID_CLASSE_TEAM, excluido: false },
-        select: { chave: true, nome: true, dados: true, idEstab: true, criadoEm: true, atualizadoEm: true },
+        select: {
+          chave: true,
+          nome: true,
+          dados: true,
+          idEstab: true,
+          criadoEm: true,
+          atualizadoEm: true,
+        },
       }),
       this.prisma.dVincula.findFirst({
         where: {
@@ -335,7 +410,7 @@ export class TeamsService {
           idClasse: ID_CLASSE_TEAM_MEMBERSHIP,
           excluido: false,
         },
-        select: { chave: true },
+        select: { chave: true, metaDados: true },
       }),
     ]);
 
@@ -346,6 +421,24 @@ export class TeamsService {
       throw new ForbiddenException('Acesso negado: você não é membro deste time');
     }
 
+    const meta = membership.metaDados as Record<string, unknown> | null;
+    const cargo = (meta?.cargo as string) ?? 'MEMBER';
+    // Só checa ADMIN da org se ainda não for LEAD (otimização: evita query desnecessária)
+    let isOrgAdmin = false;
+    if (cargo !== 'LEAD' && team.idEstab) {
+      const adminVinculo = await this.prisma.dVincula.findFirst({
+        where: {
+          idLocEscritu: team.idEstab,
+          idEntidade: userEntidadeId,
+          idClasse: ID_CLASSE_ORG_ADMIN,
+          excluido: false,
+        },
+        select: { chave: true },
+      });
+      isOrgAdmin = !!adminVinculo;
+    }
+    const canManage = cargo === 'LEAD' || isOrgAdmin;
+
     const memberCount = await this.prisma.dVincula.count({
       where: { idLocEscritu: teamId, idClasse: ID_CLASSE_TEAM_MEMBERSHIP, excluido: false },
     });
@@ -353,7 +446,14 @@ export class TeamsService {
     const dados = team.dados as Record<string, unknown> | null;
     const prefix = (dados?.key as string) ?? 'DEV';
     const orgId = team.idEstab?.toString() ?? '';
-    return this.buildResponse(team, orgId, prefix, memberCount, dados);
+    return this.buildResponse(
+      team,
+      orgId,
+      prefix,
+      memberCount,
+      { canEdit: canManage, canDelete: canManage },
+      dados,
+    );
   }
 
   /**
@@ -377,7 +477,14 @@ export class TeamsService {
 
     const team = await this.prisma.dEntidade.findFirst({
       where: { chave: teamId, idClasse: ID_CLASSE_TEAM, excluido: false },
-      select: { chave: true, nome: true, dados: true, idEstab: true, criadoEm: true, atualizadoEm: true },
+      select: {
+        chave: true,
+        nome: true,
+        dados: true,
+        idEstab: true,
+        criadoEm: true,
+        atualizadoEm: true,
+      },
     });
 
     if (!team) {
@@ -390,6 +497,8 @@ export class TeamsService {
     const novosDados: Record<string, unknown> = {
       ...dadosAtuais,
       ...(dto.description !== undefined && { description: dto.description }),
+      ...(dto.color !== undefined && { color: dto.color }),
+      ...(dto.icon !== undefined && { icon: dto.icon }),
     };
 
     const updated = await this.prisma.dEntidade.update({
@@ -398,7 +507,14 @@ export class TeamsService {
         ...(dto.nome !== undefined && { nome: dto.nome }),
         dados: novosDados as Prisma.InputJsonValue,
       },
-      select: { chave: true, nome: true, dados: true, idEstab: true, criadoEm: true, atualizadoEm: true },
+      select: {
+        chave: true,
+        nome: true,
+        dados: true,
+        idEstab: true,
+        criadoEm: true,
+        atualizadoEm: true,
+      },
     });
 
     const memberCount = await this.prisma.dVincula.count({
@@ -408,7 +524,15 @@ export class TeamsService {
     const updatedDados = updated.dados as Record<string, unknown> | null;
     const prefix = (updatedDados?.key as string) ?? 'DEV';
     const orgId = updated.idEstab?.toString() ?? '';
-    return this.buildResponse(updated, orgId, prefix, memberCount, updatedDados);
+    // requireLeadOrAdminRole acima já validou: quem chega aqui pode editar e deletar
+    return this.buildResponse(
+      updated,
+      orgId,
+      prefix,
+      memberCount,
+      { canEdit: true, canDelete: true },
+      updatedDados,
+    );
   }
 
   /**
@@ -528,11 +652,7 @@ export class TeamsService {
    * await service.addMember('200', { userId: '300', cargo: 'MEMBER' }, BigInt(leadId));
    * ```
    */
-  async addMember(
-    id: string,
-    dto: AddTeamMemberDto,
-    userEntidadeId: bigint,
-  ): Promise<void> {
+  async addMember(id: string, dto: AddTeamMemberDto, userEntidadeId: bigint): Promise<void> {
     const teamId = BigInt(id);
 
     const team = await this.prisma.dEntidade.findFirst({
@@ -656,11 +776,7 @@ export class TeamsService {
    * await service.removeMember('200', '300', BigInt(leadId));
    * ```
    */
-  async removeMember(
-    id: string,
-    memberId: string,
-    userEntidadeId: bigint,
-  ): Promise<void> {
+  async removeMember(id: string, memberId: string, userEntidadeId: bigint): Promise<void> {
     const teamId = BigInt(id);
 
     const team = await this.prisma.dEntidade.findFirst({
@@ -770,6 +886,9 @@ export class TeamsService {
 
   /**
    * Constrói TeamResponseDto a partir de dados brutos.
+   *
+   * @param permissions - Flags canEdit/canDelete já calculadas pelo caller.
+   *   Os callers que listam (findByOrg, findMine) calculam em batch para evitar N+1.
    */
   private buildResponse(
     team: {
@@ -783,6 +902,7 @@ export class TeamsService {
     orgId: string,
     prefix: string,
     memberCount: number,
+    permissions: { canEdit: boolean; canDelete: boolean },
     dados?: Record<string, unknown> | null,
   ): TeamResponseDto {
     const teamDados = dados ?? (team.dados as Record<string, unknown> | null);
@@ -792,9 +912,13 @@ export class TeamsService {
       orgId: orgId || team.idEstab?.toString() || '',
       prefix,
       description: (teamDados?.description as string | null | undefined) ?? null,
+      color: (teamDados?.color as string | null | undefined) ?? null,
+      icon: (teamDados?.icon as string | null | undefined) ?? null,
       memberCount,
       criadoEm: team.criadoEm.toISOString(),
       atualizadoEm: team.atualizadoEm.toISOString(),
+      canEdit: permissions.canEdit,
+      canDelete: permissions.canDelete,
     };
   }
 }

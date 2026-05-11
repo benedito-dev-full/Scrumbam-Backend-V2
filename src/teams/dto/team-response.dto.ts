@@ -48,6 +48,28 @@ export class TeamResponseDto {
   @ApiPropertyOptional({ description: 'Descrição do time', nullable: true })
   description?: string | null;
 
+  /**
+   * Cor hex do time (`#RRGGBB`) ou `null` se não configurada.
+   * Persistida em `DEntidade.dados.color`.
+   */
+  @ApiPropertyOptional({
+    description: 'Cor hex do time (#RRGGBB)',
+    example: '#3B82F6',
+    nullable: true,
+  })
+  color?: string | null;
+
+  /**
+   * Nome de ícone Lucide ou `null`.
+   * Persistido em `DEntidade.dados.icon`.
+   */
+  @ApiPropertyOptional({
+    description: 'Nome de ícone Lucide',
+    example: 'rocket',
+    nullable: true,
+  })
+  icon?: string | null;
+
   @ApiProperty({ description: 'Número de membros', example: 2 })
   memberCount!: number;
 
@@ -56,6 +78,30 @@ export class TeamResponseDto {
 
   @ApiProperty({ description: 'Data de atualização', example: '2026-05-09T00:00:00.000Z' })
   atualizadoEm!: string;
+
+  /**
+   * Indica se o usuário autenticado pode editar este time.
+   *
+   * Verdadeiro quando o usuário é LEAD do time ou ADMIN da organização pai.
+   * Calculado pelo backend; o frontend usa para mostrar/esconder ações de edição.
+   */
+  @ApiProperty({
+    description: 'Se o usuário autenticado pode editar este time',
+    example: true,
+  })
+  canEdit!: boolean;
+
+  /**
+   * Indica se o usuário autenticado pode deletar este time.
+   *
+   * Mesma regra de canEdit (LEAD do time ou ADMIN da organização).
+   * Mantido como campo separado para flexibilidade futura de RBAC.
+   */
+  @ApiProperty({
+    description: 'Se o usuário autenticado pode deletar este time',
+    example: true,
+  })
+  canDelete!: boolean;
 }
 
 /**
