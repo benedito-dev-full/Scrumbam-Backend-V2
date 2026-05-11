@@ -1,8 +1,12 @@
-import { IsOptional, IsIn } from 'class-validator';
+import { IsOptional, IsIn, IsString, Matches } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
  * DTO para granularidade temporal em queries de throughput.
+ *
+ * Inclui declaracoes "shadow" de period/periodFrom/periodTo do PeriodQueryDto
+ * porque o controller injeta os dois DTOs no mesmo @Query e o ValidationPipe
+ * com forbidNonWhitelisted rejeita campos extras nao declarados.
  *
  * @example
  * ```typescript
@@ -25,4 +29,29 @@ export class GranularityQueryDto {
   @IsOptional()
   @IsIn(['day', 'week'])
   granularity?: 'day' | 'week' = 'day';
+
+  /**
+   * Declaracao shadow (PeriodQueryDto) — necessaria porque o controller
+   * usa @Query() pra esse DTO no mesmo handler em que PeriodQueryDto e injetado.
+   * Validacao real fica no PeriodQueryDto.
+   */
+  @IsOptional()
+  @IsIn(['today', 'week', 'month'])
+  period?: 'today' | 'week' | 'month';
+
+  /** Declaracao shadow (PeriodQueryDto). */
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'periodFrom deve estar no formato YYYY-MM-DD',
+  })
+  periodFrom?: string;
+
+  /** Declaracao shadow (PeriodQueryDto). */
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'periodTo deve estar no formato YYYY-MM-DD',
+  })
+  periodTo?: string;
 }

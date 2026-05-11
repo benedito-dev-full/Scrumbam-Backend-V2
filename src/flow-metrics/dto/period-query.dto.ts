@@ -69,4 +69,13 @@ export class PeriodQueryDto {
   @IsString()
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'periodTo deve estar no formato YYYY-MM-DD' })
   periodTo?: string;
+
+  /**
+   * Declaracao shadow (GranularityQueryDto) — necessaria porque o controller
+   * de throughput usa @Query() pra ambos DTOs no mesmo handler e o
+   * ValidationPipe com forbidNonWhitelisted rejeita campos extras.
+   */
+  @IsOptional()
+  @IsIn(['day', 'week'])
+  granularity?: 'day' | 'week';
 }
