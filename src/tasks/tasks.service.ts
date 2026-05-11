@@ -117,6 +117,11 @@ export class TasksService {
           : undefined,
       );
 
+      // Injetar taskType (mantém signature de buildInitialTaskDados inalterada — ADR-V2-001)
+      if (dto.taskType) {
+        dadosPayload.taskType = dto.taskType;
+      }
+
       // Buscar idStatus para INBOX (DTabela -441 do projeto)
       const inboxStatus = await tx.dTabela.findFirst({
         where: {
@@ -293,12 +298,18 @@ export class TasksService {
 
     const existing = await this.prisma.dTask.findFirst({
       where: { chave: taskId, excluido: false },
-      select: { chave: true },
+      select: { chave: true, dados: true },
     });
 
     if (!existing) {
       throw new NotFoundException(`Task ${id} não encontrada`);
     }
+
+    // Merge superficial em `dados` quando taskType for atualizado.
+    // Preserva identifier, v3, telemetry, capture, automation intactos.
+    const dadosAtuais = (existing.dados as Record<string, unknown> | null) ?? {};
+    const novosDados =
+      dto.taskType !== undefined ? { ...dadosAtuais, taskType: dto.taskType } : undefined;
 
     const updated = await this.prisma.dTask.update({
       where: { chave: taskId },
@@ -308,6 +319,7 @@ export class TasksService {
         ...(dto.assigneeId !== undefined
           ? { idAssignee: dto.assigneeId ? BigInt(dto.assigneeId) : null }
           : {}),
+        ...(novosDados !== undefined ? { dados: novosDados as Prisma.InputJsonValue } : {}),
       },
     });
 
@@ -556,6 +568,7 @@ export class TasksService {
     const dados = task.dados as Record<string, unknown> | null;
     const v3 = dados?.v3 as { state?: string } | null;
     const identifier = (dados?.identifier as string | null) ?? '';
+    const taskType = (dados?.taskType as string | null) ?? null;
 
     return {
       id: task.chave.toString(),
@@ -565,6 +578,7 @@ export class TasksService {
       identifier,
       status: v3?.state ?? 'INBOX',
       priority: task.idPriority?.toString() ?? null,
+      taskType,
       assigneeId: task.idAssignee?.toString() ?? null,
       sprintId: task.idSprint?.toString() ?? null,
       dados,

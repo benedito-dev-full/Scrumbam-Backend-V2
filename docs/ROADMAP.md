@@ -11,6 +11,73 @@
 
 ---
 
+## F5 — Domínio Estrutural (Tasks + Intentions) — Extensão Modal
+
+### Task #2: Modal Criar Task com Tipo + Responsável + Canal + Criador — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** tasks (backend V2) + intentions (frontend)
+**Fase V2:** F5 (extensão pontual pós-F5)
+**Tempo Real:** ~2.5h Implementer + ~1h Reviewer + ~45min Documenter
+**Completado em:** 2026-05-11
+**Quality Score:** 8.5/10 APPROVED
+
+**O Que Foi Feito:**
+- **Backend V2:**
+  - DTOs: `CreateTaskDto` + `UpdateTaskDto` com campo `taskType?: string` (enum FEATURE|BUG|IMPROVEMENT|REVIEW|EXPLAIN)
+  - Schema: interface `TaskDados` estendida com `taskType?: string`
+  - Service: `create()` injeta `taskType` após `buildInitialTaskDados()` (preserve signature)
+  - Service: `update()` faz merge superficial em `dados`, preservando `identifier`, `v3`, `capture`, `automation`, `telemetry`
+  - Response: `TaskResponseDto` expõe `taskType: string | null` top-level (projeção de `dados.taskType`)
+  - Tests: 3 unit tests (create-com, create-sem backward-compat, update-merge preserva identifier)
+
+- **Frontend:**
+  - Types: `CreateIntentionDto` estendido com `assigneeId?: string` e `canal?: IntentionCanal`
+  - IntentionCanal: estendida com 'mcp' (alinhamento V2 enum `source`)
+  - API: `intentionsApi.create()` envia `taskType` (mapa TYPE_ID_TO_V2), `assigneeId`, `source` (= `canal`)
+  - API: `canalToSource()` helper mapeia frontend 4 canais para V2 enum (web/telegram/api/mcp)
+  - Adapter: `task-to-intention.ts` prioriza `raw.taskType` top-level (V2 novo) antes de fallback `dados`
+  - Modal: 3 Popover novos (Responsável com `useOrgMembers`, Canal 4 opções, Criador read-only `{user.nome}`)
+  - Modal: reset handler trata `assigneeId` e `canal` states
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — DTask é estrutural (Prisma direto correto)
+- Pilar 2 (Endpoints): N/A — reutilizam `/tasks` existente (sem novo controller)
+- Pilar 3 (Seed): RESPEITADO — ZERO tabela nova (ADR-V2-001)
+
+**ADRs vinculados:** ADR-V2-001 (zero tabela nova — `taskType` em Json `dados`), ADR-V2-009 (DTask estrutural)
+
+**Smoke test integrado (verde):**
+- `npm run build` V2 PASS (0 erros TypeScript)
+- `npx tsc --noEmit` V2 PASS + frontend PASS
+- `npx eslint --max-warnings 0` ambos PASS
+- `npm test -- tasks.service` V2: 3/3 unit tests PASS (+ baseline corretos)
+- `GET /tasks/{id}` retorna `taskType` no top-level + em `dados`
+- `PUT /tasks/{id}` com `{taskType}` preserva `identifier` em `dados` (merge OK)
+- Modal permite criar task com Tipo + Responsável + Canal + Criador preenchido
+
+**Backward-compat:** tasks antigas sem `taskType` retornam `taskType: null` (seguro)
+
+**Trade-offs Documentados:**
+- `taskType` top-level duplica valor de `dados.taskType` (cost: 2 LOC, gain: DX simples — aprovado)
+- `assigneeId` não validado contra org do projeto (mitigado by frontend UI — validação futura como debt)
+- `canal` só em create (alinha semântica V2 — "origem da captura")
+
+**Issues Menores (M1/M2) do Reviewer:**
+- M1: Adapter `dados.source` vs `dados.capture.source` — futuro clarificar path exato (hoje funciona via fallback)
+- M2: `canal` como campo separado vs parte de `capture` — decisão futura de refactor (scope F5-bis)
+
+**Pilares Score:**
+- ✅ Pilar 1 N/A (justificado — estrutural)
+- ✅ Pilar 2 N/A (endpoints reutilizados — zero duplicação)
+- ✅ Pilar 3 RESPEITADO (ZERO DClasses novas — `taskType` em Json)
+
+**Plan:** [`workspace/plans/plan-tasks-create-task-modal-fields-task1.md`](../workspace/plans/plan-tasks-create-task-modal-fields-task1.md)
+**Impl Notes:** [`workspace/implementations/impl-tasks-modal-task1.md`](../workspace/implementations/impl-tasks-modal-task1.md)
+**Review:** [`workspace/reviews/review-tasks-modal-task1.md`](../workspace/reviews/review-tasks-modal-task1.md)
+
+---
+
 ## F0 — Verificacao canonica + setup repo + Multi-agent infra
 
 ### Task #0: Esqueleto canonico V2 — COMPLETA

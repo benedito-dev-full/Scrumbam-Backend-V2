@@ -15,9 +15,10 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
  *   "identifier": "DEV-7",
  *   "status": "INBOX",
  *   "priority": null,
+ *   "taskType": "BUG",
  *   "assigneeId": null,
  *   "sprintId": null,
- *   "dados": { "identifier": "DEV-7", "v3": { "state": "INBOX" } },
+ *   "dados": { "identifier": "DEV-7", "v3": { "state": "INBOX" }, "taskType": "BUG" },
  *   "criadoEm": "2026-05-09T00:00:00.000Z",
  *   "atualizadoEm": "2026-05-09T00:00:00.000Z"
  * }
@@ -45,13 +46,24 @@ export class TaskResponseDto {
   @ApiPropertyOptional({ description: 'Prioridade', nullable: true })
   priority!: string | null;
 
+  @ApiPropertyOptional({
+    description:
+      'Tipo da task (FEATURE/BUG/IMPROVEMENT/REVIEW/EXPLAIN); extraído de dados.taskType',
+    nullable: true,
+    example: 'BUG',
+  })
+  taskType!: string | null;
+
   @ApiPropertyOptional({ description: 'ID do assignee', nullable: true })
   assigneeId!: string | null;
 
   @ApiPropertyOptional({ description: 'ID do sprint', nullable: true })
   sprintId!: string | null;
 
-  @ApiPropertyOptional({ description: 'Dados polimórficos (identifier, v3, telemetry, automation)', nullable: true })
+  @ApiPropertyOptional({
+    description: 'Dados polimórficos (identifier, v3, telemetry, automation)',
+    nullable: true,
+  })
   dados!: Record<string, unknown> | null;
 
   @ApiProperty({ description: 'Data de criação ISO 8601' })

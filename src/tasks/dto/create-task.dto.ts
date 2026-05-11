@@ -1,10 +1,4 @@
-import {
-  IsEnum,
-  IsOptional,
-  IsString,
-  MaxLength,
-  MinLength,
-} from 'class-validator';
+import { IsEnum, IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
@@ -91,4 +85,13 @@ export class CreateTaskDto {
   @IsOptional()
   @IsEnum(['telegram', 'web', 'api', 'mcp'])
   source?: string;
+
+  @ApiPropertyOptional({
+    description: 'Tipo da task (persistido em dados.taskType; exposto no top-level do response)',
+    enum: ['FEATURE', 'BUG', 'IMPROVEMENT', 'REVIEW', 'EXPLAIN'],
+    example: 'BUG',
+  })
+  @IsOptional()
+  @IsIn(['FEATURE', 'BUG', 'IMPROVEMENT', 'REVIEW', 'EXPLAIN'])
+  taskType?: string;
 }

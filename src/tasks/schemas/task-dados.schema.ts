@@ -86,6 +86,12 @@ export interface TaskDados {
   telemetry?: TelemetryData;
   automation?: AutomationData;
   capture?: CaptureData;
+  /**
+   * Tipo da task: FEATURE | BUG | IMPROVEMENT | REVIEW | EXPLAIN.
+   * Persistido em `dados.taskType` (sem coluna nova — ADR-V2-001).
+   * Setado no create após `buildInitialTaskDados()` e mesclado no update.
+   */
+  taskType?: string;
 }
 
 /**

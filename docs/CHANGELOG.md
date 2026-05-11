@@ -14,6 +14,20 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Modal Criar Task com Tipo + Responsável + Canal + Criador** (V2 F5 extensão) - 2026-05-11
+  - **Backend (tasks):** `CreateTaskDto` + `UpdateTaskDto` com campo `taskType?: string` (enum FEATURE|BUG|IMPROVEMENT|REVIEW|EXPLAIN)
+  - **Schema:** `TaskDados` estendida com `taskType?: string` (persistido em Json — ADR-V2-001)
+  - **Service:** `create()` injeta `taskType` após `buildInitialTaskDados()`; `update()` faz merge superficial preservando `identifier`/`v3`/`capture`
+  - **Response:** `TaskResponseDto` expõe `taskType: string | null` no top-level (projeção de `dados.taskType`)
+  - **Frontend (intentions):** `CreateIntentionDto` estendido com `assigneeId?` e `canal?` (4 opções: web/telegram/api/mcp)
+  - **Modal:** 3 Popover novos (Responsável via `useOrgMembers`, Canal com radio buttons, Criador read-only)
+  - **API:** `intentionsApi.create()` mapeia `taskTypeId` → `taskType` (enum uppercase), envia `assigneeId` e `source` (= `canal`)
+  - **Adapter:** `task-to-intention.ts` prioriza `raw.taskType` top-level antes de fallback
+  - **Tests:** 3 unit tests V2 (create-com, create-sem backward-compat, update-merge preserva identifier)
+  - **Pilares:** P1 N/A (estrutural); P2 reutilizado (sem novo controller); P3 respeitado (ZERO DClasse nova)
+  - **ADRs:** ADR-V2-001, ADR-V2-009
+  - **Review:** APPROVED 8.5/10
+
 - **Transversal: Convite de Membros por Email com Auto-Login** (V2 pós-F8 autorizado CEO) - 2026-05-11
   - **InvitesModule:** 3 endpoints (POST /organizations/:orgId/invites, GET /invites/:token, POST /invites/:token/accept)
   - **Token Seguro:** DTabela idClasse=-476 com hash SHA-256 em metaDados (raw token só no email)

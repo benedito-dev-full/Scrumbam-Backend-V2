@@ -10,6 +10,82 @@
 
 ---
 
+## Task #2 (F5) — Modal Criar Task com Tipo + Responsável + Canal + Criador — COMPLETE
+
+**Module:** tasks (V2) + intentions (frontend)
+**Task:** Modal Criar Task com tipo + responsável + canal + criador read-only
+**Status:** COMPLETA
+**Duration:** ~4.5h total (Implementer ~2.5h + Reviewer ~1h + Documenter ~45min)
+**Quality Score:** 8.5/10 APPROVED
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plano detalhado (plan-tasks-create-task-modal-fields-task1.md) |
+| Implementer | ~2.5h | 100% PASS: 5 arquivos backend, 5 arquivos frontend, 3 unit tests |
+| Reviewer | ~1h | Score 8.5/10 APPROVED, issues M1/M2 documentados (debt futura) |
+| Documenter | ~45min | JSDoc 100%, ROADMAP, CHANGELOG, STATUS, 2 commits |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — tabela estrutural, Prisma direto correto
+- Pilar 2 (Endpoints): REUTILIZADO — endpoints `/tasks` genéricos (zero novo controller)
+- Pilar 3 (Seed): RESPEITADO — ZERO tabela/DClasse nova (ADR-V2-001)
+
+**Deliverables:**
+- [x] `CreateTaskDto` + `UpdateTaskDto` com `taskType?: string` (enum FEATURE|BUG|IMPROVEMENT|REVIEW|EXPLAIN)
+- [x] `TaskDados` schema estendido com `taskType?: string`
+- [x] `TasksService.create()` injeta `taskType` pós-`buildInitialTaskDados()` (signature preservada)
+- [x] `TasksService.update()` faz merge superficial preservando `identifier`/`v3`/`capture`/`automation`/`telemetry`
+- [x] `TaskResponseDto` expõe `taskType: string | null` top-level (fonte: `dados.taskType`)
+- [x] `CreateIntentionDto` estendido com `assigneeId?` + `canal?: IntentionCanal`
+- [x] `IntentionCanal` estendida com 'mcp' (alinhamento V2 enum `source`)
+- [x] Modal 3 Popover novos (Responsável, Canal 4 opções, Criador read-only)
+- [x] `intentionsApi.create()` envia `taskType`/`assigneeId`/`source` (= `canal`)
+- [x] `canalToSource()` helper mapeia 4 canais frontend → V2 enum
+- [x] Adapter `task-to-intention.ts` prioriza `raw.taskType` top-level
+- [x] 3 unit tests (create-com, create-sem backward-compat, update-merge)
+- [x] JSDoc 100% (DTOs, service methods, controller endpoints)
+
+**Metrics:**
+- Build V2: PASS (`npm run build` backend + frontend)
+- TypeScript V2: PASS (`npx tsc --noEmit` — 0 novos erros)
+- TypeScript Frontend: PASS (`npx tsc --noEmit` — clean)
+- ESLint V2: PASS (`npx eslint src/tasks/* --max-warnings 0`)
+- ESLint Frontend: PASS
+- Unit Tests V2: 3/3 PASS (tasks.service.spec.ts)
+- Integration Tests: smoke manual ✅
+  - POST /tasks com `taskType: "BUG"` retorna top-level + em `dados`
+  - PUT /tasks/:id com `taskType: "FEATURE"` preserva `identifier` em merge
+  - GET /tasks/:id retorna `taskType` null para tasks antigas (backward-compat)
+- N+1 Queries: ZERO (select seletivo em update)
+- BigInt: 100% serializado em responses
+
+**ADRs:**
+- ADR-V2-001 (ZERO tabela nova) — RESPEITADO (`taskType` em Json `dados`)
+- ADR-V2-009 (DTask estrutural) — APLICADO (Pilar 1 não se aplica)
+
+**Issues Menores (Reviewer) — Debt para F5-bis:**
+- **M1:** Adapter `dados.source` vs `dados.capture.source` — path exato clarificar em refactor futuro (hoje funciona via fallback)
+- **M2:** `canal` como field separado vs parte integrante de `capture` — decisão de design para revisar (escopo para F5-bis ou F8)
+
+**Backward-Compat:** ✅
+- Tasks sem `taskType` retornam `taskType: null` (seguro)
+- POST sem `taskType` continua funcionando (opcional)
+- Modal permite criar sem assignee/canal (ambos opcionais)
+
+**Trade-offs Confirmados:**
+- `taskType` top-level duplica `dados.taskType` (2 LOC gain: DX simples)
+- `assigneeId` não validado contra org (mitigado by UI; validação futura como debt R3)
+- `canal` persistido só em create, não em update (alinha semântica V2)
+
+**Plan:** [`workspace/plans/plan-tasks-create-task-modal-fields-task1.md`](../workspace/plans/plan-tasks-create-task-modal-fields-task1.md)
+**Impl Notes:** [`workspace/implementations/impl-tasks-modal-task1.md`](../workspace/implementations/impl-tasks-modal-task1.md)
+**Review:** [`workspace/reviews/review-tasks-modal-task1.md`](../workspace/reviews/review-tasks-modal-task1.md)
+**Commits:** (2 — criados neste documento)
+
+---
+
 ## Transversal Task — Convite de Membros por Email — COMPLETE
 
 **Module:** invites, email (reutilizado), auth (extensão)  
