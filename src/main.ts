@@ -3,8 +3,11 @@ import { ValidationPipe, Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { SanitizingLogger } from './mcp/logging/sanitizing-logger.service';
+import { assertProductionReady } from './common/security/production-readiness';
 
 async function bootstrap(): Promise<void> {
+  assertProductionReady(process.env);
+
   const app = await NestFactory.create(AppModule, {
     logger: new SanitizingLogger(undefined, {
       logLevels: ['error', 'warn', 'log', 'debug', 'verbose'],

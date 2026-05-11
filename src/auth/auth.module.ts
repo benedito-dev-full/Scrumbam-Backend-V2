@@ -44,7 +44,14 @@ import { RoleResolverService } from './services/role-resolver.service';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
-        secret: configService.get<string>('JWT_SECRET', 'CHANGE_ME_IN_PROD'),
+        secret: (() => {
+          const secret = configService.get<string>('JWT_SECRET');
+          if (!secret) {
+            throw new Error('JWT_SECRET não configurado. Adicione ao .env');
+          }
+
+          return secret;
+        })(),
         signOptions: {
           expiresIn: parseInt(
             configService.get<string>('JWT_EXPIRES_IN', '900'),
