@@ -82,6 +82,10 @@ function pushUnsafeEndpoint(
   value: string | undefined,
   message: string,
 ): void {
+  if (isBlank(value)) {
+    return;
+  }
+
   if (isUnsafeLocalEndpoint(value)) {
     issues.push({ key, severity: 'error', message });
   }
