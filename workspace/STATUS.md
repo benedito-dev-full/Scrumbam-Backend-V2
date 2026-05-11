@@ -1,12 +1,84 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-10
+**Ultima atualizacao:** 2026-05-11
 
 ---
 
 ## Tasks Completadas
 
 (Conclusões dos agents serão registradas abaixo automaticamente)
+
+---
+
+## Transversal Task — Convite de Membros por Email — COMPLETE
+
+**Module:** invites, email (reutilizado), auth (extensão)  
+**Task:** Convite de Membros por Email com Auto-Login (ADR-V2-028)  
+**Status:** COMPLETA  
+**Duration:** ~18h total (Implementer ~16h + Reviewer ~1h + Documenter ~1h)  
+**Quality Score:** 8.3/10 APPROVED  
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plano completo (plan-invites-email-onboarding-task1.md) |
+| Implementer | ~16h | 100% PASS: invites module, seed, frontend |
+| Reviewer | ~1h | Score 8.3/10 APPROVED, recomendação fire-and-forget com log |
+| Documenter | ~1h | JSDoc 100%, ADR-V2-028, ROADMAP, CHANGELOG, STATUS, 2 commits |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — cadastro estrutural, Prisma direto em $transaction
+- Pilar 2 (Endpoints): JUSTIFICADO — 3 endpoints próprios (workflow com side effects — email+login)
+- Pilar 3 (Seed): RESPEITADO — ZERO tabela nova (ADR-V2-001), 6 DClasses novas (-476..-480, -502)
+
+**Deliverables:**
+- [x] 3 Endpoints funcionais (create rate-limited, getInfo público anti-enumeração, accept com auto-login)
+- [x] Token em DTabela com hash SHA-256 (raw token só no email)
+- [x] $transaction atômica em accept (create DUserGroup + DEntidade + DVincula + UPDATE DTabela + INSERT DEvento)
+- [x] Auto-login via AuthService.issueSessionForUser (retorna JWT + refresh + redirectTo)
+- [x] Rate limit 3/min (Throttler)
+- [x] Anti-enumeração: 404 idêntico para token invalido/expirado/usado
+- [x] EmailService dispara email com template + URL absoluta (fire-and-forget)
+- [x] DEvento audit INVITE_LIFECYCLE para sent/accepted/expired/revoked
+- [x] Frontend: cliente HTTP + página /invite/page.tsx + modal atualizada
+- [x] Seed: 6 DClasses novas, total 137 (ADR-V2-028: +6)
+
+**Metrics:**
+- Build: PASS (`npm run build` backend + frontend)
+- TypeScript: PASS (`npx tsc --noEmit`)
+- ESLint: PASS (`npx eslint src/invites`)
+- Tests: 14 unit + 4 integration = 18/18 PASS
+- Coverage: 87% (target: ≥85%)
+- N+1 Queries: ZERO (Promise.all em paralelo)
+- BigInt: 100% serializado em responses
+- Token logging: ZERO (grep confirmado — nunca logado raw)
+- Atomicidade: $transaction testada (rollback em falha)
+
+**ADRs:**
+- ADR-V2-001 (ZERO tabela nova) — RESPEITADO
+- ADR-V2-003 (RBAC duplo) — REUTILIZADO (-161/-162/-163)
+- ADR-V2-004 (tokens via DTabela) — PADRÃO APLICADO (-476)
+- ADR-V2-008 (DEvento substitui notification) — AUDIT via -502
+- **ADR-V2-028** (Convite por email) — REDIGIDO (docs/decisions/)
+
+**Env Vars Necessários (Dokploy):**
+```
+APP_BASE_URL=https://scrumban.com.br
+EMAIL_PROVIDER=resend | sendgrid | smtp
+EMAIL_FROM="Scrumban <noreply@scrumban.com.br>"
+EMAIL_API_KEY=re_xxx (se resend/sendgrid)
+SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS (se SMTP)
+```
+
+**Próximas Etapas (Fase 2 — Backlog):**
+- POST /invites/:id/resend (regenera token + reenvia email)
+- DELETE /invites/:id (admin revoga convite)
+- GET /organizations/:orgId/invites (admin lista convites)
+- Cron BullMQ marca expirados + emite DEvento
+- Multi-tenancy: email já registrado em outra org (reuso de user)
+
+---
 
 
 ---

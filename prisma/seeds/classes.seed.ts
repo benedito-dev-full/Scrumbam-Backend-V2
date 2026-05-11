@@ -4,11 +4,11 @@
  * Composicao do seed (ADR-V2-019: monolitico):
  *   - 45 classes fixas universais Devari-Core (range -1..-110), via spread de
  *     `templates/classes-base-template.ts`.
- *   - 86 classes especificas Scrumban-V2 (range -150..-527), declaradas
+ *   - 92 classes especificas Scrumban-V2 (range -150..-527), declaradas
  *     neste arquivo, agrupadas por seccao (DEntidade, DVincula, DPedido,
  *     DTabela, DEvento, DTabela secundario) com comentarios `// === ... ===`.
  *
- * Total: 131 DClasses (ADR-V2-026: +1 AUDIT_GENERIC).
+ * Total: 137 DClasses (ADR-V2-026: +1 AUDIT_GENERIC; ADR-V2-028: +6 INVITE_*).
  *
  * Validacao automatica:
  *   `validateHierarchy(classes)` e chamado no topo deste modulo. Qualquer
@@ -73,7 +73,7 @@ function esp(
 }
 
 /**
- * Array de classes especificas Scrumban-V2 (84 entradas).
+ * Array de classes especificas Scrumban-V2 (92 entradas).
  *
  * Ordem:
  *   1. DEntidade — 7 (sub-tipos de Pessoa: USER, PLATFORM_SCRUMBAN,
@@ -84,13 +84,17 @@ function esp(
  *   4. DTabela principal — 35 (SPRINT, PRIORITY, TASK_TYPE, STATUS V3,
  *      CHANNEL, WEBHOOK, API_KEY, MCP_KEY, INSTALL_TOKEN, PAIRING_TOKEN,
  *      ISSUE_COUNTER).
- *   5. DEvento — 13 (AUDIT_GENERIC, NOTIFICATION, WEBHOOK_ATTEMPT,
- *      AGENT_HEARTBEAT, TELEGRAM_*, MCP_CALL, EXECUTION_LOG, audit logs).
+ *   5. DEvento — 14 (AUDIT_GENERIC, NOTIFICATION, WEBHOOK_ATTEMPT,
+ *      AGENT_HEARTBEAT, TELEGRAM_*, MCP_CALL, EXECUTION_LOG, audit logs,
+ *      INVITE_LIFECYCLE).
  *      ADR-V2-026 (+1 AUDIT_GENERIC) + ADR-V2-027 (rename
- *      PROJECT_DELETED → PROJECT_LIFECYCLE; ORG_DELETED → ORG_LIFECYCLE).
- *   6. DTabela secundario — 16 (AGENT_STATUS, EXEC_STATUS, RISK_LEVEL).
+ *      PROJECT_DELETED → PROJECT_LIFECYCLE; ORG_DELETED → ORG_LIFECYCLE)
+ *      + ADR-V2-028 (+1 INVITE_LIFECYCLE).
+ *   6. DTabela secundario — 21 (AGENT_STATUS, EXEC_STATUS, RISK_LEVEL,
+ *      INVITE_TOKEN, INVITE_STATUS_*).
+ *      ADR-V2-028 (+5 INVITE_TOKEN, INVITE_STATUS_PENDING/ACCEPTED/EXPIRED/REVOKED).
  *
- * Soma: 7 + 11 + 4 + 35 + 13 + 16 = 86.
+ * Soma: 7 + 11 + 4 + 35 + 14 + 21 = 92.
  */
 const classesEspecificas: DClasseSeed[] = [
   // === DEntidade — sub-tipos de Pessoa (5) + DProject/DTask (2) ===
@@ -174,11 +178,27 @@ const classesEspecificas: DClasseSeed[] = [
   esp(-496, 'EXECUTION_LOG', 'Log de execucao Claude', -3),
   esp(-497, 'TASK_CREATED', 'Audit: task criada', -3),
   esp(-498, 'TASK_STATUS_CHANGED', 'Audit: mudanca de status', -3),
-  esp(-499, 'PROJECT_LIFECYCLE', 'Audit: lifecycle de projeto (created/updated/deleted via metaDados._meta.action)', -3),
-  esp(-500, 'ORG_LIFECYCLE', 'Audit: lifecycle de organizacao (created/updated/deleted via metaDados._meta.action)', -3),
+  esp(
+    -499,
+    'PROJECT_LIFECYCLE',
+    'Audit: lifecycle de projeto (created/updated/deleted via metaDados._meta.action)',
+    -3,
+  ),
+  esp(
+    -500,
+    'ORG_LIFECYCLE',
+    'Audit: lifecycle de organizacao (created/updated/deleted via metaDados._meta.action)',
+    -3,
+  ),
   esp(-501, 'USER_LOGIN', 'Audit: login', -3),
+  esp(
+    -502,
+    'INVITE_LIFECYCLE',
+    'Audit: lifecycle de convite (sent/accepted/expired/revoked via metaDados._meta.action)',
+    -3,
+  ),
 
-  // === DTabela — status lookups secundarios (16) ===
+  // === DTabela — status lookups secundarios (21) ===
   // Filhos de STATUS (-52)
   esp(-510, 'AGENT_STATUS_ONLINE', 'Agent: ONLINE', -52),
   esp(-511, 'AGENT_STATUS_OFFLINE', 'Agent: OFFLINE', -52),
@@ -196,10 +216,20 @@ const classesEspecificas: DClasseSeed[] = [
   esp(-525, 'RISK_LEVEL_LOW', 'Risk: LOW', -52),
   esp(-526, 'RISK_LEVEL_MEDIUM', 'Risk: MEDIUM', -52),
   esp(-527, 'RISK_LEVEL_HIGH', 'Risk: HIGH', -52),
+
+  // === DTabela — convite por email (5 — ADR-V2-028) ===
+  // Filhos de STATUS (-52)
+  // -476 INVITE_TOKEN: armazenamento do token (hash SHA-256 em metaDados).
+  // -477..-480 sao lookups reservados; status atual fica em metaDados.status.
+  esp(-476, 'INVITE_TOKEN', 'Token de convite para nova org', -52),
+  esp(-477, 'INVITE_STATUS_PENDING', 'Convite: PENDING', -52),
+  esp(-478, 'INVITE_STATUS_ACCEPTED', 'Convite: ACCEPTED', -52),
+  esp(-479, 'INVITE_STATUS_EXPIRED', 'Convite: EXPIRED', -52),
+  esp(-480, 'INVITE_STATUS_REVOKED', 'Convite: REVOKED', -52),
 ];
 
 /**
- * Array completo do seed (45 fixas + 86 especificas = 131 DClasses).
+ * Array completo do seed (45 fixas + 92 especificas = 137 DClasses).
  * Validado automaticamente em time de import (validateHierarchy abaixo).
  */
 export const classes: DClasseSeed[] = [...classesFixas, ...classesEspecificas];

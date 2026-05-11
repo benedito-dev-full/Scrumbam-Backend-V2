@@ -80,6 +80,12 @@ export const EVENT_TYPES = {
   // ============== TELEGRAM (F10 Bloco B) ==============
   TELEGRAM_MESSAGE_RECEIVED: 'telegram.message.received',
   TELEGRAM_VOICE_RECEIVED: 'telegram.voice.received',
+
+  // ============== INVITES (lifecycle — ADR-V2-028) ==============
+  INVITE_SENT: 'invite.sent',
+  INVITE_ACCEPTED: 'invite.accepted',
+  INVITE_EXPIRED: 'invite.expired',
+  INVITE_REVOKED: 'invite.revoked',
 } as const;
 
 /**

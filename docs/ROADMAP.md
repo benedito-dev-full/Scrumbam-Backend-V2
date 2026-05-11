@@ -870,6 +870,98 @@
 
 ---
 
+## Transversal — Convite de Membros por Email (Pós-F8)
+
+### Task #1: Convite de Membros por Email com Auto-Login — ✅ COMPLETA
+
+**Status:** Completo  
+**Módulo V2:** invites (novo), email (reutilizado), auth (extensão), eventos (audit)  
+**Fase V2:** Feature transversal (autorizada pelo CEO após F8)  
+**Tempo Real:** ~16h Implementer + ~1h Reviewer + ~1h Documenter  
+**Completado em:** 2026-05-11  
+**Quality Score:** 8.3/10 APPROVED  
+
+**O Que Foi Feito:**
+
+- **InvitesModule:** 3 endpoints (create, getInfo, accept)
+  - `POST /organizations/:orgId/invites` — JWT + ADMIN, rate limit 3/min, fire-and-forget email
+  - `GET /invites/:token` — público, anti-enumeração (404 idêntico)
+  - `POST /invites/:token/accept` — público, $transaction atômica, auto-login
+
+- **Token em DTabela (idClasse=-476):**
+  - Hash SHA-256 em metaDados (raw token só no email)
+  - idLocEscritu = orgId (dono)
+  - expiresAt = 7 dias
+  - status = PENDING/ACCEPTED/EXPIRED/REVOKED
+
+- **Segurança:**
+  - Rate limit 3/min no create (Throttler)
+  - Anti-enumeração: GET/accept retornam 404 idêntico
+  - Race condition handling: re-validação de email em $transaction
+  - Fire-and-forget email com log estruturado de falha
+  - Token bruto NUNCA logado (grep confirmado)
+
+- **Auto-Login:**
+  - Novo método `AuthService.issueSessionForUser()` reutiliza pipeline JWT
+  - Accept retorna `{accessToken, refreshToken, user, redirectTo: '/intentions'}`
+
+- **Audit Trail (DEvento -502):**
+  - INVITE_SENT, INVITE_ACCEPTED, INVITE_EXPIRED, INVITE_REVOKED
+  - metaDados._meta.action = 'sent' | 'accepted' | 'expired' | 'revoked'
+
+- **Frontend:**
+  - `src/lib/api/invites.ts` — novo client HTTP (getInviteInfo, acceptInvite)
+  - `src/app/(auth)/invite/page.tsx` — reescrita com formulário nome+senha
+  - `<InviteWorkspaceModal>` — atualizada (email + role)
+  - Auto-login via auth-store (compatível com /login)
+
+- **Seed:**
+  - 6 DClasses novas: -476 INVITE_TOKEN, -477/-478/-479/-480 INVITE_STATUS_*, -502 INVITE_LIFECYCLE
+  - Total: 45 fixas + 92 especificas = **137 DClasses** (ADR-V2-028: +6)
+
+**Smoke test integrado (verde):**
+- `npm run build` PASS (Backend + Frontend)
+- `npx tsc --noEmit` PASS (0 errors)
+- `npx eslint src/invites` PASS
+- `npm run test src/invites --runInBand` PASS (14 specs unit + 4 integration)
+- Coverage: 87% (acima do target 85%)
+- ZERO N+1 queries (parallel Promise.all em validações)
+- BigInt serializado como string
+- $transaction atômica (rollback testado em falha)
+
+**Pilares aplicados:**
+- Pilar 1: N/A — cadastro estrutural (sem DPedido), Prisma direto em $transaction
+- Pilar 2: **JUSTIFICADO** — controller próprio (workflow com side effects — email + login)
+- Pilar 3: RESPEITADO — ZERO tabela nova (ADR-V2-001), reutiliza padrão V2 (tokens em DTabela via ADR-V2-004)
+
+**Dívidas Técnicas (Fase 2):**
+- `POST /invites/:id/resend` — regenera token + reenvia email
+- `DELETE /invites/:id` — admin revoga convite pendente
+- `GET /organizations/:orgId/invites` — admin lista convites pendentes
+- Cron BullMQ marca convites expirados + emite DEvento
+- Multi-tenancy: suporte "email já registrado em outra org" (reuso de user)
+
+**Env Vars Dokploy (necessários para deploy):**
+```
+APP_BASE_URL=https://scrumban.com.br
+EMAIL_PROVIDER=resend        # ou sendgrid | smtp
+EMAIL_FROM="Scrumban <noreply@scrumban.com.br>"
+EMAIL_API_KEY=re_xxx          # se resend/sendgrid
+SMTP_HOST=...                 # se SMTP
+SMTP_PORT=...
+SMTP_USER=...
+SMTP_PASS=...
+```
+
+**ADRs vinculados:** ADR-V2-001 (ZERO tabela nova), ADR-V2-003 (RBAC duplo), ADR-V2-004 (tokens via DTabela), ADR-V2-008 (DEvento audit), **ADR-V2-028 (Convite por email)**
+
+**Plan:** [`workspace/plans/plan-invites-email-onboarding-task1.md`](../workspace/plans/plan-invites-email-onboarding-task1.md)  
+**Impl Notes:** Integrados no código backend + frontend  
+**Review:** APPROVED 8.3/10  
+**Documentation:** ADR-V2-028 redigido; JSDoc 100%; CHANGELOG + ROADMAP + STATUS atualizados  
+
+---
+
 ## Proximas fases (preview)
 
 | Fase | Nome | Pilar dominante |

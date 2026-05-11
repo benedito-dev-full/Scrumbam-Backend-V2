@@ -196,10 +196,7 @@ export class AuthService {
     const senhaValida = await bcrypt.compare(dto.password, userGroup.senha);
     if (!senhaValida) {
       this.logger.debug(`Login falhou: senha incorreta para email="${dto.email}"`);
-      await this.registrarEventoLoginFalhou(
-        userGroup.entidades[0]?.chave ?? null,
-        dto.email,
-      );
+      await this.registrarEventoLoginFalhou(userGroup.entidades[0]?.chave ?? null, dto.email);
       throw new UnauthorizedException('Credenciais inválidas');
     }
 
@@ -280,7 +277,9 @@ export class AuthService {
       // Reuse detectado! Revogar tudo imediatamente
       this.logger.warn(`REUSE ATTACK detectado para userGroupId=${userGroupId}`);
       await this.refreshTokenService.revoke(userGroupId);
-      throw new UnauthorizedException('Refresh token inválido ou já utilizado. Faça login novamente.');
+      throw new UnauthorizedException(
+        'Refresh token inválido ou já utilizado. Faça login novamente.',
+      );
     }
 
     const userGroup = await this.prisma.dUserGroup.findUnique({
@@ -443,7 +442,9 @@ export class AuthService {
             ...dadosAtuais,
             ...(dto.defaultProjectId !== undefined && { defaultProjectId: dto.defaultProjectId }),
             ...(dto.defaultTeamId !== undefined && { defaultTeamId: dto.defaultTeamId }),
-            ...(dto.onboardingCompleted !== undefined && { onboardingCompleted: dto.onboardingCompleted }),
+            ...(dto.onboardingCompleted !== undefined && {
+              onboardingCompleted: dto.onboardingCompleted,
+            }),
           } as Prisma.InputJsonValue,
         },
       });
@@ -480,12 +481,94 @@ export class AuthService {
 
     await this.prisma.$transaction(async (tx) => {
       await tx.dEntidade.update({ where: { chave: entidade.chave }, data: { excluido: true } });
-      await tx.dUserGroup.update({ where: { chave: userGroupId }, data: { excluido: true, ativo: false } });
+      await tx.dUserGroup.update({
+        where: { chave: userGroupId },
+        data: { excluido: true, ativo: false },
+      });
       await tx.dVincula.updateMany({
         where: { idEntidade: entidade.chave, excluido: false },
         data: { excluido: true },
       });
     });
+  }
+
+  /**
+   * Emite par de tokens (access + refresh) para um usuario ja persistido,
+   * SEM validar senha. Uso restrito a fluxos pos-cadastro auto-autenticados
+   * (ex.: accept de convite — ADR-V2-028).
+   *
+   * Reusa exatamente o mesmo pipeline do `login()`:
+   *  - Resolve org/role via DVincula (-161/-162/-163).
+   *  - Gera JWT + refresh token (rotacao estrita).
+   *  - Emite `user.login.succeeded` para audit (mesma trilha do login normal).
+   *
+   * NUNCA deve ser exposto via endpoint publico. Chamado apenas por services
+   * confiaveis que ja validaram a identidade por outro mecanismo (token de
+   * convite, magic link, etc.).
+   *
+   * @param userGroupId - Chave BigInt do DUserGroup ja criado/persistido.
+   * @returns AuthResponseDto identica a `login()`.
+   * @throws {NotFoundException} Se DUserGroup ou DEntidade nao existir.
+   *
+   * @example
+   * ```typescript
+   * // Dentro do InvitesService, apos $transaction do accept:
+   * const session = await this.authService.issueSessionForUser(newUserGroupId);
+   * return { ...session, redirectTo: '/intentions' };
+   * ```
+   */
+  async issueSessionForUser(userGroupId: bigint): Promise<AuthResponseDto> {
+    const userGroup = await this.prisma.dUserGroup.findUnique({
+      where: { chave: userGroupId },
+      include: {
+        entidades: {
+          where: { idClasse: ID_CLASSE_USER, excluido: false },
+          take: 1,
+        },
+      },
+    });
+
+    if (!userGroup) {
+      throw new NotFoundException('Usuario nao encontrado');
+    }
+    const entidade = userGroup.entidades[0];
+    if (!entidade) {
+      throw new NotFoundException('Perfil de usuario nao encontrado');
+    }
+
+    const orgVinculo = await this.prisma.dVincula.findFirst({
+      where: {
+        idEntidade: entidade.chave,
+        idClasse: { in: [BigInt(-161), BigInt(-162), BigInt(-163)] },
+        excluido: false,
+      },
+      include: { locEscritu: { select: { chave: true, nome: true } } },
+      orderBy: { idClasse: 'asc' },
+    });
+
+    const orgId = orgVinculo?.idLocEscritu ?? entidade.chave;
+    const orgNome = orgVinculo?.locEscritu?.nome ?? '';
+    const orgRole = this.mapOrgRole(orgVinculo?.idClasse ?? null);
+
+    const accessToken = this.generateAccessToken(
+      userGroup.chave,
+      entidade.chave,
+      orgId,
+      userGroup.usuario,
+    );
+    const refreshToken = await this.refreshTokenService.generate(userGroup.chave);
+
+    return this.buildAuthResponse(
+      accessToken,
+      refreshToken,
+      userGroup.chave,
+      entidade.chave,
+      orgId,
+      userGroup.usuario,
+      entidade.nome,
+      orgNome,
+      orgRole,
+    );
   }
 
   // ─── Helpers privados ─────────────────────────────────────────────────────
@@ -527,10 +610,7 @@ export class AuthService {
     orgNome: string,
     orgRole?: string | null,
   ): AuthResponseDto {
-    const expiresIn = parseInt(
-      this.configService.get<string>('JWT_EXPIRES_IN', '900'),
-      10,
-    );
+    const expiresIn = parseInt(this.configService.get<string>('JWT_EXPIRES_IN', '900'), 10);
 
     return {
       accessToken,

@@ -86,6 +86,12 @@ const TYPE_TO_CLASSE: Readonly<Record<string, bigint>> = Object.freeze({
   'mcp.call': BigInt(-495), // MCP_CALL
   'telegram.message.in': BigInt(-493), // TELEGRAM_MSG_IN
   'telegram.message.out': BigInt(-494), // TELEGRAM_MSG_OUT
+
+  // Invites (ADR-V2-028) — lifecycle (sent/accepted/expired/revoked)
+  'invite.sent': BigInt(-502), // INVITE_LIFECYCLE
+  'invite.accepted': BigInt(-502),
+  'invite.expired': BigInt(-502),
+  'invite.revoked': BigInt(-502),
 });
 
 /** Catch-all para tipos não mapeados (ADR-V2-026). */

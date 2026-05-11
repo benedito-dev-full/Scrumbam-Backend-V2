@@ -45,6 +45,9 @@ import { McpModule } from './mcp/mcp.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { AutomationModule } from './automation/automation.module';
 
+// Feature transversal — Convite de membros por email (ADR-V2-028)
+import { InvitesModule } from './invites/invites.module';
+
 /**
  * AppModule raiz do Scrumban-Backend-V2.
  *
@@ -121,6 +124,8 @@ import { AutomationModule } from './automation/automation.module';
     McpModule,
     WebhooksModule,
     AutomationModule,
+    // Feature transversal — Convites por email (ADR-V2-028)
+    InvitesModule,
   ],
   providers: [
     // LoggingInterceptor global — loga method, path, statusCode, durationMs, correlationId

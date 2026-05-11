@@ -14,6 +14,22 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Transversal: Convite de Membros por Email com Auto-Login** (V2 pós-F8 autorizado CEO) - 2026-05-11
+  - **InvitesModule:** 3 endpoints (POST /organizations/:orgId/invites, GET /invites/:token, POST /invites/:token/accept)
+  - **Token Seguro:** DTabela idClasse=-476 com hash SHA-256 em metaDados (raw token só no email)
+  - **Rate Limit:** 3/min no POST create via Throttler
+  - **Anti-Enumeração:** 404 idêntico para token invalido/expirado/usado (previne vaza de emails)
+  - **Atomicidade:** $transaction em accept cria DUserGroup + DEntidade + DVincula + audit
+  - **Auto-Login:** Accept retorna JWT + refresh + redirectTo='/intentions' (UX frictionless)
+  - **Auditoria:** DEvento -502 INVITE_LIFECYCLE rastreia sent/accepted/expired/revoked via metaDados._meta.action
+  - **Frontend:** Cliente HTTP + página /invite/page.tsx + modal InviteWorkspaceModal atualizada
+  - **Seed:** 6 DClasses novas (-476 INVITE_TOKEN, -477..480 INVITE_STATUS_*, -502 INVITE_LIFECYCLE), total 137
+  - **Segurança:** Fire-and-forget email com log estruturado, race-condition handling, token bruto nunca logado
+  - **Tests/Build:** npm run build PASS, tsc PASS, eslint PASS, 14 unit + 4 integration PASS, coverage 87%
+  - **Pilares:** P2 justificado (workflow com side effects); P3 respeitado (ZERO tabela nova, reutiliza padrão V2)
+  - **ADRs:** ADR-V2-001, ADR-V2-003, ADR-V2-004, ADR-V2-008, **ADR-V2-028**
+  - **Review:** APPROVED 8.3/10
+
 - **F12 Task#1: Webhooks Outbound (CRUD, Signing, BullMQ, Auto-disable, SSRF, Observabilidade)** (V2 F12) - 2026-05-10
   - **Webhooks Module:** CRUD completo de webhooks via `DTabela.idClasse=-470`
   - **EventRouter Integration:** Hook dinâmico em `EventRouterService` para captura de eventos e enfileiramento assíncrono
