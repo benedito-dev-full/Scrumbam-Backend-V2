@@ -35,4 +35,4 @@ COPY --from=builder /app/templates ./templates
 
 EXPOSE 3000
 
-CMD ["node", "dist/main.js"]
+CMD ["node", "dist/src/main.js"]
