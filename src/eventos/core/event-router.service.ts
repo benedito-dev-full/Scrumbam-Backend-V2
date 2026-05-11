@@ -16,12 +16,30 @@ import type { IEventConsumer } from '../interfaces/consumer.interface';
 @Injectable()
 export class EventRouterService {
   private readonly logger = new Logger(EventRouterService.name);
+  private webhookListeners: Array<{
+    events: ReadonlyArray<string>;
+    handler: (event: IEvent) => Promise<void>;
+  }> = [];
 
   constructor(
     private readonly auditConsumer: AuditLogConsumer,
     private readonly notificationConsumer: NotificationConsumer,
     private readonly webhookConsumer: WebhookConsumer,
   ) {}
+
+  /**
+   * Registra um listener de webhook dinâmico.
+   *
+   * @param events - Lista de tipos de eventos suportados ou `['*']`.
+   * @param handler - Callback para processar o evento.
+   */
+  registerWebhookListener(
+    events: ReadonlyArray<string>,
+    handler: (event: IEvent) => Promise<void>,
+  ): void {
+    this.webhookListeners.push({ events, handler });
+    this.logger.log(`Webhook listener registered for ${events.length} event types`);
+  }
 
   /**
    * Retorna a lista de consumers a invocar para o evento.
@@ -37,6 +55,16 @@ export class EventRouterService {
     }
     if (isWebhookTrigger(event.type)) {
       consumers.push(this.webhookConsumer);
+    }
+
+    // Adiciona listeners dinâmicos como consumers anônimos
+    for (const listener of this.webhookListeners) {
+      if (listener.events.includes(event.type) || listener.events.includes('*')) {
+        consumers.push({
+          name: 'webhook-dynamic',
+          handle: (e) => listener.handler(e),
+        });
+      }
     }
 
     this.logger.debug(

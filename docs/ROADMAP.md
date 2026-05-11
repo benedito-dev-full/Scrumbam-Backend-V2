@@ -823,20 +823,58 @@
 
 ---
 
+## F12 — Webhooks Outbound — ✅ COMPLETA
+
+### Task #1: Webhooks Outbound (CRUD, Signing, BullMQ, Auto-disable, SSRF, Observabilidade) — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** webhooks
+**Fase V2:** F12
+**Tempo Real:** ~3h Implementer + ~1h Reviewer + ~30min Documenter
+**Completado em:** 2026-05-10
+**Quality Score:** 8.8/10 APPROVED
+
+**O Que Foi Feito:**
+- **Webhooks Module:** CRUD completo de webhooks via `DTabela.idClasse=-470`.
+- **EventRouter Integration:** Implementação de hook dinâmico em `EventRouterService` para captura de eventos em tempo real.
+- **BullMQ Processing:** Despacho assíncrono via BullMQ com 10 workers concorrentes.
+- **Segurança Robustecida:**
+  - **SSRF Guard:** Validação de URLs com resolução DNS e bloqueio de IPs privados/locais/metadata.
+  - **HMAC-SHA256:** Assinatura digital do payload via header `X-Webhook-Signature`.
+  - **Criptografia:** Secrets armazenados via AES-256-GCM.
+- **Resiliência:**
+  - **Retry Exponencial:** 3 tentativas (1min, 5min, 30min) via BullMQ.
+  - **Auto-disable:** Desativação automática após 10 falhas consecutivas (threshold configurável).
+  - **Truncamento:** Limite de 256KB por payload para preservar estabilidade da fila.
+- **Observabilidade:** Métricas P95 de latência e contadores de sucesso/falha/timeout expostos via log agendado (@Cron).
+- **Documentação:** Guia completo em `docs/webhooks-guide.md`.
+
+**Smoke test integrado (verde):**
+- `npm run build` PASS
+- `npx tsc --noEmit` PASS
+- `npx eslint src/webhooks` PASS
+- 100% de cobertura nos serviços críticos (SSRF, Signing, Retry, Hook).
+- ZERO N+1 Queries na busca de webhooks por projeto.
+- BigInt serializado como string em todos os responses.
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — Webhooks são estruturais, utilizam Prisma direto em `DTabela`/`DEvento`.
+- Pilar 2 (Endpoints): Controller próprio justificado por gestão de webhooks e integração com barramento de eventos.
+- Pilar 3 (Seed): RESPEITADO — Utiliza DClasses -470 (WEBHOOK) e -491 (WEBHOOK_ATTEMPT) já existentes.
+
+**ADRs vinculados:** ADR-V2-012 (Webhooks outbound: HMAC-SHA256, retry 3x, auto-disable), ADR-V2-028, ADR-V2-031
+
+**Plan:** [`workspace/plans/plan-webhooks-outbound-f12.md`](../workspace/plans/plan-webhooks-outbound-f12.md)
+**Impl Notes:** [`workspace/implementations/impl-webhooks-bloco-d-task12.md`](../workspace/implementations/impl-webhooks-bloco-d-task12.md)
+**Review:** [`workspace/reviews/review-webhooks-bloco-d-task12.md`](../workspace/reviews/review-webhooks-bloco-d-task12.md)
+
+---
+
 ## Proximas fases (preview)
 
 | Fase | Nome | Pilar dominante |
 |------|------|-----------------|
-| F3 | Auth + RBAC duplo via DUserGroup + DVincula | — |
-| F4 | Email module + Common Services | — |
-| F5 | Dominio estrutural (Org/Team/Project/Sprint/Status/Task) | Pilar 2 |
-| F6 | **Engine + OperacaoExecucaoClaude** (CORACAO V2) | **Pilar 1** |
-| F7 | Eventos canonicos (DEvento + EventProducerService) | — |
-| F8 | Flow Metrics + Forecast + Search (runtime) - COMPLETA | — |
-| F9 | Reports + Dashboards - COMPLETA | — |
-| F10 | Channels (Telegram + voz Groq) - COMPLETA | — |
 | F11 | MCP Server (5 tools) | — |
-| F12 | Webhooks outbound (HMAC + retry + auto-disable) | — |
 | F13 | **Automation Claude Code (Agent + Engine)** | Pilares 1+2 |
 | F14 | Hardening | — |
 | F15 | **Migration de dados do legado** | — |

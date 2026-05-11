@@ -67,6 +67,7 @@ export const EVENT_TYPES = {
   // ============== INTEGRAÇÕES (placeholders para F10/F11/F12) ==============
   AGENT_HEARTBEAT: 'agent.heartbeat',
   WEBHOOK_ATTEMPTED: 'webhook.attempted',
+  WEBHOOK_AUTO_DISABLED: 'webhook.auto_disabled',
   MCP_CALL: 'mcp.call',
   TELEGRAM_MESSAGE_IN: 'telegram.message.in',
   TELEGRAM_MESSAGE_OUT: 'telegram.message.out',

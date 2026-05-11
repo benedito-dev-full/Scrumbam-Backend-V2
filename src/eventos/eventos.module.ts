@@ -53,6 +53,6 @@ import { EventHealthController } from './monitoring/event-health.controller';
     { provide: WEBHOOK_DISPATCHER_TOKEN, useClass: WebhookDispatcherStub },
     TelemetryService,
   ],
-  exports: [EventProducerService, TelemetryService, CircuitBreakerService],
+  exports: [EventProducerService, TelemetryService, CircuitBreakerService, EventRouterService],
 })
 export class EventosModule {}

@@ -11,6 +11,56 @@
 
 ---
 
+## Task #12 — COMPLETE (V2 Fase F12)
+
+**Module:** webhooks
+**Task:** Webhooks Outbound (CRUD, Signing, BullMQ, Auto-disable, SSRF, Observabilidade)
+**Status:** COMPLETA — Score 8.8/10 APPROVED
+**Duration:** ~4.5h total (Implementer ~3h + Reviewer ~1h + Documenter ~30min)
+**Quality Score:** 8.8/10
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plano F12 com foco em segurança SSRF e HMAC |
+| Implementer | ~3h | 100% PASS, SSRF Guard robusto, BullMQ integration |
+| Reviewer | ~1h | Score 8.8/10, APPROVED, recomendação TimezoneService |
+| Documenter | ~30min | JSDoc, ROADMAP, CHANGELOG, STATUS e ADR-V2-012 atualizados |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — Webhooks são estruturais, utilizam Prisma direto em DTabela/DEvento.
+- Pilar 2 (Endpoints): Controller próprio justificado por gestão específica e integração com barramento de eventos.
+- Pilar 3 (Seed): RESPEITADO — Utiliza DClasses -470 (WEBHOOK) e -491 (WEBHOOK_ATTEMPT) já existentes.
+
+**Deliverables:**
+- [x] **Webhooks Module:** CRUD completo e ownership guard via `WebhooksController`.
+- [x] **WebhooksHookService:** Integração via hook dinâmico em `EventRouterService` com enfileiramento `addBulk`.
+- [x] **WebhookDispatchProcessor:** Worker BullMQ com retry exponencial (3x) e concorrência 10.
+- [x] **WebhooksSsrfService:** Proteção contra SSRF com resolução DNS e bloqueio de redes privadas/metadata.
+- [x] **WebhooksSigningService:** Criptografia AES-256-GCM para secrets e assinatura HMAC-SHA256.
+- [x] **WebhooksRetryService:** Lógica de backoff e auto-disable após 10 falhas consecutivas.
+- [x] **Observabilidade:** Métricas P95 e contadores de sucesso/falha/timeout via `@Cron` a cada 5min.
+- [x] **Guia de Webhooks:** Documentação completa para integração de clientes em `docs/webhooks-guide.md`.
+- [x] **Truncamento:** Proteção de estabilidade da fila via limite de 256KB por payload.
+
+**Metrics:**
+- Build: PASS (`npm run build`)
+- TypeScript: PASS (`npx tsc --noEmit`)
+- ESLint: PASS (`npx eslint src/webhooks`)
+- N+1 Queries: ZERO (Busca de webhooks em lote por projeto)
+- Queries/request: Despacho = 1 lookup config + 1 transaction (attempt log + update status)
+- BigInt: 100% serializado em todos os responses
+- JSDoc: 100% cobertura em serviços e processador (Pilar 2/3 referenciados)
+
+**ADRs:** ADR-V2-012, ADR-V2-028, ADR-V2-031
+
+**Plan:** [`workspace/plans/plan-webhooks-outbound-f12.md`](../workspace/plans/plan-webhooks-outbound-f12.md)
+**Impl Notes:** [`workspace/implementations/impl-webhooks-bloco-d-task12.md`](../workspace/implementations/impl-webhooks-bloco-d-task12.md)
+**Review:** [`workspace/reviews/review-webhooks-bloco-d-task12.md`](../workspace/reviews/review-webhooks-bloco-d-task12.md)
+
+---
+
 ## Task #6 - F10 Channels Bloco C - COMPLETE (V2 Fase F10)
 
 **Module:** channels

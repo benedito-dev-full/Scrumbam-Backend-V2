@@ -42,6 +42,7 @@ import { ReportsModule } from './reports/reports.module';
 // F10 — Channels (Telegram + Groq Whisper) — Bloco A: Core Channels
 import { ChannelsModule } from './channels/channels.module';
 import { McpModule } from './mcp/mcp.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
 
 /**
  * AppModule raiz do Scrumban-Backend-V2.
@@ -117,6 +118,7 @@ import { McpModule } from './mcp/mcp.module';
     // F10 Bloco A — Core Channels (pairing, routing, command registry)
     ChannelsModule,
     McpModule,
+    WebhooksModule,
     // Modules canônicos das fases F11-F13 restantes serão importados aqui.
   ],
   providers: [

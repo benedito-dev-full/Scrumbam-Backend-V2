@@ -77,6 +77,7 @@ const TYPE_TO_CLASSE: Readonly<Record<string, bigint>> = Object.freeze({
   // Integrações (placeholders F10/F11/F12)
   'agent.heartbeat': BigInt(-492), // AGENT_HEARTBEAT
   'webhook.attempted': BigInt(-491), // WEBHOOK_ATTEMPT
+  'webhook.auto_disabled': BigInt(-491), // WEBHOOK_ATTEMPT lifecycle/admin
   'mcp.call': BigInt(-495), // MCP_CALL
   'telegram.message.in': BigInt(-493), // TELEGRAM_MSG_IN
   'telegram.message.out': BigInt(-494), // TELEGRAM_MSG_OUT

@@ -14,6 +14,20 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F12 Task#1: Webhooks Outbound (CRUD, Signing, BullMQ, Auto-disable, SSRF, Observabilidade)** (V2 F12) - 2026-05-10
+  - **Webhooks Module:** CRUD completo de webhooks via `DTabela.idClasse=-470`
+  - **EventRouter Integration:** Hook dinâmico em `EventRouterService` para captura de eventos e enfileiramento assíncrono
+  - **BullMQ Processing:** Despacho assíncrono com retry exponencial (3x) e truncamento de payload (256KB)
+  - **Segurança (SSRF):** `WebhooksSsrfService` com resolução DNS e bloqueio de IPs privados/locais/metadata
+  - **Segurança (Signing):** Assinatura HMAC-SHA256 e criptografia AES-256-GCM dos secrets
+  - **Resiliência:** Auto-disable após 10 falhas consecutivas; timeout de 10s por tentativa
+  - **Observabilidade:** Métricas P95 de latência e contadores de sucesso/falha/timeout via `@Cron`
+  - **Documentação:** Guia completo em `docs/webhooks-guide.md`
+  - **Pilares:** P2 justificado (gestão específica + dispatcher); P3 respeitado (DClasses -470, -491)
+  - **ADRs:** ADR-V2-012 (Webhooks outbound), ADR-V2-028, ADR-V2-031
+  - **Tests/Build/Lint:** `npm run build` PASS; `tsc --noEmit` PASS; `eslint` PASS; coverage 100% serviços críticos
+  - **Review:** APPROVED 8.8/10
+
 - **F10 Task#6: Channels Bloco D - Rate Limit + Observabilidade** (V2 F10) - 2026-05-10
   - **Rate limit Telegram:** `TelegramRateLimitService` com Redis Lua atomico por `rate:telegram:{chatId}`, limite 30 mensagens/min/chat e fail-open controlado
   - **Observabilidade:** `TelegramMetricsService` com contadores text/voice/command/intent e P95 de latencia de transcricao
