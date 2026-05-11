@@ -101,7 +101,7 @@ import { AutomationModule } from './automation/automation.module';
     ProjectsModule,
     TasksModule,
     // F6 — Automation Claude Code (Engine + Executions + ApprovalFlow)
-    ExecutionsModule,
+    ExecutionsModule.forRoot(),
     // F7 — Eventos Canônicos (EventProducerService global + /events/health)
     EventosModule,
     // F7 — Notifications endpoints sobre DEvento -490
