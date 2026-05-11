@@ -324,6 +324,14 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
    *
    * @param expiresInMs Tempo em ms até expiração (default: 1h = 3.600.000ms)
    */
+  async gravarComoQueued(): Promise<void> {
+    this.dados.approval = {
+      status: 'queued',
+    };
+    this._baixado = null;
+    await this._gravarParcialmente();
+  }
+
   async gravarComoAwaitingApproval(expiresInMs = 3600000): Promise<void> {
     this.dados.approval = {
       status: 'awaiting_approval',

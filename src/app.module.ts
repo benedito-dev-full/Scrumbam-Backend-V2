@@ -43,6 +43,7 @@ import { ReportsModule } from './reports/reports.module';
 import { ChannelsModule } from './channels/channels.module';
 import { McpModule } from './mcp/mcp.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { AutomationModule } from './automation/automation.module';
 
 /**
  * AppModule raiz do Scrumban-Backend-V2.
@@ -119,7 +120,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     ChannelsModule,
     McpModule,
     WebhooksModule,
-    // Modules canônicos das fases F11-F13 restantes serão importados aqui.
+    AutomationModule,
   ],
   providers: [
     // LoggingInterceptor global — loga method, path, statusCode, durationMs, correlationId

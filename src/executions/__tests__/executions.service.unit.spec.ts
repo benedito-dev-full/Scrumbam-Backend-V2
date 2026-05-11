@@ -1,20 +1,6 @@
-/**
- * Testes unitários — ExecutionsService
- *
- * Cobre: execute() com riscos LOW/MEDIUM/HIGH, erros de validação.
- *
- * Mocks: PrismaService, EntidadeService, ClaudeRunnerService,
- *        OperacaoExecucaoClaude (via jest.mock).
- *
- * @see src/executions/executions.service.ts
- */
-
-import { ForbiddenException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
-import { Logger } from '@nestjs/common';
+import { ForbiddenException, Logger, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { ExecutionsService } from '../executions.service';
 import { ExecuteCommandDto } from '../dto/execute-command.dto';
-
-// ---- Mocks globais ----
 
 beforeAll(() => {
   jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
@@ -27,123 +13,16 @@ afterAll(() => {
   jest.restoreAllMocks();
 });
 
-// ---- Builder de mocks ----
-
-function buildMockPrisma(overrides: {
-  projectDados?: object;
-  projectExists?: boolean;
-  membershipExists?: boolean;
-  pedidoResult?: object;
-} = {}) {
-  const {
-    projectDados = { automation: { idAgent: '100' } },
-    projectExists = true,
-    membershipExists = true,
-    pedidoResult = null,
-  } = overrides;
-
-  return {
-    dProject: {
-      findFirst: jest.fn().mockResolvedValue(
-        projectExists
-          ? { chave: BigInt(100), dados: projectDados, excluido: false }
-          : null,
-      ),
-    },
-    dVincula: {
-      findFirst: jest.fn().mockResolvedValue(
-        membershipExists
-          ? { idClasse: BigInt(-171) }
-          : null,
-      ),
-    },
-    dPedido: {
-      findFirst: jest.fn().mockResolvedValue(pedidoResult),
-      update: jest.fn().mockResolvedValue({ chave: BigInt(1000001), dados: {}, criadoEm: new Date(), atualizadoEm: new Date() }),
-    },
-    $queryRaw: jest.fn().mockResolvedValue([{ nextval: BigInt(1000001) }]),
-    $transaction: jest.fn().mockImplementation(async (fn: (tx: any) => Promise<any>) => {
-      return fn({
-        dPedido: {
-          create: jest.fn().mockResolvedValue({ chave: BigInt(1000001) }),
-        },
-      });
-    }),
-    dVFS: {
-      findFirst: jest.fn().mockImplementation(({ where }: { where: any }) => {
-        const { chaveScript } = where;
-        const scripts: Record<number, string> = {
-          3: buildRiskGateScript('LOW'),
-          4: '(async function commandValidator(op) {})',
-          5: '(async function posCalculo(op) {})',
-          6: '(async function preGravacao(op) {})',
-          7: '(async function posGravacao(op) {})',
-        };
-        const conteudo = scripts[chaveScript];
-        if (conteudo) {
-          return Promise.resolve({ chave: BigInt(100), chaveScript, conteudo, ativo: true });
-        }
-        return Promise.resolve(null);
-      }),
-    },
-    dEvento: {
-      create: jest.fn().mockResolvedValue({ chave: BigInt(200) }),
-    },
-  };
-}
-
-function buildMockEntidadeService(entidadeId = BigInt(42)) {
-  return {
-    getEntidadeIdFromUserGroup: jest.fn().mockResolvedValue(entidadeId),
-  };
-}
-
-function buildMockClaudeRunner() {
-  return {
-    runClaudeCode: jest.fn().mockResolvedValue({
-      exitCode: 0,
-      headBefore: 'abc1234',
-      headAfter: 'def5678',
-      branch: 'scrumban/auto-1000001',
-      filesChanged: 2,
-      stdout: '[STUB] done',
-      stderr: '',
-    }),
-  };
-}
-
-/** Constrói script risk-gate que classifica como riskLevel específico */
 function buildRiskGateScript(riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'): string {
   return `(async function riskGateValidator(op) {
     if (!op.dados) op.dados = {};
     op.dados.risk = {
       level: '${riskLevel}',
       explanation: 'Mock: ${riskLevel}',
-      matchedPatterns: ${riskLevel !== 'LOW' ? '[{ pattern: "/test/", level: "' + riskLevel + '" }]' : '[]'},
-      classifiedAt: new Date().toISOString(),
+      matchedPatterns: [],
+      classifiedAt: new Date().toISOString()
     };
   })`;
-}
-
-/** Cria mock Prisma com risk gate configurado para nível específico */
-function buildMockPrismaWithRisk(riskLevel: 'LOW' | 'MEDIUM' | 'HIGH') {
-  const base = buildMockPrisma();
-  base.dVFS.findFirst = jest.fn().mockImplementation(({ where }: { where: any }) => {
-    const { chaveScript } = where;
-    const scripts: Record<number, string> = {
-      3: buildRiskGateScript(riskLevel),
-      4: '(async function commandValidator(op) {})',
-      5: '(async function posCalculo(op) {})',
-      6: '(async function preGravacao(op) {})',
-      7: '(async function posGravacao(op) {})',
-    };
-    const conteudo = scripts[chaveScript];
-    if (conteudo) {
-      return Promise.resolve({ chave: BigInt(100), chaveScript, conteudo, ativo: true });
-    }
-    return Promise.resolve(null);
-  });
-  return base;
 }
 
 function buildService(overrides: {
@@ -159,171 +38,211 @@ function buildService(overrides: {
     agentId = '100',
   } = overrides;
 
-  const projectDados = agentId !== null
-    ? { automation: { idAgent: agentId } }
-    : {};
+  const mockPrisma = {
+    dProject: {
+      findFirst: jest.fn().mockResolvedValue(
+        projectExists ? { chave: BigInt(100), dados: {}, excluido: false } : null,
+      ),
+    },
+    dVincula: {
+      findFirst: jest.fn().mockImplementation(({ where }: { where: any }) => {
+        if (where?.idClasse === BigInt(-185)) {
+          return Promise.resolve(agentId !== null
+            ? {
+                chave: BigInt(900),
+                entidade: {
+                  chave: BigInt(agentId),
+                  dados: { statusCode: '-510', tunnelPort: 20000 },
+                },
+              }
+            : null);
+        }
 
-  const mockPrisma = buildMockPrismaWithRisk(riskLevel);
-  mockPrisma.dProject.findFirst = jest.fn().mockResolvedValue(
-    projectExists
-      ? { chave: BigInt(100), dados: projectDados, excluido: false }
-      : null,
-  );
-  mockPrisma.dVincula.findFirst = jest.fn().mockResolvedValue(
-    membershipExists ? { idClasse: BigInt(-171) } : null,
-  );
+        return Promise.resolve(membershipExists ? { idClasse: BigInt(-171) } : null);
+      }),
+    },
+    dPedido: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      update: jest.fn().mockResolvedValue({ chave: BigInt(1000001), dados: {}, criadoEm: new Date(), atualizadoEm: new Date() }),
+    },
+    $queryRaw: jest.fn().mockResolvedValue([{ nextval: BigInt(1000001) }]),
+    $transaction: jest.fn().mockImplementation(async (fn: (tx: any) => Promise<any>) => fn({
+      dPedido: {
+        create: jest.fn().mockResolvedValue({ chave: BigInt(1000001) }),
+      },
+    })),
+    dVFS: {
+      findFirst: jest.fn().mockImplementation(({ where }: { where: any }) => {
+        const scripts: Record<number, string> = {
+          3: buildRiskGateScript(riskLevel),
+          4: '(async function commandValidator(op) {})',
+          5: '(async function posCalculo(op) {})',
+          6: '(async function preGravacao(op) {})',
+          7: '(async function posGravacao(op) {})',
+        };
+        const conteudo = scripts[where.chaveScript];
+        return conteudo ? Promise.resolve({ chave: BigInt(100), chaveScript: where.chaveScript, conteudo, ativo: true }) : Promise.resolve(null);
+      }),
+    },
+    dEvento: {
+      create: jest.fn().mockResolvedValue({ chave: BigInt(200) }),
+    },
+  };
 
-  const mockEntidade = buildMockEntidadeService();
-  const mockClaude = buildMockClaudeRunner();
-  // F7 Bloco Q: ExecutionsService recebe EventProducerService real (4º parâmetro).
-  // Mock absorve silenciosamente — testes existentes não devem mudar comportamento.
+  const mockEntidade = {
+    getEntidadeIdFromUserGroup: jest.fn().mockResolvedValue(BigInt(42)),
+  };
+  const mockClaude = {
+    runClaudeCode: jest.fn().mockResolvedValue({
+      exitCode: 0,
+      headBefore: 'abc1234',
+      headAfter: 'abc1234',
+      stdout: '[STUB] done',
+      stderr: '',
+    }),
+  };
   const mockEventProducer = { addInternalEvent: jest.fn().mockResolvedValue(undefined) };
+  const mockCommandValidator = { validate: jest.fn(), validateText: jest.fn() };
+  const mockAgentTunnel = {
+    probe: jest.fn().mockResolvedValue({ tunnelOk: true, latencyMs: 1 }),
+  };
+  const mockExecutionQueue = {
+    enqueueExecution: jest.fn().mockResolvedValue(undefined),
+  };
 
   const service = new ExecutionsService(
     mockPrisma as any,
     mockEntidade as any,
     mockClaude as any,
     mockEventProducer as any,
+    mockCommandValidator as any,
+    mockAgentTunnel as any,
+    mockExecutionQueue as any,
   );
 
-  return { service, mockPrisma, mockEntidade, mockClaude, mockEventProducer };
+  return { service, mockPrisma, mockCommandValidator, mockAgentTunnel, mockExecutionQueue };
 }
-
-// ---- Testes ----
 
 describe('ExecutionsService.execute()', () => {
   const baseDto: ExecuteCommandDto = {
-    text: 'adicione testes unitários ao AuthService',
+    command: {
+      executable: 'npm',
+      args: ['test'],
+      cwd: '.',
+      timeoutMs: 600000,
+    },
   };
 
-  describe('validações de entrada', () => {
-    it('deve lançar NotFoundException se projeto não existe', async () => {
-      const { service } = buildService({ projectExists: false });
+  it('deve lancar NotFoundException se projeto nao existe', async () => {
+    const { service } = buildService({ projectExists: false });
 
-      await expect(
-        service.execute('100', baseDto, '1'),
-      ).rejects.toThrow(NotFoundException);
+    await expect(service.execute('100', baseDto, '1')).rejects.toThrow(NotFoundException);
+  });
+
+  it('deve lancar ForbiddenException se user nao e membro', async () => {
+    const { service } = buildService({ membershipExists: false });
+
+    await expect(service.execute('100', baseDto, '1')).rejects.toThrow(ForbiddenException);
+  });
+
+  it('deve lancar UnprocessableEntityException se agent primary nao existe', async () => {
+    const { service } = buildService({ agentId: null });
+
+    await expect(service.execute('100', baseDto, '1')).rejects.toThrow(UnprocessableEntityException);
+  });
+
+  it('deve criar execution LOW como queued e enfileirar job', async () => {
+    const { service, mockPrisma, mockExecutionQueue } = buildService({ riskLevel: 'LOW' });
+    mockPrisma.dPedido.findFirst.mockResolvedValue({
+      chave: BigInt(1000001),
+      idClasse: BigInt(-301),
+      idPessoa: BigInt(42),
+      dados: {
+        approval: { status: 'queued' },
+        command: { text: 'npm test', executable: 'npm', args: ['test'] },
+        audit: { projectId: '100', triggeredBy: '42', agentId: '100', correlationId: 'test' },
+        risk: { level: 'LOW', matchedPatterns: [] },
+        riskLevelCode: '-525',
+      },
+      criadoEm: new Date(),
+      atualizadoEm: new Date(),
     });
 
-    it('deve lançar ForbiddenException se user não é membro', async () => {
-      const { service } = buildService({ membershipExists: false });
+    const result = await service.execute('100', baseDto, '1');
 
-      await expect(
-        service.execute('100', baseDto, '1'),
-      ).rejects.toThrow(ForbiddenException);
-    });
-
-    it('deve lançar UnprocessableEntityException se agente não configurado', async () => {
-      const { service } = buildService({ agentId: null });
-
-      await expect(
-        service.execute('100', baseDto, '1'),
-      ).rejects.toThrow(UnprocessableEntityException);
+    expect(result.riskLevel).toBe('LOW');
+    expect(result.approval.status).toBe('queued');
+    expect(mockExecutionQueue.enqueueExecution).toHaveBeenCalledWith({
+      executionId: '1000001',
+      projectId: '100',
+      agentId: '100',
     });
   });
 
-  describe('decisão de approval', () => {
-    it('deve aprovar automaticamente execução LOW', async () => {
-      const { service, mockPrisma } = buildService({ riskLevel: 'LOW' });
-
-      // Mock do findFirst pós-gravação para retornar o pedido
-      mockPrisma.dPedido.findFirst.mockResolvedValue({
-        chave: BigInt(1000001),
-        idClasse: BigInt(-301),
-        idPessoa: BigInt(42),
-        dados: {
-          approval: { status: 'approved', approvedBy: 'auto:risk-gate-low' },
-          command: { text: baseDto.text },
-          audit: { projectId: '100', triggeredBy: '42', agentId: '100', correlationId: 'test' },
-          risk: { level: 'LOW', matchedPatterns: [] },
-        },
-        criadoEm: new Date(),
-        atualizadoEm: new Date(),
-      });
-
-      const result = await service.execute('100', baseDto, '1');
-
-      expect(result.riskLevel).toBe('LOW');
-      expect(result.approval.status).toBe('approved');
-      expect(result.approval.approvedBy).toBe('auto:risk-gate-low');
+  it('deve persistir MEDIUM como awaiting_approval', async () => {
+    const { service, mockPrisma } = buildService({ riskLevel: 'MEDIUM' });
+    mockPrisma.dPedido.findFirst.mockResolvedValue({
+      chave: BigInt(1000002),
+      idClasse: BigInt(-302),
+      idPessoa: BigInt(42),
+      dados: {
+        approval: { status: 'awaiting_approval' },
+        command: { text: 'npm test', executable: 'npm', args: ['test'] },
+        audit: { projectId: '100', triggeredBy: '42', agentId: '100', correlationId: 'test' },
+        risk: { level: 'MEDIUM', matchedPatterns: [] },
+        riskLevelCode: '-526',
+      },
+      criadoEm: new Date(),
+      atualizadoEm: new Date(),
     });
 
-    it('deve aprovar automaticamente execução MEDIUM', async () => {
-      const { service, mockPrisma } = buildService({ riskLevel: 'MEDIUM' });
+    const result = await service.execute('100', baseDto, '1');
 
-      mockPrisma.dPedido.findFirst.mockResolvedValue({
-        chave: BigInt(1000002),
-        idClasse: BigInt(-302),
-        idPessoa: BigInt(42),
-        dados: {
-          approval: { status: 'approved', approvedBy: 'auto:risk-gate-medium' },
-          command: { text: baseDto.text },
-          audit: { projectId: '100', triggeredBy: '42', agentId: '100', correlationId: 'test' },
-          risk: { level: 'MEDIUM', matchedPatterns: [] },
-        },
-        criadoEm: new Date(),
-        atualizadoEm: new Date(),
-      });
-
-      const result = await service.execute('100', baseDto, '1');
-
-      expect(result.riskLevel).toBe('MEDIUM');
-      expect(result.approval.status).toBe('approved');
-      expect(result.approval.approvedBy).toBe('auto:risk-gate-medium');
-    });
-
-    it('deve persistir HIGH como awaiting_approval (sem auto-aprovação)', async () => {
-      const { service, mockPrisma } = buildService({ riskLevel: 'HIGH' });
-
-      mockPrisma.dPedido.findFirst.mockResolvedValue({
-        chave: BigInt(1000003),
-        idClasse: BigInt(-303),
-        idPessoa: BigInt(42),
-        dados: {
-          approval: { status: 'awaiting_approval', expiresAt: new Date(Date.now() + 3600000).toISOString() },
-          command: { text: 'DROP TABLE users' },
-          audit: { projectId: '100', triggeredBy: '42', agentId: '100', correlationId: 'test' },
-          risk: { level: 'HIGH', matchedPatterns: [{ pattern: '/DROP/', level: 'HIGH' }] },
-        },
-        criadoEm: new Date(),
-        atualizadoEm: new Date(),
-      });
-
-      const result = await service.execute('100', { text: 'DROP TABLE users' }, '1');
-
-      expect(result.riskLevel).toBe('HIGH');
-      expect(result.approval.status).toBe('awaiting_approval');
-      // Não deve ter approvedBy para HIGH awaiting
-      expect(result.approval.approvedBy).toBeUndefined();
-    });
+    expect(result.riskLevel).toBe('MEDIUM');
+    expect(result.approval.status).toBe('awaiting_approval');
+    expect(result.approval.approvedBy).toBeUndefined();
   });
 
-  describe('saída', () => {
-    it('deve retornar ExecutionResponseDto com campos obrigatórios', async () => {
-      const { service, mockPrisma } = buildService({ riskLevel: 'LOW' });
-
-      mockPrisma.dPedido.findFirst.mockResolvedValue({
-        chave: BigInt(1000001),
-        idClasse: BigInt(-301),
-        idPessoa: BigInt(42),
-        dados: {
-          approval: { status: 'approved', approvedBy: 'auto:risk-gate-low' },
-          command: { text: baseDto.text },
-          audit: { projectId: '100', triggeredBy: '42', agentId: '100', correlationId: 'test' },
-          risk: { level: 'LOW', matchedPatterns: [] },
-        },
-        criadoEm: new Date(),
-        atualizadoEm: new Date(),
-      });
-
-      const result = await service.execute('100', baseDto, '1');
-
-      expect(result.id).toBeDefined();
-      expect(result.riskLevel).toBeDefined();
-      expect(result.approval).toBeDefined();
-      expect(result.command).toBeDefined();
-      expect(result.createdAt).toBeDefined();
-      expect(typeof result.id).toBe('string');
+  it('deve persistir HIGH como awaiting_approval', async () => {
+    const { service, mockPrisma } = buildService({ riskLevel: 'HIGH' });
+    mockPrisma.dPedido.findFirst.mockResolvedValue({
+      chave: BigInt(1000003),
+      idClasse: BigInt(-303),
+      idPessoa: BigInt(42),
+      dados: {
+        approval: { status: 'awaiting_approval' },
+        command: { text: 'npm test', executable: 'npm', args: ['test'] },
+        audit: { projectId: '100', triggeredBy: '42', agentId: '100', correlationId: 'test' },
+        risk: { level: 'HIGH', matchedPatterns: [] },
+        riskLevelCode: '-527',
+      },
+      criadoEm: new Date(),
+      atualizadoEm: new Date(),
     });
+
+    const result = await service.execute('100', baseDto, '1');
+
+    expect(result.riskLevel).toBe('HIGH');
+    expect(result.approval.status).toBe('awaiting_approval');
+  });
+
+  it('deve validar comando antes do Engine', async () => {
+    const { service, mockCommandValidator } = buildService({ riskLevel: 'LOW' });
+
+    await service.execute('100', baseDto, '1');
+
+    expect(mockCommandValidator.validate).toHaveBeenCalledWith(baseDto.command);
+  });
+
+  it('nao deve criar DPedido quando validator rejeita comando', async () => {
+    const { service, mockPrisma, mockCommandValidator } = buildService({ riskLevel: 'LOW' });
+    mockCommandValidator.validate.mockImplementation(() => {
+      throw new UnprocessableEntityException('comando rejeitado');
+    });
+
+    await expect(service.execute('100', baseDto, '1')).rejects.toThrow(UnprocessableEntityException);
+
+    expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 });

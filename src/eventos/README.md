@@ -86,7 +86,7 @@ Regras:
 | Email | `email.sent`, `email.failed` | `-489` AUDIT_GENERIC |
 | Auth | `user.login.succeeded`, `user.login.failed` | `-501` USER_LOGIN |
 | Sistema | `system.health.check`, `system.audit.log` | `-489` AUDIT_GENERIC |
-| Integracoes | `agent.heartbeat`, `webhook.attempted`, `mcp.call`, `telegram.message.in/out` | `-492`/`-491`/`-495`/`-493`/`-494` |
+| Integracoes | `agent.registered`, `agent.online`, `agent.offline`, `agent.heartbeat`, `webhook.attempted`, `mcp.call`, `telegram.message.in/out` | `-492`/`-491`/`-495`/`-493`/`-494` |
 
 ## NotificationConsumer
 

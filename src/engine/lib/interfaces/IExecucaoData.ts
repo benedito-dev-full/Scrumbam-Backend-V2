@@ -10,6 +10,10 @@ export interface IExecucaoData {
   command: {
     /** O prompt/comando original enviado ao Claude */
     text: string;
+    /** Executavel estruturado enviado ao agent */
+    executable?: string;
+    /** Args estruturados enviados ao agent */
+    args?: string[];
     /** Working directory relativo ao project remotePath */
     cwd?: string;
     /** Variáveis de ambiente extras (sanitizadas) */
@@ -17,6 +21,22 @@ export interface IExecucaoData {
     /** Timeout em ms (default: 600000 = 10min) */
     timeoutMs?: number;
   };
+
+  /** Lookup canonico de risco (-525/-526/-527) para UI/auditoria */
+  riskLevelCode?: string;
+
+  /** Lookup canonico de status de execution (-514..-522) */
+  statusCode?: string;
+
+  /** Dados usados para retorno idempotente de POST /execute */
+  idempotency?: {
+    key: string;
+    userId: string;
+    projectId: string;
+  };
+
+  /** Politica de rollback conservador em caso de falha */
+  rollbackOnFailure?: boolean;
 
   /** Risk Gate — preenchido pelo script DVFS chave=3 em calcula() */
   risk?: {

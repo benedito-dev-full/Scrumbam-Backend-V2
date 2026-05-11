@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { CorrelationIdService } from './services/correlation-id.service';
 import { TimezoneService } from './services/timezone.service';
+import { SensitiveDataSanitizerService } from './security/sensitive-data-sanitizer.service';
 
 /**
  * `CommonModule` — Módulo global de serviços canônicos compartilhados.
@@ -25,7 +26,17 @@ import { TimezoneService } from './services/timezone.service';
  */
 @Global()
 @Module({
-  providers: [PrismaService, CorrelationIdService, TimezoneService],
-  exports: [PrismaService, CorrelationIdService, TimezoneService],
+  providers: [
+    PrismaService,
+    CorrelationIdService,
+    TimezoneService,
+    SensitiveDataSanitizerService,
+  ],
+  exports: [
+    PrismaService,
+    CorrelationIdService,
+    TimezoneService,
+    SensitiveDataSanitizerService,
+  ],
 })
 export class CommonModule {}

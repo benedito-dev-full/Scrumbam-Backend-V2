@@ -124,53 +124,26 @@ function buildMockEntidadeService(entidadeId = BigInt(42)) {
   };
 }
 
-function buildMockClaudeRunner() {
-  return {
-    runClaudeCode: jest.fn().mockResolvedValue({
-      exitCode: 0,
-      headBefore: 'abc',
-      headAfter: 'def',
-      stdout: '[STUB]',
-      stderr: '',
-    }),
-  };
-}
-
-function buildMockExecutionsService() {
-  return {
-    execute: jest.fn().mockResolvedValue({
-      id: '1000002',
-      riskLevel: 'HIGH',
-      approval: { status: 'awaiting_approval' },
-      command: { text: 'git reset --hard abc1234' },
-      projectId: '100',
-      triggeredBy: '42',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }),
-  };
-}
-
 function buildApprovalService(prismaOverrides = {}) {
   const mockPrisma = buildMockPrismaForApproval(prismaOverrides as any);
   const mockEntidade = buildMockEntidadeService();
-  const mockClaude = buildMockClaudeRunner();
-  const mockExecutions = buildMockExecutionsService();
+  const mockEventProducer = { addInternalEvent: jest.fn().mockResolvedValue(undefined) };
+  const mockExecutionQueue = { enqueueExecution: jest.fn().mockResolvedValue(undefined) };
 
   const service = new ApprovalFlowService(
     mockPrisma as any,
     mockEntidade as any,
-    mockClaude as any,
-    mockExecutions as any,
+    mockEventProducer as any,
+    mockExecutionQueue as any,
   );
 
-  return { service, mockPrisma, mockEntidade, mockClaude, mockExecutions };
+  return { service, mockPrisma, mockEntidade, mockEventProducer, mockExecutionQueue };
 }
 
 // ---- Testes: approve() ----
 
 describe('ApprovalFlowService.approve()', () => {
-  it('deve lançar NotFoundException se execution não existe', async () => {
+  it('deve falhar fechado mesmo se execution nao existe', async () => {
     const { service } = buildApprovalService({ pedido: null });
 
     await expect(
@@ -213,7 +186,7 @@ describe('ApprovalFlowService.approve()', () => {
   });
 
   it('deve retornar ExecutionResponseDto após aprovação bem-sucedida', async () => {
-    const { service } = buildApprovalService();
+    const { service, mockEventProducer, mockExecutionQueue } = buildApprovalService();
     const dto: ApproveExecutionDto = { notes: 'Aprovado após revisão' };
 
     const result = await service.approve('1000001', '1', dto);
@@ -221,13 +194,24 @@ describe('ApprovalFlowService.approve()', () => {
     expect(result).toBeDefined();
     expect(result.id).toBeDefined();
     expect(result.riskLevel).toBeDefined();
+    expect(mockEventProducer.addInternalEvent).toHaveBeenCalledWith(
+      'execution.approved',
+      expect.objectContaining({ executionId: '1000001', approvedBy: '42' }),
+      'test-corr-001',
+      { source: ApprovalFlowService.name },
+    );
+    expect(mockExecutionQueue.enqueueExecution).toHaveBeenCalledWith({
+      executionId: '1000001',
+      projectId: '100',
+      agentId: '100',
+    });
   });
 });
 
 // ---- Testes: reject() ----
 
 describe('ApprovalFlowService.reject()', () => {
-  it('deve lançar NotFoundException se execution não existe', async () => {
+  it('deve falhar fechado mesmo se execution nao existe', async () => {
     const { service } = buildApprovalService({ pedido: null });
 
     const dto: RejectExecutionDto = { reason: 'Operação irreversível no banco' };
@@ -287,14 +271,14 @@ describe('ApprovalFlowService.reject()', () => {
     });
 
     const mockEntidade = buildMockEntidadeService();
-    const mockClaude = buildMockClaudeRunner();
-    const mockExecutions = buildMockExecutionsService();
+    const mockEventProducer = { addInternalEvent: jest.fn().mockResolvedValue(undefined) };
+    const mockExecutionQueue = { enqueueExecution: jest.fn().mockResolvedValue(undefined) };
 
     const service = new ApprovalFlowService(
       mockPrisma as any,
       mockEntidade as any,
-      mockClaude as any,
-      mockExecutions as any,
+      mockEventProducer as any,
+      mockExecutionQueue as any,
     );
 
     const dto: RejectExecutionDto = { reason: 'Operação muito arriscada para produção' };
@@ -308,10 +292,10 @@ describe('ApprovalFlowService.reject()', () => {
 // ---- Testes: rollback() ----
 
 describe('ApprovalFlowService.rollback()', () => {
-  it('deve lançar NotFoundException se execution não existe', async () => {
+  it('deve falhar fechado mesmo se execution nao existe', async () => {
     const { service } = buildApprovalService({ pedido: null });
 
-    await expect(service.rollback('9999', '1')).rejects.toThrow(NotFoundException);
+    await expect(service.rollback('9999', '1')).rejects.toThrow(BadRequestException);
   });
 
   it('deve lançar BadRequestException se não tem git.headBefore', async () => {
@@ -329,7 +313,7 @@ describe('ApprovalFlowService.rollback()', () => {
     await expect(service.rollback('1000001', '1')).rejects.toThrow(BadRequestException);
   });
 
-  it('deve criar nova execution com comando git reset --hard', async () => {
+  it('deve falhar fechado sem criar nova execution de rollback', async () => {
     const pedidoComGit = buildPedidoAwaitingApproval({
       dados: {
         approval: { status: 'approved' },
@@ -339,21 +323,9 @@ describe('ApprovalFlowService.rollback()', () => {
       },
     });
 
-    const { service, mockExecutions } = buildApprovalService({ pedido: pedidoComGit });
+    const { service } = buildApprovalService({ pedido: pedidoComGit });
 
-    const result = await service.rollback('1000001', '1');
-
-    // Verifica que execute() foi chamado com comando de rollback
-    expect(mockExecutions.execute).toHaveBeenCalledWith(
-      '100',
-      expect.objectContaining({
-        text: expect.stringContaining('git reset --hard abc1234'),
-      }),
-      '1',
-    );
-
-    expect(result).toBeDefined();
-    expect(result.riskLevel).toBe('HIGH');
+    await expect(service.rollback('1000001', '1')).rejects.toThrow(BadRequestException);
   });
 });
 
@@ -379,7 +351,8 @@ describe('ApprovalFlowSweeperService', () => {
       $executeRaw: jest.fn().mockResolvedValue(0),
     };
 
-    const sweeper = new ApprovalFlowSweeperService(mockPrisma as any);
+    const eventProducer = { addInternalEvent: jest.fn().mockResolvedValue(undefined) };
+    const sweeper = new ApprovalFlowSweeperService(mockPrisma as any, eventProducer as any);
     const count = await sweeper.expireStaleApprovals();
 
     expect(count).toBe(0);
@@ -416,7 +389,8 @@ describe('ApprovalFlowSweeperService', () => {
       $executeRaw: jest.fn().mockResolvedValue(2),
     };
 
-    const sweeper = new ApprovalFlowSweeperService(mockPrisma as any);
+    const eventProducer = { addInternalEvent: jest.fn().mockResolvedValue(undefined) };
+    const sweeper = new ApprovalFlowSweeperService(mockPrisma as any, eventProducer as any);
     const count = await sweeper.expireStaleApprovals();
 
     expect(count).toBe(2); // apenas 2 expirados (1003 não expirou)

@@ -10,6 +10,10 @@ import { PrismaService } from '../prisma.service';
 import { EntidadeService } from '../entidades/entidades.service';
 import { EventProducerService } from '../eventos/core/event-producer.service';
 import { ClaudeRunnerService } from './claude-runner.service';
+import { AgentTunnelService } from '../automation/agents/agent-tunnel.service';
+import { AUTOMATION_CLASS_IDS } from '../automation/constants/automation-class-ids';
+import { CommandValidatorService } from './services/command-validator.service';
+import { ExecutionQueueService } from './queues/execution-queue.service';
 import { ExecuteCommandDto } from './dto/execute-command.dto';
 import {
   ExecutionResponseDto,
@@ -17,7 +21,6 @@ import {
 } from './dto/execution-response.dto';
 import OperacaoExecucaoClaude from '../engine/lib/operacao/OperacaoExecucaoClaude';
 
-/** idClasses de membership em projeto (DVincula) */
 const PROJECT_MEMBERSHIP_CLASSES = [
   BigInt(-170),
   BigInt(-171),
@@ -25,23 +28,6 @@ const PROJECT_MEMBERSHIP_CLASSES = [
   BigInt(-173),
 ];
 
-/**
- * ExecutionsService — orquestra criação de executions via Engine (Pilar 1).
- *
- * O método execute() instancia OperacaoExecucaoClaude e executa o workflow
- * completo: nova() → setExecucaoData() → calcula() → [aprova()/gravarComoAwaitingApproval()] → grava()
- *
- * Decisão de approval (conforme ADR-V2-006):
- * - LOW (-301): auto-aprovação → aprova('auto:risk-gate-low') → grava()
- * - MEDIUM (-302): auto-aprovação → aprova('auto:risk-gate-medium') → grava()
- * - HIGH (-303): aguarda admin → gravarComoAwaitingApproval() (sem aprova/grava)
- *
- * REGRA INVIOLÁVEL: Engine APENAS para DPedido idClasse=-300..-303.
- * Cadastros estruturais (DProject, DTask, DEntidade) usam Service + Prisma direto.
- *
- * @see ADR-V2-005 (OperacaoExecucaoClaude extends OperacaoPedido)
- * @see ADR-V2-006 (risk via idClasse -301/-302/-303)
- */
 @Injectable()
 export class ExecutionsService {
   private readonly logger = new Logger(ExecutionsService.name);
@@ -51,49 +37,41 @@ export class ExecutionsService {
     private readonly entidadeService: EntidadeService,
     private readonly claudeRunnerService: ClaudeRunnerService,
     private readonly eventProducer: EventProducerService,
+    private readonly commandValidator: CommandValidatorService,
+    private readonly agentTunnelService: AgentTunnelService,
+    private readonly executionQueue: ExecutionQueueService,
   ) {}
 
-  /**
-   * Cria e executa um comando Claude Code via Engine.
-   *
-   * Fluxo:
-   * 1. Busca DProject + valida existência
-   * 2. Resolve entidadeId do user via EntidadeService
-   * 3. Valida membership no projeto via DVincula
-   * 4. Resolve agentId de DProject.dados.automation.idAgent
-   * 5. Instancia OperacaoExecucaoClaude + executa workflow
-   * 6. Decisão de approval conforme risk.level
-   * 7. Retorna ExecutionResponseDto
-   *
-   * @param projectId - ID do projeto (string do BigInt)
-   * @param dto - Comando e opções
-   * @param userId - ID do DUserGroup do usuário autenticado
-   * @returns ExecutionResponseDto com dados da execution criada
-   *
-   * @throws {NotFoundException} Se projeto não existe
-   * @throws {ForbiddenException} Se usuário não é membro do projeto
-   * @throws {UnprocessableEntityException} Se agente não configurado no projeto
-   */
   async execute(
     projectId: string,
     dto: ExecuteCommandDto,
     userId: string,
+    idempotencyKey?: string,
   ): Promise<ExecutionResponseDto> {
-    // 1. Buscar DProject
+    if (!dto.command) {
+      throw new UnprocessableEntityException(
+        'POST /projects/:id/execute exige command estruturado. Campo text livre nao e aceito.',
+      );
+    }
+
     const project = await this.prisma.dProject.findFirst({
       where: { chave: BigInt(projectId), excluido: false },
     });
-
     if (!project) {
-      throw new NotFoundException(`Projeto ${projectId} não encontrado.`);
+      throw new NotFoundException(`Projeto ${projectId} nao encontrado.`);
     }
 
-    // 2. Resolver entidadeId do user
     const userEntidadeId = await this.entidadeService.getEntidadeIdFromUserGroup(
       BigInt(userId),
     );
 
-    // 3. Validar membership
+    const existingExecution = idempotencyKey
+      ? await this.findIdempotentExecution(projectId, userEntidadeId.toString(), idempotencyKey)
+      : null;
+    if (existingExecution) {
+      return existingExecution;
+    }
+
     const membership = await this.prisma.dVincula.findFirst({
       where: {
         idClasse: { in: PROJECT_MEMBERSHIP_CLASSES },
@@ -102,75 +80,70 @@ export class ExecutionsService {
         excluido: false,
       },
     });
-
     if (!membership) {
-      throw new ForbiddenException(
-        `Usuário não tem acesso ao projeto ${projectId}.`,
-      );
+      throw new ForbiddenException(`Usuario nao tem acesso ao projeto ${projectId}.`);
     }
 
-    // 4. Resolver agentId
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const projectDados = (project.dados ?? {}) as any;
-    const agentId: string | undefined = projectDados?.automation?.idAgent;
+    this.commandValidator.validate(dto.command);
 
-    if (!agentId) {
-      throw new UnprocessableEntityException(
-        `Projeto ${projectId} não tem agente configurado. Configure DProject.dados.automation.idAgent.`,
-      );
-    }
-
-    // 5. Gerar correlationId
+    const agent = await this.resolvePrimaryAgent(BigInt(projectId), dto.agentId);
+    const agentId = agent.chave.toString();
     const correlationId = randomUUID();
+    const commandText = this.toCommandText(dto.command);
 
     this.logger.log(
       `[${correlationId}] execute: project=${projectId} user=${userEntidadeId} agent=${agentId}`,
     );
 
-    // 6. Instanciar Engine (Pilar 1 — APENAS para DPedido idClasse=-300..-303)
+    const command = {
+      text: commandText,
+      executable: dto.command.executable,
+      args: dto.command.args,
+      cwd: dto.command.cwd,
+      env: dto.command.env,
+      timeoutMs: dto.command.timeoutMs,
+    };
+
     const op = new OperacaoExecucaoClaude({
       usuario: userEntidadeId.toString(),
-      classe: '-300', // agrupador — calcula() sobrescreverá _classeBase conforme risk.level
+      classe: '-300',
       bd: this.prisma,
-      projectId: projectId,
-      agentId: agentId,
+      projectId,
+      agentId,
       taskId: dto.taskId,
-      command: {
-        text: dto.text,
-        cwd: dto.cwd,
-        timeoutMs: dto.timeoutMs,
-      },
+      command,
       correlationId,
       agentTunnelService: this.claudeRunnerService,
-      // F7 Bloco Q: EventProducerService real (decisão CEO #5)
-      // Engine recebe via interface IEventProducer (tipo) — sem dependência circular
       eventProducer: this.eventProducer,
     });
 
-    // 7. Workflow Engine
     await op.nova();
     op.pedidoCab.setPessoa(userEntidadeId);
     op.pedidoCab.setLocEscritu(BigInt(projectId));
     op.setExecucaoData({
-      command: { text: dto.text, cwd: dto.cwd, timeoutMs: dto.timeoutMs },
-    });
-    await op.calcula(); // Risk Gate (DVFS chave 3) → define _classeBase e dados.risk
+      command,
+      idempotency: idempotencyKey
+        ? { key: idempotencyKey, userId: userEntidadeId.toString(), projectId }
+        : undefined,
+      rollbackOnFailure: dto.rollbackOnFailure === true,
+    } as any);
+    await op.calcula();
 
     const riskLevel = op.dados.risk?.level ?? 'LOW';
+    op.setExecucaoData({
+      riskLevelCode: this.toRiskLevelCode(riskLevel),
+      statusCode:
+        riskLevel === 'LOW'
+          ? AUTOMATION_CLASS_IDS.EXEC_STATUS_QUEUED.toString()
+          : AUTOMATION_CLASS_IDS.EXEC_STATUS_AWAITING_APPROVAL.toString(),
+    } as any);
 
-    // 8. Decisão de approval
     if (riskLevel === 'LOW') {
-      await op.aprova({ aprovador: 'auto:risk-gate-low' });
-      await op.grava();
-    } else if (riskLevel === 'MEDIUM') {
-      await op.aprova({ aprovador: 'auto:risk-gate-medium' });
-      await op.grava();
+      await op.gravarComoQueued();
     } else {
-      // HIGH → aguarda aprovação manual
-      await op.gravarComoAwaitingApproval(3600000); // 1h expiração
+      await op.gravarComoAwaitingApproval(3600000);
     }
 
-    // 9. Buscar registro persistido para serializar
     const pedido = await this.prisma.dPedido.findFirst({
       where: { chave: (op as any).chcriacao },
       select: {
@@ -184,8 +157,7 @@ export class ExecutionsService {
     });
 
     if (!pedido) {
-      // Fallback: usar dados do op (em casos de mock em testes)
-      return serializeExecution({
+      const response = serializeExecution({
         chave: (op as any).chcriacao,
         idClasse: BigInt((op as any)._classeBase),
         idPessoa: userEntidadeId,
@@ -193,6 +165,80 @@ export class ExecutionsService {
         criadoEm: new Date(),
         atualizadoEm: new Date(),
       });
+      if (riskLevel === 'LOW') {
+        await this.executionQueue.enqueueExecution({
+          executionId: response.id,
+          projectId,
+          agentId,
+        });
+      }
+      return response;
+    }
+
+    const response = serializeExecution({
+      chave: pedido.chave,
+      idClasse: pedido.idClasse,
+      idPessoa: pedido.idPessoa,
+      dados: pedido.dados,
+      criadoEm: pedido.criadoEm,
+      atualizadoEm: pedido.atualizadoEm,
+    });
+    if (riskLevel === 'LOW') {
+      await this.executionQueue.enqueueExecution({
+        executionId: response.id,
+        projectId,
+        agentId,
+      });
+    }
+    return response;
+  }
+
+  private toCommandText(command: ExecuteCommandDto['command']): string {
+    return [command.executable, ...command.args].join(' ').trim();
+  }
+
+  private toRiskLevelCode(riskLevel: string): string {
+    if (riskLevel === 'HIGH') return AUTOMATION_CLASS_IDS.RISK_LEVEL_HIGH.toString();
+    if (riskLevel === 'MEDIUM') return AUTOMATION_CLASS_IDS.RISK_LEVEL_MEDIUM.toString();
+    return AUTOMATION_CLASS_IDS.RISK_LEVEL_LOW.toString();
+  }
+
+  private async findIdempotentExecution(
+    projectId: string,
+    userId: string,
+    idempotencyKey: string,
+  ): Promise<ExecutionResponseDto | null> {
+    const pedido = await this.prisma.dPedido.findFirst({
+      where: {
+        idClasse: {
+          in: [
+            AUTOMATION_CLASS_IDS.EXEC_LOW,
+            AUTOMATION_CLASS_IDS.EXEC_MEDIUM,
+            AUTOMATION_CLASS_IDS.EXEC_HIGH,
+          ],
+        },
+        idLocEscritu: BigInt(projectId),
+        excluido: false,
+        dados: {
+          path: ['idempotency', 'key'],
+          equals: idempotencyKey,
+        },
+      } as any,
+      select: {
+        chave: true,
+        idClasse: true,
+        idPessoa: true,
+        dados: true,
+        criadoEm: true,
+        atualizadoEm: true,
+      },
+    });
+
+    if (!pedido) return null;
+
+    const dados = (pedido.dados ?? {}) as any;
+    if (dados?.idempotency?.userId !== userId || dados?.idempotency?.projectId !== projectId) {
+      return null;
     }
 
     return serializeExecution({
@@ -203,5 +249,51 @@ export class ExecutionsService {
       criadoEm: pedido.criadoEm,
       atualizadoEm: pedido.atualizadoEm,
     });
+  }
+
+  private async resolvePrimaryAgent(
+    projectId: bigint,
+    requestedAgentId?: string,
+  ): Promise<{ chave: bigint }> {
+    const link = await this.prisma.dVincula.findFirst({
+      where: {
+        idClasse: AUTOMATION_CLASS_IDS.PROJECT_AGENT,
+        idLocEscritu: projectId,
+        tipo: 'primary',
+        excluido: false,
+      },
+      include: {
+        entidade: {
+          select: { chave: true, dados: true },
+        },
+      },
+    });
+
+    if (!link?.entidade) {
+      throw new UnprocessableEntityException(`Projeto ${projectId} nao tem agent primary vinculado.`);
+    }
+
+    if (requestedAgentId && requestedAgentId !== link.entidade.chave.toString()) {
+      throw new UnprocessableEntityException(`agentId informado nao e o primary do projeto ${projectId}.`);
+    }
+
+    const dados = (link.entidade.dados ?? {}) as Record<string, unknown>;
+    if (String(dados.statusCode) !== AUTOMATION_CLASS_IDS.AGENT_STATUS_ONLINE.toString()) {
+      throw new UnprocessableEntityException('Agent primary nao esta online.');
+    }
+
+    const tunnelPort =
+      typeof dados.tunnelPort === 'number'
+        ? dados.tunnelPort
+        : typeof dados.tunnelPort === 'string' && /^\d+$/.test(dados.tunnelPort)
+          ? Number(dados.tunnelPort)
+          : null;
+
+    const probe = await this.agentTunnelService.probe(tunnelPort);
+    if (!probe.tunnelOk) {
+      throw new UnprocessableEntityException(`Tunnel do agent indisponivel: ${probe.error ?? 'TUNNEL_UNAVAILABLE'}`);
+    }
+
+    return { chave: link.entidade.chave };
   }
 }

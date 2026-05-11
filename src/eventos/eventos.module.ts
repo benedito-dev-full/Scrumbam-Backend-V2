@@ -1,5 +1,6 @@
 import { Global, Module, forwardRef } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
+import { CommonModule } from '../common/common.module';
 import { EventProducerService } from './core/event-producer.service';
 import { EventRouterService } from './core/event-router.service';
 import { CircuitBreakerService } from './core/circuit-breaker.service';
@@ -40,7 +41,7 @@ import { EventHealthController } from './monitoring/event-health.controller';
  */
 @Global()
 @Module({
-  imports: [forwardRef(() => AuthModule)],
+  imports: [CommonModule, forwardRef(() => AuthModule)],
   controllers: [EventHealthController],
   providers: [
     EventProducerService,

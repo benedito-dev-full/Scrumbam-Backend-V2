@@ -17,6 +17,12 @@ export class CommandSummaryDto {
   @ApiProperty({ description: 'Texto do comando enviado ao Claude' })
   text!: string;
 
+  @ApiPropertyOptional({ description: 'Executavel estruturado' })
+  executable?: string;
+
+  @ApiPropertyOptional({ description: 'Args estruturados', type: [String] })
+  args?: string[];
+
   @ApiPropertyOptional({ description: 'Working directory usado' })
   cwd?: string;
 
@@ -219,6 +225,8 @@ export function serializeExecution(pedido: {
     },
     command: {
       text: dados?.command?.text ?? '',
+      executable: dados?.command?.executable,
+      args: dados?.command?.args,
       cwd: dados?.command?.cwd,
       timeoutMs: dados?.command?.timeoutMs,
     },

@@ -4,6 +4,7 @@ import { CircuitBreakerService } from './circuit-breaker.service';
 import { IntelligentRetryService } from './intelligent-retry.service';
 import { EventRouterService } from './event-router.service';
 import { TelemetryService } from '../monitoring/telemetry.service';
+import { SensitiveDataSanitizerService } from '../../common/security/sensitive-data-sanitizer.service';
 import { ALL_EVENT_TYPES_SET } from './event-types';
 import type { IEvent } from '../interfaces/event.interface';
 import type { IEventProducer } from '../interfaces/event-producer.interface';
@@ -45,6 +46,7 @@ export class EventProducerService implements IEventProducer {
     private readonly retry: IntelligentRetryService,
     private readonly telemetry: TelemetryService,
     private readonly correlationIdService: CorrelationIdService,
+    private readonly sanitizer: SensitiveDataSanitizerService,
   ) {}
 
   async addInternalEvent<TPayload extends Record<string, unknown>>(
@@ -68,7 +70,7 @@ export class EventProducerService implements IEventProducer {
 
     const event: IEvent<TPayload> = {
       type,
-      payload,
+      payload: this.sanitizer.sanitizeRecord(payload),
       correlationId: effectiveCorrelationId,
       metadata: {
         source,

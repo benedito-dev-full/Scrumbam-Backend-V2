@@ -6,6 +6,7 @@ import { WipAgeService } from './wip-age.service';
 import { CfdService } from './cfd.service';
 import { PeriodInput } from '../helpers/period-resolver';
 import { DashboardResponseDto } from '../dto/dashboard-response.dto';
+import { AutomationMetricsService } from '../../automation/metrics/automation-metrics.service';
 
 /**
  * Serviço de dashboard consolidado de flow metrics.
@@ -35,6 +36,7 @@ export class DashboardService {
     private readonly throughputService: ThroughputService,
     private readonly wipAgeService: WipAgeService,
     private readonly cfdService: CfdService,
+    private readonly automationMetricsService: AutomationMetricsService,
   ) {}
 
   /**
@@ -71,12 +73,13 @@ export class DashboardService {
 
     const start = Date.now();
 
-    const [cycleTime, leadTime, throughput, wipAge, cfd] = await Promise.all([
+    const [cycleTime, leadTime, throughput, wipAge, cfd, automation] = await Promise.all([
       this.cycleTimeService.calculate(projectId, period),
       this.leadTimeService.calculate(projectId, period),
       this.throughputService.calculate(projectId, 'day', period),
       this.wipAgeService.calculate(projectId),
       this.cfdService.calculate(projectId, period),
+      this.automationMetricsService.getOverview(),
     ]);
 
     const elapsed = Date.now() - start;
@@ -95,6 +98,7 @@ export class DashboardService {
       throughput,
       wipAge,
       cfd,
+      automation,
       calculatedAt: new Date().toISOString(),
     };
   }

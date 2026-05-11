@@ -54,7 +54,9 @@ const TYPE_TO_CLASSE: Readonly<Record<string, bigint>> = Object.freeze({
   'execution.high.created': BigInt(-496),
   'execution.awaiting_approval': BigInt(-496),
   'execution.approved': BigInt(-496),
+  'execution.started': BigInt(-496),
   'execution.rejected': BigInt(-496),
+  'execution.expired': BigInt(-496),
   'execution.completed': BigInt(-496),
   'execution.succeeded': BigInt(-496),
   'execution.failed': BigInt(-496),
@@ -75,6 +77,9 @@ const TYPE_TO_CLASSE: Readonly<Record<string, bigint>> = Object.freeze({
   'system.audit.log': BigInt(-489),
 
   // Integrações (placeholders F10/F11/F12)
+  'agent.registered': BigInt(-492), // AGENT_HEARTBEAT / eventos do agent
+  'agent.online': BigInt(-492),
+  'agent.offline': BigInt(-492),
   'agent.heartbeat': BigInt(-492), // AGENT_HEARTBEAT
   'webhook.attempted': BigInt(-491), // WEBHOOK_ATTEMPT
   'webhook.auto_disabled': BigInt(-491), // WEBHOOK_ATTEMPT lifecycle/admin

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
+import { AutomationModule } from '../automation/automation.module';
 import { FlowMetricsController } from './flow-metrics.controller';
 import { CycleTimeService } from './services/cycle-time.service';
 import { LeadTimeService } from './services/lead-time.service';
@@ -29,7 +30,7 @@ import { PeriodResolver } from './helpers/period-resolver';
  * - DashboardService — agregação de todos os 5 indicadores
  */
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, AutomationModule],
   controllers: [FlowMetricsController],
   providers: [
     PeriodResolver,

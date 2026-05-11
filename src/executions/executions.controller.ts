@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Param,
@@ -26,6 +27,7 @@ import { ApprovalFlowService } from './approval-flow.service';
 import { ExecutionHistoryService } from './execution-history.service';
 import { ExecutionAccessGuard } from './guards/execution-access.guard';
 import { ExecutionThrottlerGuard } from './guards/execution-throttler.guard';
+import { IdempotencyGuard } from './guards/idempotency.guard';
 
 import { ExecuteCommandDto } from './dto/execute-command.dto';
 import { ExecutionResponseDto } from './dto/execution-response.dto';
@@ -85,12 +87,16 @@ export class ExecutionsController {
    * - MEDIUM: auto-aprovado + executado imediatamente
    * - HIGH: persiste em awaiting_approval (exige POST .../approve)
    *
+   * Bloco C (F13): adicionado IdempotencyGuard para prevenir execuções duplicadas.
+   *
    * @param projectId - ID do projeto
    * @param dto - Comando e opções
    * @param req - Request com user JWT
    * @returns ExecutionResponseDto (201)
    *
+   * @throws {400} Comando inválido ou perigoso (CommandValidatorService)
    * @throws {403} Sem membership no projeto
+   * @throws {409} Idempotency-Key duplicada
    * @throws {422} Agente não configurado no projeto
    * @throws {429} Rate limit: 30 execuções/min por projeto
    *
@@ -102,22 +108,24 @@ export class ExecutionsController {
    * ```
    */
   @Post('projects/:id/execute')
-  @UseGuards(ExecutionAccessGuard, ExecutionThrottlerGuard)
+  @UseGuards(ExecutionAccessGuard, ExecutionThrottlerGuard, IdempotencyGuard)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Executar comando Claude Code no projeto' })
   @ApiParam({ name: 'id', description: 'ID do projeto (BigInt como string)', example: '123' })
   @ApiResponse({ status: 201, description: 'Execution criada', type: ExecutionResponseDto })
-  @ApiResponse({ status: 400, description: 'Parâmetros inválidos' })
+  @ApiResponse({ status: 400, description: 'Comando inválido ou perigoso' })
   @ApiResponse({ status: 401, description: 'Não autenticado' })
   @ApiResponse({ status: 403, description: 'Sem acesso ao projeto' })
+  @ApiResponse({ status: 409, description: 'Idempotency-Key duplicada' })
   @ApiResponse({ status: 422, description: 'Agente não configurado no projeto' })
   @ApiResponse({ status: 429, description: 'Rate limit: 30 execuções/min por projeto' })
   async execute(
     @Param('id') projectId: string,
     @Body() dto: ExecuteCommandDto,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Req() req: RequestWithUser,
   ): Promise<ExecutionResponseDto> {
-    return this.executionsService.execute(projectId, dto, getUserId(req));
+    return this.executionsService.execute(projectId, dto, getUserId(req), idempotencyKey);
   }
 
   /**
@@ -208,7 +216,6 @@ export class ExecutionsController {
   @ApiOperation({ summary: 'Aprovar execution em awaiting_approval (PROJECT_MANAGER)' })
   @ApiParam({ name: 'id', description: 'ID da execution', example: '1000001' })
   @ApiResponse({ status: 200, description: 'Execution aprovada e em execução', type: ExecutionResponseDto })
-  @ApiResponse({ status: 400, description: 'Execution não está em awaiting_approval' })
   @ApiResponse({ status: 401, description: 'Não autenticado' })
   @ApiResponse({ status: 403, description: 'Sem papel de PROJECT_MANAGER' })
   @ApiResponse({ status: 404, description: 'Execution não encontrada' })
@@ -247,7 +254,6 @@ export class ExecutionsController {
   @ApiOperation({ summary: 'Rejeitar execution em awaiting_approval (PROJECT_MANAGER)' })
   @ApiParam({ name: 'id', description: 'ID da execution', example: '1000001' })
   @ApiResponse({ status: 200, description: 'Execution rejeitada', type: ExecutionResponseDto })
-  @ApiResponse({ status: 400, description: 'Execution não está em awaiting_approval' })
   @ApiResponse({ status: 401, description: 'Não autenticado' })
   @ApiResponse({ status: 403, description: 'Sem papel de PROJECT_MANAGER' })
   @ApiResponse({ status: 404, description: 'Execution não encontrada' })
@@ -259,34 +265,19 @@ export class ExecutionsController {
   ): Promise<ExecutionResponseDto> {
     return this.approvalFlowService.reject(id, getUserId(req), dto);
   }
-
   /**
-   * Cria rollback de uma execution (gera nova execution HIGH).
+   * Rollback manual legado desabilitado.
    *
-   * A nova execution será classificada HIGH (contém git reset --hard + force push)
-   * e exigirá nova aprovação manual do PROJECT_MANAGER.
+   * Rollback automatico ocorre apenas no runtime isolado com rollbackOnFailure.
    *
-   * @param id - ID da execution original
-   * @param req - Request com user JWT
-   * @returns ExecutionResponseDto da nova execution de rollback (201)
-   *
-   * @throws {400} Execution não tem git.headBefore
-   * @throws {403} Sem papel de PROJECT_MANAGER
-   * @throws {404} Execution não encontrada
-   *
-   * @example
-   * ```bash
-   * curl -X POST /api/v1/executions/1000001/rollback \
-   *   -H "Authorization: Bearer {token}"
-   * ```
+   * @throws {400} Rollback manual legado desabilitado
    */
   @Post('executions/:id/rollback')
   @UseGuards(ExecutionAccessGuard)
-  @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Criar rollback da execution (gera nova execution HIGH)' })
+  @HttpCode(HttpStatus.BAD_REQUEST)
+  @ApiOperation({ summary: 'Rollback manual legado desabilitado' })
   @ApiParam({ name: 'id', description: 'ID da execution original', example: '1000001' })
-  @ApiResponse({ status: 201, description: 'Nova execution de rollback criada (HIGH — exige aprovação)', type: ExecutionResponseDto })
-  @ApiResponse({ status: 400, description: 'Execution não tem dados git para rollback' })
+  @ApiResponse({ status: 400, description: 'Rollback manual legado desabilitado' })
   @ApiResponse({ status: 401, description: 'Não autenticado' })
   @ApiResponse({ status: 403, description: 'Sem papel de PROJECT_MANAGER' })
   @ApiResponse({ status: 404, description: 'Execution não encontrada' })

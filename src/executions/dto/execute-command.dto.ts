@@ -1,59 +1,64 @@
 import {
-  IsString,
-  IsNotEmpty,
-  IsOptional,
+  ArrayMaxSize,
+  IsArray,
+  IsBoolean,
   IsInt,
-  Min,
+  IsNotEmpty,
+  IsObject,
+  IsOptional,
+  IsString,
   Max,
-  MinLength,
   MaxLength,
+  Min,
+  MinLength,
+  ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
 /**
- * DTO para execução de comando Claude Code em um projeto.
- *
- * Validações:
- * - text: string obrigatória entre 10 e 50000 caracteres
- * - cwd: string opcional (working directory relativo ao remotePath)
- * - timeoutMs: inteiro opcional entre 30000ms (30s) e 3600000ms (1h)
- * - taskId: string opcional (BigInt como string da DTask associada)
+ * Comando estruturado aceito pela F13.
+ * Shell string livre nao faz parte do contrato externo.
  */
-export class ExecuteCommandDto {
-  /**
-   * Prompt/comando para o Claude Code.
-   * Mínimo 10 caracteres para evitar comandos triviais, máximo 50000.
-   */
+export class StructuredCommandDto {
   @ApiProperty({
-    description: 'Prompt/comando para o Claude Code',
-    example: 'adicione testes unitários para o AuthService cobrindo o fluxo de login',
-    minLength: 10,
-    maxLength: 50000,
+    description: 'Executavel permitido pela allowlist',
+    example: 'npm',
   })
   @IsString()
   @IsNotEmpty()
-  @MinLength(10)
-  @MaxLength(50000)
-  text!: string;
+  @MinLength(1)
+  @MaxLength(64)
+  executable!: string;
 
-  /**
-   * Working directory relativo ao remotePath do projeto.
-   * Se ausente, usa o remotePath raiz do projeto.
-   */
+  @ApiProperty({
+    description: 'Argumentos passados sem shell e sem metacaracteres',
+    example: ['test', '--', '--runInBand'],
+    type: [String],
+  })
+  @IsArray()
+  @ArrayMaxSize(64)
+  @IsString({ each: true })
+  @MaxLength(512, { each: true })
+  args!: string[];
+
   @ApiPropertyOptional({
     description: 'Working directory relativo ao remotePath do projeto',
     example: 'src/auth',
   })
   @IsOptional()
   @IsString()
+  @MaxLength(512)
   cwd?: string;
 
-  /**
-   * Timeout em ms (default: 600000 = 10min).
-   * Mínimo: 30s (para evitar timeouts imediatos).
-   * Máximo: 1h.
-   */
+  @ApiPropertyOptional({
+    description: 'Variaveis de ambiente allowlisted',
+    example: { NODE_ENV: 'test', CI: 'true' },
+  })
+  @IsOptional()
+  @IsObject()
+  env?: Record<string, string>;
+
   @ApiPropertyOptional({
     description: 'Timeout em ms (default: 600000 = 10min)',
     example: 300000,
@@ -66,11 +71,38 @@ export class ExecuteCommandDto {
   @Max(3600000)
   @Type(() => Number)
   timeoutMs?: number;
+}
 
-  /**
-   * ID da task associada (BigInt como string).
-   * Opcional — se presente, vincula a execution à DTask.
-   */
+/**
+ * DTO para criacao de execution Claude Code em um projeto.
+ *
+ * Bloco C/F13: a entrada externa aceita somente command estruturado.
+ */
+export class ExecuteCommandDto {
+  @ApiProperty({
+    description: 'Comando estruturado executado sem shell',
+    type: StructuredCommandDto,
+  })
+  @ValidateNested()
+  @Type(() => StructuredCommandDto)
+  command!: StructuredCommandDto;
+
+  @ApiPropertyOptional({
+    description: 'Agent esperado. Se informado, deve bater com o primary ativo do projeto.',
+    example: '456',
+  })
+  @IsOptional()
+  @IsString()
+  agentId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Habilita rollback conservador em falha',
+    example: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  rollbackOnFailure?: boolean;
+
   @ApiPropertyOptional({
     description: 'ID da task associada (string do BigInt)',
     example: '42',

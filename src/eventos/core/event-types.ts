@@ -44,7 +44,9 @@ export const EVENT_TYPES = {
   EXECUTION_HIGH_CREATED: 'execution.high.created',
   EXECUTION_AWAITING_APPROVAL: 'execution.awaiting_approval',
   EXECUTION_APPROVED: 'execution.approved',
+  EXECUTION_STARTED: 'execution.started',
   EXECUTION_REJECTED: 'execution.rejected',
+  EXECUTION_EXPIRED: 'execution.expired',
   EXECUTION_COMPLETED: 'execution.completed',
   EXECUTION_SUCCEEDED: 'execution.succeeded',
   EXECUTION_FAILED: 'execution.failed',
@@ -65,6 +67,9 @@ export const EVENT_TYPES = {
   SYSTEM_AUDIT_LOG: 'system.audit.log',
 
   // ============== INTEGRAÇÕES (placeholders para F10/F11/F12) ==============
+  AGENT_REGISTERED: 'agent.registered',
+  AGENT_ONLINE: 'agent.online',
+  AGENT_OFFLINE: 'agent.offline',
   AGENT_HEARTBEAT: 'agent.heartbeat',
   WEBHOOK_ATTEMPTED: 'webhook.attempted',
   WEBHOOK_AUTO_DISABLED: 'webhook.auto_disabled',

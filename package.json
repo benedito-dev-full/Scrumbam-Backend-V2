@@ -39,6 +39,8 @@
     "@nestjs/schedule": "^4.0.0",
     "@nestjs/swagger": "^7.1.17",
     "@nestjs/throttler": "^5.0.1",
+    "@octokit/auth-app": "^8.2.0",
+    "@octokit/rest": "^22.0.1",
     "@prisma/client": "^5.7.0",
     "@sendgrid/mail": "^8.1.6",
     "bcryptjs": "^2.4.3",

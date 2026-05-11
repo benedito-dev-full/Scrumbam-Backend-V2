@@ -55,7 +55,8 @@ export class LoggingInterceptor implements NestInterceptor {
     const res = context.switchToHttp().getResponse<Response>();
     const startTime = Date.now();
 
-    const { method, url } = req;
+    const { method } = req;
+    const url = this.sanitizeUrl(req.url);
     const correlationId = this.correlationIdService.get() ?? 'no-correlation-id';
     const userId = (req as Request & { user?: { sub?: string } }).user?.sub;
 
@@ -90,6 +91,13 @@ export class LoggingInterceptor implements NestInterceptor {
           });
         },
       }),
+    );
+  }
+
+  private sanitizeUrl(url: string): string {
+    return url.replace(
+      /([?&][^=]*(?:token|secret|key|password|authorization|apiKey|privateKey|ssh)[^=]*=)[^&]*/gi,
+      '$1[REDACTED]',
     );
   }
 }

@@ -4,6 +4,7 @@ import { LeadTimeResponseDto } from './lead-time-response.dto';
 import { ThroughputResponseDto } from './throughput-response.dto';
 import { WipAgeResponseDto } from './wip-age-response.dto';
 import { CfdResponseDto } from './cfd-response.dto';
+import { AutomationMetricsResponseDto } from '../../automation/metrics/automation-metrics.dto';
 
 /**
  * Response DTO para o dashboard consolidado de flow metrics.
@@ -60,6 +61,12 @@ export class DashboardResponseDto {
    */
   @ApiProperty({ description: 'CFD do projeto', type: CfdResponseDto })
   cfd!: CfdResponseDto;
+
+  @ApiProperty({
+    description: 'Resumo operacional da automacao F13',
+    type: AutomationMetricsResponseDto,
+  })
+  automation!: AutomationMetricsResponseDto;
 
   /**
    * Timestamp do cálculo (ISO 8601).

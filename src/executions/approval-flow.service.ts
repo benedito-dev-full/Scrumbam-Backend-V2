@@ -8,15 +8,15 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { EntidadeService } from '../entidades/entidades.service';
-import { ClaudeRunnerService } from './claude-runner.service';
-import { ExecutionsService } from './executions.service';
+import { EventProducerService } from '../eventos/core/event-producer.service';
+import { AUTOMATION_CLASS_IDS } from '../automation/constants/automation-class-ids';
+import { ExecutionQueueService } from './queues/execution-queue.service';
 import { ApproveExecutionDto } from './dto/approve-execution.dto';
 import { RejectExecutionDto } from './dto/reject-execution.dto';
 import {
   ExecutionResponseDto,
   serializeExecution,
 } from './dto/execution-response.dto';
-import OperacaoExecucaoClaude from '../engine/lib/operacao/OperacaoExecucaoClaude';
 
 /** idClasses de execução */
 const EXECUTION_CLASSES = [BigInt(-301), BigInt(-302), BigInt(-303)];
@@ -47,8 +47,8 @@ export class ApprovalFlowService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly entidadeService: EntidadeService,
-    private readonly claudeRunnerService: ClaudeRunnerService,
-    private readonly executionsService: ExecutionsService,
+    private readonly eventProducer: EventProducerService,
+    private readonly executionQueue: ExecutionQueueService,
   ) {}
 
   /**
@@ -66,9 +66,9 @@ export class ApprovalFlowService {
    * @param dto - DTO com notas opcionais
    * @returns ExecutionResponseDto atualizado
    *
-   * @throws {NotFoundException} Se execution não existe
-   * @throws {BadRequestException} Se execution não está em awaiting_approval
-   * @throws {ForbiddenException} Se usuário não é MANAGER do projeto
+   * @throws {NotFoundException} Se execution nao existe
+   * @throws {BadRequestException} Se execution nao esta em awaiting_approval
+   * @throws {ForbiddenException} Se usuario nao e manager do projeto
    * @throws {ConflictException} Se outro admin já decidiu (race condition)
    */
   async approve(
@@ -119,12 +119,15 @@ export class ApprovalFlowService {
       SET dados = jsonb_set(
             jsonb_set(
               jsonb_set(
-                jsonb_set(dados, '{approval,status}', '"approved"'),
-                '{approval,approvedBy}', to_jsonb(${userEntidadeId.toString()}::text)
+                jsonb_set(
+                  jsonb_set(dados, '{approval,status}', '"approved"'),
+                  '{approval,approvedBy}', to_jsonb(${userEntidadeId.toString()}::text)
+                ),
+                '{approval,decidedAt}', to_jsonb(NOW()::text)
               ),
-              '{approval,decidedAt}', to_jsonb(NOW()::text)
+              '{approval,notes}', ${notesJson}::jsonb
             ),
-            '{approval,notes}', ${notesJson}::jsonb
+            '{statusCode}', to_jsonb(${AUTOMATION_CLASS_IDS.EXEC_STATUS_APPROVED.toString()}::text)
           ),
           aprovado = true,
           "atualizadoEm" = NOW()
@@ -158,35 +161,20 @@ export class ApprovalFlowService {
     const correlationId =
       dadosAtualizados?.audit?.correlationId ?? `approve-${executionId}`;
 
-    const op = new OperacaoExecucaoClaude({
-      usuario: dadosAtualizados?.audit?.triggeredBy ?? userId,
-      classe: pedidoAtualizado.idClasse.toString(),
-      bd: this.prisma,
-      projectId: dadosAtualizados?.audit?.projectId ?? '0',
-      agentId: dadosAtualizados?.audit?.agentId ?? '0',
-      taskId: dadosAtualizados?.task?.id,
-      command: dadosAtualizados?.command ?? { text: '' },
-      correlationId,
-      agentTunnelService: this.claudeRunnerService,
-      eventProducer: {
-        addInternalEvent: async (event: string, data: unknown, corrId: string) => {
-          this.logger.debug(`[${corrId}] STUB eventProducer: ${event} ${JSON.stringify(data)}`);
-        },
-      },
+    await this.eventProducer.addInternalEvent('execution.approved', {
+      executionId,
+      projectId: dadosAtualizados?.audit?.projectId,
+      agentId: dadosAtualizados?.audit?.agentId,
+      approvedBy: userEntidadeId.toString(),
+    }, correlationId, { source: ApprovalFlowService.name });
+
+    await this.executionQueue.enqueueExecution({
+      executionId,
+      projectId: String(dadosAtualizados?.audit?.projectId ?? pedidoAtualizado.idLocEscritu ?? '0'),
+      agentId: String(dadosAtualizados?.audit?.agentId ?? '0'),
     });
 
     // Chamar gravarAposAprovacaoManual — restaura state + aprova + DVFS 6,7 + UPDATE + Claude
-    await op.gravarAposAprovacaoManual({
-      aprovador: userEntidadeId.toString(),
-      dadosExistentes: {
-        chave: pedidoAtualizado.chave,
-        dados: dadosAtualizados,
-        idClasse: pedidoAtualizado.idClasse,
-        aprovado: pedidoAtualizado.aprovado,
-        baixado: pedidoAtualizado.baixado,
-      },
-    });
-
     // 7. Buscar estado final e retornar
     const pedidoFinal = await this.prisma.dPedido.findFirst({
       where: { chave: BigInt(executionId) },
@@ -220,9 +208,9 @@ export class ApprovalFlowService {
    * @param dto - Motivo obrigatório
    * @returns ExecutionResponseDto com status 'rejected'
    *
-   * @throws {NotFoundException} Se execution não existe
-   * @throws {BadRequestException} Se não está em awaiting_approval
-   * @throws {ForbiddenException} Se não é MANAGER
+   * @throws {NotFoundException} Se execution nao existe
+   * @throws {BadRequestException} Se execution nao esta em awaiting_approval
+   * @throws {ForbiddenException} Se usuario nao e manager do projeto
    * @throws {ConflictException} Se outro admin já decidiu
    */
   async reject(
@@ -269,12 +257,15 @@ export class ApprovalFlowService {
       SET dados = jsonb_set(
             jsonb_set(
               jsonb_set(
-                jsonb_set(dados, '{approval,status}', '"rejected"'),
-                '{approval,rejectedBy}', to_jsonb(${userEntidadeId.toString()}::text)
+                jsonb_set(
+                  jsonb_set(dados, '{approval,status}', '"rejected"'),
+                  '{approval,rejectedBy}', to_jsonb(${userEntidadeId.toString()}::text)
+                ),
+                '{approval,rejectedReason}', ${reasonJson}::jsonb
               ),
-              '{approval,rejectedReason}', ${reasonJson}::jsonb
+              '{approval,decidedAt}', to_jsonb(NOW()::text)
             ),
-            '{approval,decidedAt}', to_jsonb(NOW()::text)
+            '{statusCode}', to_jsonb(${AUTOMATION_CLASS_IDS.EXEC_STATUS_REJECTED.toString()}::text)
           ),
           "atualizadoEm" = NOW()
       WHERE chave = ${BigInt(executionId)}
@@ -303,7 +294,7 @@ export class ApprovalFlowService {
       },
     });
 
-    return serializeExecution({
+    const response = serializeExecution({
       chave: pedidoFinal!.chave,
       idClasse: pedidoFinal!.idClasse,
       idPessoa: pedidoFinal!.idPessoa,
@@ -311,91 +302,32 @@ export class ApprovalFlowService {
       criadoEm: pedidoFinal!.criadoEm,
       atualizadoEm: pedidoFinal!.atualizadoEm,
     });
-  }
 
+    const dadosFinais = (pedidoFinal!.dados ?? {}) as any;
+    await this.eventProducer.addInternalEvent('execution.rejected', {
+      executionId,
+      projectId: dadosFinais?.audit?.projectId,
+      agentId: dadosFinais?.audit?.agentId,
+      rejectedBy: userEntidadeId.toString(),
+      reason: dto.reason,
+    }, dadosFinais?.audit?.correlationId ?? `reject-${executionId}`, { source: ApprovalFlowService.name });
+
+    return response;
+  }
   /**
-   * Cria rollback de uma execution: gera nova execution com git reset --hard.
+   * Rollback manual legado desabilitado.
    *
-   * A nova execution passará pelo Risk Gate e será classificada como HIGH
-   * (contém force push + reset --hard) → exigirá nova aprovação manual.
+   * A F13 Bloco E permite rollback automatico apenas pelo RollbackService conservador.
    *
-   * Após criação: marca dados.pullRequest.rolledBackAt na execution original.
-   *
-   * @param executionId - ID da execution original
-   * @param userId - ID do DUserGroup do admin
-   * @returns ExecutionResponseDto da nova execution de rollback
-   *
-   * @throws {NotFoundException} Se execution não existe
-   * @throws {BadRequestException} Se execution não tem git.headBefore
-   * @throws {ForbiddenException} Se não é MANAGER
+   * @throws {BadRequestException} Enquanto nao existir fluxo manual conservador
    */
   async rollback(
     executionId: string,
-    userId: string,
+    _userId: string,
   ): Promise<ExecutionResponseDto> {
-    const pedido = await this.prisma.dPedido.findFirst({
-      where: {
-        chave: BigInt(executionId),
-        idClasse: { in: EXECUTION_CLASSES },
-        excluido: false,
-      },
-    });
-
-    if (!pedido) {
-      throw new NotFoundException(`Execution ${executionId} não encontrada.`);
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const dados = pedido.dados as any;
-
-    if (!dados?.git?.headBefore) {
-      throw new BadRequestException(
-        `Execution ${executionId} não tem dados de git.headBefore. Apenas executions que modificaram o código podem ser revertidas.`,
-      );
-    }
-
-    const userEntidadeId = await this.entidadeService.getEntidadeIdFromUserGroup(
-      BigInt(userId),
+    throw new BadRequestException(
+      `Rollback manual legado desabilitado para execution ${executionId}. Use rollbackOnFailure no runtime isolado.`,
     );
-
-    if (pedido.idLocEscritu) {
-      await this._validateManagerAccess(
-        pedido.idLocEscritu,
-        userEntidadeId,
-        executionId,
-      );
-    }
-
-    const projectId = dados?.audit?.projectId;
-    const branch = dados?.git?.branch ?? 'main';
-
-    // Comando de rollback — será classificado HIGH pelo Risk Gate
-    const rollbackCommand =
-      `git reset --hard ${dados.git.headBefore} && git push --force-with-lease origin ${branch}`;
-
-    this.logger.log(
-      `[ApprovalFlow] Rollback: execution=${executionId} headBefore=${dados.git.headBefore}`,
-    );
-
-    // Cria nova execution HIGH via ExecutionsService.execute()
-    const newExecution = await this.executionsService.execute(
-      projectId,
-      { text: rollbackCommand },
-      userId,
-    );
-
-    // Marcar execution original com rollbackAt
-    await this.prisma.$executeRaw`
-      UPDATE "DPedido"
-      SET dados = jsonb_set(
-            jsonb_set(dados, '{pullRequest,rolledBackAt}', to_jsonb(NOW()::text)),
-            '{pullRequest,rollbackRef}', to_jsonb(${newExecution.id}::text)
-          ),
-          "atualizadoEm" = NOW()
-      WHERE chave = ${BigInt(executionId)}
-    `;
-
-    return newExecution;
   }
 
   /**
