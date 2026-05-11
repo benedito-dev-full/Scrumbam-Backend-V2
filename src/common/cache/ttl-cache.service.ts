@@ -22,7 +22,7 @@ export class TtlCacheService {
   private readonly logger = new Logger(TtlCacheService.name);
   private readonly store = new Map<string, CacheEntry<unknown>>();
 
-  constructor(private readonly maxEntries = 500) {}
+  private readonly maxEntries = 500;
 
   /**
    * Retorna valor cacheado quando a chave existe e ainda nao expirou.
