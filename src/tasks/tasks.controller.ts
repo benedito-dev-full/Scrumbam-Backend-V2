@@ -13,13 +13,7 @@ import {
   Request,
   UseGuards,
 } from '@nestjs/common';
-import {
-  ApiBearerAuth,
-  ApiOperation,
-  ApiParam,
-  ApiResponse,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TasksService } from './tasks.service';
 import { CreateTaskDto } from './dto/create-task.dto';
@@ -63,7 +57,10 @@ export class TasksController {
    * ```
    */
   @Post()
-  @ApiOperation({ summary: 'Criar task com identifier atômico DEV-N', description: 'Estado inicial: INBOX. Identifier gerado atomicamente.' })
+  @ApiOperation({
+    summary: 'Criar task com identifier atômico DEV-N',
+    description: 'Estado inicial: INBOX. Identifier gerado atomicamente.',
+  })
   @ApiResponse({ status: 201, description: 'Task criada', type: TaskResponseDto })
   @ApiResponse({ status: 401, description: 'Não autenticado' })
   @ApiResponse({ status: 404, description: 'Projeto não encontrado' })
@@ -121,10 +118,7 @@ export class TasksController {
   @ApiParam({ name: 'id', description: 'ID da task' })
   @ApiResponse({ status: 200, description: 'Task atualizada', type: TaskResponseDto })
   @ApiResponse({ status: 404, description: 'Task não encontrada' })
-  async update(
-    @Param('id') id: string,
-    @Body() dto: UpdateTaskDto,
-  ): Promise<TaskResponseDto> {
+  async update(@Param('id') id: string, @Body() dto: UpdateTaskDto): Promise<TaskResponseDto> {
     return this.tasksService.update(id, dto);
   }
 
@@ -152,8 +146,9 @@ export class TasksController {
   async updateStatus(
     @Param('id') id: string,
     @Body() dto: UpdateTaskStatusDto,
+    @Request() req: { user: { entidadeId: string } },
   ): Promise<TaskResponseDto> {
-    return this.tasksService.updateStatus(id, dto);
+    return this.tasksService.updateStatus(id, dto, BigInt(req.user.entidadeId));
   }
 
   /**

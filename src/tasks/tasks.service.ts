@@ -1,9 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { EventProducerService } from '../eventos/core/event-producer.service';
@@ -20,7 +15,6 @@ import { TaskResponseDto, ListTasksResponseDto } from './dto/task-response.dto';
 
 /** idClasse de DTask no seed F1 (classes canônicas V2). */
 const ID_CLASSE_TASK = BigInt(-154); // SCRUMBAN_TASK (seed classes.seed.ts)
-
 
 /** Mapa de status string → idClasse DTabela (seed F1). */
 const STATUS_TO_TABELA_CLASSE: Record<string, bigint> = {
@@ -103,16 +97,23 @@ export class TasksService {
     const projectDados = project.dados as Record<string, unknown> | null;
     const prefix = (projectDados?.prefix as string | null) ?? 'DEV';
 
+    // Identifier escopado fora da transaction para usar no evento de audit
+    let createdIdentifier = `${prefix}-?`;
+
     const task = await this.prisma.$transaction(async (tx) => {
       // Gerar identifier atômico
       const identifier = await this.identifierService.getNextIdentifier(tx, projectId, prefix);
+      createdIdentifier = identifier;
 
       // Construir dados V3 iniciais
       const dadosPayload = buildInitialTaskDados(
         identifier,
         creatorId.toString(),
         dto.rawText || dto.source
-          ? { rawText: dto.rawText, source: dto.source as 'telegram' | 'web' | 'api' | 'mcp' | undefined }
+          ? {
+              rawText: dto.rawText,
+              source: dto.source as 'telegram' | 'web' | 'api' | 'mcp' | undefined,
+            }
           : undefined,
       );
 
@@ -142,15 +143,22 @@ export class TasksService {
       });
     });
 
+    // Hidratar nome do criador (1 query — DEntidade.chave do JWT)
+    const creator = await this.prisma.dEntidade.findFirst({
+      where: { chave: creatorId, excluido: false },
+      select: { nome: true },
+    });
+
     // Audit APÓS commit — tipo task.created → idClasse=-497 TASK_CREATED
     await this.eventProducer.addInternalEvent(
       'task.created',
       {
         taskId: task.chave.toString(),
         nome: dto.nome,
-        identifier: `${prefix}-?`,
+        identifier: createdIdentifier,
         projectId: dto.projectId,
         userId: creatorId.toString(),
+        userName: creator?.nome ?? null,
       },
       this.correlationIdService.getOrGenerate(),
       { source: TasksService.name },
@@ -328,7 +336,11 @@ export class TasksService {
    * const task = await service.updateStatus('7', { status: 'READY' });
    * ```
    */
-  async updateStatus(id: string, dto: UpdateTaskStatusDto): Promise<TaskResponseDto> {
+  async updateStatus(
+    id: string,
+    dto: UpdateTaskStatusDto,
+    actorId?: bigint,
+  ): Promise<TaskResponseDto> {
     const taskId = BigInt(id);
 
     if (!isValidState(dto.status)) {
@@ -357,9 +369,7 @@ export class TasksService {
 
     // Atualizar telemetria
     const telemetriaAtual = (dadosAtuais.telemetry as Record<string, unknown>) ?? {};
-    const workSessions = (
-      telemetriaAtual.workSessions as Array<Record<string, unknown>>
-    ) ?? [];
+    const workSessions = (telemetriaAtual.workSessions as Array<Record<string, unknown>>) ?? [];
 
     const novasTelemetria: Record<string, unknown> = { ...telemetriaAtual };
 
@@ -432,6 +442,16 @@ export class TasksService {
       },
     });
 
+    // Hidratar nome do ator quando o controller passa o JWT (actorId).
+    let actorName: string | null = null;
+    if (actorId) {
+      const actor = await this.prisma.dEntidade.findFirst({
+        where: { chave: actorId, excluido: false },
+        select: { nome: true },
+      });
+      actorName = actor?.nome ?? null;
+    }
+
     // Audit APÓS commit — tipo task.status.changed → idClasse=-498 TASK_STATUS_CHANGED
     await this.eventProducer.addInternalEvent(
       'task.status.changed',
@@ -439,7 +459,11 @@ export class TasksService {
         taskId: taskId.toString(),
         from: fromStatus,
         to: toStatus,
+        ...(actorId && { userId: actorId.toString() }),
+        ...(actorName && { userName: actorName }),
         ...(dto.movedBy && { movedBy: dto.movedBy }),
+        nome: task.nome,
+        identifier: (task.dados as Record<string, unknown> | null)?.identifier ?? null,
       },
       this.correlationIdService.getOrGenerate(),
       { source: TasksService.name },
