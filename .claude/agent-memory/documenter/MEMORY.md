@@ -1,6 +1,6 @@
 # Documenter Agent Memory — Scrumban-Backend-V2
 
-**Versão:** 1.3 (atualizado após Sub-tarefa 2.3 F13)
+**Versão:** 1.4 (atualizado após Task 01 F4 priority persistence)
 **Última atualização:** 2026-05-12
 
 ---
@@ -424,3 +424,26 @@ export class [Nome]Dto {
   - ROADMAP entry para Sub-tarefa deve detalhar pilares aplicados e ADRs (modelo seguir Task #2 F5)
   - Commit com scope `seeds` é padrão para alterações no `prisma/seeds/classes.seed.ts`
   - ADR-V2-033 é novo ADR (15º da série); redação em progresso (esqueleto completo em 2.5)
+
+### Task 01 F4: Corrigir persistência de `priority` em DTask (2026-05-12)
+- **Scope:** `tasks` (Pilar 2 — reutilizar endpoint genérico)
+- **ADR Redigido:** `docs/decisions/ADR-V2-034-priority-dtabela-por-projeto.md` (nova, padrão Priority como DTabela escopada)
+- **Deliverables:**
+  - `TasksService`: helper `resolvePriorityId()` + persist `idPriority` em create/update
+  - `buildResponse()`: batch lookup `buildPriorityMap()` (ZERO N+1)
+  - `SeedBootstrapService`: novo método `seedPrioritiesIfMissing()` cria 4 DTabelas PRIORITY por projeto
+  - Backfill script: `prisma/scripts/backfill-priority-tabelas.ts` standalone idempotente
+  - DTOs: enums corrigidos (CRITICAL→URGENT), `update-task.dto.spec.ts` novo (M1 fix)
+  - ESLint config: glob incluído `prisma/scripts/**/*.ts`
+- **Commit:** `86701a5` (scope `tasks`, type `fix`)
+- **Tests:** 85/85 PASS (77 tasks + 8 DTO spec M1 fix)
+- **Quality:** 8.0/10 APPROVED (padrão robusto, zero N+1, ADR justificado)
+- **Workflow:** Implementer (1.5h round 2 M1) → Reviewer (40min) → Documenter (30min) = 2.33h total
+- **Pilares:** P1 N/A | P2 REUTILIZADO (endpoint genérico /tasks/:id PATCH) | P3 RESPEITADO (zero tabela nova)
+- **Lições:**
+  - Pattern Priority espelha Status — precedente estabelecido em ADR-V2-009
+  - M1 fix (DTO spec) fundamental — cliente/Reviewer identificou gap validation
+  - Backfill script like best practice para seed anterior a feature
+  - Scope `tasks` é padrão (não `executions` ou outro genérico — reside em tasks/)
+  - Priority DTabela escopada por projeto = chaves runtime únicas por projeto (importante para multi-tenant)
+  - ADR-V2-034 precedente para future custom priorities (sem código novo)
