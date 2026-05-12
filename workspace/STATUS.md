@@ -4,6 +4,58 @@
 
 ---
 
+## Task #1 Sub-tarefa 1 (F13 Cliente — Agente V2 VPS) — Scaffolding + Config Loader — ✅ COMPLETE
+
+**Module:** automation/agent (subprojeto monorepo `agent/`)
+**Task:** Agente Cliente V2 (executor passivo de Claude Code via HTTP+HMAC, rodando em VPS remota)
+**Task Status:** COMPLETE (Documenter fechou — Sub-tarefa 1 de 7)
+**Fase V2:** F13 (Cliente — Sub-tarefa 1 de 7)
+**Duration:** ~5h Implementer + ~30min Reviewer + ~30min Documenter
+**Quality Score:** 9.0/10 APPROVED rodada 1
+**Completed:** 2026-05-12
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan Task #1 (7 sub-tarefas no total) |
+| Implementer | ~5h | 100% PASS: monorepo setup + config loader + 11 tests + smoke |
+| Reviewer | ~30min | Score 9.0/10 APPROVED rodada 1 (JSDoc completo, modo 0600 defensivo, escopo respeitado) |
+| Documenter | ~30min | ROADMAP, CHANGELOG, STATUS, commit Conventional |
+
+**Deliverables:**
+- [x] Pasta `agent/` criada (subprojeto monorepo — ADR-V2-031 em redação)
+- [x] `package.json` com deps (express, pino, zod) + devDeps (TS, jest, ESLint 9)
+- [x] `tsconfig.json` strict (`noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns`)
+- [x] `eslint.config.js` flat (ESLint 9) — independente do root (que ignora `agent/**`)
+- [x] `src/logger.ts` — pino com redaction de `agentCommandSecret`, `agentApiKey`, `installToken`, `signature`, `password` (+ variações nested)
+- [x] `src/config/schema.ts` — `AgentConfigSchema` zod completo
+- [x] `src/config/loader.ts` — `loadConfig()` valida modo 0600 + parse + zod
+- [x] `src/index.ts` — bootstrap mínimo (loga banner e sai; servidor HTTP vem na Sub-tarefa 2)
+- [x] Placeholders `.gitkeep` em `server/`, `handlers/`, `claude-code/`, `tunnel/`, `outbound/`, `lifecycle/`
+- [x] `README.md` mínimo
+- [x] `.gitignore` (dist, node_modules, coverage)
+- [x] **NÃO criado:** install.sh, systemd unit, autossh wrapper, HTTP server, RUN_CLAUDE_CODE handler — escopo respeitado
+
+**Metrics:**
+- `npm install`: PASS (471 packages, 0 vulnerabilities)
+- `npm run build`: PASS (tsc → dist/)
+- `npm run lint`: PASS (eslint clean)
+- `npm run typecheck`: PASS (tsc --noEmit clean)
+- `npm test`: PASS 11/11 specs (loader: válido, defaults, modo 0644, modo 0640, JSON malformado, faltando agentId, faltando agentCommandSecret, URL inválida, allowlist vazio, path inexistente, env override)
+- Smoke `node dist/index.js`: PASS (boot loga em JSON estruturado)
+- Backend root build: NÃO regredi (erros pré-existentes em `pdf-generator.service.ts` confirmados via `git stash`)
+
+**Decisões registradas:**
+- ESLint: migrado para v9 + flat config local (`agent/eslint.config.js`) para não colidir com flat config raiz que ignora `agent/**` (ajustado em commit posterior).
+- `eslint.config.js` raiz: adicionado `agent/**` em `ignores` para evitar warnings ao editar agent/ a partir do root.
+- `claudeMdPath` default `/root/.claude/CLAUDE.md` (não obrigatório no zod; install.sh resolve `~/.claude/CLAUDE.md` do user real).
+- Ownership check (`stat.uid`) — não implementado nesta sub-tarefa; modo 0600 é defesa suficiente para MVP. Pode entrar em Sub-tarefa 6 (install.sh) ou hardening posterior.
+
+**Próximo passo:** Orchestrator chama Reviewer → Documenter (commit). Sub-tarefa 2 só após gate APPROVED.
+
+---
+
 ## Task #01 (F8 Transversal) — Multi-Tenant Identity + Workspace Switch (ADR-V2-030) — ✅ COMPLETE
 
 **Module:** auth + invites (backend V2) / auth-store + sidebar + invite (frontend)

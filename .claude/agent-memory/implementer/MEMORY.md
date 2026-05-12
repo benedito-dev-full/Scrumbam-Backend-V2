@@ -1,7 +1,7 @@
 # Implementer Agent Memory — Scrumban-Backend-V2
 
-**Versão:** 2.1 (F10 Bloco C — Telegram Commands — 2026-05-10)
-**Última atualização:** 2026-05-10
+**Versão:** 2.2 (F13 Cliente — Agent monorepo scaffolding — 2026-05-12)
+**Última atualização:** 2026-05-12
 
 **Notas por fase:**
 - F7 Eventos Canônicos: ver `f7-eventos-canonicos.md` (CommonModule Global, EventProducer pattern, Engine isolation via type-only import).
@@ -11,6 +11,7 @@
 - F10 Bloco A Core Channels: gotchas abaixo (DVincula.metaDados vs DTabela.dados, busca de token por hash).
 - F10 Bloco B Telegram Webhook: gotchas abaixo (ioredis SET NX sintaxe, fetch nativo multipart, @types/supertest ausente).
 - F10 Bloco C Telegram Commands: gotchas abaixo (DProject sem idCreator, filtro de data em memória, var TS6133 em specs).
+- F13 Cliente Sub-tarefa 1 (agent/ scaffolding): coexistência ESLint do agent com flat config raiz — ver `agent-monorepo-eslint-coexistence.md`. Resumo: agent/ usa ESLint v9 + flat config local; root adicionou `agent/**` em ignores. PostToolUse hook valida cada arquivo via `cd dir_do_package_json && npx eslint <file>`, então subprojetos precisam de config próprio para evitar warning "File ignored". `node_modules` e `dist` do agent já cobertos pelo `.gitignore` raiz (`**/node_modules`, `dist/`).
 
 ---
 

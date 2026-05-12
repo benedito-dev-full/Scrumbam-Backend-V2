@@ -12,6 +12,21 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Added
+
+- **F13 Task #1 Sub-tarefa 1: Scaffolding Monorepo + Config Loader com Validação 0600** (V2 F13 Cliente) - 2026-05-12
+  - **Novo subprojeto:** `agent/` (TypeScript 5.4 strict, Node 20+)
+  - **Stack:** express, pino (redaction defensiva), zod (validação schema)
+  - **Config loader:** 4 validações (arquivo existe, modo **0600 obrigatório**, JSON válido, zod schema)
+  - **Redaction:** 9 paths sensíveis (agentCommandSecret, agentApiKey, installToken, signature, password + nested)
+  - **Bootstrap:** Carrega config, inicia logger, loga banner — placeholder para Sub-tarefas 2-5 (HTTP server, heartbeat, handlers, autossh, lifecycle)
+  - **JSDoc:** 100% em schema, loader, logger, index (4 export points)
+  - **Tests:** 11/11 PASS (config loader scenarios: válido, defaults, modo 0644 rejeitado, modo 0640 rejeitado, JSON malformado, campos faltando, URL inválida, allowlist vazio, path inexistente, env override)
+  - **Build:** `npm run build` PASS, `npm run typecheck` PASS, `npm run lint` PASS, smoke `node dist/index.js` PASS
+  - **ADRs:** **ADR-V2-031 (novo — monorepo agent cliente VPS)**
+  - **Pilares:** N/A (cliente standalone)
+  - **Score:** 9.0/10 APPROVED rodada 1
+
 ### Removed
 
 - **F13 Sub-tarefa 2.5: Remove claudeSessionId residual de AutomationData** (V2 F13 Backend-Side Prep — Conclusão) - 2026-05-12

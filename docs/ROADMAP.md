@@ -202,7 +202,110 @@
 
 ---
 
-## F13 — Automation Claude Code — Backend-Side Prep
+## F13 — Automation Claude Code — Cliente VPS + Backend-Side Prep
+
+### Task #1: Agente Cliente V2 (7 sub-tarefas)
+
+#### Sub-tarefa 1: Scaffolding Monorepo + Config Loader com Validação 0600 — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** agent (novo subprojeto monorepo `Scrumban-Backend-V2/agent/`)
+**Fase V2:** F13 (Cliente — Sub-tarefa 1 de 7)
+**Tempo Real:** ~5h Implementer + ~30min Reviewer + ~30min Documenter
+**Completado em:** 2026-05-12
+**Quality Score:** 9.0/10 APPROVED rodada 1
+
+**O Que Foi Feito:**
+
+**Novo Subprojeto `agent/` (monorepo):**
+- **Estrutura Maven-like em TypeScript:**
+  - `package.json` — scrumban-agent v0.1.0, deps (express, pino, zod), devDeps (TS 5.4, jest, ESLint 9)
+  - `tsconfig.json` — strict máximo (`noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns`, `noImplicitAny`)
+  - `eslint.config.js` — flat config local (ESLint 9) — independente do root
+  - `.gitignore` — dist, node_modules, coverage
+  - `README.md` mínimo (uso, env vars, próximas sub-tarefas)
+  - `jest.config.json` embutido em package.json (preset ts-jest)
+
+- **Código Fonte (`src/`):**
+  - `index.ts` — bootstrap minimal (carrega config, inicia logger, loga banner, sai)
+    - JSDoc explicando que Sub-tarefas 2-5 vão adicionar: servidor HTTP, heartbeat, RUN_CLAUDE_CODE handler, autossh, lifecycle
+  - `logger.ts` — factory `createLogger(level)` retorna pino com redaction defensiva
+    - REDACT_PATHS: agentCommandSecret, agentApiKey, installToken, signature, password (9 variações: top-level + nested)
+    - JSDoc completo (@example, descrição defensiva)
+  - `config/schema.ts` — Zod schema `AgentConfigSchema` (11 campos obrigatórios + defaults)
+    - Campos: agentId, agentApiKey, agentCommandSecret, backendBaseUrl, backendTunnelHost, backendTunnelPort, tunnelPort, allowedProjectRoots, claudeMdPath, agentSshKeyPath, logLevel
+    - JSDoc em cada propriedade (significado, padrões, restrições)
+    - Export type `AgentConfig = z.infer<typeof AgentConfigSchema>`
+  - `config/loader.ts` — função `loadConfig(explicitPath?)` com 4 validações
+    - 1. Arquivo existe (`fs.statSync`)
+    - 2. Modo **exatamente 0600** (defesa contra leak de secrets em VPS compartilhada) — rejeita 0644/0640 com mensagem clara `chmod 600`
+    - 3. JSON parse válido (zod-friendly)
+    - 4. Zod schema validação (mensagens detalhadas por campo)
+    - Override via env `SCRUMBAN_AGENT_CONFIG_PATH`
+    - Default `/etc/scrumban-agent/config.json`
+    - JSDoc completo (@throws, @example, modo 0600 justificativa)
+
+- **Placeholders `.gitkeep` (Sub-tarefas 2-5):**
+  - `src/server/` — HTTP server express
+  - `src/handlers/` — RUN_CLAUDE_CODE handler
+  - `src/outbound/` — client outbound (POST /execute ao backend)
+  - `src/tunnel/` — autossh wrapper
+  - `src/claude-code/` — executor Claude Code
+  - `src/lifecycle/` — SIGTERM gracioso, heartbeat loop
+
+- **Tests (`__tests__/config.loader.spec.ts`):**
+  - 11 specs PASS
+    - Válido, defaults, modo 0644 (rejeita), modo 0640 (rejeita), JSON malformado, faltando agentId, faltando agentCommandSecret, URL inválida, allowlist vazio, path inexistente, env override
+  - Build: `npm run build` PASS (dist/ tsc clean)
+  - Lint: `npm run lint` PASS (ESLint 9 flat)
+  - TypeCheck: `npm run typecheck` PASS (tsc --noEmit)
+  - Smoke: `node dist/index.js` PASS (boot loga JSON estruturado via pino)
+
+**Decisões Registradas:**
+- ESLint v9 em agent/eslint.config.js — independente do root (root ignora agent/** em seu ignores)
+- `claudeMdPath` default `/root/.claude/CLAUDE.md` — não obrigatório em zod; install.sh resolve `~/.claude/CLAUDE.md` do user real
+- Ownership check (`stat.uid`) — não implementado Sub-tarefa 1; modo 0600 é defesa suficiente para MVP. Pode entrar Sub-tarefa 6 (install.sh) ou hardening posterior
+- HTTP server, heartbeat, handlers, autossh — **não** implementados nesta sub-tarefa (escopo Sub-tarefas 2-5)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — cliente VPS, zero Engine
+- Pilar 2 (Endpoints): N/A — zero endpoint cliente-side (Sub-tarefa 2 adiciona POST /v1/execute dispatcher)
+- Pilar 3 (Seed): N/A — cliente é standalone, zero DClasse
+
+**ADRs vinculados:** **ADR-V2-031 (novo — monorepo agent cliente VPS)**
+
+**Build & Testes:**
+- `npm install`: PASS (471 packages, 0 vulnerabilities)
+- `npm run build`: PASS (tsc → dist/)
+- `npm run lint`: PASS (eslint clean)
+- `npm run typecheck`: PASS (tsc --noEmit clean)
+- `npm test`: PASS (11/11 specs config.loader — todos cenários cobertos)
+- Smoke (node dist/index.js): PASS (boot loga banner JSON)
+- Root build: NÃO regredi (erros pré-existentes confirmados via git stash)
+
+**Próximas Sub-tarefas (roadmap):**
+1. **Sub-tarefa 2:** HTTP server (express) em 127.0.0.1:tunnelPort + middleware HMAC-SHA256 + `/v1/execute` dispatcher
+2. **Sub-tarefa 3:** RemoteBackendClient + heartbeat loop (setInterval 30s) + session resolver
+3. **Sub-tarefa 4:** RUN_CLAUDE_CODE handler + CLAUDE.md parser + allowlist validation
+4. **Sub-tarefa 5:** autossh wrapper + lifecycle signals (SIGTERM gracioso)
+5. **Sub-tarefa 6:** install.sh (systemd setup, config file generator, ownership fix)
+6. **Sub-tarefa 7:** smoke tests E2E + docs completos
+
+**Plan:** [`workspace/plans/plan-automation-agent-v2-client-task1.md`](../workspace/plans/plan-automation-agent-v2-client-task1.md) §5 Sub-tarefa 1
+**Review:** [`workspace/reviews/review-automation-agent-task1-sub1.md`](../workspace/reviews/review-automation-agent-task1-sub1.md)
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan Task #1 (7 sub-tarefas) |
+| Implementer | ~5h | 100% PASS: monorepo setup + config loader + 11 tests + smoke |
+| Reviewer | ~30min | Score 9.0/10 APPROVED rodada 1 (JSDoc completo, modo 0600 defensivo, escopo respeitado) |
+| Documenter | ~30min | ROADMAP, CHANGELOG, STATUS, commit Conventional |
+
+---
+
+### Task #2: Backend-Side Prep (5 sub-tarefas)
 
 ### Sub-tarefa 2.1: Seed DClasses Agent Session Lifecycle + ADR-V2-033 Esqueleto — ✅ COMPLETA
 

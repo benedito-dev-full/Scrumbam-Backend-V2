@@ -1,23 +1,16 @@
-// Flat config (ESLint v9+) — Scrumban-Backend-V2
-// Usa @typescript-eslint instalado via npm install.
+// Flat config (ESLint v9+) — Scrumban Agent (subprojeto monorepo).
+// Independente do flat config raiz (que também ignora `agent/**`).
+// Quando `npx eslint` roda dentro de `agent/`, ESLint v9 acha este arquivo
+// primeiro (busca para cima da CWD) e usa este.
 const tseslint = require('@typescript-eslint/eslint-plugin');
 const tsparser = require('@typescript-eslint/parser');
 
 module.exports = [
   {
-    ignores: [
-      'dist/**',
-      'node_modules/**',
-      '.claude/**',
-      'workspace/**',
-      'docs/**',
-      'prisma/migrations/**',
-      'coverage/**',
-      'agent/**',
-    ],
+    ignores: ['dist/**', 'node_modules/**', 'coverage/**'],
   },
   {
-    files: ['src/**/*.ts', 'test/**/*.ts', 'prisma/seeds/**/*.ts', 'templates/**/*.ts'],
+    files: ['src/**/*.ts', '__tests__/**/*.ts'],
     languageOptions: {
       parser: tsparser,
       parserOptions: {
@@ -38,6 +31,14 @@ module.exports = [
         clearTimeout: 'readonly',
         setInterval: 'readonly',
         clearInterval: 'readonly',
+        describe: 'readonly',
+        it: 'readonly',
+        expect: 'readonly',
+        beforeEach: 'readonly',
+        afterEach: 'readonly',
+        beforeAll: 'readonly',
+        afterAll: 'readonly',
+        jest: 'readonly',
       },
     },
     plugins: {
