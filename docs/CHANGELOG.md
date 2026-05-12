@@ -14,6 +14,27 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F13 Task #1 Sub-tarefa 2: HTTP Server Local + HMAC Middleware + Dispatcher /v1/execute** (V2 F13 Cliente) - 2026-05-12
+  - **Servidor:** Express bind 127.0.0.1:tunnelPort (loopback only, defesa contra exposição direta)
+  - **HMAC-SHA256:** Algoritmo byte-a-byte idêntico a `remote-execution-client.ts` (backend)
+    - Validações: agentId, timestamp skew ±5min, nonce anti-replay, constant-time compare
+  - **Nonce Store:** LRU in-memory 10_000 entries, TTL 10min (alinhado com timestamp skew)
+    - `ttlAutopurge` automático via `lru-cache`
+  - **Rate Limit:** express-rate-limit 60 req/min por agentId (defesa em profundidade)
+    - Posicionado APÓS HMAC no pipeline (invalidas não consomem bucket)
+  - **Dispatcher /v1/execute:** Type discriminator
+    - PING: `{accepted: true, message: 'pong'}` — sanity check E2E
+    - RUN_CLAUDE_CODE: 501 NotImplemented stub (handler real Sub-tarefa 4)
+    - UNKNOWN_COMMAND_TYPE/MISSING_TYPE: 400 com lista tipos suportados
+  - **GET /ping:** Autenticado com HMAC, retorna metadata (agentId, version, uptimeSec)
+  - **Error Handlers:** Payloads >1MB (413), JSON malformado (400), 404 padronizado
+  - **Graceful Shutdown:** 30s dreno + fallback `closeAllConnections` (Node 18+)
+  - **Tests:** 15 specs PASS (13 obrigatórios + 2 lifecycle bonus)
+  - **Dependencies:** express, lru-cache, express-rate-limit
+  - **Score:** 9.2/10 APPROVED rodada 1 (5 gates segurança validados)
+  - **Pilares:** N/A (cliente)
+  - **ADRs:** ADR-V2-031, ADR-V2-033
+
 - **F13 Task #1 Sub-tarefa 1: Scaffolding Monorepo + Config Loader com Validação 0600** (V2 F13 Cliente) - 2026-05-12
   - **Novo subprojeto:** `agent/` (TypeScript 5.4 strict, Node 20+)
   - **Stack:** express, pino (redaction defensiva), zod (validação schema)

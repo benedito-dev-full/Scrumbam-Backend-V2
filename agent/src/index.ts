@@ -1,9 +1,17 @@
 /**
- * Entry point do scrumban-agent (Sub-tarefa 1 do Task #1 — F13 cliente).
+ * Entry point do scrumban-agent.
  *
- * Por enquanto: carrega config, inicializa logger, loga banner de boot e fica
- * idle. Servidor HTTP, autossh, handlers de comando, heartbeat loop e
- * lifecycle são adicionados nas sub-tarefas seguintes (2 a 5).
+ * Sub-tarefas concluídas:
+ *  - Sub-tarefa 1: config loader + logger pino com redaction.
+ *  - Sub-tarefa 2: HTTP server (127.0.0.1) + HMAC middleware + nonce store
+ *    LRU + rate limit (60 req/min) + dispatcher `/v1/execute` com `PING`
+ *    e stub 501 para `RUN_CLAUDE_CODE`.
+ *
+ * Sub-tarefas pendentes:
+ *  - Sub-tarefa 3: outbound client + heartbeat loop (setInterval 30s).
+ *  - Sub-tarefa 4: handler real de RUN_CLAUDE_CODE (runner + allowlist +
+ *    identity-resolver + session-parser).
+ *  - Sub-tarefa 5: autossh wrapper + lifecycle completo.
  *
  * Uso (produção):
  *   /opt/scrumban-agent/bin/scrumban-agent
@@ -13,12 +21,16 @@
  */
 import { loadConfig } from './config/loader';
 import { createLogger } from './logger';
+import { createServer } from './server/http.server';
 
 const AGENT_VERSION = '0.1.0';
 
 async function bootstrap(): Promise<void> {
   const config = loadConfig();
   const logger = createLogger(config.logLevel);
+  const server = createServer(config, logger);
+
+  await server.start();
 
   logger.info(
     {
@@ -27,23 +39,28 @@ async function bootstrap(): Promise<void> {
       backendBaseUrl: config.backendBaseUrl,
       tunnelPort: config.tunnelPort,
       allowedProjectRoots: config.allowedProjectRoots,
-      stage: 'sub-tarefa-1-scaffolding',
+      stage: 'sub-tarefa-2-http-server',
     },
-    'scrumban-agent iniciado (Sub-tarefa 1: config loader pronto — servidor HTTP, heartbeat, handlers virao nas Sub-tarefas 2-5)',
+    'scrumban-agent pronto (Sub-tarefa 2: HTTP server + HMAC ativo — outbound/heartbeat virao na Sub-tarefa 3)',
   );
 
-  // Sub-tarefas pendentes (placeholder):
-  // - Sub-tarefa 2: subir HTTP server (express) em 127.0.0.1:tunnelPort + middleware HMAC + /v1/execute dispatcher.
-  // - Sub-tarefa 3: backend-client + heartbeat loop (setInterval 30s).
-  // - Sub-tarefa 4: handler RUN_CLAUDE_CODE + identity-resolver + allowlist + session-parser.
-  // - Sub-tarefa 5: autossh wrapper + lifecycle (SIGTERM gracioso).
-  //
-  // Nesta sub-tarefa o processo sai limpo apos logar o boot — nao mantem
-  // event loop ativo. As sub-tarefas seguintes farao o processo persistir.
+  // Graceful shutdown — drena conexões in-flight por até 30s.
+  const shutdown = (signal: NodeJS.Signals) => {
+    logger.info({ signal }, 'sinal recebido — iniciando shutdown');
+    server
+      .stop()
+      .then(() => process.exit(0))
+      .catch((err: Error) => {
+        logger.error({ err: err.message }, 'falha no shutdown');
+        process.exit(1);
+      });
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 bootstrap().catch((err: Error) => {
-  // Logger pode ainda nao ter sido inicializado se loadConfig falhou.
+  // Logger pode ainda não ter sido inicializado se loadConfig falhou.
   // Fallback para console.error (permitido pelo eslint).
   console.error('scrumban-agent: falha no bootstrap:', err.message);
   if (err.stack) {

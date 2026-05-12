@@ -10,8 +10,8 @@ Binário cliente Node.js+TypeScript que roda na VPS do CEO. **Executor passivo**
 
 | Sub-tarefa | Status | Conteúdo |
 |---|---|---|
-| **1. Scaffolding + config loader** | em curso | `package.json`, `tsconfig.json`, `eslint.config.js`, jest, logger (pino com redaction), config schema (zod), config loader (modo 0600), `index.ts` bootstrap mínimo, 11 specs |
-| 2. HTTP server + HMAC + `/v1/execute` | pendente | express, middleware HMAC, nonce LRU, dispatcher |
+| **1. Scaffolding + config loader** | completa | `package.json`, `tsconfig.json`, `eslint.config.js`, jest, logger (pino com redaction), config schema (zod), config loader (modo 0600), `index.ts` bootstrap mínimo, 11 specs |
+| **2. HTTP server + HMAC + `/v1/execute`** | em review | express bind 127.0.0.1, middleware HMAC (algoritmo idêntico ao backend, `timingSafeEqual`), nonce LRU 10min/10k entries, rate limit 60/min por agentId, dispatcher PING + RUN_CLAUDE_CODE stub 501, GET /ping autenticado, graceful shutdown 30s, 15 specs |
 | 3. Outbound + heartbeat | pendente | `backend-client`, `heartbeat-loop` (30s) |
 | 4. RUN_CLAUDE_CODE + session-parser | pendente | runner, allowlist, identity-resolver, fallback `~/.claude/projects/` |
 | 5. autossh + lifecycle | pendente | wrapper, SIGTERM gracioso |
@@ -73,14 +73,20 @@ agent/
 │   ├── config/
 │   │   ├── schema.ts              # AgentConfigSchema (zod)
 │   │   └── loader.ts              # loadConfig() — valida modo 0600 + zod
-│   ├── server/                    # vazio — Sub-tarefa 2
-│   ├── handlers/                  # vazio — Sub-tarefas 2 e 4
+│   ├── server/
+│   │   ├── http.server.ts         # express bind 127.0.0.1 + graceful shutdown
+│   │   ├── hmac.middleware.ts     # HMAC-SHA256 (idêntico ao backend) + timingSafeEqual
+│   │   ├── nonce.store.ts         # LRU 10min/10k anti-replay
+│   │   ├── rate-limit.middleware.ts  # 60 req/min por agentId
+│   │   └── dispatcher.ts          # POST /v1/execute (PING + RUN_CLAUDE_CODE stub 501)
+│   ├── handlers/                  # vazio — Sub-tarefa 4 (handler real de RUN_CLAUDE_CODE)
 │   ├── claude-code/               # vazio — Sub-tarefa 4
 │   ├── tunnel/                    # vazio — Sub-tarefa 5
 │   ├── outbound/                  # vazio — Sub-tarefa 3
 │   └── lifecycle/                 # vazio — Sub-tarefas 3 e 5
 ├── __tests__/
-│   └── config.loader.spec.ts      # 11 specs
+│   ├── config.loader.spec.ts      # 11 specs
+│   └── http.server.spec.ts        # 15 specs (HMAC, dispatcher, rate limit, lifecycle)
 ├── package.json
 ├── tsconfig.json
 ├── eslint.config.js               # flat config (ESLint 9)

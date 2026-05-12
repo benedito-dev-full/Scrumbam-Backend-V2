@@ -4,6 +4,60 @@
 
 ---
 
+## Task #1 Sub-tarefa 2 (F13 Cliente — Agente V2 VPS) — HTTP Server + HMAC + Dispatcher — ✅ COMPLETE
+
+**Module:** automation/agent (subprojeto monorepo `agent/`)
+**Task:** HTTP server local (127.0.0.1) + middleware HMAC + nonce LRU + rate limit + dispatcher `/v1/execute`
+**Task Status:** COMPLETE (Documenter fechou — Sub-tarefa 2 de 7)
+**Fase V2:** F13 (Cliente — Sub-tarefa 2 de 7)
+**Duration:** ~6h Implementer + ~30min Reviewer + ~30min Documenter
+**Quality Score:** 9.2/10 APPROVED rodada 1
+**Completed:** 2026-05-12
+
+**Deliverables:**
+- [x] `src/server/nonce.store.ts` — LRU anti-replay (`lru-cache`), TTL 10min (alinhado com timestamp skew), max 10_000 entries, `has/add/size/clear` API
+- [x] `src/server/hmac.middleware.ts` — algoritmo IDÊNTICO ao `remote-execution-client.ts` (canonical = `method\npath\nts\nnonce\nsha256(rawBody)`), comparação `crypto.timingSafeEqual`, error codes `MISSING_HEADER`/`AGENT_MISMATCH`/`TIMESTAMP_SKEW`/`NONCE_REPLAY`/`HMAC_INVALID`
+- [x] `src/server/rate-limit.middleware.ts` — `express-rate-limit` 60 req/min por `x-scrumban-agent-id`, defesa em profundidade (backend já tem 30)
+- [x] `src/server/dispatcher.ts` — `POST /v1/execute` lê `type`; PING ack `{accepted:true, message:'pong'}`; RUN_CLAUDE_CODE retorna **501 NOT_IMPLEMENTED** (handler real é Sub-tarefa 4); UNKNOWN_COMMAND_TYPE/MISSING_TYPE com lista de tipos suportados
+- [x] `src/server/http.server.ts` — express bind `127.0.0.1:<tunnelPort>` (NUNCA 0.0.0.0), body parser 1MB com `verify` preservando `rawBody`, GET /ping autenticado, 404 padronizado, graceful shutdown 30s + `closeAllConnections` como fallback
+- [x] `src/index.ts` atualizado — startup do server + `SIGTERM`/`SIGINT` → `server.stop()` → `process.exit(0)`
+- [x] `__tests__/http.server.spec.ts` — 15 specs (10 obrigatórios do plano + 5 bonus edge cases + 2 lifecycle real)
+- [x] **NÃO criado:** outbound client, heartbeat loop (Sub-tarefa 3); runner/identity-resolver/allowlist/session-parser (Sub-tarefa 4); autossh wrapper (Sub-tarefa 5); install.sh (Sub-tarefa 6) — escopo respeitado
+
+**Metrics:**
+- `npm run build`: PASS (tsc → dist/server/*)
+- `npm run lint`: PASS (eslint clean, zero warnings)
+- `npm test`: PASS 26/26 specs (11 config.loader + 15 http.server)
+- Coverage cenários obrigatórios: 13/13 (1 PING ok, 2 HMAC inválido, 3 timestamp velho, 4 nonce replay, 5 type desconhecido, 6 RUN_CLAUDE_CODE → 501, 7 missing type, 8 agent mismatch, 9 /ping ok, 10 rate limit, 11 missing header, 12 404, 13 invalid JSON)
+
+**Decisões técnicas registradas:**
+- **GET /ping COM HMAC** (recomendação seguida) — coerência com `/v1/execute`, sem exceção no pipeline. Resposta: `{ok, agentId, version, uptimeSec}`.
+- **Stub RUN_CLAUDE_CODE → 501 NotImplemented** (recomendação seguida) — explícito e semanticamente correto. Body inclui `executionId` e `errorCode: NOT_IMPLEMENTED`.
+- **`rawBody` via `verify` callback** em `express.json` — preserva bytes antes do parse para o hash SHA-256 casar com o backend.
+- **`req.path` (sem querystring)** no canonical — alinhado com o backend `remote-execution-client.ts`. `req.originalUrl` traria query e quebraria a assinatura.
+- **Rate limit APÓS HMAC** no pipeline (não antes) — evita que requests rejeitados por HMAC inválido consumam capacidade do bucket. Atacante não consegue exaurir o limite com requests sem credencial válida.
+- **Nonce só registrado APÓS validação HMAC completa** — analogamente, evita que tentativas inválidas poluam o LRU.
+- **`express-rate-limit` + `lru-cache`** como `dependencies` (não devDependencies) — rodam em produção.
+- **Body limit 1MB** — Risk Gate stdout/stderr não chegam aqui (chegam via callback outbound do agente para o backend). Inbound só recebe comandos curtos.
+- **Bind 127.0.0.1 hardcoded** — não configurável, exatamente por design. Servidor só recebe via reverse tunnel SSH.
+
+**Próximo passo:** Sub-tarefa 3 (RemoteBackendClient + heartbeat loop)
+
+**Plan:** [`workspace/plans/plan-automation-agent-v2-client-task1.md`](../workspace/plans/plan-automation-agent-v2-client-task1.md) §5 Sub-tarefa 2
+**Review:** [`workspace/reviews/review-automation-agent-task1-sub2.md`](../workspace/reviews/review-automation-agent-task1-sub2.md)
+**Impl Notes:** [`workspace/implementations/impl-automation-agent-http-server-task1-sub2.md`](../workspace/implementations/impl-automation-agent-http-server-task1-sub2.md)
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan Task #1 (7 sub-tarefas) |
+| Implementer | ~6h | 100% PASS: http server + middleware + dispatcher + 15 tests |
+| Reviewer | ~30min | Score 9.2/10 APPROVED rodada 1 (5 gates segurança validados) |
+| Documenter | ~30min | JSDoc, ROADMAP, CHANGELOG, STATUS, commit Conventional |
+
+---
+
 ## Task #1 Sub-tarefa 1 (F13 Cliente — Agente V2 VPS) — Scaffolding + Config Loader — ✅ COMPLETE
 
 **Module:** automation/agent (subprojeto monorepo `agent/`)

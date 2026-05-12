@@ -305,6 +305,137 @@
 
 ---
 
+#### Sub-tarefa 2: HTTP Server + HMAC Middleware + Dispatcher /v1/execute — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** agent/src/server (subprojeto monorepo `Scrumban-Backend-V2/agent/`)
+**Fase V2:** F13 (Cliente — Sub-tarefa 2 de 7)
+**Tempo Real:** ~6h Implementer + ~30min Reviewer + ~30min Documenter
+**Completado em:** 2026-05-12
+**Quality Score:** 9.2/10 APPROVED rodada 1
+
+**O Que Foi Feito:**
+
+**HTTP Server Local (127.0.0.1 loopback only):**
+- **Bind defensivo:** Express bind `127.0.0.1:<config.tunnelPort>` — NUNCA `0.0.0.0`
+  - Acesso único via reverse tunnel SSH (Sub-tarefa 5 autossh wrapper)
+  - Primeira linha de defesa contra exposição direta da VPS
+  
+- **Middleware Pipeline:**
+  1. `express.json({ limit: '1mb', verify })` — preserva `rawBody` para HMAC
+  2. Body parser error handler — payloads >1MB rejeitados (413), JSON malformado (400)
+  3. HMAC-SHA256 middleware — valida cada request inbound
+  4. Rate limit middleware — 60 req/min por agentId (defesa em profundidade)
+  5. Handler ou 404
+
+- **HMAC Middleware (`src/server/hmac.middleware.ts`):**
+  - Algoritmo **idêntico** ao `remote-execution-client.ts` backend: `hmac-sha256(secret, "METHOD\npath\ntimestamp\nnonce\nsha256(rawBody)")`
+  - Validações: MISSING_HEADER → 401, AGENT_MISMATCH → 401, TIMESTAMP_SKEW (±5min) → 401, NONCE_REPLAY → 409, HMAC_INVALID → 401
+  - `crypto.timingSafeEqual` obrigatório (proteção timing attack)
+  - Nonce registrado APÓS validação bem-sucedida (não no começo)
+  - JSDoc completo explicando byte-a-byte alignment com backend
+
+- **Nonce Store Anti-Replay (`src/server/nonce.store.ts`):**
+  - LRU in-memory: 10_000 entries max, TTL 10min (alinhado com timestamp skew)
+  - `has(nonce)`, `add(nonce)`, `size()`, `clear()` API
+  - Cleanup automático via `ttlAutopurge` em `lru-cache`
+  - Single-process (agente é single-instance) — Redis não necessário como no backend
+  - JSDoc explicando por que LRU local é suficiente
+
+- **Rate Limit Middleware (`src/server/rate-limit.middleware.ts`):**
+  - `express-rate-limit` 60 req/min por `x-scrumban-agent-id` header
+  - Defesa em profundidade: backend já impõe 30 req/min; agente impõe 60 para detectar anômalo
+  - Posicionado APÓS HMAC (só conta requests autenticados; invalid HMAC não consome bucket)
+  - JSDoc explicando ordenação defensiva no pipeline
+
+- **Dispatcher `/v1/execute` (`src/server/dispatcher.ts`):**
+  - Type discriminator: lê `type` do body parseado
+  - **PING:** handler simples → `{accepted: true, executionId: null, message: 'pong'}`
+  - **RUN_CLAUDE_CODE:** stub 501 NotImplemented (handler real Sub-tarefa 4) → `{accepted: false, errorCode: 'NOT_IMPLEMENTED'}`
+  - **UNKNOWN_COMMAND_TYPE/MISSING_TYPE:** 400 com lista de tipos suportados
+  - GET /ping: também autenticado (mesmo middleware HMAC, GET supor tipo sem body)
+  - 404 padronizado para rotas não-existentes
+  - JSDoc explicando discriminator como porta aberta para future commands (LIST_CLAUDE_SESSIONS, etc)
+
+- **HTTP Server (`src/server/http.server.ts`):**
+  - Factory `createServer(config, logger, options?)` retorna interface `AgentHttpServer`
+  - `start()` — vincula 127.0.0.1:tunnelPort, loga metadata
+  - `stop()` — graceful shutdown 30s (fecha socket, drena in-flight requests)
+    - Fallback `closeAllConnections()` se timeout (Node 18+)
+  - `getApp()`, `getNonceStore()` para testes e introspecção
+  - JSDoc detalhado (pipeline, métodos, exemplos)
+
+- **Bootstrap (`src/index.ts` atualizado):**
+  - `createServer()` inicializado durante boot
+  - SIGTERM/SIGINT → `server.stop()` → `process.exit(0)`
+  - Graceful shutdown garantido mesmo em pressão
+
+**Testes (`agent/__tests__/http.server.spec.ts`):**
+- 15 specs PASS (13 obrigatórios + 2 bonus lifecycle)
+  1. PING aceito (response válido)
+  2. PING com agentId mismatch (401)
+  3. PING com timestamp velho (401)
+  4. PING com nonce replay (409)
+  5. PING com HMAC inválido (401)
+  6. RUN_CLAUDE_CODE → 501 (stub)
+  7. POST /v1/execute sem `type` (400)
+  8. POST /v1/execute com `type` desconhecido (400)
+  9. POST /v1/execute missing header HMAC (401)
+  10. Rate limit: 61 requests em 1min → 429 (13º excede)
+  11. Body >1MB (413)
+  12. Invalid JSON (400)
+  13. GET /ping retorna metadata (ok, agentId, version, uptimeSec)
+  14. Lifecycle: start → stop idempotente
+  15. Lifecycle: timeout graceful shutdown invoca `closeAllConnections`
+
+**Decisões Técnicas Registradas:**
+- **GET /ping COM HMAC:** Coerência com `/v1/execute`; sem exceção no pipeline
+- **Stub RUN_CLAUDE_CODE → 501 NotImplemented:** Explícito, semanticamente correto; Sub-tarefa 4 implementa
+- **`rawBody` via verify callback:** Preserva bytes antes do parse para SHA-256 casar com backend
+- **Rate limit APÓS HMAC no pipeline:** Evita consumo de bucket por requests inválidos
+- **Nonce só registrado APÓS validação completa:** Análogo a rate limit — invalidas não poluem LRU
+- **Bind 127.0.0.1 hardcoded:** Não configurável; by design — acesso via tunnel SSH sempre
+- **Body limit 1MB:** Risk Gate stdout/stderr não vêm via inbound (vêm via callback outbound)
+
+**Dependencies:**
+- `dependencies`: express, pino, zod, lru-cache, express-rate-limit
+- `devDependencies`: (adicionados) supertest, @types/supertest
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — cliente VPS, zero Engine
+- Pilar 2 (Endpoints): N/A — cliente-side; Sub-tarefa 3 adiciona outbound client
+- Pilar 3 (Seed): N/A — cliente standalone, zero DClasse
+
+**ADRs vinculados:** ADR-V2-031 (monorepo agent), **ADR-V2-033 (contrato HTTP+HMAC)**
+
+**Build & Testes:**
+- `npm run build`: PASS (tsc → dist/server/*)
+- `npm run lint`: PASS (eslint clean, zero warnings)
+- `npm test`: PASS (26/26 specs: 11 config.loader + 15 http.server)
+- Cobertura cenários obrigatórios: 13/13 ✓
+- TypeScript strict: PASS (zero novos erros)
+
+**Issues Encontrados (Minor — não bloqueiam):**
+- Mi1: AGENT_VERSION duplicado (`http.server.ts` + `config.schema.ts`) — refactor futuro
+- Mi3: GET /ping sem `rawBody` (método GET não tem body por HTTP spec) — aceitável, HMAC valida assim mesmo
+
+**Próximo passo:** Sub-tarefa 3 (RemoteBackendClient + heartbeat loop)
+
+**Plan:** [`workspace/plans/plan-automation-agent-v2-client-task1.md`](../workspace/plans/plan-automation-agent-v2-client-task1.md) §5 Sub-tarefa 2
+**Review:** [`workspace/reviews/review-automation-agent-task1-sub2.md`](../workspace/reviews/review-automation-agent-task1-sub2.md)
+**Impl Notes:** [`workspace/implementations/impl-automation-agent-http-server-task1-sub2.md`](../workspace/implementations/impl-automation-agent-http-server-task1-sub2.md)
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan Task #1 (7 sub-tarefas) |
+| Implementer | ~6h | 100% PASS: http server + middleware + dispatcher + 15 tests |
+| Reviewer | ~30min | Score 9.2/10 APPROVED rodada 1 (5 gates validados) |
+| Documenter | ~30min | JSDoc, ROADMAP, CHANGELOG, STATUS, commit Conventional |
+
+---
+
 ### Task #2: Backend-Side Prep (5 sub-tarefas)
 
 ### Sub-tarefa 2.1: Seed DClasses Agent Session Lifecycle + ADR-V2-033 Esqueleto — ✅ COMPLETA
