@@ -45,12 +45,12 @@ export class CreateTaskDto {
   descricao?: string;
 
   @ApiPropertyOptional({
-    description: 'Prioridade da task',
-    enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'],
+    description: 'Prioridade da task — alinhada com seed canônico DTabela -421..-424 (V2)',
+    enum: ['LOW', 'MEDIUM', 'HIGH', 'URGENT'],
     example: 'MEDIUM',
   })
   @IsOptional()
-  @IsEnum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'])
+  @IsEnum(['LOW', 'MEDIUM', 'HIGH', 'URGENT'])
   priority?: string;
 
   @ApiPropertyOptional({

@@ -1,0 +1,1 @@
+- [Agent install.sh gotchas](agent_install_gotchas.md) — distribuição OPÇÃO C, claudeMdPath em /root, shellcheck suppressions justificadas

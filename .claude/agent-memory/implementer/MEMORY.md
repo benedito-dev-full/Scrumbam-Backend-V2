@@ -11,6 +11,7 @@
 - F10 Bloco A Core Channels: gotchas abaixo (DVincula.metaDados vs DTabela.dados, busca de token por hash).
 - F10 Bloco B Telegram Webhook: gotchas abaixo (ioredis SET NX sintaxe, fetch nativo multipart, @types/supertest ausente).
 - F10 Bloco C Telegram Commands: gotchas abaixo (DProject sem idCreator, filtro de data em memória, var TS6133 em specs).
+- F13 Cliente Sub-tarefa 5 (agent/ autossh wrapper + lifecycle): wrapper modular do `autossh` (não inline como no legado) — reconnect com backoff exponencial próprio + circuit breaker 5 crashes/60s → pausa 5min (legado entraria em flap loop dependendo só de systemd `Restart=always`); `isHealthy()` exposto p/ heartbeat; `lifecycle/shutdown.ts` ordena heartbeat → server → autossh → exit (autossh por último para drenar in-flight requests). Testes com fake clock + mock de spawn — 17 specs (84/84 total). Gotcha: backoff capeado em maxBackoffMs faz que respawns dentro da janela `crashWindowMs` empilhem timers; ao testar circuit breaker, NÃO faça tick após o crash que abre o circuito (o circuitTimer fica pendente). Decisão: spawn lançando síncrono (ENOENT) entra no MESMO flow de crash — não fail-fast no bootstrap (circuit breaker já protege).
 - F13 Cliente Sub-tarefa 1 (agent/ scaffolding): coexistência ESLint do agent com flat config raiz — ver `agent-monorepo-eslint-coexistence.md`. Resumo: agent/ usa ESLint v9 + flat config local; root adicionou `agent/**` em ignores. PostToolUse hook valida cada arquivo via `cd dir_do_package_json && npx eslint <file>`, então subprojetos precisam de config próprio para evitar warning "File ignored". `node_modules` e `dist` do agent já cobertos pelo `.gitignore` raiz (`**/node_modules`, `dist/`).
 
 ---
@@ -84,6 +85,15 @@ Operacao (abstract)
 - `src/workflow-statuses/` — WorkflowStatusesModule (apenas seedDefaults + README)
 - `src/projects/` — ProjectsModule (DProject + DVincula -171/-172/-173 + SeedBootstrap)
 - `src/tasks/` — TasksModule (DTask + V3 Intentions + identifier atômico DEV-N + state machine)
+
+### Gotchas F4 — Priority DTabela (Task 01 fix 2026-05-12, ADR-V2-034)
+- **Priority segue padrão Status V3**: DTabela escopada por projeto (`dEntidadeId=projectId`), idClasse -421..-424. Cada projeto novo precisa das 4 DTabelas via `SeedBootstrapService.seedPrioritiesIfMissing`. Backfill standalone em `prisma/scripts/backfill-priority-tabelas.ts` cobre projetos legados.
+- **Helpers em tasks.service.ts**: `resolvePriorityId` (enum→chave), `buildPriorityMap` (batch lookup ZERO N+1), `mapPriorityEnum` (BigInt→enum string), `buildResponse(task, priorityMap?)` (priorityMap opcional para listas).
+- **DTOs alinhados com seed**: `CRITICAL` → `URGENT`. Frontend e legado usam URGENT. Sem migration.
+- **Update semântica**: `undefined`=não toca, `null`=limpa, `string`=resolve. `priority: string | null` no DTO.
+- **Fallback silencioso**: DTabela ausente → `logger.warn` + `null` (não BadRequest). Operador roda backfill.
+- **`eslint.config.js` precisa de glob explícito**: `prisma/scripts/**/*.ts` adicionado (junto com `prisma/seeds/**/*.ts`). Sem isso, ESLint ignora e hook bloqueia com warning "File ignored".
+- **Hook PostToolUse:Edit dispara ESLint a cada Edit** — ao adicionar `const X = ...` que será usado em Edit subsequente, agrupar a declaração + primeiro uso na mesma Edit. Caso contrário `@typescript-eslint/no-unused-vars` bloqueia.
 
 ### Codepaths F6 Task 2 (ExecutionsModule)
 - `src/executions/executions.service.ts` — execute() com Engine completo + decisão LOW/MEDIUM/HIGH

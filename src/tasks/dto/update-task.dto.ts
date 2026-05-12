@@ -1,4 +1,12 @@
-import { IsEnum, IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  IsEnum,
+  IsIn,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+  ValidateIf,
+} from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
@@ -39,13 +47,15 @@ export class UpdateTaskDto {
   descricao?: string;
 
   @ApiPropertyOptional({
-    description: 'Nova prioridade',
-    enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'],
+    description: 'Nova prioridade — alinhada com seed canônico DTabela -421..-424 (V2)',
+    enum: ['LOW', 'MEDIUM', 'HIGH', 'URGENT'],
     example: 'HIGH',
+    nullable: true,
   })
   @IsOptional()
-  @IsEnum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'])
-  priority?: string;
+  @ValidateIf((o: UpdateTaskDto) => o.priority !== null)
+  @IsEnum(['LOW', 'MEDIUM', 'HIGH', 'URGENT'])
+  priority?: string | null;
 
   @ApiPropertyOptional({
     description: 'ID do assignee (chave DEntidade)',

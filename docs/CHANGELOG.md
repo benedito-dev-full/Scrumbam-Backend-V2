@@ -12,6 +12,24 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Fixed
+
+- **F4 Task 01: Corrigir persistência de `priority` em DTask** (V2 F4) - 2026-05-12
+  - **Service:** `TasksService` agora persiste `idPriority` em `create()` e `update()` via helper `resolvePriorityId()`
+    - Helper resolve DTabela PRIORITY escopada por projeto (padrão paralelo a Status)
+    - Batch lookup `buildPriorityMap()` para ZERO N+1 queries em responses
+    - Semântica clara para `update()`: `undefined` (não toca), `null` (limpa), string (lookup)
+  - **Seed:** `SeedBootstrapService` nova subtarefa `seedPrioritiesIfMissing()` — cria 4 DTabelas PRIORITY por projeto (idClasse -421..-424)
+    - Idempotente: lookup por `(idClasse, dEntidadeId)` antes criar
+    - Reutilizável em backfill script para projetos legados
+  - **Backfill:** Novo script `prisma/scripts/backfill-priority-tabelas.ts` idempotente — para projetos criados antes desta feature
+    - Batch lookup eficiente (1 query por projeto)
+    - Output relatório: projetos visitados, priorities criadas
+  - **DTOs:** Enum corrigido `CRITICAL` → `URGENT` (alinhado com seed canônico -424); `update-task.dto.spec.ts` novo com 8 testes ValidationPipe
+  - **Tests:** 85/85 PASS (77 tasks + 8 DTO spec)
+  - **ADR-V2-034:** Formaliza padrão Priority como DTabela escopada por projeto (espelhando Status, ADR-V2-009)
+  - **Score:** 8.0/10 APPROVED
+
 ### Added
 
 - **F13 Task #1 Sub-tarefa 5: Autossh Wrapper + Graceful Shutdown** (V2 F13 Cliente) - 2026-05-12

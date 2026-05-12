@@ -17,7 +17,13 @@ module.exports = [
     ],
   },
   {
-    files: ['src/**/*.ts', 'test/**/*.ts', 'prisma/seeds/**/*.ts', 'templates/**/*.ts'],
+    files: [
+      'src/**/*.ts',
+      'test/**/*.ts',
+      'prisma/seeds/**/*.ts',
+      'prisma/scripts/**/*.ts',
+      'templates/**/*.ts',
+    ],
     languageOptions: {
       parser: tsparser,
       parserOptions: {

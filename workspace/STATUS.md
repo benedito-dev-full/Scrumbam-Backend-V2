@@ -4,6 +4,106 @@
 
 ---
 
+## Task 01: Corrigir persistência de `priority` em DTask (V2 Fase F4) — ✅ COMPLETA
+
+**Module:** tasks
+**Task:** Fix priority persistence — TasksService.create/update agora persistem idPriority; SeedBootstrapService cria DTabelas PRIORITY por projeto; backfill idempotente para projetos legados
+**Task Status:** COMPLETA — Score 8.0/10 APPROVED
+**Fase V2:** F4 (Tasks/DProject — wrappers DX)
+**Duration:** ~1.5h Implementer (round 2 M1 fix) + ~40min Reviewer + ~30min Documenter
+**Completed:** 2026-05-12
+
+**Deliverables:**
+- [x] `src/tasks/tasks.service.ts` — helper privado `resolvePriorityId()` + persistência `idPriority` em create/update
+- [x] `src/tasks/tasks.service.ts` — `buildResponse()` retorna `priority` como string enum via batch lookup `priorityMap` (ZERO N+1)
+- [x] `src/tasks/dto/create-task.dto.ts` — enum corrigido: `CRITICAL` → `URGENT` (alinhado com seed canônico)
+- [x] `src/tasks/dto/update-task.dto.ts` — enum corrigido + `@ValidateIf` para aceitar `null` semanticamente (M1 fix)
+- [x] `src/tasks/dto/update-task.dto.spec.ts` — NOVO, 8 testes DTO spec (M1 fix) — todos PASS
+- [x] `src/tasks/dto/task-response.dto.ts` — ajustes de tipo para `priority: string | null`
+- [x] `src/tasks/tasks.service.spec.ts` — 7 novos testes (70 → 77 PASS)
+- [x] `src/projects/seed-bootstrap.service.ts` — novo método `seedPrioritiesIfMissing()` idempotente; `seedProject()` agora cria 4 DTabelas PRIORITY por projeto
+- [x] `prisma/scripts/backfill-priority-tabelas.ts` — NOVO script standalone idempotente para projetos legados
+- [x] `docs/decisions/ADR-V2-034-priority-dtabela-por-projeto.md` — NOVO, formalizando padrão Priority como DTabela escopada por projeto (espelhando Status)
+- [x] `eslint.config.js` — glob incluído `prisma/scripts/**/*.ts`
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DTask estrutural, não transacional
+- Pilar 2 (Endpoints): ✅ REUTILIZADO — endpoint genérico `/tasks/:id` (PATCH) sem controller novo
+- Pilar 3 (Seed): ✅ RESPEITADO — DTabelas -421..-424 existentes (ADR-V2-001, zero tabela nova)
+
+**Metrics:**
+- `npm run build`: PASS (0 TypeScript errors, 0 ESLint warnings)
+- `npx jest`: 85 PASS (77 tasks + 8 DTO spec M1 fix)
+- N+1 Queries: ZERO — priorityMap batch lookup por task
+- BigInt: ✅ 100% serializado em responses
+
+**Quality Score:** 8.0/10 APPROVED
+- Strengths: padrão claro (espelha Status), idempotência robusta, testes cobrindo edges (null clearance, enum validation)
+- Minor issues: none critical
+
+**ADRs vinculados:** ADR-V2-034 (priority DTabela escopada por projeto), ADR-V2-001 (zero tabela nova), ADR-V2-009 (DTabela padrão)
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plano completo, padrão claro |
+| Implementer | ~1.5h | Service fix + DTOs + seed bootstrap + backfill script; round 2 M1 fix DTO spec |
+| Reviewer | ~40min | Score 8.0/10 APPROVED (padrão robusto, zero N+1, 85 testes PASS, ADR justificado) |
+| Documenter | ~30min | JSDoc tasks.service + seed-bootstrap + backfill script; ROADMAP + CHANGELOG + STATUS + ADR-V2-034 polimento + commit |
+
+**Plan:** [`workspace/plans/plan-tasks-fix-priority-persistence-task01.md`](../workspace/plans/plan-tasks-fix-priority-persistence-task01.md)
+**Impl Notes:** [`workspace/implementations/impl-tasks-fix-priority-persistence-task01.md`](../workspace/implementations/impl-tasks-fix-priority-persistence-task01.md)
+**Review:** Score 8.0/10 APPROVED
+
+---
+
+## Task #1 Sub-tarefa 6 (F13 Cliente — Agente V2 VPS) — install.sh + systemd + CLAUDE.md template — 🟡 IMPLEMENTER COMPLETO (aguarda Reviewer)
+
+**Module:** automation/agent (subprojeto monorepo `agent/`)
+**Task:** Instalador bash idempotente (13 fases, dry-run, shellcheck-clean), systemd unit com hardening completo, template do CLAUDE.md global, uninstall.sh, README expandido com troubleshooting
+**Task Status:** Implementer COMPLETE — Reviewer pendente (Sub-tarefa 6 de 7)
+**Fase V2:** F13 (Cliente — Sub-tarefa 6 de 7)
+**Duration:** ~4h Implementer
+**Completed (Implementer):** 2026-05-12
+
+**Deliverables:**
+- [x] `agent/install.sh` (458 LOC) — 13 fases: parse args + validações (root, distro, idempotência); pre-flight (NTP, Node 20+, autossh, jq, curl, Claude Code CLI ≥ 2.1.139 via `semver_ge`); user `scrumban-agent` (system, nologin); diretórios (`/opt/scrumban-agent`, `/etc/scrumban-agent` 0700, `/var/lib/scrumban-agent` 0700, `/var/log/scrumban-agent` 0750); copy bundle `dist/`; gerar par Ed25519 (idempotente); handshake `POST /agents/install-token` com `{token, hostname, sshPubKey, agentVersion}`, recebe `{agentId, agentApiKey, agentCommandSecret, tunnelPort}`; ssh-keyscan → known_hosts; grava config.json via jq (0600, owner scrumban-agent); systemd unit copy + daemon-reload + enable + restart; CLAUDE.md template bootstrap (só se ausente, sem popular automaticamente); heartbeat poll 60s via journalctl; resumo final colorido
+- [x] `agent/systemd/scrumban-agent.service` (33 LOC) — `User=scrumban-agent`, hardening completo (`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=read-only`, `ProtectKernelTunables/Modules/ControlGroups`, `RestrictSUIDSGID`, `LockPersonality`, `RestrictRealtime`, `RestrictNamespaces`, `PrivateTmp`), `ReadWritePaths=/etc/scrumban-agent /var/lib/scrumban-agent /var/log/scrumban-agent`, `MemoryMax=512M`, `TasksMax=100`, `Restart=always`/`RestartSec=5`, `After=network-online.target`
+- [x] `agent/CLAUDE-md-template.md` (53 LOC) — template com 2 entradas exemplo (scrumban-backend-v2, scrumban-frontend), regras de formato (label `Caminho:` ou `Path:`, slug case-sensitive), comentários sobre allowlist + risco de NÃO commitar em repos públicos
+- [x] `agent/uninstall.sh` (92 LOC) — confirmação interativa (`--yes` para pular), stop/disable systemd, remove unit + drop-ins, daemon-reload, rm -rf de TODOS os diretórios, pkill + userdel (com fallback sem `-r`), verificação de resíduos com exit 1 se sobrar algo. Preserva `/root/.claude/CLAUDE.md` intencionalmente (reinstalação reaproveita mapeamento)
+- [x] `agent/README.md` expandido (+~250 LOC) — seções "Instalação na VPS" (pré-reqs + bundle + 13 fases), "systemd unit (hardening)", "Onde mora o CLAUDE.md global" (trade-off `/root` vs `/home/<user>`), "Troubleshooting" (heartbeat, RUN_CLAUDE_CODE, service não inicia, logs verbosos), "Dev local (sem instalar)"
+- [x] **shellcheck PASS:** install.sh + uninstall.sh, zero warnings, com `-x` (segue source) — 2 falsos positivos suprimidos com comentários: SC2294 (eval intencional para suportar redirects/pipes, input vem de constantes hardcoded), SC2034 (variável de loop `_` ao invés de `i`)
+- [x] **Dry-run smoke test PASS:** rodou `bash install.sh --dry-run --backend=https://api.scrumban.com.br --token=fake-token --tunnel-port=20000` localmente (macOS), imprimiu todas as 13 fases sem executar, gated com `[dry-run]` prefix
+- [x] **NÃO mexido em código TS** — Sub-tarefas 1-5 preservadas
+- [x] **NÃO criado ADRs** — escopo da Sub-tarefa 7
+
+**Metrics:**
+- `shellcheck -x install.sh uninstall.sh`: PASS (zero warnings)
+- Dry-run: PASS (13 fases imprimem comandos sem efeito colateral)
+
+**Decisões de design:**
+- **Distribuição OPÇÃO C (bundle-relative):** install.sh assume `dist/` + `systemd/` + `CLAUDE-md-template.md` no mesmo diretório que ele. Operador faz `tar czf` no dev e `scp` para VPS. Mais simples que GitHub release (sem CI/CD de release ainda) e mais seguro que servir o binário via HTTP no próprio backend (legado fazia isso — `curl ${ARGUS_API}/agent-dist/index.js` — vetor de supply chain). Migração para `--bundle-url` (GitHub release) é trivial quando for hora.
+- **`claudeMdPath` default = `/root/.claude/CLAUDE.md`:** CEO opera backend com sudo, Claude Code manual usa `~/.claude/CLAUDE.md` de root, alinhamento natural. Agente roda como `scrumban-agent` mas lê via chmod 0644 (read-only ao mundo, escrita só do root). Trade-off documentado no README.
+- **Idempotência forte mas SEM `--reinstall`:** se `config.json` existe, install falha com mensagem clara. Forçar reinstalação exige `uninstall.sh` primeiro — evita sobrescrever credenciais por acidente.
+- **Pre-flight Claude Code CLI ≥ 2.1.139:** versão mínima confirmada pelo spike de Sub-tarefa 4 (output JSON com `session_id` snake_case). `semver_ge` POSIX (sort -V) compara versões corretamente. Falha rápido com mensagem clara em vez de deixar runtime descobrir.
+- **Heartbeat poll 60s no install:** valida que o serviço subiu E está se comunicando ANTES de declarar sucesso. Detecta clock skew, túnel down, backend rejeitando — todos os problemas comuns. Se journalctl não tiver linha "heartbeat" em 60s, mostra warning (não falha hard — possível flakiness de rede local).
+- **`ProtectHome=read-only` (não `=yes`):** agente precisa LER `/root/.claude/CLAUDE.md`. `=yes` bloqueia até leitura. `=read-only` permite ler mas não escrever (anti-prompt-injection — agente NÃO pode modificar o CLAUDE.md).
+- **Dry-run permissivo:** bypassa root check e apt-get check quando `--dry-run`. Permite smoke test em qualquer máquina dev sem sudo.
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — install bash, não toca DPedido
+- Pilar 2 (Endpoints): N/A — consome endpoint existente (`/agents/install-token`)
+- Pilar 3 (Seed): N/A — zero DClasse nova
+
+**ADRs vinculados:** ADR-V2-030 (slug via CLAUDE.md), ADR-V2-031 (monorepo agent), ADR-V2-033 (HTTP+HMAC contrato)
+
+**Próximo passo:** Reviewer da Sub-tarefa 6 → Documenter fecha → Sub-tarefa 7 (docs + ADRs)
+
+**Plan:** [`workspace/plans/plan-automation-agent-v2-client-task1.md`](../workspace/plans/plan-automation-agent-v2-client-task1.md) §5 Sub-tarefa 6
+
+---
+
 ## Task #1 Sub-tarefa 5 (F13 Cliente — Agente V2 VPS) — Autossh Wrapper + Lifecycle Coordenado — 🟡 IMPLEMENTER COMPLETO (aguarda Reviewer)
 
 **Module:** automation/agent (subprojeto monorepo `agent/`)

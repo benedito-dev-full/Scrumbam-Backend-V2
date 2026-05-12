@@ -1,0 +1,43 @@
+[Unit]
+Description=Scrumban Agent V2 (cliente Claude Code remoto)
+Documentation=https://github.com/devari/scrumban-backend-v2
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=scrumban-agent
+Group=scrumban-agent
+ExecStart=/usr/bin/node /opt/scrumban-agent/dist/index.js
+Restart=always
+RestartSec=5
+WorkingDirectory=/var/lib/scrumban-agent
+Environment=NODE_ENV=production
+StandardOutput=journal
+StandardError=journal
+
+# Hardening (systemd security)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+# /home fica read-only para o agente conseguir LER ~/.claude/CLAUDE.md
+# do CEO (claudeMdPath aponta para /root/.claude/CLAUDE.md ou /home/<user>/.claude/CLAUDE.md
+# — depende da decisão de install.sh). Se o claudeMdPath ficar em /root,
+# precisa de ProtectHome=read-only (não 'yes') OU desativar (ver nota abaixo).
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictNamespaces=true
+# Apenas paths estritamente necessários ficam read-write
+ReadWritePaths=/etc/scrumban-agent /var/lib/scrumban-agent /var/log/scrumban-agent
+
+# Limites de recursos
+MemoryMax=512M
+TasksMax=100
+
+[Install]
+WantedBy=multi-user.target

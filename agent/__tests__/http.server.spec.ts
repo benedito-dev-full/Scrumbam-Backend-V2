@@ -161,7 +161,11 @@ describe('HTTP server (Sub-tarefa 2)', () => {
       expect(res.body.supportedTypes).toEqual(expect.arrayContaining(['PING', 'RUN_CLAUDE_CODE']));
     });
 
-    it('6) type=RUN_CLAUDE_CODE → 501 NOT_IMPLEMENTED (stub Sub-tarefa 2)', async () => {
+    it('6) type=RUN_CLAUDE_CODE → handler delega (Sub-tarefa 4 ativa)', async () => {
+      // Após Sub-tarefa 4 o handler real responde. Sem CLAUDE.md no path
+      // de teste, deve retornar 500 CLAUDE_MD_NOT_FOUND — comportamento
+      // esperado quando filesystem está vazio. O importante aqui é que
+      // o dispatcher delega corretamente (não retorna mais 501).
       const server = createServer(TEST_CONFIG, silentLogger());
       const body = JSON.stringify({
         type: 'RUN_CLAUDE_CODE',
@@ -173,10 +177,11 @@ describe('HTTP server (Sub-tarefa 2)', () => {
 
       const res = await request(server.getApp()).post('/v1/execute').set(headers).send(body);
 
-      expect(res.status).toBe(501);
+      // Status pode ser 500 (CLAUDE.md ausente) ou 422 (slug ausente).
+      // Não é mais 501 — esse era o stub.
+      expect(res.status).not.toBe(501);
       expect(res.body).toMatchObject({
         accepted: false,
-        errorCode: 'NOT_IMPLEMENTED',
         executionId: 'exec-rcc-1',
       });
     });

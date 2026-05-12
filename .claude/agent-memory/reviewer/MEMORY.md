@@ -181,6 +181,21 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 | Task#1 | eventos-canonicos | F7 | **8.5** | **APPROVED** | auth.service.ts com 4 prisma.dEvento.create diretos (débito, não bloqueador) |
 | Task#1 | flow-metrics-forecast | F8 | **8.5** | **APPROVED** | N+1 e criadoEm corrigidos em re-review (6.5 → 8.5 após correções MAJOR) |
 | Task#2 | search | F8 | **8.8** | **APPROVED** | 4 queries/request (3 paralelas + DVincula→DEntidade justificado); zero issues bloqueantes |
+| Task#2 sub3 | automation-backend-side | F13 | **8.8** | **APPROVED** | slug em dados.slug (Json); backfill sequencial idempotente; fallback untitled-<ts> pragmático; 3 minors não bloqueantes |
+| Task#2 sub4 | automation-backend-side | F13 | **8.8** | **APPROVED** | Pilar 1 inviolado; isolation dupla camada; zero vazamento sessionPath; decisão -496 reutilização pragmática; 11/11 specs |
+| Task#1 sub2 | automation-agent (cliente VPS) | F13 | **9.2** | **APPROVED** | 5 críticos de segurança OK; HMAC byte-a-byte; bind 127.0.0.1 hardcoded; nonce pós-HMAC; 26/26 specs; zero scope creep |
+| Task#1 sub4 | automation-agent (cliente VPS) | F13 | **9.0** | **APPROVED** | 6 críticos segurança OK; session_id snake_case; execFile sem shell; realpathSync+prefix check; mutex try/finally; ACK async+.catch; 67/67 specs; M1: is_error não entra no success |
+
+## PADRÕES APRENDIDOS F13 TASK1 SUB4 (Agente V2 — RUN_CLAUDE_CODE + session extraction)
+
+- **`execFile` sem shell = defesa obrigatória para spawn CLI externo**: verificar que o runner usa `execFile` (não `exec`), args como array (nunca string), sem opção `shell: true`. Com `execFile`, o prompt vai como `argv[N]` — metacaracteres de shell não são interpretados mesmo que o prompt contenha `$(rm -rf /)`.
+- **`realpathSync` em AMBOS os lados da comparação de path**: ao validar allowlist, canonicalizar tanto o path do workspace quanto cada `allowedRoot` via `realpathSync` antes de comparar. Canonicalizar só o path de entrada mas não os roots = burla via symlink nos roots. Verificar ambos.
+- **Mutex em `try/finally` é obrigatório para locks de slug**: o `try/finally` deve ser o bloco MAIS EXTERNO da função assíncrona que detém o lock. Aninhamento de try/catch internos não afeta o finally externo — mas verificar que o finally está na função correta (`runAndReport`, não dentro de sub-try).
+- **`sendExecutionResult` fire-and-forget com `.catch` explícito**: padrão correto para ACK síncrono. Verificar: (1) sem `await` na chamada, (2) `.catch(err => logger.error(...))` captura falha de transporte, (3) `void` suprime warning de Promise não-awaited. Ausência do `.catch` = unhandled rejection potencial.
+- **Dois UUIDs no output JSON do Claude Code**: `session_id` (snake_case, canônico para `--resume`) vs `uuid` (id da execução individual, não reaproveitável). Verificar via grep que o parser extrai `parsed.session_id`, não `parsed.uuid`. Se extrair `uuid`, o `--resume` não funcionará.
+- **`is_error:true` no output JSON do Claude Code não entra automaticamente no campo `success`**: a lógica `success = exitCode === 0 && parsedSuccess && !timedOut` não considera `isError`. Isso é decisão de design aceitável para MVP (log de warn presente, comportamento detectável), mas gera débito semântico: o backend pode registrar `success:true` em execuções que o Claude Code reportou como erro. Verificar se a intenção foi explicitamente documentada — se ausente, pontuar como M1.
+- **Teste com título prometendo comportamento que o assert não verifica**: quando um teste diz "X → Y" no título mas o assert não verifica Y explicitamente (apenas um comportamento diferente relacionado), é MEDIUM — não CRITICAL. Não bloqueia aprovação se o comportamento documentado em comentário é razoável para MVP, mas registrar como débito de qualidade.
+- **Slug sanitização como defesa em profundidade contra injection em parsers de texto**: `projectSlug` deve ser validado com regex estrita (`/^[a-zA-Z0-9._-]+$/`) ANTES de ser usado para buscar seção em arquivo de texto. Sem essa sanitização, um slug como `## evil\n- Caminho: /etc` poderia manipular o parser line-by-line. Verificar presença no `validatePayload`.
 
 ## PADRÕES APRENDIDOS F7
 
@@ -200,6 +215,44 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 - **Monte Carlo 3 itens obrigatórios**: (1) filtro throughput <= 0 antes do resample, (2) guard contra loop infinito (`maxPeriods`), (3) seed determinístico para testes. Faltar 1 = MAJOR.
 - **Re-review: comentário residual após correção**: ao remover filtro criadoEm, comentário "inclui pelo criadoEm já filtrado" ficou no código. É MINOR (não afeta comportamento), não REJECT. Documentar como débito de qualidade mas não bloquear.
 - **Re-review: padrão groupBy com fallback**: correção de N+1 em forecast aceita 2 queries (groupBy + findMany condicional) como pior caso — isso é correto. Verificar que o findMany do fallback NÃO está dentro de loop (deve ser 1 query única antes do loop JS).
+
+## PADRÕES APRENDIDOS F13 TASK2 SUB2.2 (RemoteExecutionClient V2)
+
+- **Spec files de stubs são responsabilidade do Implementer**: quando um serviço é convertido em stub (interface muda), os spec files existentes DEVEM ser atualizados na mesma sub-tarefa. Deixar spec file testando interface antiga é erro TypeScript — MAJOR bloqueante. Pattern: sempre verificar `npx tsc --noEmit 2>&1 | grep spec` separado dos erros pré-existentes.
+- **Fallback de compatibilidade implícito viola "quebra controlada"**: se plano diz "sem backward-compat, quebra controlada", qualquer fallback silencioso (ex: `dados.command.text` como legado de `dados.prompt`) viola essa decisão. Verificar se o argumento do Implementer se sustenta operacionalmente — neste caso não se sustentava porque outros campos (slug) falhariam antes. Rejeitar como M2.
+- **HMAC preservado = verificar linha a linha**: canonical string formula `[method, path, timestamp, nonce, bodyHash].join('\n')` + headers `x-scrumban-*` devem ser verificados via `git diff` comparando versão anterior. Se idêntico = PASS total.
+- **Stubs com `@deprecated` no arquivo, classe e método**: padrão correto para code que será removido. Incluir no JSDoc: ADR que motivou, o que substituiu, quando será removido (fase). Verificar presença dos 3 níveis de documentação.
+- **`finishExecution` com `prisma.dPedido.update` direto em processor de Execution**: este padrão é pré-existente e SCOPED para refactor em Sub-tarefa posterior (Engine update). Não penalizar se: (1) era pré-existente antes desta task, (2) o plano explicitamente delega Engine update para outra sub-tarefa, (3) não foi introduzido novo `prisma.dPedido.create()`. Verificar via `git diff` que não é novo.
+- **Construtor reduzido de N→M dependências é sinal positivo**: remoção de `ExecutionWorktreeService`, `RollbackService`, `GithubPrService` do construtor do processor significa refactor saudável. Verificar que as deps removidas ainda estão no módulo (não quebraram DI).
+- **Validação `idClasseRisk > 0` com dupla barreira via loadExecution**: quando `loadExecution` filtra por `EXECUTION_CLASSES = [-301,-302,-303]`, uma validação adicional de `idClasseRisk > 0` é suficiente (não estrita). A dupla barreira mitiga. MINOR se não verificar estritamente {-301,-302,-303}.
+
+## PADRÕES APRENDIDOS F13 TASK2 SUB2.4 (execution-result + Engine registrarOutcome)
+
+- **Pilar 1 em UPDATE de DPedido via callback inbound**: o padrão correto é `recordExecutionResult` (service) instanciar `OperacaoExecucaoClaude` e delegar para `registrarOutcome()`, que internamente chama `_atualizarPedidoCompleto()` → `this._database.dPedido.update`. `prisma.dPedido.findFirst` no handler é SELECT — permitido. Verificar via `grep "prisma\.dPedido\.\(update\|create\)"` — deve retornar ZERO ou apenas comentários.
+- **Isolation dupla camada para callback inbound**: (1) `dados.audit.agentId` vs `agentId` do path/header, (2) `agentEntity.chave.toString()` vs `agentId` (sanity check de guard). As DUAS camadas devem estar presentes em endpoints de callback de agente. Falta de camada 2 = MINOR; falta de camada 1 = MAJOR (isolation real).
+- **DClasses -516/-517 são DTabela de Status, não DEvento**: range -510..-522 com `idPai=-52` são status de execução (DTabela). Planos que referenciam -516/-517 para DEvento estão incorretos. Verificar com `grep "esp(-516\|esp(-517" prisma/seeds/classes.seed.ts`. Solução pragmática: reutilizar DEvento -496 (EXECUTION_LOG) diferenciando por `event.type`.
+- **Stub inline de `agentTunnelService` no service de produção**: `{ runClaudeCode: () => Promise.resolve({}) }` hard-coded como argumento de `OperacaoExecucaoClaude` é MINOR — funciona porque `registrarOutcome` não chama `_executarClaude`, mas é tech debt. Verificar se há TODO/comentário explícito. Se ausente, pontuar como MINOR.
+- **`claudeSessionPath` é campo de ENTRADA (agente→backend), não de SAÍDA**: deve aparecer apenas em DTOs de request (agente envia) e em `DPedido.dados` (armazenamento interno). Qualquer presença em `ExecutionResponseDto`, `TaskResponseDto` ou qualquer DTO de response para frontend = Risco #7 = MAJOR.
+- **Idempotência via sentinel `dados.audit.outcome.recordedAt`**: padrão correto para callback inbound. Verificar que: (1) o service checa o sentinel ANTES de instanciar Engine; (2) retorno idempotente não chama `updateMock` nem emite eventos; (3) spec verifica ambas as condições.
+
+## PADRÕES APRENDIDOS F13 TASK1 SUB2 (Agente V2 — HTTP Server + HMAC)
+
+- **Validar bind 127.0.0.1 como string literal no listen()**: `app.listen(port, '127.0.0.1', ...)` — a string deve ser hardcoded, não variável. Bind `0.0.0.0` ou ausência do host arg = REJEITAR (amplia superfície).
+- **HMAC agente: comparar canonical string com `remote-execution-client.ts`**: formula é `[method, path, timestamp, nonce, sha256(rawBody).hex].join('\n')`. Verificar: (1) `req.method.toUpperCase()` no agente vs string literal uppercase no backend, (2) `req.path` (sem querystring) vs path literal no backend, (3) `rawBody` Buffer vs `body` string UTF-8 produzem mesmo sha256. Qualquer divergência = REJEITAR.
+- **Nonce registrado após HMAC, não antes**: verificar que `nonceStore.add(nonce)` ocorre APÓS `timingSafeEqual` retornar true. Nonce adicionado em falha de HMAC = vetor de DoS no LRU.
+- **`timingSafeEqual` exige buffers de mesmo tamanho**: `safeEqualHex(a, b)` deve checar `a.length !== b.length` antes de invocar `timingSafeEqual`. Se tamanhos diferentes → false direto (Node.js lança TypeError para buffers de tamanho diferente).
+- **Error handler Express 4 params ANTES das rotas**: quando colocado imediatamente após `express.json()`, captura apenas erros do body parser. É comportamento correto mas semanticamente confuso — anotar como M1 e recomendar mover para após as rotas no pipeline final.
+- **Build pré-existente com erros não é bloqueante para módulo agent/**: confirmar via `git stash` + `npm run build` se os erros TypeScript estavam presentes antes da task. Erros pré-existentes não penalizam a task atual.
+- **Scope creep**: verificar que diretórios de sub-tarefas futuras (`handlers/`, `outbound/`, `tunnel/`, `claude-code/`) contêm apenas `.gitkeep`. Qualquer arquivo `.ts` neles = MAJOR.
+
+## PADRÕES APRENDIDOS F13 TASK2 SUB2.3 (Slug Derivation)
+
+- **Backfill `onModuleInit` sequencial é correto**: `for...of` com `await` por item garante que projeto N+1 vê slug do projeto N já commitado — evita colisão entre projetos do mesmo batch. `Promise.all` no backfill seria bug de race condition interna. Verificar que o backfill NOT usa `Promise.all` sobre os itens do batch.
+- **Fallback `untitled-<timestamp-base36>` é pragmático para slugify()='' casos**: nomes compostos só de símbolos são raros em produção. O fallback não bloqueia cadastro e o índice unique pega colisão. Alternativa (lançar erro) piora UX de import/automação. Aprovar como decisão adequada para MVP.
+- **Race condition P2002 em `create()` após `findFirst` de slug**: janela de race entre `findFirst` (slug livre) e `create` (unique violation) existe mas é de baixa probabilidade para slugs de projeto. Ausência de try/catch P2002 é MINOR (não MAJOR) — o erro propagaria como 500, não como dado corrompido. Degradação controlada.
+- **`slug` em `dados` Json NÃO exposto no response DTO = débito técnico**: se slug é identidade técnica usada por sistemas externos (RemoteExecutionClient), deve ser acessível via API sem query raw. Anotar como MINOR quando buildResponse não inclui campo `slug` no DTO de resposta.
+- **Índice expression `LOWER(dados->>'slug')` + slugify lowercase = redundância defensiva OK**: o slugify já retorna lowercase, mas o índice com LOWER() protege contra dados legados inconsistentes. Aceitar como decisão defensiva, não como inconsistência.
+- **`Prisma.AnyNull` para Json path filter no backfill**: `{ dados: { path: ['slug'], equals: Prisma.AnyNull } }` é a forma correta de buscar registros onde a chave Json está ausente ou é null. `Prisma.JsonNull` para dados=null inteiro. A combinação `OR [JsonNull, AnyNull]` captura todos os casos de ausência de slug.
 
 ## PADRÕES APRENDIDOS F8 TASK#2 (Search)
 
@@ -270,6 +323,7 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 | Task 1 | email+common | F4 | 8.2 | APPROVED | nestjs-pino não instalado (DoD explícito); @Public() ausente no HealthController |
 | Task 1 | domain-structural | F5 | 8.0 | APPROVED | parseInt(limit) em 4 controllers; for...of vs createMany no bootstrap; TeamsService sem AuditService |
 | Task 2 | executions (F6) | F6 | 8.5 | APPROVED | ScheduleModule.forRoot() duplicado; testes de integração I1-I4 ausentes (unit tests cobrem os casos) |
+| Task 1 sub1 | agent scaffolding | F13 cliente | **9.0** | **APPROVED** | 4 MINORs: branches loader não cobertas (EPERM/isFile), ownership check ausente, discrepância jest.config.js no handoff, 0% coverage logger/index (esperado) |
 
 Detalhes: [F2 scores](project_f2_scores.md) | [F3 scores](project_f3_scores.md) | [F5 scores](project_f5_scores.md)
 

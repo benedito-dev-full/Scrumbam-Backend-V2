@@ -30,6 +30,26 @@ const STATUS_TO_TABELA_CLASSE: Record<string, bigint> = {
 };
 
 /**
+ * Mapa de priority enum → idClasse DTabela (seed F1).
+ * Cada projeto tem 4 DTabelas (uma por idClasse), criadas no bootstrap.
+ * Lookup dinâmico via `(idClasse, dEntidadeId=projectId)` resolve a chave runtime.
+ */
+const PRIORITY_TO_TABELA_CLASSE: Record<string, bigint> = {
+  HIGH: BigInt(-421),
+  MEDIUM: BigInt(-422),
+  LOW: BigInt(-423),
+  URGENT: BigInt(-424),
+};
+
+/** Inverso de PRIORITY_TO_TABELA_CLASSE — mapeia idClasse string → enum para buildResponse. */
+const TABELA_CLASSE_TO_PRIORITY: Record<string, string> = {
+  '-421': 'HIGH',
+  '-422': 'MEDIUM',
+  '-423': 'LOW',
+  '-424': 'URGENT',
+};
+
+/**
  * Service de tasks (DTask).
  *
  * Implementa CRUD completo de tasks com:
@@ -132,6 +152,11 @@ export class TasksService {
         select: { chave: true },
       });
 
+      // Resolver idPriority (lookup DTabela -42X escopado pelo projeto)
+      const idPriority = dto.priority
+        ? await this.resolvePriorityId(tx, projectId, dto.priority)
+        : null;
+
       // Criar DTask
       return tx.dTask.create({
         data: {
@@ -140,6 +165,7 @@ export class TasksService {
           nome: dto.nome,
           descricao: dto.descricao ?? null,
           idStatus: inboxStatus?.chave ?? null,
+          idPriority,
           idAssignee: dto.assigneeId ? BigInt(dto.assigneeId) : null,
           idSprint: dto.sprintId ? BigInt(dto.sprintId) : null,
           idCreator: creatorId,
@@ -169,7 +195,8 @@ export class TasksService {
       { source: TasksService.name },
     );
 
-    return this.buildResponse(task);
+    const priorityMap = await this.buildPriorityMap([task.idPriority]);
+    return this.buildResponse(task, priorityMap);
   }
 
   /**
@@ -246,7 +273,9 @@ export class TasksService {
     const hasMore = tasks.length > take;
     const pageTasks = hasMore ? tasks.slice(0, take) : tasks;
 
-    const items = pageTasks.map((t) => this.buildResponse(t));
+    // Batch lookup do mapa de priority (ZERO N+1 — 1 query para todo o lote)
+    const priorityMap = await this.buildPriorityMap(pageTasks.map((t) => t.idPriority));
+    const items = pageTasks.map((t) => this.buildResponse(t, priorityMap));
     const nextCursor = hasMore ? pageTasks[pageTasks.length - 1].chave.toString() : null;
 
     return { items, pagination: { hasMore, nextCursor } };
@@ -274,7 +303,8 @@ export class TasksService {
       throw new NotFoundException(`Task ${id} não encontrada`);
     }
 
-    return this.buildResponse(task);
+    const priorityMap = await this.buildPriorityMap([task.idPriority]);
+    return this.buildResponse(task, priorityMap);
   }
 
   /**
@@ -298,7 +328,7 @@ export class TasksService {
 
     const existing = await this.prisma.dTask.findFirst({
       where: { chave: taskId, excluido: false },
-      select: { chave: true, dados: true },
+      select: { chave: true, dados: true, idProject: true },
     });
 
     if (!existing) {
@@ -311,6 +341,27 @@ export class TasksService {
     const novosDados =
       dto.taskType !== undefined ? { ...dadosAtuais, taskType: dto.taskType } : undefined;
 
+    // Resolver idPriority (semântica undefined/null/string):
+    //   undefined → não tocar
+    //   null      → limpar (idPriority = null)
+    //   string    → lookup DTabela do projeto
+    let idPriorityUpdate: bigint | null | undefined = undefined;
+    if (dto.priority !== undefined) {
+      if (dto.priority === null) {
+        idPriorityUpdate = null;
+      } else if (existing.idProject) {
+        idPriorityUpdate = await this.resolvePriorityId(
+          this.prisma,
+          existing.idProject,
+          dto.priority,
+        );
+      } else {
+        this.logger.warn(
+          `update: task ${taskId} sem idProject; ignorando priority="${dto.priority}"`,
+        );
+      }
+    }
+
     const updated = await this.prisma.dTask.update({
       where: { chave: taskId },
       data: {
@@ -319,11 +370,13 @@ export class TasksService {
         ...(dto.assigneeId !== undefined
           ? { idAssignee: dto.assigneeId ? BigInt(dto.assigneeId) : null }
           : {}),
+        ...(idPriorityUpdate !== undefined ? { idPriority: idPriorityUpdate } : {}),
         ...(novosDados !== undefined ? { dados: novosDados as Prisma.InputJsonValue } : {}),
       },
     });
 
-    return this.buildResponse(updated);
+    const priorityMap = await this.buildPriorityMap([updated.idPriority]);
+    return this.buildResponse(updated, priorityMap);
   }
 
   /**
@@ -481,7 +534,8 @@ export class TasksService {
       { source: TasksService.name },
     );
 
-    return this.buildResponse(updated);
+    const priorityMap = await this.buildPriorityMap([updated.idPriority]);
+    return this.buildResponse(updated, priorityMap);
   }
 
   /**
@@ -515,7 +569,8 @@ export class TasksService {
       data: { idSprint: BigInt(dto.sprintId) },
     });
 
-    return this.buildResponse(updated);
+    const priorityMap = await this.buildPriorityMap([updated.idPriority]);
+    return this.buildResponse(updated, priorityMap);
   }
 
   /**
@@ -552,19 +607,128 @@ export class TasksService {
 
   // ─── Helpers privados ─────────────────────────────────────────────────────
 
-  private buildResponse(task: {
-    chave: bigint;
-    idProject?: bigint | null;
-    nome: string;
-    descricao?: string | null;
-    idStatus?: bigint | null;
-    idPriority?: bigint | null;
-    idAssignee?: bigint | null;
-    idSprint?: bigint | null;
-    dados?: unknown;
-    criadoEm: Date;
-    atualizadoEm: Date;
-  }): TaskResponseDto {
+  /**
+   * Resolve enum de priority (HIGH/MEDIUM/LOW/URGENT) → chave BigInt
+   * da DTabela escopada pelo projeto.
+   *
+   * Padrão paralelo ao Status (DTabela -441..-449 escopada por projectId).
+   * As 4 DTabelas PRIORITY são criadas no bootstrap do projeto
+   * (SeedBootstrapService) e em backfill idempotente para projetos legados.
+   *
+   * @param tx - Prisma TransactionClient OU PrismaService
+   * @param projectId - Chave BigInt do projeto
+   * @param priority - Enum string (HIGH/MEDIUM/LOW/URGENT)
+   * @returns chave BigInt da DTabela correspondente, ou null se inválido
+   *
+   * @throws {BadRequestException} Se priority não mapeia ou DTabela não existe
+   *   no projeto (sinal de que bootstrap não rodou — rodar backfill).
+   */
+  private async resolvePriorityId(
+    tx: Prisma.TransactionClient | PrismaService,
+    projectId: bigint,
+    priority: string,
+  ): Promise<bigint | null> {
+    const idClassePriority = PRIORITY_TO_TABELA_CLASSE[priority];
+    if (!idClassePriority) {
+      throw new BadRequestException(
+        `Priority "${priority}" inválida — esperado um de: HIGH, MEDIUM, LOW, URGENT`,
+      );
+    }
+
+    const tabela = await tx.dTabela.findFirst({
+      where: {
+        idClasse: idClassePriority,
+        dEntidadeId: projectId,
+        excluido: false,
+      },
+      select: { chave: true },
+    });
+
+    if (!tabela) {
+      this.logger.warn(
+        `resolvePriorityId: DTabela PRIORITY ${priority} (idClasse=${idClassePriority}) ausente ` +
+          `para projeto ${projectId}. Rodar backfill (scripts/backfill-priority-tabelas).`,
+      );
+      // Fallback silencioso: persiste null em vez de quebrar a operação.
+      return null;
+    }
+
+    return tabela.chave;
+  }
+
+  /**
+   * Converte o BigInt persistido em DTask.idPriority → string enum
+   * (HIGH/MEDIUM/LOW/URGENT) consultando a DTabela referenciada.
+   *
+   * Implementação batch para ZERO N+1: recebe um Map pré-resolvido
+   * de `idPriorityChave → enum`. Para conveniência em chamadas single,
+   * o método `findPriorityEnumMap` constrói o mapa em 1 query.
+   *
+   * @param idPriority - chave da DTabela (BigInt ou null)
+   * @param priorityMap - mapa chave-string → enum (pré-resolvido)
+   * @returns string enum ou null
+   */
+  private mapPriorityEnum(
+    idPriority: bigint | null | undefined,
+    priorityMap: Map<string, string>,
+  ): string | null {
+    if (!idPriority) return null;
+    return priorityMap.get(idPriority.toString()) ?? null;
+  }
+
+  /**
+   * Constrói o mapa `chaveDTabela → enum` em 1 query para um conjunto
+   * de tasks. Usado em findMany/findOne/create/update para evitar N+1.
+   *
+   * @param idPriorityValues - lista de idPriority (pode conter null/duplicados)
+   * @returns Map<string, string> onde key=`chave.toString()`, value=enum
+   */
+  private async buildPriorityMap(
+    idPriorityValues: Array<bigint | null | undefined>,
+  ): Promise<Map<string, string>> {
+    const uniqueIds = Array.from(
+      new Set(
+        idPriorityValues
+          .filter((id): id is bigint => id !== null && id !== undefined)
+          .map((id) => id.toString()),
+      ),
+    ).map((s) => BigInt(s));
+
+    if (uniqueIds.length === 0) {
+      return new Map();
+    }
+
+    const tabelas = await this.prisma.dTabela.findMany({
+      where: { chave: { in: uniqueIds }, excluido: false },
+      select: { chave: true, idClasse: true },
+    });
+
+    const map = new Map<string, string>();
+    for (const t of tabelas) {
+      const enumValue = TABELA_CLASSE_TO_PRIORITY[t.idClasse.toString()];
+      if (enumValue) {
+        map.set(t.chave.toString(), enumValue);
+      }
+    }
+    return map;
+  }
+
+  private buildResponse(
+    task: {
+      chave: bigint;
+      idProject?: bigint | null;
+      nome: string;
+      descricao?: string | null;
+      idStatus?: bigint | null;
+      idPriority?: bigint | null;
+      idAssignee?: bigint | null;
+      idSprint?: bigint | null;
+      dados?: unknown;
+      criadoEm: Date;
+      atualizadoEm: Date;
+    },
+    priorityMap?: Map<string, string>,
+  ): TaskResponseDto {
     const dados = task.dados as Record<string, unknown> | null;
     const v3 = dados?.v3 as { state?: string } | null;
     const identifier = (dados?.identifier as string | null) ?? '';
@@ -577,7 +741,7 @@ export class TasksService {
       projectId: task.idProject?.toString() ?? '',
       identifier,
       status: v3?.state ?? 'INBOX',
-      priority: task.idPriority?.toString() ?? null,
+      priority: priorityMap ? this.mapPriorityEnum(task.idPriority, priorityMap) : null,
       taskType,
       assigneeId: task.idAssignee?.toString() ?? null,
       sprintId: task.idSprint?.toString() ?? null,

@@ -1393,6 +1393,70 @@
 **Documentation:** [`workspace/documentation/doc-email-common-f4-task1.md`](../workspace/documentation/doc-email-common-f4-task1.md)
 **Commit:** (a ser criado pelo Documenter)
 
+### Task #2: Corrigir persistência de `priority` em DTask — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** tasks
+**Fase V2:** F4
+**Tempo Real:** ~1.5h Implementer (round 2 M1 fix) + ~40min Reviewer + ~30min Documenter
+**Completado em:** 2026-05-12
+**Quality Score:** 8.0/10 APPROVED
+
+**O Que Foi Feito:**
+
+- **TasksService — Persistência de Priority:**
+  - Helper privado `resolvePriorityId(tx, projectId, priority)` resolve enum string → `DTabela.chave` escopada por projeto (padrão paralelo a Status)
+  - `create()` agora persiste `idPriority` via helper (antes era ignorado de `CreateTaskDto.priority`)
+  - `update()` agora persiste `idPriority` com semântica clara: `undefined` (não toca), `null` (limpa), string (lookup)
+  - `buildResponse()` retorna `priority` como string enum via batch lookup `buildPriorityMap()` — **ZERO N+1 queries**
+  - Mapa de constantes: `PRIORITY_TO_TABELA_CLASSE` (enum → idClasse), `TABELA_CLASSE_TO_PRIORITY` (idClasse → enum)
+
+- **Seed Bootstrap — DTabelas Priority:**
+  - `SeedBootstrapService` novo método `seedPrioritiesIfMissing()` cria 4 DTabelas PRIORITY (HIGH/MEDIUM/LOW/URGENT) por projeto
+  - Idempotente: lookup por `(idClasse, dEntidadeId=projectId)` antes criar
+  - Integrado em `seedProject()` como fallback para projetos legados (roda mesmo se INBOX já existe)
+  - DClasses: -421 (HIGH), -422 (MEDIUM), -423 (LOW), -424 (URGENT)
+
+- **Backfill Script:**
+  - Novo `prisma/scripts/backfill-priority-tabelas.ts` standalone para projetos existentes
+  - Batch lookup eficiente (1 query por projeto para validar quais priorities faltam)
+  - Idempotente: não sobrescreve se já existe
+  - Output: relatório de projetos visitados e priorities criadas
+
+- **DTOs — Ajustes:**
+  - `CreateTaskDto`: enum `-` `CRITICAL` (inválido no seed) — removido, mantém `LOW|MEDIUM|HIGH|URGENT`
+  - `UpdateTaskDto`: enum corrigido + `@ValidateIf` para aceitar `null` semanticamente (clear field semantics)
+  - `UpdateTaskDto.spec.ts` — NOVO, 8 testes ValidationPipe (undefined/null/enums válidos/inválido/vazio)
+  - `TaskResponseDto`: `priority: string | null` tipagem ajustada
+
+- **Tests:**
+  - `tasks.service.spec.ts`: 77/77 PASS (7 testes novos)
+  - `update-task.dto.spec.ts`: 8/8 PASS (M1 fix — DTO spec)
+  - Regressão: todas anteriores PASS
+  - Build: `npm run build` PASS (0 TypeScript, 0 ESLint)
+
+- **Documentação:**
+  - `eslint.config.js` glob incluído `prisma/scripts/**/*.ts`
+  - ADR-V2-034 redigido: formaliza padrão Priority como DTabela escopada por projeto (espelhando Status, ADR-V2-009)
+
+**Pilares aplicados:**
+- Pilar 1: N/A (DTask é estrutural, não transacional)
+- Pilar 2: **REUTILIZADO** — endpoint genérico `/tasks/:id` (PATCH) sem controller novo (Pilar 2 aplicado: não criar duplicata)
+- Pilar 3: **RESPEITADO** — zero tabela nova (DTabelas -421..-424 já existentes no seed F1); ADR-V2-001 inviolável
+
+**Smoke test (verde):**
+- `npm run build` PASS (0 TypeScript, 0 ESLint)
+- `npx jest` 85/85 PASS (77 tasks + 8 DTO spec)
+- N+1 ZERO: `buildPriorityMap()` batch lookup 1 query para múltiplas tasks
+- BigInt serializado como string em responses
+- idempotência validated: rodar backfill 2x não duplica
+
+**ADRs vinculados:** ADR-V2-034 (priority DTabela escopada por projeto), ADR-V2-001 (zero tabela nova), ADR-V2-009 (DTabela padrão)
+
+**Plan:** [`workspace/plans/plan-tasks-fix-priority-persistence-task01.md`](../workspace/plans/plan-tasks-fix-priority-persistence-task01.md)
+**Impl Notes:** [`workspace/implementations/impl-tasks-fix-priority-persistence-task01.md`](../workspace/implementations/impl-tasks-fix-priority-persistence-task01.md)
+**Review:** Score 8.0/10 APPROVED
+
 ---
 
 ---

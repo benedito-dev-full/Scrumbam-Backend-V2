@@ -25,6 +25,8 @@
 import express, { Express, NextFunction, Request, Response } from 'express';
 import type { Server as HttpServer } from 'http';
 import type { Logger } from 'pino';
+import { createProjectMutex, type ProjectMutex } from '../handlers/run-claude-code.handler';
+import type { BackendClient } from '../outbound/backend-client';
 import type { AgentConfig } from '../config/schema';
 import { createDispatcher, SUPPORTED_TYPES_LIST } from './dispatcher';
 import { createHmacMiddleware, type RawBodyRequest } from './hmac.middleware';
@@ -75,10 +77,24 @@ export function createServer(
     rateLimitOverrides?: { windowMs?: number; max?: number };
     /** Tempo de boot — usado em /ping para calcular uptime (default Date.now). */
     bootedAtMs?: number;
+    /**
+     * BackendClient injetado pelo bootstrap. Necessário para o handler
+     * `RUN_CLAUDE_CODE` reportar `execution-result` outbound. Em testes
+     * que só exercitam `PING` ou stubs HMAC, pode ser omitido — usamos
+     * um noop client que loga warn.
+     */
+    backendClient?: BackendClient;
+    /**
+     * Mutex local por `projectSlug` (Sub-tarefa 4). Default: novo Set.
+     * Injetável para testes que querem inspecionar/popular o estado.
+     */
+    mutex?: ProjectMutex;
   },
 ): AgentHttpServer {
   const nonceStore = options?.nonceStore ?? createNonceStore();
   const bootedAtMs = options?.bootedAtMs ?? Date.now();
+  const mutex = options?.mutex ?? createProjectMutex();
+  const backendClient: BackendClient = options?.backendClient ?? noopBackendClient(logger);
   const app = express();
 
   // 1. Body parser com preservação de rawBody para HMAC.
@@ -134,7 +150,12 @@ export function createServer(
   });
 
   // POST /v1/execute — dispatcher autenticado.
-  app.post('/v1/execute', hmacMiddleware, rateLimitMiddleware, createDispatcher(logger));
+  app.post(
+    '/v1/execute',
+    hmacMiddleware,
+    rateLimitMiddleware,
+    createDispatcher({ config, logger, backendClient, mutex }),
+  );
 
   // 404 padronizado para qualquer outro path.
   app.use((req: Request, res: Response): void => {
@@ -214,6 +235,25 @@ export function createServer(
 
     getNonceStore(): NonceStore {
       return nonceStore;
+    },
+  };
+}
+
+/**
+ * BackendClient no-op para testes/setup mínimo. Loga warn quando alguém
+ * tentar reportar `execution-result` sem ter passado um client real. Em
+ * produção o bootstrap SEMPRE injeta o client real.
+ */
+function noopBackendClient(logger: Logger): BackendClient {
+  return {
+    async sendHeartbeat(): Promise<void> {
+      logger.warn({ stage: 'http.server.noop' }, 'sendHeartbeat chamado em noop backend client');
+    },
+    async sendExecutionResult(): Promise<void> {
+      logger.warn(
+        { stage: 'http.server.noop' },
+        'sendExecutionResult chamado em noop backend client',
+      );
     },
   };
 }

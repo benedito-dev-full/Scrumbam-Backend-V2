@@ -43,7 +43,14 @@ export class TaskResponseDto {
   @ApiProperty({ description: 'Estado V3 atual', example: 'INBOX' })
   status!: string;
 
-  @ApiPropertyOptional({ description: 'Prioridade', nullable: true })
+  @ApiPropertyOptional({
+    description:
+      'Prioridade da task — string enum (HIGH/MEDIUM/LOW/URGENT) derivada do idClasse ' +
+      'da DTabela referenciada por DTask.idPriority. Retorna null se não definida.',
+    nullable: true,
+    enum: ['LOW', 'MEDIUM', 'HIGH', 'URGENT'],
+    example: 'HIGH',
+  })
   priority!: string | null;
 
   @ApiPropertyOptional({

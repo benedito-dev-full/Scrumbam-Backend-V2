@@ -1,6 +1,6 @@
 # Documenter Agent Memory — Scrumban-Backend-V2
 
-**Versão:** 1.2 (atualizado após Sub-tarefa 2.1 F13)
+**Versão:** 1.3 (atualizado após Sub-tarefa 2.3 F13)
 **Última atualização:** 2026-05-12
 
 ---
@@ -380,6 +380,33 @@ export class [Nome]Dto {
   - Fire-and-forget email requer log estruturado (não throw em falha)
   - Anti-enumeração: 404 idêntico em GET e POST (timing-safe respostas)
   - AuthService.issueSessionForUser() novo método (reutiliza JWT pipeline)
+
+### Sub-tarefa 5 F13: Autossh Wrapper + Graceful Shutdown (2026-05-12)
+- **Scope:** `agent` (novo scope cliente VPS — Pilar N/A, estrutural cliente)
+- **Arquivos:** `agent/src/tunnel/autossh.wrapper.ts` (457 linhas), `agent/src/lifecycle/shutdown.ts` (116 linhas), updated heartbeat-loop.ts + index.ts
+- **Tests Novos:** `agent/__tests__/autossh.spec.ts` (11 specs), `agent/__tests__/shutdown.spec.ts` (6 specs) = 17 novos, 84/84 total PASS
+- **Funcionalidades:**
+  - Circuit breaker: 5 crashes/60s → pausa 5min (evita flap loop)
+  - Backoff exponencial 1s→60s com reset após 60s uptime estável
+  - `createAutosshWrapper(config, logger, options): AutosshHandle` modular, DI tunáveis
+  - Graceful shutdown ordering: heartbeat → server (drena 30s) → autossh → exit(0/1)
+  - Dedupe SIGTERM+SIGINT idempotente via flag `triggered`
+  - `isHealthy()` exposto: Sub-tarefa 3 placeholder now refletido em payload
+- **ADRs Vinculados:** ADR-V2-031 (agent monorepo), ADR-V2-035 (logs sensíveis — futura)
+- **Commit:** `4c9c6e8` (scope `agent`, type `feat`)
+- **Quality:** 9.0/10 APPROVED rodada 1
+- **Documentação:**
+  - ROADMAP: Sub-tarefa 5 marcada ✅ COMPLETA
+  - CHANGELOG: entry 30 linhas com detalhe circuit breaker, shutdown, heartbeat integration
+  - STATUS.md: seção 58 linhas Task #1 Sub-tarefa 5 com deliverables, métricas, decisões design
+- **Workflow:** Implementer (3.5h) → Documenter (45min) = 4.25h total
+- **Lições:**
+  - Scope `agent` é novo (antes tudo `automation`). Cliente é V2 separado, warrant escopo próprio
+  - Tunáveis em options importante para testes (fake timers, mock spawn, função "agora")
+  - Circuit breaker `crashWindowMs + crashThreshold` válido padrão: não throw fast, monitora via `circuit_open` log
+  - Graceful shutdown ordem defensiva: heartbeat ANTES server (evita log enganoso), server ANTES autossh (drena in-flight requests)
+  - ADR-V2-035 redigir futura para log-sensíveis (agentSshKeyPath line 312 expõe caminho — remover por flag boolean)
+  - STATUS.md pre-populado por Implementer (novo padrão — Documenter valida, não refaz)
 
 ### Sub-tarefa 2.1 F13: Seed Agent Session Lifecycle + ADR-V2-033 (2026-05-12)
 - **Scope:** `seeds` (Pilar 3 — estrutural puro)

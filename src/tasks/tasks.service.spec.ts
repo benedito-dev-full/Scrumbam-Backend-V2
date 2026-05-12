@@ -301,6 +301,210 @@ describe('TasksService', () => {
 
       expect(result.taskType).toBe('FEATURE');
     });
+
+    // ─── priority persistence (V2 F4 — Task 01) ──────────────────────────────
+
+    describe('priority persistence', () => {
+      it('deve persistir idPriority quando dto.priority="HIGH" + DTabela existe', async () => {
+        prisma.dTask.findFirst.mockResolvedValue({
+          chave: BigInt(7),
+          dados: { identifier: 'DEV-7' },
+          idProject: BigInt(1),
+        });
+
+        // resolvePriorityId → DTabela -421 (HIGH) com chave 1001
+        prisma.dTabela.findFirst.mockResolvedValue({ chave: BigInt(1001) });
+
+        let updateDataCaptured: Record<string, unknown> | null = null;
+        prisma.dTask.update.mockImplementation(({ data }: { data: Record<string, unknown> }) => {
+          updateDataCaptured = data;
+          return Promise.resolve(makeTask({ chave: BigInt(7), idPriority: BigInt(1001) }));
+        });
+
+        // buildPriorityMap → 1 query findMany para resolver enum
+        prisma.dTabela.findMany.mockResolvedValue([
+          { chave: BigInt(1001), idClasse: BigInt(-421) },
+        ]);
+
+        const result = await service.update('7', { priority: 'HIGH' });
+
+        // Persistência: idPriority foi enviado no UPDATE
+        expect(updateDataCaptured).not.toBeNull();
+        expect(updateDataCaptured!.idPriority).toEqual(BigInt(1001));
+
+        // Lookup DTabela com idClasse correto
+        expect(prisma.dTabela.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              idClasse: BigInt(-421),
+              dEntidadeId: BigInt(1),
+            }),
+          }),
+        );
+
+        // Response: priority retorna string enum (não BigInt)
+        expect(result.priority).toBe('HIGH');
+      });
+
+      it('deve limpar idPriority quando dto.priority === null', async () => {
+        prisma.dTask.findFirst.mockResolvedValue({
+          chave: BigInt(7),
+          dados: { identifier: 'DEV-7' },
+          idProject: BigInt(1),
+        });
+
+        let updateDataCaptured: Record<string, unknown> | null = null;
+        prisma.dTask.update.mockImplementation(({ data }: { data: Record<string, unknown> }) => {
+          updateDataCaptured = data;
+          return Promise.resolve(makeTask({ chave: BigInt(7), idPriority: null }));
+        });
+
+        prisma.dTabela.findMany.mockResolvedValue([]);
+
+        const result = await service.update('7', { priority: null } as unknown as {
+          priority: string | null;
+        });
+
+        expect(updateDataCaptured).not.toBeNull();
+        expect(updateDataCaptured!.idPriority).toBeNull();
+        // resolvePriorityId NÃO foi chamado (não busca DTabela)
+        expect(prisma.dTabela.findFirst).not.toHaveBeenCalled();
+        expect(result.priority).toBeNull();
+      });
+
+      it('não deve tocar idPriority quando dto.priority === undefined', async () => {
+        prisma.dTask.findFirst.mockResolvedValue({
+          chave: BigInt(7),
+          dados: { identifier: 'DEV-7' },
+          idProject: BigInt(1),
+        });
+
+        let updateDataCaptured: Record<string, unknown> | null = null;
+        prisma.dTask.update.mockImplementation(({ data }: { data: Record<string, unknown> }) => {
+          updateDataCaptured = data;
+          return Promise.resolve(makeTask({ chave: BigInt(7) }));
+        });
+
+        prisma.dTabela.findMany.mockResolvedValue([]);
+
+        await service.update('7', { nome: 'Sem priority' });
+
+        // Chave idPriority NÃO está no data do update
+        expect(updateDataCaptured).not.toBeNull();
+        expect('idPriority' in updateDataCaptured!).toBe(false);
+        expect(prisma.dTabela.findFirst).not.toHaveBeenCalled();
+      });
+
+      it('deve persistir null (fallback silencioso) se DTabela PRIORITY não existir no projeto', async () => {
+        prisma.dTask.findFirst.mockResolvedValue({
+          chave: BigInt(7),
+          dados: { identifier: 'DEV-7' },
+          idProject: BigInt(1),
+        });
+
+        // Bootstrap NÃO rodou — DTabela ausente
+        prisma.dTabela.findFirst.mockResolvedValue(null);
+
+        let updateDataCaptured: Record<string, unknown> | null = null;
+        prisma.dTask.update.mockImplementation(({ data }: { data: Record<string, unknown> }) => {
+          updateDataCaptured = data;
+          return Promise.resolve(makeTask({ chave: BigInt(7), idPriority: null }));
+        });
+
+        prisma.dTabela.findMany.mockResolvedValue([]);
+
+        const result = await service.update('7', { priority: 'MEDIUM' });
+
+        // Persistido null (fallback)
+        expect(updateDataCaptured).not.toBeNull();
+        expect(updateDataCaptured!.idPriority).toBeNull();
+        expect(result.priority).toBeNull();
+      });
+
+      it('deve rejeitar BadRequestException para priority inválida', async () => {
+        prisma.dTask.findFirst.mockResolvedValue({
+          chave: BigInt(7),
+          dados: { identifier: 'DEV-7' },
+          idProject: BigInt(1),
+        });
+
+        await expect(
+          service.update('7', { priority: 'INVALIDO' as unknown as string }),
+        ).rejects.toThrow(BadRequestException);
+      });
+    });
+  });
+
+  // ─── create() priority ─────────────────────────────────────────────────────
+
+  describe('create() — priority', () => {
+    it('deve persistir idPriority em create quando dto.priority="MEDIUM"', async () => {
+      const task = makeTask({ chave: BigInt(9), idPriority: BigInt(2002) });
+
+      prisma.dProject.findFirst.mockResolvedValue({ dados: { prefix: 'DEV' } });
+
+      let createDataCaptured: Record<string, unknown> | null = null;
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const txMock = {
+          dTask: {
+            create: jest.fn().mockImplementation(({ data }: { data: Record<string, unknown> }) => {
+              createDataCaptured = data;
+              return Promise.resolve(task);
+            }),
+          },
+          dTabela: {
+            findFirst: jest
+              .fn()
+              // 1ª chamada: INBOX (idClasse -441) → não existe
+              .mockResolvedValueOnce(null)
+              // 2ª chamada: PRIORITY MEDIUM (idClasse -422) → chave 2002
+              .mockResolvedValueOnce({ chave: BigInt(2002) }),
+          },
+        };
+        identifierService.getNextIdentifier.mockResolvedValue('DEV-9');
+        return fn(txMock);
+      });
+
+      prisma.dTabela.findMany.mockResolvedValue([{ chave: BigInt(2002), idClasse: BigInt(-422) }]);
+
+      const result = await service.create(
+        { nome: 'Com priority', projectId: '1', priority: 'MEDIUM' },
+        BigInt(100),
+      );
+
+      expect(createDataCaptured).not.toBeNull();
+      expect(createDataCaptured!.idPriority).toEqual(BigInt(2002));
+      expect(result.priority).toBe('MEDIUM');
+    });
+
+    it('deve persistir null quando create() sem priority', async () => {
+      const task = makeTask({ chave: BigInt(10), idPriority: null });
+
+      prisma.dProject.findFirst.mockResolvedValue({ dados: { prefix: 'DEV' } });
+
+      let createDataCaptured: Record<string, unknown> | null = null;
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const txMock = {
+          dTask: {
+            create: jest.fn().mockImplementation(({ data }: { data: Record<string, unknown> }) => {
+              createDataCaptured = data;
+              return Promise.resolve(task);
+            }),
+          },
+          dTabela: { findFirst: jest.fn().mockResolvedValue(null) },
+        };
+        identifierService.getNextIdentifier.mockResolvedValue('DEV-10');
+        return fn(txMock);
+      });
+
+      prisma.dTabela.findMany.mockResolvedValue([]);
+
+      const result = await service.create({ nome: 'Sem priority', projectId: '1' }, BigInt(100));
+
+      expect(createDataCaptured).not.toBeNull();
+      expect(createDataCaptured!.idPriority).toBeNull();
+      expect(result.priority).toBeNull();
+    });
   });
 
   // ─── updateStatus() — state machine ────────────────────────────────────────
