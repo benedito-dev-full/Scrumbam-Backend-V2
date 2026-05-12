@@ -1,11 +1,4 @@
-import {
-  IsBoolean,
-  IsOptional,
-  IsString,
-  IsUrl,
-  MaxLength,
-  MinLength,
-} from 'class-validator';
+import { IsBoolean, IsOptional, IsString, IsUrl, MaxLength, MinLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
@@ -103,4 +96,29 @@ export class CreateProjectDto {
   @IsOptional()
   @IsUrl()
   gitRepo?: string;
+
+  /**
+   * ID do time ao qual o projeto será vinculado (DVincula -182).
+   *
+   * Quando fornecido, cria atomicamente um vínculo PROJECT_TEAM_LINK
+   * (`idLocEscritu=teamId`, `idEntidade=projectId`) na mesma transação
+   * que cria o DProject.
+   *
+   * Validações:
+   *  - Team deve existir (DEntidade idClasse=-180).
+   *  - Team deve pertencer à mesma org do projeto (cross-org guard).
+   *  - Usuário deve ser LEAD do time ou ADMIN da org.
+   *
+   * Quando omitido, o projeto fica órfão (sem vínculo de time) e é
+   * listado em `GET /projects` mas não em `GET /projects?teamId=X`.
+   *
+   * @see ADR-V2-029 — Project ↔ Team via DVincula -182
+   */
+  @ApiPropertyOptional({
+    description: 'ID do time a vincular (DVincula -182). Omitir cria projeto órfão.',
+    example: '200',
+  })
+  @IsOptional()
+  @IsString()
+  teamId?: string;
 }

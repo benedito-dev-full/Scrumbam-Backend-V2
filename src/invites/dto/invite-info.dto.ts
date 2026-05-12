@@ -54,4 +54,20 @@ export class InviteInfoDto {
    */
   @ApiProperty({ description: 'Data de expiracao (ISO 8601)', example: '2026-05-18T12:00:00.000Z' })
   expiresAt!: string;
+
+  /**
+   * Fluxo do convite:
+   * - `new_user`: email nao tem conta ainda — accept requer `name + password`.
+   * - `existing_user`: email ja tem DEntidade -150 em outra org — accept apenas
+   *   cria DVincula (merge); `name + password` sao ignorados pelo backend.
+   *
+   * O frontend usa esse campo para escolher o formulario de aceite (criar conta
+   * vs. confirmar entrada). Ver ADR-V2-030 (Multi-tenant identity).
+   */
+  @ApiProperty({
+    description: 'Fluxo do aceite: new_user (cria conta) ou existing_user (apenas merge)',
+    example: 'new_user',
+    enum: ['new_user', 'existing_user'],
+  })
+  flow!: 'new_user' | 'existing_user';
 }

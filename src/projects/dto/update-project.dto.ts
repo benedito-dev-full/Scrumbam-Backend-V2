@@ -5,6 +5,7 @@ import {
   IsUrl,
   MaxLength,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -68,4 +69,29 @@ export class UpdateProjectDto {
   @IsString()
   @MaxLength(8)
   prefix?: string;
+
+  /**
+   * Vínculo do projeto com um time (DVincula -182 PROJECT_TEAM_LINK).
+   *
+   * Convenção (ADR-V2-029):
+   *  - `teamId` omitido → vínculo inalterado.
+   *  - `teamId` string → soft-delete do vínculo atual (se houver) e cria
+   *    novo vínculo (`idLocEscritu=teamId, idEntidade=projectId`). Requer
+   *    LEAD do novo time ou ADMIN da org.
+   *  - `teamId === null` → soft-delete do vínculo atual (projeto fica
+   *    órfão). Não requer permissão no time (apenas MANAGER do projeto).
+   *
+   * Para diferenciar omissão de `null` no service, use `'teamId' in dto`
+   * em vez de `dto.teamId !== undefined`.
+   *
+   * @see ADR-V2-029
+   */
+  @ApiPropertyOptional({
+    description: 'ID do time (string) | null para desvincular | omitir para manter',
+    example: '200',
+    nullable: true,
+  })
+  @ValidateIf((o: UpdateProjectDto) => o.teamId !== null && o.teamId !== undefined)
+  @IsString()
+  teamId?: string | null;
 }

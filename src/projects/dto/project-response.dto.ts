@@ -46,6 +46,21 @@ export class ProjectResponseDto {
   @ApiPropertyOptional({ description: 'URL do repositório git', nullable: true })
   gitRepo!: string | null;
 
+  /**
+   * ID do time ao qual o projeto está vinculado (DVincula -182).
+   *
+   * `null` quando o projeto é órfão (sem vínculo ativo de time).
+   * Backend SEMPRE retorna `string | null` — nunca `undefined`.
+   *
+   * @see ADR-V2-029
+   */
+  @ApiPropertyOptional({
+    description: 'ID do time vinculado (DVincula -182) ou null se órfão',
+    example: '200',
+    nullable: true,
+  })
+  teamId!: string | null;
+
   @ApiProperty({ description: 'Data de criação ISO 8601', example: '2026-05-09T00:00:00.000Z' })
   criadoEm!: string;
 

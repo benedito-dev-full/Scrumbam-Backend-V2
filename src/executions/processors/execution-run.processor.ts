@@ -1,25 +1,16 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Job } from 'bullmq';
 import { PrismaService } from '../../prisma.service';
 import { EventProducerService } from '../../eventos/core/event-producer.service';
 import { AgentTunnelService } from '../../automation/agents/agent-tunnel.service';
 import { AUTOMATION_CLASS_IDS } from '../../automation/constants/automation-class-ids';
-import {
-  ExecutionWorktree,
-  ExecutionWorktreeService,
-} from '../../automation/runtime/execution-worktree.service';
-import {
-  ExecutionRuntimeLogService,
-} from '../../automation/runtime/execution-runtime-log.service';
+import { ExecutionRuntimeLogService } from '../../automation/runtime/execution-runtime-log.service';
 import {
   RemoteAgentRuntime,
   RemoteExecutionClient,
-  RemoteStructuredCommand,
 } from '../../automation/runtime/remote-execution-client';
-import { RollbackService } from '../../automation/runtime/rollback.service';
-import { GithubPrService } from '../../automation/github/github-pr.service';
 import { EXECUTION_QUEUE_NAME } from '../queues/execution-queue.constants';
 import { ExecutionRunJobData } from '../queues/execution-queue.service';
 
@@ -28,8 +19,13 @@ const EXECUTION_CLASSES = [
   AUTOMATION_CLASS_IDS.EXEC_MEDIUM,
   AUTOMATION_CLASS_IDS.EXEC_HIGH,
 ];
-const MAX_OUTPUT_BYTES = 1024 * 1024;
-const INTERNAL_TIMEOUT_MS = 300000;
+
+/**
+ * Timeout default (segundos) entregue ao agente caso `DPedido.dados.timeoutSec`
+ * (ou equivalente) nao esteja preenchido. Plan-task1 §4 sugere 1800s (30min)
+ * para execucoes Claude Code.
+ */
+const DEFAULT_TIMEOUT_SEC = 1800;
 
 interface ExecutionPedido {
   chave: bigint;
@@ -48,6 +44,24 @@ interface RuntimeAgent {
   dados: Record<string, unknown>;
 }
 
+/**
+ * Processor BullMQ que dispara execucoes Claude Code remotamente.
+ *
+ * Modelo V2 (apos ADR-V2-030/-032/-033, Sub-tarefa 2.2 do
+ * `plan-automation-backend-side-task2.md`):
+ *
+ * 1. Carrega `DPedido` (idClasse=-301/-302/-303), `DProject`, agente.
+ * 2. Resolve `projectSlug`, `prompt`, `resumeSessionId`, `idClasseRisk`.
+ * 3. Marca execucao como RUNNING e emite `execution.started`.
+ * 4. Chama `remoteClient.execute()` (payload `RUN_CLAUDE_CODE`, ACK sincrono).
+ * 5. Retorna apos ACK. **O resultado real (exitCode, claudeSessionId,
+ *    outcome) chega via callback `POST /agents/:id/execution-result`**
+ *    (Sub-tarefa 2.4 — ainda nao implementada nesta sub-tarefa 2.2).
+ *
+ * Git operations (worktree, commit, push, rollback) deixaram de ser
+ * orquestradas pelo backend — sao responsabilidade do Claude Code dentro
+ * do projeto remoto (resolvido via `~/.claude/CLAUDE.md`).
+ */
 @Injectable()
 @Processor(EXECUTION_QUEUE_NAME, { concurrency: 3 })
 export class ExecutionRunProcessor extends WorkerHost {
@@ -59,22 +73,18 @@ export class ExecutionRunProcessor extends WorkerHost {
     private readonly agentTunnel: AgentTunnelService,
     private readonly remoteClient: RemoteExecutionClient,
     private readonly logService: ExecutionRuntimeLogService,
-    private readonly worktreeService: ExecutionWorktreeService,
-    private readonly rollbackService: RollbackService,
-    private readonly githubPrService: GithubPrService,
   ) {
     super();
   }
 
   async process(job: Job<ExecutionRunJobData>): Promise<void> {
     const { executionId, projectId, agentId } = job.data;
-    const logContext = this.logService.createContext();
     const pedido = await this.loadExecution(executionId);
     if (!pedido) return;
 
     const dados = pedido.dados;
-    const correlationId = this.asString(this.asRecord(dados.audit)?.correlationId)
-      ?? `execution-${executionId}`;
+    const correlationId =
+      this.asString(this.asRecord(dados.audit)?.correlationId) ?? `execution-${executionId}`;
 
     const [project, agent] = await Promise.all([
       this.loadProject(projectId),
@@ -82,11 +92,7 @@ export class ExecutionRunProcessor extends WorkerHost {
     ]);
 
     if (!project || !agent) {
-      await this.failExecution(
-        pedido,
-        correlationId,
-        'PROJECT_OR_AGENT_NOT_FOUND',
-      );
+      await this.failExecution(pedido, correlationId, 'PROJECT_OR_AGENT_NOT_FOUND');
       return;
     }
 
@@ -95,11 +101,7 @@ export class ExecutionRunProcessor extends WorkerHost {
       runtimeAgent = this.resolveRuntimeAgent(agent);
       const probe = await this.agentTunnel.probe(runtimeAgent.tunnelPort);
       if (!probe.tunnelOk) {
-        await this.failExecution(
-          pedido,
-          correlationId,
-          probe.error ?? 'TUNNEL_UNAVAILABLE',
-        );
+        await this.failExecution(pedido, correlationId, probe.error ?? 'TUNNEL_UNAVAILABLE');
         return;
       }
 
@@ -109,18 +111,13 @@ export class ExecutionRunProcessor extends WorkerHost {
         return;
       }
 
-      await this.safeEmit(
-        'execution.started',
-        { executionId, projectId, agentId },
-        correlationId,
-      );
+      await this.safeEmit('execution.started', { executionId, projectId, agentId }, correlationId);
 
-      await this.runExecution({
+      await this.dispatchRunClaudeCode({
         pedido,
         project,
         agent: runtimeAgent,
         correlationId,
-        logContext,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -128,164 +125,102 @@ export class ExecutionRunProcessor extends WorkerHost {
     }
   }
 
-  private async runExecution(input: {
+  /**
+   * Monta o payload V2 e dispara `RUN_CLAUDE_CODE`. Retorna apos receber
+   * ACK sincrono do agente — resultado completo chega via callback.
+   */
+  private async dispatchRunClaudeCode(input: {
     pedido: ExecutionPedido;
     project: RuntimeProject;
     agent: RemoteAgentRuntime;
     correlationId: string;
-    logContext: ReturnType<ExecutionRuntimeLogService['createContext']>;
   }): Promise<void> {
     const executionId = input.pedido.chave.toString();
     const projectId = input.project.chave.toString();
-    const dados = input.pedido.dados;
-    const command = this.asRecord(dados.command);
-    const rollbackOnFailure = dados.rollbackOnFailure === true;
-    let worktree: ExecutionWorktree | null = null;
 
-    try {
-      worktree = await this.worktreeService.prepare(
-        {
-          executionId,
-          projectId,
-          correlationId: input.correlationId,
-          agent: input.agent,
-          projectAutomation: this.resolveProjectAutomation(input.project.dados),
-          command: {
-            executable: this.asString(command?.executable),
-            args: this.asStringArray(command?.args),
-          },
-        },
-        input.logContext,
-      );
+    const projectSlug = this.resolveProjectSlug(input.project);
+    const prompt = this.resolvePrompt(input.pedido.dados);
+    const resumeSessionId = this.resolveResumeSessionId(input.pedido.dados);
+    const timeoutSec = this.resolveTimeoutSec(input.pedido.dados);
+    const idClasseRisk = Number(input.pedido.idClasse);
 
-      const headBefore = await this.runGitText(
-        input,
-        worktree,
-        ['rev-parse', 'HEAD'],
-      );
-
-      const result = await this.remoteClient.execute(
-        {
-          executionId,
-          projectId,
-          correlationId: input.correlationId,
-          agent: input.agent,
-          workspace: worktree.workspace,
-          command: this.userCommand(command),
-        },
-        input.logContext,
-      );
-
-      if (result.exitCode !== 0) {
-        const timeoutStatus = result.timedOut
-          ? AUTOMATION_CLASS_IDS.EXEC_STATUS_EXPIRED
-          : AUTOMATION_CLASS_IDS.EXEC_STATUS_FAILED;
-        if (rollbackOnFailure) {
-          await this.rollbackService.rollbackWorktree(
-            { executionId, projectId, correlationId: input.correlationId, agent: input.agent, worktree },
-            input.logContext,
-          );
-        }
-        await this.finishExecution(input.pedido.chave, {
-          statusCode: timeoutStatus.toString(),
-          claude: {
-            exitCode: result.exitCode,
-            stdout: result.stdout,
-            stderr: result.stderr,
-            outputTruncated: result.outputTruncated,
-            finishedAt: new Date().toISOString(),
-            durationMs: result.durationMs,
-          },
-        });
-        await this.emitFinished(
-          result.timedOut ? 'execution.expired' : 'execution.failed',
-          executionId,
-          projectId,
-          input.agent.agentId,
-          input.correlationId,
-        );
-        return;
-      }
-
-      const status = await this.runGitText(input, worktree, ['status', '--porcelain']);
-      const filesChanged = status
-        .split(/\r?\n/)
-        .filter((line) => line.trim().length > 0).length;
-
-      let headAfter = headBefore.trim();
-      let pushedAt: string | undefined;
-      const commitMessage = `chore: scrumban execution ${executionId}`;
-
-      if (filesChanged > 0 && worktree.isolated) {
-        await this.runGit(input, worktree, ['add', '-A']);
-        await this.runGit(input, worktree, ['commit', '-m', commitMessage]);
-        headAfter = (await this.runGitText(input, worktree, ['rev-parse', 'HEAD'])).trim();
-        await this.runGit(input, worktree, ['push', 'origin', worktree.branch]);
-        pushedAt = new Date().toISOString();
-      }
-
-      await this.finishExecution(input.pedido.chave, {
-        statusCode: AUTOMATION_CLASS_IDS.EXEC_STATUS_SUCCESS.toString(),
-          claude: {
-            exitCode: 0,
-            stdout: result.stdout,
-            stderr: result.stderr,
-            outputTruncated: result.outputTruncated,
-            finishedAt: new Date().toISOString(),
-            durationMs: result.durationMs,
-          },
-        git: {
-          headBefore: headBefore.trim(),
-          headAfter,
-          branch: worktree.branch,
-          commitMessage,
-          pushedAt,
-          filesChanged,
-        },
-      });
-
-      await this.githubPrService.openPrIfNeeded({
-        executionId,
-        projectId,
-        agentId: input.agent.agentId,
-        correlationId: input.correlationId,
-        projectDados: input.project.dados,
-        branch: worktree.branch,
-        baseBranch: worktree.baseBranch,
-        commandText: this.asString(command?.text) ?? '',
-        filesChanged,
-        diffNonEmpty: filesChanged > 0 && headAfter !== headBefore.trim(),
-      });
-
-      await this.emitFinished('execution.succeeded', executionId, projectId, input.agent.agentId, input.correlationId);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      await this.safeRecordSystem({
-        executionId,
-        projectId,
-        agentId: input.agent.agentId,
-        correlationId: input.correlationId,
-        line: message,
-        code: 'EXECUTION_RUNTIME_FAILED',
-      });
-
-      if (rollbackOnFailure && worktree) {
-        await this.rollbackService.rollbackWorktree(
-          { executionId, projectId, correlationId: input.correlationId, agent: input.agent, worktree },
-          input.logContext,
-        );
-      }
-
-      await this.finishExecution(input.pedido.chave, {
-        statusCode: AUTOMATION_CLASS_IDS.EXEC_STATUS_FAILED.toString(),
-        claude: {
-          exitCode: -1,
-          stderr: message,
-          finishedAt: new Date().toISOString(),
-        },
-      });
-      await this.emitFinished('execution.failed', executionId, projectId, input.agent.agentId, input.correlationId);
+    if (!Number.isInteger(idClasseRisk) || idClasseRisk > 0) {
+      throw new Error(`idClasseRisk invalido (${idClasseRisk}) — esperado -301/-302/-303`);
     }
+
+    await this.remoteClient.execute({
+      executionId,
+      projectId,
+      correlationId: input.correlationId,
+      projectSlug,
+      idClasseRisk,
+      prompt,
+      resumeSessionId,
+      timeoutSec,
+      agent: input.agent,
+    });
+
+    this.logger.log(
+      `execution_dispatched executionId=${executionId} projectSlug=${projectSlug} idClasseRisk=${idClasseRisk}`,
+    );
+
+    // Aguardar callback `POST /agents/:id/execution-result` (Sub-tarefa 2.4)
+    // para fechar a execucao (finishExecution / emitFinished). Por enquanto
+    // a execucao permanece em RUNNING ate sweeper ou callback.
+  }
+
+  /**
+   * Extrai `projectSlug` de `DProject.dados.slug`. Falha barulhento se
+   * ausente — sub-tarefa 2.3 (backfill) deve garantir que todo DProject
+   * tenha slug antes desta funcao rodar em producao.
+   */
+  private resolveProjectSlug(project: RuntimeProject): string {
+    const slug = this.asString(project.dados.slug);
+    if (!slug) {
+      throw new InternalServerErrorException(
+        `DProject.dados.slug ausente para projectId=${project.chave.toString()} — execute Sub-tarefa 2.3 (backfill) antes de disparar execucoes V2`,
+      );
+    }
+    return slug;
+  }
+
+  /**
+   * Extrai prompt do usuario do `DPedido.dados`. Tenta na ordem:
+   * 1. `dados.prompt` (canonico V2)
+   * 2. `dados.command.text` (legado — texto livre que virava command shell)
+   *
+   * Falha se ambos ausentes.
+   */
+  private resolvePrompt(dados: Record<string, unknown>): string {
+    const direct = this.asString(dados.prompt);
+    if (direct) return direct;
+
+    const command = this.asRecord(dados.command);
+    const fromCommand = this.asString(command?.text);
+    if (fromCommand) return fromCommand;
+
+    throw new Error(
+      'DPedido.dados.prompt ausente (e dados.command.text tambem) — prompt obrigatorio no protocolo V2',
+    );
+  }
+
+  /**
+   * Extrai `resumeSessionId` opcional de `DPedido.dados.resumeSessionId`.
+   * Retorna `null` se ausente (sessao nova).
+   */
+  private resolveResumeSessionId(dados: Record<string, unknown>): string | null {
+    const direct = this.asString(dados.resumeSessionId);
+    return direct ?? null;
+  }
+
+  /**
+   * Extrai timeout em segundos de `DPedido.dados.timeoutSec`. Default
+   * `DEFAULT_TIMEOUT_SEC` (1800s = 30min).
+   */
+  private resolveTimeoutSec(dados: Record<string, unknown>): number {
+    const direct = this.asNumber(dados.timeoutSec);
+    if (direct && direct > 0 && Number.isFinite(direct)) return direct;
+    return DEFAULT_TIMEOUT_SEC;
   }
 
   private async loadExecution(executionId: string): Promise<ExecutionPedido | null> {
@@ -442,11 +377,7 @@ export class ExecutionRunProcessor extends WorkerHost {
     agentId: string,
     correlationId: string,
   ): Promise<void> {
-    await this.safeEmit(
-      type,
-      { executionId, projectId, agentId },
-      correlationId,
-    );
+    await this.safeEmit(type, { executionId, projectId, agentId }, correlationId);
   }
 
   private async safeEmit(
@@ -455,12 +386,9 @@ export class ExecutionRunProcessor extends WorkerHost {
     correlationId: string,
   ): Promise<void> {
     try {
-      await this.eventProducer.addInternalEvent(
-        type,
-        payload,
-        correlationId,
-        { source: ExecutionRunProcessor.name },
-      );
+      await this.eventProducer.addInternalEvent(type, payload, correlationId, {
+        source: ExecutionRunProcessor.name,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.warn(`execution_event_emit_failed type=${type} error=${message}`);
@@ -478,79 +406,6 @@ export class ExecutionRunProcessor extends WorkerHost {
     }
   }
 
-  private async runGitText(
-    input: {
-      pedido: ExecutionPedido;
-      project: RuntimeProject;
-      agent: RemoteAgentRuntime;
-      correlationId: string;
-      logContext: ReturnType<ExecutionRuntimeLogService['createContext']>;
-    },
-    worktree: ExecutionWorktree,
-    args: string[],
-  ): Promise<string> {
-    const result = await this.runGit(input, worktree, args);
-    if (result.exitCode !== 0) {
-      throw new Error(`git ${args.join(' ')} failed`);
-    }
-    return result.stdout;
-  }
-
-  private runGit(
-    input: {
-      pedido: ExecutionPedido;
-      project: RuntimeProject;
-      agent: RemoteAgentRuntime;
-      correlationId: string;
-      logContext: ReturnType<ExecutionRuntimeLogService['createContext']>;
-    },
-    worktree: ExecutionWorktree,
-    args: string[],
-  ) {
-    return this.remoteClient.execute(
-      {
-        executionId: input.pedido.chave.toString(),
-        projectId: input.project.chave.toString(),
-        correlationId: input.correlationId,
-        agent: input.agent,
-        workspace: worktree.workspace,
-        command: {
-          executable: 'git',
-          args,
-          cwd: worktree.workspace,
-          timeoutMs: INTERNAL_TIMEOUT_MS,
-          maxOutputBytes: MAX_OUTPUT_BYTES,
-        },
-      },
-      input.logContext,
-    );
-  }
-
-  private userCommand(command: Record<string, unknown> | undefined): RemoteStructuredCommand {
-    const executable = this.asString(command?.executable);
-    const args = this.asStringArray(command?.args);
-    if (!executable || !args) {
-      throw new Error('Execution command estruturado ausente.');
-    }
-
-    return {
-      executable,
-      args,
-      cwd: this.asString(command?.cwd) ?? '.',
-      env: this.asRecordOfString(command?.env),
-      timeoutMs: this.asNumber(command?.timeoutMs) ?? 3600000,
-      maxOutputBytes: MAX_OUTPUT_BYTES,
-    };
-  }
-
-  private resolveProjectAutomation(dados: Record<string, unknown>) {
-    const automation = this.asRecord(dados.automation) ?? {};
-    return {
-      remotePath: this.asString(automation.remotePath),
-      remoteBranch: this.asString(automation.remoteBranch),
-    };
-  }
-
   private asRecord(value: unknown): Record<string, unknown> | undefined {
     return value && typeof value === 'object' && !Array.isArray(value)
       ? (value as Record<string, unknown>)
@@ -563,19 +418,5 @@ export class ExecutionRunProcessor extends WorkerHost {
 
   private asNumber(value: unknown): number | undefined {
     return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-  }
-
-  private asStringArray(value: unknown): string[] | undefined {
-    return Array.isArray(value) && value.every((item) => typeof item === 'string')
-      ? value
-      : undefined;
-  }
-
-  private asRecordOfString(value: unknown): Record<string, string> | undefined {
-    const record = this.asRecord(value);
-    if (!record) return undefined;
-    const entries = Object.entries(record);
-    if (!entries.every(([, item]) => typeof item === 'string')) return undefined;
-    return Object.fromEntries(entries) as Record<string, string>;
   }
 }

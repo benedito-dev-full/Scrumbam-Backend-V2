@@ -131,10 +131,7 @@ describe('ProjectsService', () => {
       });
 
       // Act
-      const result = await service.create(
-        { nome: 'Test Project', prefix: 'DEV' },
-        BigInt(100),
-      );
+      const result = await service.create({ nome: 'Test Project', prefix: 'DEV' }, BigInt(100));
 
       // Assert
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
@@ -185,47 +182,358 @@ describe('ProjectsService', () => {
     });
 
     it('deve paginar com cursor corretamente', async () => {
-      const vinculos = [
-        { idLocEscritu: BigInt(1) },
-        { idLocEscritu: BigInt(2) },
-      ];
-      prisma.dVincula.findMany.mockResolvedValue(vinculos);
+      const vinculos = [{ idLocEscritu: BigInt(1) }, { idLocEscritu: BigInt(2) }];
+      // findMany é chamado: (1) roles do user, (2) batch team links (após findMany de projects).
+      prisma.dVincula.findMany
+        .mockResolvedValueOnce(vinculos) // roles user
+        .mockResolvedValueOnce([]); // team links batch (nenhum projeto tem team)
       prisma.dProject.findMany.mockResolvedValue([mockProject]);
       prisma.dVincula.groupBy.mockResolvedValue([
         { idLocEscritu: BigInt(1), _count: { chave: 2 } },
       ]);
 
-      const result = await service.findMany(BigInt(100), undefined, 1);
+      const result = await service.findMany(BigInt(100), { limit: 1 });
 
       expect(result.pagination.hasMore).toBe(true);
       expect(result.pagination.nextCursor).toBe('1');
+      // teamId resolvido como null quando não há vínculo -182.
+      expect(result.items[0]?.teamId).toBeNull();
+    });
+
+    it('deve filtrar por teamId e retornar vazio quando time não tem projetos (ADR-V2-029)', async () => {
+      // 1ª chamada de findMany: resolução dos projectIds do time (vazio).
+      prisma.dVincula.findMany.mockResolvedValueOnce([]);
+
+      const result = await service.findMany(BigInt(100), { teamId: '999' });
+
+      expect(result.items).toHaveLength(0);
+      expect(result.pagination.hasMore).toBe(false);
+      // Apenas 1 query feita (a do time), sem buscar roles do user.
+      expect(prisma.dVincula.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('deve intersectar projectIds do time com membership do user (ADR-V2-029)', async () => {
+      prisma.dVincula.findMany
+        // 1) projectIds do time: project 1, 2
+        .mockResolvedValueOnce([{ idEntidade: BigInt(1) }, { idEntidade: BigInt(2) }])
+        // 2) roles do user (apenas projeto 1)
+        .mockResolvedValueOnce([{ idLocEscritu: BigInt(1) }])
+        // 3) team links batch
+        .mockResolvedValueOnce([{ idEntidade: BigInt(1), idLocEscritu: BigInt(200) }]);
+      prisma.dProject.findMany.mockResolvedValue([mockProject]);
+      prisma.dVincula.groupBy.mockResolvedValue([
+        { idLocEscritu: BigInt(1), _count: { chave: 1 } },
+      ]);
+
+      const result = await service.findMany(BigInt(100), { teamId: '200', limit: 20 });
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].teamId).toBe('200');
+      // 3 chamadas: time, user-roles, team-links batch.
+      expect(prisma.dVincula.findMany).toHaveBeenCalledTimes(3);
+    });
+
+    it('deve manter filtro teamId combinado com cursor na 2ª página (regressão review Task 19)', async () => {
+      // Bug detectado em review: spreads consecutivos com a mesma chave
+      // (`idLocEscritu`) faziam o segundo (cursor) sobrescrever o primeiro
+      // (teamProjectIds). Este teste prova que ambos os filtros coexistem.
+      prisma.dVincula.findMany
+        // 1) projectIds do time: 1, 2, 3
+        .mockResolvedValueOnce([
+          { idEntidade: BigInt(1) },
+          { idEntidade: BigInt(2) },
+          { idEntidade: BigInt(3) },
+        ])
+        // 2) roles do user (paginadas após cursor)
+        .mockResolvedValueOnce([{ idLocEscritu: BigInt(2) }])
+        // 3) team links batch
+        .mockResolvedValueOnce([{ idEntidade: BigInt(2), idLocEscritu: BigInt(200) }]);
+      prisma.dProject.findMany.mockResolvedValue([{ ...mockProject, chave: BigInt(2) }]);
+      prisma.dVincula.groupBy.mockResolvedValue([
+        { idLocEscritu: BigInt(2), _count: { chave: 1 } },
+      ]);
+
+      await service.findMany(BigInt(100), { teamId: '200', cursor: '3', limit: 20 });
+
+      // Verifica que a 2ª chamada (roles do user) contém AMBOS os filtros
+      // (`in: [...]` e `lt: ...`) no mesmo objeto idLocEscritu.
+      const userRolesCall = prisma.dVincula.findMany.mock.calls[1][0];
+      expect(userRolesCall.where.idLocEscritu).toEqual({
+        in: [BigInt(1), BigInt(2), BigInt(3)],
+        lt: BigInt(3),
+      });
     });
   });
 
   describe('findOne()', () => {
-    it('deve retornar projeto quando usuário é membro', async () => {
+    it('deve retornar projeto quando usuário é membro e teamId=null (órfão)', async () => {
       prisma.dProject.findFirst.mockResolvedValue(mockProject);
-      prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(1) });
+      // findFirst é chamado paralelo: (1) vinculo membership, (2) teamLink.
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce({ chave: BigInt(1) }) // membership
+        .mockResolvedValueOnce(null); // teamLink null
       prisma.dVincula.count.mockResolvedValue(3);
 
       const result = await service.findOne('1', BigInt(100));
 
       expect(result.id).toBe('1');
       expect(result.memberCount).toBe(3);
+      expect(result.teamId).toBeNull();
+    });
+
+    it('deve retornar teamId quando projeto tem vínculo -182 ativo (ADR-V2-029)', async () => {
+      prisma.dProject.findFirst.mockResolvedValue(mockProject);
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce({ chave: BigInt(1) }) // membership
+        .mockResolvedValueOnce({ idLocEscritu: BigInt(200) }); // teamLink ativo
+      prisma.dVincula.count.mockResolvedValue(3);
+
+      const result = await service.findOne('1', BigInt(100));
+
+      expect(result.teamId).toBe('200');
     });
 
     it('deve lançar NotFoundException quando projeto não encontrado', async () => {
       prisma.dProject.findFirst.mockResolvedValue(null);
-      prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(1) });
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce({ chave: BigInt(1) })
+        .mockResolvedValueOnce(null);
 
       await expect(service.findOne('999', BigInt(100))).rejects.toThrow(NotFoundException);
     });
 
     it('deve lançar ForbiddenException quando usuário não é membro', async () => {
       prisma.dProject.findFirst.mockResolvedValue(mockProject);
-      prisma.dVincula.findFirst.mockResolvedValue(null);
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce(null) // não é membro
+        .mockResolvedValueOnce(null);
 
       await expect(service.findOne('1', BigInt(999))).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('create() — vínculo de team (ADR-V2-029)', () => {
+    it('deve criar DVincula -182 quando teamId fornecido (LEAD do time)', async () => {
+      const txVinculaCreate = jest.fn().mockResolvedValue({ chave: BigInt(99) });
+      const txEntidadeFindFirst = jest
+        .fn()
+        // 1) team existe e está na mesma org
+        .mockResolvedValueOnce({ chave: BigInt(200), idEstab: BigInt(50) });
+      const txVinculaFindFirst = jest
+        .fn()
+        // 1) membership LEAD do time
+        .mockResolvedValueOnce({ metaDados: { cargo: 'LEAD' } });
+      const projWithOrg = { ...mockProject, idEstab: BigInt(50) };
+
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const txMock = {
+          dProject: { create: jest.fn().mockResolvedValue(projWithOrg) },
+          dVincula: {
+            create: txVinculaCreate,
+            findFirst: txVinculaFindFirst,
+          },
+          dEntidade: { findFirst: txEntidadeFindFirst },
+        };
+        return fn(txMock);
+      });
+
+      const result = await service.create({ nome: 'P', orgId: '50', teamId: '200' }, BigInt(100));
+
+      expect(txVinculaCreate).toHaveBeenCalledWith({
+        data: {
+          idClasse: BigInt(-182),
+          idLocEscritu: BigInt(200),
+          idEntidade: BigInt(1),
+        },
+      });
+      // project.team.linked emitido APÓS commit
+      expect(eventProducer.addInternalEvent).toHaveBeenCalledWith(
+        'project.team.linked',
+        expect.objectContaining({ teamId: '200', previousTeamId: null }),
+        'test-corr-id',
+        expect.objectContaining({ source: 'ProjectsService' }),
+      );
+      expect(result.teamId).toBe('200');
+    });
+
+    it('deve REJEITAR cross-org (time de outra org) — ForbiddenException', async () => {
+      const projWithOrg = { ...mockProject, idEstab: BigInt(50) };
+
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const txMock = {
+          dProject: { create: jest.fn().mockResolvedValue(projWithOrg) },
+          dVincula: { create: jest.fn(), findFirst: jest.fn() },
+          dEntidade: {
+            findFirst: jest
+              .fn()
+              // team existe MAS está em outra org (idEstab=999, projeto=50)
+              .mockResolvedValueOnce({ chave: BigInt(200), idEstab: BigInt(999) }),
+          },
+        };
+        return fn(txMock);
+      });
+
+      await expect(
+        service.create({ nome: 'P', orgId: '50', teamId: '200' }, BigInt(100)),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('deve lançar NotFoundException quando teamId não existe', async () => {
+      const projWithOrg = { ...mockProject, idEstab: BigInt(50) };
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const txMock = {
+          dProject: { create: jest.fn().mockResolvedValue(projWithOrg) },
+          dVincula: { create: jest.fn(), findFirst: jest.fn() },
+          dEntidade: { findFirst: jest.fn().mockResolvedValueOnce(null) },
+        };
+        return fn(txMock);
+      });
+
+      await expect(
+        service.create({ nome: 'P', orgId: '50', teamId: '999' }, BigInt(100)),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('deve criar projeto órfão quando teamId omitido (teamId=null no response)', async () => {
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const txMock = {
+          dProject: { create: jest.fn().mockResolvedValue(mockProject) },
+          dVincula: { create: jest.fn() },
+        };
+        return fn(txMock);
+      });
+
+      const result = await service.create({ nome: 'P' }, BigInt(100));
+
+      expect(result.teamId).toBeNull();
+      // project.team.linked NÃO foi emitido
+      const linkedCalls = eventProducer.addInternalEvent.mock.calls.filter(
+        (c) => c[0] === 'project.team.linked',
+      );
+      expect(linkedCalls).toHaveLength(0);
+    });
+  });
+
+  describe('update() — vínculo de team (ADR-V2-029)', () => {
+    it('deve reatribuir time (X→Y) com soft-delete antigo + create novo', async () => {
+      // requireManagerRole: findFirst MANAGER (1ª call)
+      // previousTeamLink: findFirst (-182) (2ª call) — retorna existing
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce({ chave: BigInt(99) }) // manager
+        .mockResolvedValueOnce({ chave: BigInt(77), idLocEscritu: BigInt(200) }); // previous link
+      const projWithOrg = { ...mockProject, idEstab: BigInt(50) };
+      prisma.dProject.findFirst.mockResolvedValue(projWithOrg);
+      prisma.dVincula.count.mockResolvedValue(1);
+
+      const txUpdateLink = jest.fn().mockResolvedValue({ chave: BigInt(77) });
+      const txCreateLink = jest.fn().mockResolvedValue({ chave: BigInt(78) });
+      const txUpdateProject = jest.fn().mockResolvedValue(projWithOrg);
+      const txEntidadeFindFirst = jest
+        .fn()
+        .mockResolvedValueOnce({ chave: BigInt(201), idEstab: BigInt(50) });
+      const txVinculaFindFirst = jest.fn().mockResolvedValueOnce({ metaDados: { cargo: 'LEAD' } });
+
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        return fn({
+          dProject: { update: txUpdateProject },
+          dVincula: {
+            update: txUpdateLink,
+            create: txCreateLink,
+            findFirst: txVinculaFindFirst,
+          },
+          dEntidade: { findFirst: txEntidadeFindFirst },
+        });
+      });
+
+      const result = await service.update('1', { teamId: '201' }, BigInt(100));
+
+      expect(txUpdateLink).toHaveBeenCalledWith({
+        where: { chave: BigInt(77) },
+        data: { excluido: true },
+      });
+      expect(txCreateLink).toHaveBeenCalledWith({
+        data: {
+          idClasse: BigInt(-182),
+          idLocEscritu: BigInt(201),
+          idEntidade: BigInt(1),
+        },
+      });
+      expect(eventProducer.addInternalEvent).toHaveBeenCalledWith(
+        'project.team.linked',
+        expect.objectContaining({ teamId: '201', previousTeamId: '200' }),
+        'test-corr-id',
+        expect.objectContaining({ source: 'ProjectsService' }),
+      );
+      expect(result.teamId).toBe('201');
+    });
+
+    it('deve desvincular (X→null) com soft-delete e emitir project.team.unlinked', async () => {
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce({ chave: BigInt(99) }) // manager
+        .mockResolvedValueOnce({ chave: BigInt(77), idLocEscritu: BigInt(200) });
+      prisma.dProject.findFirst.mockResolvedValue(mockProject);
+      prisma.dVincula.count.mockResolvedValue(1);
+
+      const txUpdateLink = jest.fn().mockResolvedValue({ chave: BigInt(77) });
+      const txCreateLink = jest.fn();
+      const txUpdateProject = jest.fn().mockResolvedValue(mockProject);
+
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        return fn({
+          dProject: { update: txUpdateProject },
+          dVincula: { update: txUpdateLink, create: txCreateLink, findFirst: jest.fn() },
+        });
+      });
+
+      const result = await service.update('1', { teamId: null }, BigInt(100));
+
+      expect(txUpdateLink).toHaveBeenCalledWith({
+        where: { chave: BigInt(77) },
+        data: { excluido: true },
+      });
+      expect(txCreateLink).not.toHaveBeenCalled();
+      expect(eventProducer.addInternalEvent).toHaveBeenCalledWith(
+        'project.team.unlinked',
+        expect.objectContaining({ teamId: null, previousTeamId: '200' }),
+        'test-corr-id',
+        expect.objectContaining({ source: 'ProjectsService' }),
+      );
+      expect(result.teamId).toBeNull();
+    });
+
+    it('deve REJEITAR update por não-MANAGER (ForbiddenException antes de mutação)', async () => {
+      prisma.dVincula.findFirst.mockResolvedValueOnce(null); // não é MANAGER
+
+      await expect(service.update('1', { teamId: '200' }, BigInt(999))).rejects.toThrow(
+        ForbiddenException,
+      );
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('deve manter teamId quando dto não envia o campo (no-op)', async () => {
+      prisma.dVincula.findFirst.mockResolvedValueOnce({ chave: BigInt(99) }); // manager
+      prisma.dProject.findFirst.mockResolvedValue(mockProject);
+      prisma.dVincula.count.mockResolvedValue(1);
+      // findFirst final para resolver teamId atual (vínculo ativo no projeto)
+      prisma.dVincula.findFirst.mockResolvedValueOnce({ idLocEscritu: BigInt(200) });
+
+      const txUpdateProject = jest.fn().mockResolvedValue(mockProject);
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        return fn({
+          dProject: { update: txUpdateProject },
+          dVincula: { update: jest.fn(), create: jest.fn(), findFirst: jest.fn() },
+        });
+      });
+
+      const result = await service.update('1', { nome: 'Novo' }, BigInt(100));
+
+      expect(result.teamId).toBe('200');
+      // Nenhum evento de team emitido
+      const linkedCalls = eventProducer.addInternalEvent.mock.calls.filter(
+        (c) => c[0] === 'project.team.linked' || c[0] === 'project.team.unlinked',
+      );
+      expect(linkedCalls).toHaveLength(0);
     });
   });
 

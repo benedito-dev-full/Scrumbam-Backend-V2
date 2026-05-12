@@ -75,10 +75,7 @@ describe('TeamsService', () => {
     };
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        TeamsService,
-        { provide: PrismaService, useValue: prisma },
-      ],
+      providers: [TeamsService, { provide: PrismaService, useValue: prisma }],
     }).compile();
 
     service = module.get<TeamsService>(TeamsService);
@@ -194,11 +191,46 @@ describe('TeamsService', () => {
     // Act
     await service.delete('200', BigInt(1));
 
-    // Assert: cascade na ordem correta (memberships → counters → team)
-    expect(prisma.dVincula.updateMany).toHaveBeenCalledTimes(1);
+    // Assert: cascade (memberships -181, project-team links -182, counters, team)
+    expect(prisma.dVincula.updateMany).toHaveBeenCalledTimes(2);
     expect(prisma.dTabela.updateMany).toHaveBeenCalledTimes(1);
     expect(prisma.dEntidade.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: { excluido: true } }),
     );
+  });
+
+  /**
+   * Bug #2 (review Task 19 — ADR-V2-029): delete de time não cascateava
+   * vínculos -182 PROJECT_TEAM_LINK, deixando-os zumbis. Este teste prova
+   * que ambos os vínculos (-181 membership + -182 project-link) são
+   * soft-deletados na mesma transação.
+   */
+  it('delete: cascade soft-deleta vínculos -182 PROJECT_TEAM_LINK (regressão Bug #2)', async () => {
+    // Arrange
+    prisma.dEntidade.findFirst.mockResolvedValue({ chave: BigInt(200), idEstab: BigInt(100) });
+    prisma.dVincula.findFirst.mockResolvedValue(mockLeadMembership);
+    prisma.$transaction.mockImplementation(async (cb: (tx: typeof prisma) => Promise<unknown>) =>
+      cb(prisma),
+    );
+    prisma.dVincula.updateMany.mockResolvedValue({ count: 2 });
+    prisma.dTabela.updateMany.mockResolvedValue({ count: 1 });
+    prisma.dEntidade.update.mockResolvedValue({ chave: BigInt(200) });
+
+    // Act
+    await service.delete('200', BigInt(1));
+
+    // Assert: updateMany foi chamado especificamente para -182 (PROJECT_TEAM_LINK)
+    const projectLinkCascade = prisma.dVincula.updateMany.mock.calls.find((call: unknown[]) => {
+      const arg = call[0] as { where?: { idClasse?: bigint } };
+      return arg.where?.idClasse === BigInt(-182);
+    });
+    expect(projectLinkCascade).toBeDefined();
+    expect(projectLinkCascade[0]).toEqual({
+      where: { idLocEscritu: BigInt(200), idClasse: BigInt(-182), excluido: false },
+      data: { excluido: true },
+    });
+
+    // Cascade total: 2 updateMany em DVincula (-181 e -182) + 1 em DTabela
+    expect(prisma.dVincula.updateMany).toHaveBeenCalledTimes(2);
   });
 });

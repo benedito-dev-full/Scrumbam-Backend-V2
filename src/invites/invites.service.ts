@@ -57,6 +57,17 @@ interface InviteMetaDados {
   usedAt: string | null;
   invitedByUserId: string;
   status: 'PENDING' | 'ACCEPTED' | 'EXPIRED' | 'REVOKED';
+  /**
+   * Fluxo do aceite (ADR-V2-030). Default `new_user` para back-compat com
+   * convites criados antes da migracao para multi-tenant identity.
+   */
+  flow?: 'new_user' | 'existing_user';
+  /**
+   * Apenas para flow=`existing_user`: id (string) da DEntidade -150 ja
+   * existente que sera vinculada a org via DVincula no accept. Snapshot
+   * tirado no momento do createInvite — re-validado no accept.
+   */
+  targetUserId?: string;
 }
 
 /**
@@ -155,11 +166,16 @@ export class InvitesService {
       throw new ForbiddenException('Inviter nao possui perfil de usuario');
     }
 
-    // Verificar se email ja virou DEntidade USER e e membro
+    // Verificar se email ja virou DEntidade USER (ADR-V2-030: merge flow).
+    // - Se ja e membro DESTA org → 409 (decisao CEO).
+    // - Se tem conta em outra org → flow='existing_user' (token de merge).
+    // - Se nao tem conta → flow='new_user' (fluxo padrao do convite).
     const existingUser = await this.prisma.dEntidade.findFirst({
       where: { idClasse: ID_CLASSE_USER, email: emailLower, excluido: false },
       select: { chave: true },
     });
+    let inviteFlow: 'new_user' | 'existing_user' = 'new_user';
+    let targetUserId: bigint | null = null;
     if (existingUser) {
       const existingLink = await this.prisma.dVincula.findFirst({
         where: {
@@ -173,10 +189,9 @@ export class InvitesService {
       if (existingLink) {
         throw new ConflictException('Email ja e membro desta organizacao');
       }
-      // R4: email registrado em outra org. MVP rejeita; refinar em fase 2.
-      throw new ConflictException(
-        'Email ja possui conta. Peca para um admin adiciona-lo via gestao de membros.',
-      );
+      // Email tem conta noutra org — gerar token de merge (sem criar DUserGroup).
+      inviteFlow = 'existing_user';
+      targetUserId = existingUser.chave;
     }
 
     // Verificar convite pendente
@@ -200,6 +215,8 @@ export class InvitesService {
       usedAt: null,
       invitedByUserId: inviterUserId.toString(),
       status: 'PENDING',
+      flow: inviteFlow,
+      ...(targetUserId ? { targetUserId: targetUserId.toString() } : {}),
     };
 
     const invite = await this.prisma.dTabela.create({
@@ -231,7 +248,7 @@ export class InvitesService {
     );
 
     this.logger.log(
-      `Convite criado inviteId=${invite.chave} orgId=${orgId} email=${emailLower} role=${dto.role}`,
+      `Convite criado inviteId=${invite.chave} orgId=${orgId} email=${emailLower} role=${dto.role} flow=${inviteFlow}`,
     );
 
     // Fire-and-forget — log estruturado de falha (NUNCA bloquear resposta).
@@ -306,6 +323,7 @@ export class InvitesService {
       email: invite.nome,
       role: meta.role,
       expiresAt: meta.expiresAt,
+      flow: meta.flow ?? 'new_user',
     };
   }
 
@@ -337,35 +355,56 @@ export class InvitesService {
       throw new NotFoundException();
     }
 
-    const senhaHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
     const tokenHash = this.hashToken(rawToken);
 
-    // $transaction atomica — TODA criacao dentro. Geracao de JWT FORA.
+    // Pre-resolve do flow (1 query rapida fora da tx) — necessario porque:
+    //  - new_user precisa hashar senha ANTES da tx (bcrypt e CPU-bound, ~100ms).
+    //  - existing_user nao precisa de senha (ignora dto.name/password).
+    //  - Hashar senha dentro da tx prolonga lock de DB desnecessariamente.
+    // A re-validacao do token dentro da tx (race-safe) e feita normalmente.
+    const preInvite = await this.findValidInviteByHashWithinTx(this.prisma, tokenHash);
+    if (!preInvite) {
+      throw new NotFoundException();
+    }
+    const preMeta = preInvite.metaDados as unknown as InviteMetaDados;
+    const flow: 'new_user' | 'existing_user' = preMeta.flow ?? 'new_user';
+
+    // Validar payload conforme o flow (regras de negocio que o DTO opcional nao cobre).
+    if (flow === 'new_user') {
+      if (!dto.name || dto.name.trim().length < 2) {
+        throw new BadRequestException('Nome e obrigatorio (minimo 2 caracteres)');
+      }
+      if (!dto.password || dto.password.length < 8) {
+        throw new BadRequestException('Senha e obrigatoria (minimo 8 caracteres)');
+      }
+    } else if (dto.name || dto.password) {
+      // existing_user: name/password sao ignorados — apenas log, nao falha.
+      this.logger.warn(
+        `acceptInvite inviteId=${preInvite.chave} flow=existing_user com name/password no body — ignorados`,
+      );
+    }
+
+    const senhaHash =
+      flow === 'new_user' && dto.password ? await bcrypt.hash(dto.password, BCRYPT_ROUNDS) : null;
+
+    // $transaction atomica — TODA escrita dentro. Geracao de JWT FORA.
     const result = await this.prisma.$transaction(async (tx) => {
-      // 1. Re-validar token dentro da tx (concurrent-safe).
+      // 1. Re-validar token dentro da tx (concurrent-safe contra duplo-accept).
       const invite = await this.findValidInviteByHashWithinTx(tx, tokenHash);
       if (!invite) {
         throw new NotFoundException();
       }
 
       const meta = invite.metaDados as unknown as InviteMetaDados;
+      const txFlow: 'new_user' | 'existing_user' = meta.flow ?? 'new_user';
       const emailLower = invite.nome.toLowerCase();
-
-      // 2. Race: email pode ter virado user/membro entre GET e POST.
-      const existingUser = await tx.dEntidade.findFirst({
-        where: { idClasse: ID_CLASSE_USER, email: emailLower, excluido: false },
-        select: { chave: true },
-      });
-      if (existingUser) {
-        throw new ConflictException('Email ja possui conta. Faca login normalmente.');
-      }
 
       const orgId = invite.idLocEscrituracao;
       if (!orgId) {
         throw new NotFoundException();
       }
 
-      // 3. Verificar que org ainda existe.
+      // 2. Verificar que org ainda existe.
       const org = await tx.dEntidade.findFirst({
         where: { chave: orgId, idClasse: BigInt(-152), excluido: false },
         select: { chave: true },
@@ -374,42 +413,116 @@ export class InvitesService {
         throw new NotFoundException();
       }
 
-      // 4. DUserGroup (-46) — credenciais.
-      const userGroup = await tx.dUserGroup.create({
-        data: {
-          idClasse: ID_CLASSE_USER_GROUP,
-          usuario: emailLower,
-          senha: senhaHash,
-          nome: dto.name,
-          dados: {} as Prisma.InputJsonValue,
-        },
-      });
-
-      // 5. DEntidade (-150) — perfil.
-      const userEntidade = await tx.dEntidade.create({
-        data: {
-          idClasse: ID_CLASSE_USER,
-          nome: dto.name,
-          email: emailLower,
-          dUserGroupId: userGroup.chave,
-        },
-      });
-
-      // 6. DVincula — role na org.
       const roleClasse = ROLE_TO_VINCULA_CLASSE[meta.role];
       if (!roleClasse) {
         throw new BadRequestException(`Role invalido no convite: ${meta.role}`);
       }
-      await tx.dVincula.create({
-        data: {
-          idClasse: roleClasse,
-          idLocEscritu: orgId,
-          idEntidade: userEntidade.chave,
-          metaDados: { cargo: meta.role } as Prisma.InputJsonValue,
-        },
-      });
 
-      // 7. UPDATE DTabela — marca convite como usado (status=ACCEPTED).
+      let userGroupId: bigint;
+      let userEntidadeId: bigint;
+
+      if (txFlow === 'existing_user') {
+        // ───────── Merge flow (ADR-V2-030) ─────────
+        // NAO cria DUserGroup nem DEntidade — apenas DVincula.
+        if (!meta.targetUserId) {
+          throw new NotFoundException();
+        }
+        const targetEntidadeId = BigInt(meta.targetUserId);
+        const targetEntidade = await tx.dEntidade.findFirst({
+          where: {
+            chave: targetEntidadeId,
+            idClasse: ID_CLASSE_USER,
+            excluido: false,
+          },
+          select: { chave: true, dUserGroupId: true, email: true },
+        });
+        if (!targetEntidade || !targetEntidade.dUserGroupId) {
+          // Anti-enumeracao: usuario alvo sumiu — token vira invalido.
+          throw new NotFoundException();
+        }
+        // Defesa: email do convite deve continuar bate ndo com email do user alvo
+        // (cobre caso de admin convidar B@x.com e depois user B mudar seu email).
+        if (targetEntidade.email && targetEntidade.email.toLowerCase() !== emailLower) {
+          throw new NotFoundException();
+        }
+
+        // Race-safe: re-checar que ainda nao e membro desta org.
+        const existingLink = await tx.dVincula.findFirst({
+          where: {
+            idEntidade: targetEntidadeId,
+            idLocEscritu: orgId,
+            idClasse: { in: [ID_CLASSE_ORG_ADMIN, ID_CLASSE_ORG_MEMBER, ID_CLASSE_ORG_VIEWER] },
+            excluido: false,
+          },
+          select: { chave: true },
+        });
+        if (existingLink) {
+          throw new ConflictException('Email ja e membro desta organizacao');
+        }
+
+        await tx.dVincula.create({
+          data: {
+            idClasse: roleClasse,
+            idLocEscritu: orgId,
+            idEntidade: targetEntidadeId,
+            metaDados: { cargo: meta.role, mergedFromInvite: true } as Prisma.InputJsonValue,
+          },
+        });
+
+        userGroupId = targetEntidade.dUserGroupId;
+        userEntidadeId = targetEntidadeId;
+      } else {
+        // ───────── new_user flow (cria conta) ─────────
+        if (!senhaHash || !dto.name) {
+          // Defesa em profundidade — validado fora da tx, mas garante o invariant.
+          throw new BadRequestException('Nome e senha sao obrigatorios para criar conta');
+        }
+
+        // Race: email pode ter virado user/membro entre GET e POST.
+        const existingUser = await tx.dEntidade.findFirst({
+          where: { idClasse: ID_CLASSE_USER, email: emailLower, excluido: false },
+          select: { chave: true },
+        });
+        if (existingUser) {
+          throw new ConflictException('Email ja possui conta. Faca login normalmente.');
+        }
+
+        // DUserGroup (-46) — credenciais.
+        const userGroup = await tx.dUserGroup.create({
+          data: {
+            idClasse: ID_CLASSE_USER_GROUP,
+            usuario: emailLower,
+            senha: senhaHash,
+            nome: dto.name,
+            dados: {} as Prisma.InputJsonValue,
+          },
+        });
+
+        // DEntidade (-150) — perfil.
+        const userEntidade = await tx.dEntidade.create({
+          data: {
+            idClasse: ID_CLASSE_USER,
+            nome: dto.name,
+            email: emailLower,
+            dUserGroupId: userGroup.chave,
+          },
+        });
+
+        // DVincula — role na org.
+        await tx.dVincula.create({
+          data: {
+            idClasse: roleClasse,
+            idLocEscritu: orgId,
+            idEntidade: userEntidade.chave,
+            metaDados: { cargo: meta.role } as Prisma.InputJsonValue,
+          },
+        });
+
+        userGroupId = userGroup.chave;
+        userEntidadeId = userEntidade.chave;
+      }
+
+      // UPDATE DTabela — marca convite como usado (status=ACCEPTED).
       const usedAt = new Date().toISOString();
       const newMeta: InviteMetaDados = {
         ...meta,
@@ -424,34 +537,38 @@ export class InvitesService {
       });
 
       return {
-        userGroupId: userGroup.chave,
-        userEntidadeId: userEntidade.chave,
+        userGroupId,
+        userEntidadeId,
         orgId,
         inviteId: invite.chave,
         role: meta.role,
+        flow: txFlow,
       };
     });
 
     // Audit APOS commit (fora da tx). Falha aqui NAO compromete o aceite.
     const correlationId = this.correlationIdService.getOrGenerate();
     await this.eventProducer.addInternalEvent(
-      'invite.accepted',
+      result.flow === 'existing_user' ? 'invite.accepted.merge' : 'invite.accepted',
       {
         inviteId: result.inviteId.toString(),
         orgId: result.orgId.toString(),
         newUserId: result.userEntidadeId.toString(),
         role: result.role,
+        flow: result.flow,
       },
       correlationId,
       { source: InvitesService.name },
     );
 
     this.logger.log(
-      `Convite aceito inviteId=${result.inviteId} newUserId=${result.userEntidadeId} role=${result.role}`,
+      `Convite aceito inviteId=${result.inviteId} userId=${result.userEntidadeId} role=${result.role} flow=${result.flow}`,
     );
 
     // Auto-login FORA da $transaction (gera JWT + refresh).
-    const session = await this.authService.issueSessionForUser(result.userGroupId);
+    // Em existing_user, preferimos emitir sessao ja na org recem-mergeada
+    // (UX: usuario completa o accept e ja "esta" no workspace novo).
+    const session = await this.authService.issueSessionForUser(result.userGroupId, result.orgId);
 
     return {
       ...session,
@@ -510,7 +627,10 @@ export class InvitesService {
    * Idem `findValidInviteByRawToken`, mas operando sobre tx (transaction).
    * Recebe ja o hash (calculado fora da tx para evitar custo redundante).
    */
-  private async findValidInviteByHashWithinTx(tx: Prisma.TransactionClient, tokenHash: string) {
+  private async findValidInviteByHashWithinTx(
+    tx: Prisma.TransactionClient | PrismaService,
+    tokenHash: string,
+  ) {
     const now = new Date();
     const candidates = await tx.dTabela.findMany({
       where: {

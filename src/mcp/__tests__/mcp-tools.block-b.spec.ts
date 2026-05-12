@@ -31,10 +31,20 @@ describe('MCP Bloco B tools', () => {
 
   beforeEach(() => {
     tasksService = {
-      findMany: jest.fn().mockResolvedValue({ items: [], pagination: { hasMore: false, nextCursor: null } }),
-      create: jest.fn().mockResolvedValue({ id: '1', nome: 'Task', status: 'INBOX', projectId: unsafeId }),
+      findMany: jest
+        .fn()
+        .mockResolvedValue({ items: [], pagination: { hasMore: false, nextCursor: null } }),
+      create: jest
+        .fn()
+        .mockResolvedValue({ id: '1', nome: 'Task', status: 'INBOX', projectId: unsafeId }),
       findOne: jest.fn().mockResolvedValue({ id: unsafeId, projectId: unsafeId, status: 'INBOX' }),
-      updateStatus: jest.fn().mockResolvedValue({ id: unsafeId, status: 'READY', atualizadoEm: '2026-05-10T00:00:00.000Z' }),
+      updateStatus: jest
+        .fn()
+        .mockResolvedValue({
+          id: unsafeId,
+          status: 'READY',
+          atualizadoEm: '2026-05-10T00:00:00.000Z',
+        }),
     };
     projectsService = {
       findMany: jest.fn().mockResolvedValue({
@@ -45,7 +55,9 @@ describe('MCP Bloco B tools', () => {
       findOne: jest.fn().mockResolvedValue({ id: unsafeId, nome: 'Projeto' }),
     };
     tabelaService = {
-      listarPorClasse: jest.fn().mockResolvedValue({ items: [], pagination: { hasMore: false, nextCursor: null } }),
+      listarPorClasse: jest
+        .fn()
+        .mockResolvedValue({ items: [], pagination: { hasMore: false, nextCursor: null } }),
     };
 
     router = new McpRouterService(
@@ -98,11 +110,7 @@ describe('MCP Bloco B tools', () => {
   });
 
   it('list_tasks sem projectId restringe a projetos acessiveis antes de delegar', async () => {
-    await router.dispatch(
-      'tools/call',
-      { name: 'list_tasks', arguments: { limit: 10 } },
-      userCtx,
-    );
+    await router.dispatch('tools/call', { name: 'list_tasks', arguments: { limit: 10 } }, userCtx);
 
     expect(projectsService.findAccessibleProjectIds).toHaveBeenCalledWith(userCtx.dEntidadeId);
     expect(tasksService.findMany).toHaveBeenCalledWith({
@@ -117,11 +125,7 @@ describe('MCP Bloco B tools', () => {
     );
     projectsService.findAccessibleProjectIds.mockResolvedValueOnce(projectIds);
 
-    await router.dispatch(
-      'tools/call',
-      { name: 'list_tasks', arguments: { limit: 10 } },
-      userCtx,
-    );
+    await router.dispatch('tools/call', { name: 'list_tasks', arguments: { limit: 10 } }, userCtx);
 
     expect(tasksService.findMany).toHaveBeenCalledWith({
       projectIds,
@@ -249,13 +253,19 @@ describe('MCP Bloco B tools', () => {
       userCtx,
     );
 
-    expect(projectsService.findMany).toHaveBeenCalledWith(userCtx.dEntidadeId, unsafeId, 10);
+    expect(projectsService.findMany).toHaveBeenCalledWith(userCtx.dEntidadeId, {
+      cursor: unsafeId,
+      limit: 10,
+    });
   });
 
   it('list_sprints usa TabelaService.listarPorClasse para DTabela -400', async () => {
     await router.dispatch(
       'tools/call',
-      { name: 'list_sprints', arguments: { projectId: unsafeId, cursor: '9007199254740999', limit: 25 } },
+      {
+        name: 'list_sprints',
+        arguments: { projectId: unsafeId, cursor: '9007199254740999', limit: 25 },
+      },
       userCtx,
     );
 
@@ -287,26 +297,47 @@ describe('MCP Bloco B tools', () => {
 
   it('valida params invalidos nas 5 tools antes de chamar services canonicos', async () => {
     await expect(
-      router.dispatch('tools/call', { name: 'list_tasks', arguments: { status: 'UNKNOWN' } }, userCtx),
+      router.dispatch(
+        'tools/call',
+        { name: 'list_tasks', arguments: { status: 'UNKNOWN' } },
+        userCtx,
+      ),
     ).resolves.toEqual(
       expect.objectContaining({
-        error: expect.objectContaining({ code: -32602, data: { field: 'status', issue: 'invalid V3 status code' } }),
+        error: expect.objectContaining({
+          code: -32602,
+          data: { field: 'status', issue: 'invalid V3 status code' },
+        }),
       }),
     );
 
     await expect(
-      router.dispatch('tools/call', { name: 'create_task', arguments: { projectId: unsafeId } }, userCtx),
+      router.dispatch(
+        'tools/call',
+        { name: 'create_task', arguments: { projectId: unsafeId } },
+        userCtx,
+      ),
     ).resolves.toEqual(
       expect.objectContaining({
-        error: expect.objectContaining({ code: -32602, data: { field: 'titulo', issue: 'required string' } }),
+        error: expect.objectContaining({
+          code: -32602,
+          data: { field: 'titulo', issue: 'required string' },
+        }),
       }),
     );
 
     await expect(
-      router.dispatch('tools/call', { name: 'update_status', arguments: { taskId: 'bad', statusCode: 'READY' } }, userCtx),
+      router.dispatch(
+        'tools/call',
+        { name: 'update_status', arguments: { taskId: 'bad', statusCode: 'READY' } },
+        userCtx,
+      ),
     ).resolves.toEqual(
       expect.objectContaining({
-        error: expect.objectContaining({ code: -32602, data: { field: 'taskId', issue: 'valid bigint string expected' } }),
+        error: expect.objectContaining({
+          code: -32602,
+          data: { field: 'taskId', issue: 'valid bigint string expected' },
+        }),
       }),
     );
 
@@ -314,7 +345,10 @@ describe('MCP Bloco B tools', () => {
       router.dispatch('tools/call', { name: 'list_projects', arguments: { limit: 51 } }, userCtx),
     ).resolves.toEqual(
       expect.objectContaining({
-        error: expect.objectContaining({ code: -32602, data: { field: 'limit', issue: 'integer between 1 and 50 expected' } }),
+        error: expect.objectContaining({
+          code: -32602,
+          data: { field: 'limit', issue: 'integer between 1 and 50 expected' },
+        }),
       }),
     );
 
@@ -322,7 +356,10 @@ describe('MCP Bloco B tools', () => {
       router.dispatch('tools/call', { name: 'list_sprints', arguments: { limit: 20 } }, userCtx),
     ).resolves.toEqual(
       expect.objectContaining({
-        error: expect.objectContaining({ code: -32602, data: { field: 'projectId', issue: 'required string' } }),
+        error: expect.objectContaining({
+          code: -32602,
+          data: { field: 'projectId', issue: 'required string' },
+        }),
       }),
     );
 
@@ -366,7 +403,11 @@ describe('MCP Bloco B tools', () => {
     ).rejects.toThrow(forbidden);
     expect(tabelaService.listarPorClasse).not.toHaveBeenCalled();
 
-    tasksService.findOne.mockResolvedValueOnce({ id: unsafeId, projectId: unsafeId, status: 'INBOX' });
+    tasksService.findOne.mockResolvedValueOnce({
+      id: unsafeId,
+      projectId: unsafeId,
+      status: 'INBOX',
+    });
     projectsService.findOne.mockRejectedValueOnce(forbidden);
     await expect(
       router.dispatch(

@@ -33,6 +33,9 @@ const TYPE_TO_CLASSE: Readonly<Record<string, bigint>> = Object.freeze({
   'project.created': BigInt(-499), // PROJECT_LIFECYCLE
   'project.updated': BigInt(-499),
   'project.deleted': BigInt(-499),
+  // Project ↔ Team (ADR-V2-029) — reusa -499 PROJECT_LIFECYCLE
+  'project.team.linked': BigInt(-499),
+  'project.team.unlinked': BigInt(-499),
 
   // Org lifecycle (ADR-V2-027)
   'org.created': BigInt(-500), // ORG_LIFECYCLE

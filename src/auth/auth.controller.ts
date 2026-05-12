@@ -10,13 +10,7 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import {
-  ApiBearerAuth,
-  ApiHeader,
-  ApiOperation,
-  ApiResponse,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiHeader, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { ApiKeyService } from './services/api-key.service';
 import { AuthCompositeGuard } from './guards/auth-composite.guard';
@@ -28,6 +22,7 @@ import { RegisterDto } from './dto/register.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { AuthResponseDto, UserProfileDto } from './dto/auth-response.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
+import { SwitchOrgDto } from './dto/switch-org.dto';
 import { ApiKeyResponseDto } from './dto/api-key-response.dto';
 
 /**
@@ -122,8 +117,61 @@ export class AuthController {
     // O refresh token contém info suficiente para identificar o user via hash
 
     // Workaround F3: usar _user se disponível (JWT ainda válido), ou buscar por hash
-    const userGroupId = _user ? BigInt(_user.sub) : await this.findUserGroupByRefreshToken(dto.refreshToken);
+    const userGroupId = _user
+      ? BigInt(_user.sub)
+      : await this.findUserGroupByRefreshToken(dto.refreshToken);
     return this.authService.refresh(dto.refreshToken, userGroupId);
+  }
+
+  /**
+   * Troca a organizacao ativa da sessao (ADR-V2-030 — multi-tenant identity).
+   *
+   * Permite a um usuario com vinculos em multiplas orgs (DVincula -161/-162/-163)
+   * trocar de workspace sem fazer logout. Emite novo par de tokens com
+   * `organizationId` apontando para a org alvo e rotaciona o refresh token
+   * (tokens antigos sao invalidados imediatamente).
+   *
+   * O frontend DEVE:
+   *  1. Salvar AMBOS os novos tokens em `useAuthStore.setTokens`.
+   *  2. Atualizar `user.organizationId/organizationName/orgRole` no store.
+   *  3. Limpar cache de queries (`queryClient.clear()`) para evitar leak da
+   *     org anterior.
+   *  4. Persistir em `localStorage['scrumban-last-org']` para auto-resolver
+   *     no proximo login.
+   *
+   * @param user - JWT payload do usuario atual.
+   * @param dto - { organizationId: string } da org alvo.
+   * @returns AuthResponseDto com tokens novos + perfil atualizado.
+   *
+   * @throws {ForbiddenException} Se nao tem DVincula ativo na org alvo.
+   * @throws {NotFoundException} Se usuario ou perfil nao existem.
+   *
+   * @example
+   * ```bash
+   * curl -X POST http://localhost:3000/api/v1/auth/switch-org \
+   *   -H "Authorization: Bearer <jwt>" \
+   *   -H "Content-Type: application/json" \
+   *   -d '{"organizationId":"152"}'
+   * ```
+   */
+  @Post('switch-org')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Troca a organizacao ativa da sessao (ADR-V2-030)',
+    description:
+      'Valida membership na org alvo, emite novo par de tokens (refresh rotacionado) e audit DEvento -501.',
+  })
+  @ApiResponse({ status: 200, description: 'Sessao trocada', type: AuthResponseDto })
+  @ApiResponse({ status: 401, description: 'Nao autenticado' })
+  @ApiResponse({ status: 403, description: 'Nao e membro da org alvo' })
+  @ApiResponse({ status: 404, description: 'Usuario ou perfil nao encontrado' })
+  async switchOrg(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: SwitchOrgDto,
+  ): Promise<AuthResponseDto> {
+    return this.authService.switchOrg(BigInt(user.sub), BigInt(dto.organizationId));
   }
 
   /**

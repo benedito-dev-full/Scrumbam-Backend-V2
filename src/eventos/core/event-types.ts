@@ -26,6 +26,10 @@ export const EVENT_TYPES = {
   PROJECT_UPDATED: 'project.updated',
   PROJECT_DELETED: 'project.deleted',
 
+  // ============== PROJECT ↔ TEAM (ADR-V2-029) ==============
+  PROJECT_TEAM_LINKED: 'project.team.linked',
+  PROJECT_TEAM_UNLINKED: 'project.team.unlinked',
+
   // ============== ORGANIZATIONS / TEAMS (lifecycle — ADR-V2-027) ==============
   ORG_CREATED: 'org.created',
   ORG_UPDATED: 'org.updated',

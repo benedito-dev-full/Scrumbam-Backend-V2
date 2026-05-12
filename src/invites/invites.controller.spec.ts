@@ -77,6 +77,7 @@ describe('InvitesController', () => {
         email: 'convidado@x.com',
         role: 'MEMBER',
         expiresAt: '2026-05-18T12:00:00.000Z',
+        flow: 'new_user',
       });
 
       const res = await controller.getInfo('valid-token');

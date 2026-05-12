@@ -32,7 +32,10 @@ export class ListProjectsTool implements McpTool {
       parseBigIntParam(cursor, 'cursor');
     }
 
-    const result = await this.projectsService.findMany(ctx.dEntidadeId, cursor, optionalLimit(input));
+    const result = await this.projectsService.findMany(ctx.dEntidadeId, {
+      cursor,
+      limit: optionalLimit(input),
+    });
 
     return textResult(result);
   }

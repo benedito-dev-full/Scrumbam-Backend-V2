@@ -325,33 +325,35 @@ describe('InvitesService', () => {
   });
 
   describe('acceptInvite', () => {
-    it('aceita convite valido, cria usuario e auto-login', async () => {
+    it('aceita convite valido (new_user), cria usuario e auto-login', async () => {
       const raw = 'valid-token';
       const hash = createHash('sha256').update(raw).digest('hex');
       const future = new Date(Date.now() + 60_000).toISOString();
+
+      const inviteRow = {
+        chave: BigInt(555),
+        idLocEscrituracao: BigInt(100),
+        dEntidadeId: BigInt(7),
+        nome: 'novo@x.com',
+        metaDados: {
+          tokenHash: hash,
+          role: 'MEMBER',
+          expiresAt: future,
+          usedAt: null,
+          status: 'PENDING',
+          invitedByUserId: '7',
+          flow: 'new_user',
+        },
+      };
+      // Pre-resolve do flow (chama this.prisma.dTabela.findMany fora da tx).
+      prismaMock.dTabela.findMany.mockResolvedValue([inviteRow]);
 
       const txClient = {
         dEntidade: { findFirst: jest.fn(), create: jest.fn() },
         dUserGroup: { create: jest.fn() },
         dVincula: { create: jest.fn() },
-        dTabela: { findMany: jest.fn(), update: jest.fn() },
+        dTabela: { findMany: jest.fn().mockResolvedValue([inviteRow]), update: jest.fn() },
       };
-      txClient.dTabela.findMany.mockResolvedValue([
-        {
-          chave: BigInt(555),
-          idLocEscrituracao: BigInt(100),
-          dEntidadeId: BigInt(7),
-          nome: 'novo@x.com',
-          metaDados: {
-            tokenHash: hash,
-            role: 'MEMBER',
-            expiresAt: future,
-            usedAt: null,
-            status: 'PENDING',
-            invitedByUserId: '7',
-          },
-        },
-      ]);
       txClient.dEntidade.findFirst.mockImplementation(
         (args: { where: Record<string, unknown> }) => {
           if (args.where.idClasse === BigInt(-150)) return Promise.resolve(null); // sem user
@@ -375,7 +377,8 @@ describe('InvitesService', () => {
       expect(result.accessToken).toBe('jwt');
       expect(result.refreshToken).toBe('refresh');
       expect(result.redirectTo).toBe('/intentions');
-      expect(authMock.issueSessionForUser).toHaveBeenCalledWith(BigInt(900));
+      // issueSessionForUser agora recebe (userGroupId, preferredOrgId).
+      expect(authMock.issueSessionForUser).toHaveBeenCalledWith(BigInt(900), BigInt(100));
       expect(txClient.dVincula.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
@@ -394,13 +397,157 @@ describe('InvitesService', () => {
       );
       expect(eventMock.addInternalEvent).toHaveBeenCalledWith(
         'invite.accepted',
-        expect.objectContaining({ inviteId: '555', newUserId: '901', role: 'MEMBER' }),
+        expect.objectContaining({
+          inviteId: '555',
+          newUserId: '901',
+          role: 'MEMBER',
+          flow: 'new_user',
+        }),
         'corr-1',
         expect.anything(),
       );
     });
 
+    it('merge flow (existing_user): cria APENAS DVincula, sem DUserGroup nem DEntidade', async () => {
+      const raw = 'merge-token';
+      const hash = createHash('sha256').update(raw).digest('hex');
+      const future = new Date(Date.now() + 60_000).toISOString();
+
+      const inviteRow = {
+        chave: BigInt(700),
+        idLocEscrituracao: BigInt(200),
+        dEntidadeId: BigInt(7),
+        nome: 'b@test.com',
+        metaDados: {
+          tokenHash: hash,
+          role: 'MEMBER',
+          expiresAt: future,
+          usedAt: null,
+          status: 'PENDING',
+          invitedByUserId: '7',
+          flow: 'existing_user',
+          targetUserId: '42',
+        },
+      };
+      prismaMock.dTabela.findMany.mockResolvedValue([inviteRow]);
+
+      const txClient = {
+        dEntidade: { findFirst: jest.fn(), create: jest.fn() },
+        dUserGroup: { create: jest.fn() },
+        dVincula: { findFirst: jest.fn(), create: jest.fn() },
+        dTabela: { findMany: jest.fn().mockResolvedValue([inviteRow]), update: jest.fn() },
+      };
+      txClient.dEntidade.findFirst.mockImplementation(
+        (args: { where: Record<string, unknown> }) => {
+          // org check
+          if (args.where.idClasse === BigInt(-152)) {
+            return Promise.resolve({ chave: BigInt(200) });
+          }
+          // target user lookup (chave=42, idClasse=-150)
+          if (args.where.idClasse === BigInt(-150) && args.where.chave === BigInt(42)) {
+            return Promise.resolve({
+              chave: BigInt(42),
+              dUserGroupId: BigInt(99),
+              email: 'b@test.com',
+            });
+          }
+          return Promise.resolve(null);
+        },
+      );
+      // race-safe: ainda nao e membro desta org
+      txClient.dVincula.findFirst.mockResolvedValue(null);
+      txClient.dVincula.create.mockResolvedValue({ chave: BigInt(800) });
+      txClient.dTabela.update.mockResolvedValue({});
+
+      prismaMock.$transaction.mockImplementation(
+        async (cb: (tx: typeof txClient) => Promise<unknown>) => cb(txClient),
+      );
+
+      const result = await service.acceptInvite(raw, {});
+
+      expect(result.redirectTo).toBe('/intentions');
+      // CRITICAL: NUNCA criar DUserGroup nem DEntidade no merge flow.
+      expect(txClient.dUserGroup.create).not.toHaveBeenCalled();
+      expect(txClient.dEntidade.create).not.toHaveBeenCalled();
+      // DVincula criada com idEntidade do user existente, nao um novo.
+      expect(txClient.dVincula.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            idClasse: BigInt(-162),
+            idLocEscritu: BigInt(200),
+            idEntidade: BigInt(42),
+            metaDados: expect.objectContaining({ mergedFromInvite: true }),
+          }),
+        }),
+      );
+      // Auto-login usa o dUserGroupId do user existente + prefere a org mergeada.
+      expect(authMock.issueSessionForUser).toHaveBeenCalledWith(BigInt(99), BigInt(200));
+      expect(eventMock.addInternalEvent).toHaveBeenCalledWith(
+        'invite.accepted.merge',
+        expect.objectContaining({ flow: 'existing_user' }),
+        'corr-1',
+        expect.anything(),
+      );
+    });
+
+    it('merge flow: re-check de race (user ja virou membro da org alvo entre createInvite e accept)', async () => {
+      const raw = 'merge-race';
+      const hash = createHash('sha256').update(raw).digest('hex');
+      const future = new Date(Date.now() + 60_000).toISOString();
+
+      const inviteRow = {
+        chave: BigInt(701),
+        idLocEscrituracao: BigInt(200),
+        dEntidadeId: BigInt(7),
+        nome: 'race@test.com',
+        metaDados: {
+          tokenHash: hash,
+          role: 'MEMBER',
+          expiresAt: future,
+          usedAt: null,
+          status: 'PENDING',
+          invitedByUserId: '7',
+          flow: 'existing_user',
+          targetUserId: '42',
+        },
+      };
+      prismaMock.dTabela.findMany.mockResolvedValue([inviteRow]);
+
+      const txClient = {
+        dEntidade: { findFirst: jest.fn(), create: jest.fn() },
+        dUserGroup: { create: jest.fn() },
+        dVincula: { findFirst: jest.fn(), create: jest.fn() },
+        dTabela: { findMany: jest.fn().mockResolvedValue([inviteRow]), update: jest.fn() },
+      };
+      txClient.dEntidade.findFirst.mockImplementation(
+        (args: { where: Record<string, unknown> }) => {
+          if (args.where.idClasse === BigInt(-152)) {
+            return Promise.resolve({ chave: BigInt(200) });
+          }
+          if (args.where.idClasse === BigInt(-150) && args.where.chave === BigInt(42)) {
+            return Promise.resolve({
+              chave: BigInt(42),
+              dUserGroupId: BigInt(99),
+              email: 'race@test.com',
+            });
+          }
+          return Promise.resolve(null);
+        },
+      );
+      // RACE: ja existe DVincula na org alvo — outro admin pode ter adicionado.
+      txClient.dVincula.findFirst.mockResolvedValue({ chave: BigInt(123) });
+
+      prismaMock.$transaction.mockImplementation(
+        async (cb: (tx: typeof txClient) => Promise<unknown>) => cb(txClient),
+      );
+
+      await expect(service.acceptInvite(raw, {})).rejects.toThrow(ConflictException);
+      expect(txClient.dVincula.create).not.toHaveBeenCalled();
+    });
+
     it('rejeita com NotFoundException para token invalido', async () => {
+      // Pre-resolve no service usa this.prisma.dTabela.findMany — vazio.
+      prismaMock.dTabela.findMany.mockResolvedValue([]);
       const txClient = {
         dEntidade: { findFirst: jest.fn() },
         dUserGroup: { create: jest.fn() },
@@ -416,31 +563,34 @@ describe('InvitesService', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('rejeita com ConflictException se email virou user entre GET e POST (race)', async () => {
+    it('new_user flow: rejeita com ConflictException se email virou user entre GET e POST (race)', async () => {
       const raw = 'race-token';
       const hash = createHash('sha256').update(raw).digest('hex');
       const future = new Date(Date.now() + 60_000).toISOString();
+
+      const inviteRow = {
+        chave: BigInt(1),
+        idLocEscrituracao: BigInt(100),
+        dEntidadeId: BigInt(7),
+        nome: 'race@x.com',
+        metaDados: {
+          tokenHash: hash,
+          role: 'MEMBER',
+          expiresAt: future,
+          usedAt: null,
+          status: 'PENDING',
+          invitedByUserId: '7',
+          flow: 'new_user',
+        },
+      };
+      prismaMock.dTabela.findMany.mockResolvedValue([inviteRow]);
+
       const txClient = {
         dEntidade: { findFirst: jest.fn(), create: jest.fn() },
         dUserGroup: { create: jest.fn() },
         dVincula: { create: jest.fn() },
         dTabela: {
-          findMany: jest.fn().mockResolvedValue([
-            {
-              chave: BigInt(1),
-              idLocEscrituracao: BigInt(100),
-              dEntidadeId: BigInt(7),
-              nome: 'race@x.com',
-              metaDados: {
-                tokenHash: hash,
-                role: 'MEMBER',
-                expiresAt: future,
-                usedAt: null,
-                status: 'PENDING',
-                invitedByUserId: '7',
-              },
-            },
-          ]),
+          findMany: jest.fn().mockResolvedValue([inviteRow]),
           update: jest.fn(),
         },
       };
@@ -449,6 +599,9 @@ describe('InvitesService', () => {
         (args: { where: Record<string, unknown> }) => {
           if (args.where.idClasse === BigInt(-150)) {
             return Promise.resolve({ chave: BigInt(42) });
+          }
+          if (args.where.idClasse === BigInt(-152)) {
+            return Promise.resolve({ chave: BigInt(100) });
           }
           return Promise.resolve(null);
         },

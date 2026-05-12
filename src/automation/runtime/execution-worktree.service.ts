@@ -1,14 +1,18 @@
-import { Injectable, UnprocessableEntityException } from '@nestjs/common';
-import {
-  ExecutionLogContext,
-  ExecutionRuntimeLogService,
-} from './execution-runtime-log.service';
-import {
-  RemoteAgentRuntime,
-  RemoteExecutionClient,
-  RemoteStructuredCommand,
-} from './remote-execution-client';
+import { Injectable, Logger, UnprocessableEntityException } from '@nestjs/common';
+import { RemoteAgentRuntime } from './remote-execution-client';
 
+/**
+ * @deprecated F13/V2: a partir de ADR-V2-030/-032/-033 o agente V2 NAO mais
+ * recebe comandos shell genericos - apenas `RUN_CLAUDE_CODE`. Worktree
+ * isolation passa a ser responsabilidade do Claude Code (que rodara `git
+ * worktree add` ou afins de dentro do projeto, conforme o caso) ou
+ * desnecessaria (operacao direto no projeto principal).
+ *
+ * Este service permanece como stub para nao quebrar o grafo do
+ * `ExecutionRunProcessor` enquanto Sub-tarefa 2.4 (endpoint
+ * execution-result inbound) nao reescreve o fluxo end-to-end. Sera
+ * removido quando o fluxo V2 estiver completo (F13 final).
+ */
 export interface ProjectAutomationRuntimeConfig {
   remotePath?: string;
   remoteBranch?: string;
@@ -20,7 +24,7 @@ export interface ExecutionWorktreeInput {
   correlationId: string;
   agent: RemoteAgentRuntime;
   projectAutomation: ProjectAutomationRuntimeConfig;
-  command: {
+  command?: {
     executable?: string;
     args?: string[];
   };
@@ -34,71 +38,46 @@ export interface ExecutionWorktree {
   isolated: boolean;
 }
 
-const INTERNAL_TIMEOUT_MS = 300000;
-const MAX_OUTPUT_BYTES = 1024 * 1024;
-
+/**
+ * @deprecated Ver bloco JSDoc do arquivo. Service nao executa mais comandos
+ * remotos - apenas valida config do projeto e devolve metadados de worktree
+ * "logica" (sem isolamento real, sem `git worktree add` outbound).
+ */
 @Injectable()
 export class ExecutionWorktreeService {
-  constructor(
-    private readonly remoteClient: RemoteExecutionClient,
-    private readonly logService: ExecutionRuntimeLogService,
-  ) {}
+  private readonly logger = new Logger(ExecutionWorktreeService.name);
 
-  async prepare(
-    input: ExecutionWorktreeInput,
-    logContext: ExecutionLogContext,
-  ): Promise<ExecutionWorktree> {
+  /**
+   * @deprecated No protocolo V2 nao ha mais isolamento de worktree gerenciado
+   * pelo backend. Esta funcao apenas valida `remotePath` e retorna metadados
+   * "logicos" para preservar a interface dos consumidores. O agente V2/Claude
+   * Code decide internamente o que fazer no filesystem.
+   */
+  async prepare(input: ExecutionWorktreeInput): Promise<ExecutionWorktree> {
     const rootPath = this.requireRemotePath(input.projectAutomation.remotePath);
     const branch = `scrumban/exec-${input.executionId}`;
     const baseBranch = input.projectAutomation.remoteBranch ?? 'main';
-    const workspace = `${rootPath}/worktrees/exec-${input.executionId}`;
-    const needsIsolation = this.requiresIsolatedWorktree(input.command);
 
-    if (!needsIsolation) {
-      return { branch, baseBranch, rootPath, workspace: rootPath, isolated: false };
-    }
-
-    await this.logService.recordSystem({
-      executionId: input.executionId,
-      projectId: input.projectId,
-      agentId: input.agent.agentId,
-      correlationId: input.correlationId,
-      line: `creating isolated worktree ${branch}`,
-    });
-
-    await this.remoteClient.execute(
-      {
-        executionId: input.executionId,
-        projectId: input.projectId,
-        correlationId: input.correlationId,
-        agent: input.agent,
-        workspace: rootPath,
-        command: this.command(
-          'git',
-          ['worktree', 'add', '-B', branch, workspace, baseBranch],
-          rootPath,
-        ),
-      },
-      logContext,
+    this.logger.debug(
+      `worktree_prepare_noop executionId=${input.executionId} projectId=${input.projectId} (V2: agent/Claude Code handles worktree)`,
     );
 
-    return { branch, baseBranch, rootPath, workspace, isolated: true };
+    return {
+      branch,
+      baseBranch,
+      rootPath,
+      workspace: rootPath,
+      isolated: false,
+    };
   }
 
-  requiresIsolatedWorktree(command: { executable?: string; args?: string[] }): boolean {
-    const executable = command.executable;
-    const args = command.args ?? [];
-    if (!executable) return true;
-
-    if (['ls', 'grep', 'cat', 'echo', 'pwd', 'find'].includes(executable)) {
-      return false;
-    }
-
-    if (executable === 'git') {
-      return !['status', 'diff', 'log', 'branch'].includes(args[0] ?? '');
-    }
-
-    return true;
+  /**
+   * @deprecated Mantido como interface para callers existentes. No V2 nao
+   * faz diferenca pratica (sempre retorna `false` - worktree isolation eh
+   * decisao do agente).
+   */
+  requiresIsolatedWorktree(): boolean {
+    return false;
   }
 
   private requireRemotePath(remotePath: string | undefined): string {
@@ -114,19 +93,4 @@ export class ExecutionWorktreeService {
     }
     return remotePath.replace(/\/+$/, '');
   }
-
-  private command(
-    executable: string,
-    args: string[],
-    cwd: string,
-  ): RemoteStructuredCommand {
-    return {
-      executable,
-      args,
-      cwd,
-      timeoutMs: INTERNAL_TIMEOUT_MS,
-      maxOutputBytes: MAX_OUTPUT_BYTES,
-    };
-  }
 }
-

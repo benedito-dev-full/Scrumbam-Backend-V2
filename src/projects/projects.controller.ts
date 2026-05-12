@@ -33,6 +33,7 @@ import {
   ProjectStatsDto,
 } from './dto/project-response.dto';
 import { ProjectActivityQueryDto } from './dto/project-activity-query.dto';
+import { ListProjectsQueryDto } from './dto/list-projects-query.dto';
 
 /**
  * Controller de projetos (DProject).
@@ -75,7 +76,10 @@ export class ProjectsController {
    * ```
    */
   @Post()
-  @ApiOperation({ summary: 'Criar projeto', description: 'Cria projeto com 9 statuses V3 e Sprint 1 default. O criador torna-se MANAGER.' })
+  @ApiOperation({
+    summary: 'Criar projeto',
+    description: 'Cria projeto com 9 statuses V3 e Sprint 1 default. O criador torna-se MANAGER.',
+  })
   @ApiResponse({ status: 201, description: 'Projeto criado', type: ProjectResponseDto })
   @ApiResponse({ status: 401, description: 'Não autenticado' })
   async create(
@@ -98,20 +102,34 @@ export class ProjectsController {
    * ```
    */
   @Get()
-  @ApiOperation({ summary: 'Listar projetos do usuário' })
+  @ApiOperation({
+    summary: 'Listar projetos do usuário',
+    description:
+      'Lista projetos onde o usuário é membro. Aceita `teamId` opcional para filtrar por DVincula -182 (ADR-V2-029).',
+  })
   @ApiQuery({ name: 'cursor', required: false, description: 'Cursor de paginação' })
-  @ApiQuery({ name: 'limit', required: false, description: 'Itens por página (1-100)', example: 20 })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description: 'Itens por página (1-100)',
+    example: 20,
+  })
+  @ApiQuery({
+    name: 'teamId',
+    required: false,
+    description: 'Filtra projetos vinculados ao time (DVincula -182)',
+    example: '200',
+  })
   @ApiResponse({ status: 200, description: 'Lista de projetos', type: ListProjectResponseDto })
   async findMany(
     @Request() req: { user: { entidadeId: string } },
-    @Query('cursor') cursor?: string,
-    @Query('limit') limit?: string,
+    @Query() query: ListProjectsQueryDto,
   ): Promise<ListProjectResponseDto> {
-    return this.projectsService.findMany(
-      BigInt(req.user.entidadeId),
-      cursor,
-      limit ? parseInt(limit, 10) : 20,
-    );
+    return this.projectsService.findMany(BigInt(req.user.entidadeId), {
+      cursor: query.cursor,
+      limit: query.limit ?? 20,
+      teamId: query.teamId,
+    });
   }
 
   /**
@@ -186,7 +204,11 @@ export class ProjectsController {
   @Get(':id/activity')
   @ApiOperation({ summary: 'Timeline de atividades do projeto' })
   @ApiParam({ name: 'id', description: 'ID do projeto' })
-  @ApiResponse({ status: 200, description: 'Lista de eventos', type: ListProjectActivityResponseDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Lista de eventos',
+    type: ListProjectActivityResponseDto,
+  })
   async getActivity(
     @Param('id') id: string,
     @Query() query: ProjectActivityQueryDto,

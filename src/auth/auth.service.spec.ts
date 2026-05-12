@@ -25,6 +25,7 @@ const makePrismaMock = () => ({
   dVincula: {
     create: jest.fn(),
     findFirst: jest.fn(),
+    findMany: jest.fn().mockResolvedValue([]),
     updateMany: jest.fn(),
   },
   dEvento: {
@@ -37,7 +38,12 @@ describe('AuthService', () => {
   let service: AuthService;
   let prisma: ReturnType<typeof makePrismaMock>;
   let jwtService: { sign: jest.Mock };
-  let refreshTokenService: { generate: jest.Mock; validate: jest.Mock; rotate: jest.Mock; revoke: jest.Mock };
+  let refreshTokenService: {
+    generate: jest.Mock;
+    validate: jest.Mock;
+    rotate: jest.Mock;
+    revoke: jest.Mock;
+  };
   let organizationsService: { create: jest.Mock };
 
   beforeEach(async () => {
@@ -82,17 +88,22 @@ describe('AuthService', () => {
       const mockEntidade = { chave: BigInt(2), nome: 'João Silva', email: 'joao@test.com' };
 
       // Transaction 1: cria DUserGroup + DEntidade + DEvento
-      prisma.$transaction.mockImplementation(async (fn: (tx: typeof prisma) => Promise<unknown>) => {
-        return fn({
-          ...prisma,
-          dUserGroup: { ...prisma.dUserGroup, create: jest.fn().mockResolvedValue(mockUserGroup) },
-          dEntidade: {
-            ...prisma.dEntidade,
-            create: jest.fn().mockResolvedValueOnce(mockEntidade), // USER
-          },
-          dEvento: { create: jest.fn().mockResolvedValue({ chave: BigInt(5) }) },
-        });
-      });
+      prisma.$transaction.mockImplementation(
+        async (fn: (tx: typeof prisma) => Promise<unknown>) => {
+          return fn({
+            ...prisma,
+            dUserGroup: {
+              ...prisma.dUserGroup,
+              create: jest.fn().mockResolvedValue(mockUserGroup),
+            },
+            dEntidade: {
+              ...prisma.dEntidade,
+              create: jest.fn().mockResolvedValueOnce(mockEntidade), // USER
+            },
+            dEvento: { create: jest.fn().mockResolvedValue({ chave: BigInt(5) }) },
+          });
+        },
+      );
 
       // Transaction 2 (OrganizationsService.create) já mockado no beforeEach
 
@@ -200,9 +211,9 @@ describe('AuthService', () => {
     it('deve detectar reuse attack e revogar tokens', async () => {
       refreshTokenService.validate.mockResolvedValue(false);
 
-      await expect(
-        service.refresh('stolen-token', BigInt(1)),
-      ).rejects.toThrow(UnauthorizedException);
+      await expect(service.refresh('stolen-token', BigInt(1))).rejects.toThrow(
+        UnauthorizedException,
+      );
 
       expect(refreshTokenService.revoke).toHaveBeenCalledWith(BigInt(1));
     });
@@ -227,20 +238,118 @@ describe('AuthService', () => {
         entidades: [{ chave: BigInt(2), nome: 'João Silva' }],
       };
       prisma.dUserGroup.findUnique.mockResolvedValue(mockUserGroup);
-      prisma.dVincula.findFirst.mockResolvedValue({
-        idClasse: BigInt(-161),
-        idLocEscritu: BigInt(3),
-        locEscritu: { chave: BigInt(3), nome: 'Empresa ABC' },
-      });
+      // ADR-V2-030: getMe agora usa findMany para popular availableOrgs.
+      prisma.dVincula.findMany.mockResolvedValue([
+        {
+          idClasse: BigInt(-161),
+          idLocEscritu: BigInt(3),
+          locEscritu: { chave: BigInt(3), nome: 'Empresa ABC' },
+        },
+      ]);
 
       const result = await service.getMe(BigInt(1));
 
       expect(result.id).toBe('1');
       expect(result.entidadeId).toBe('2');
       expect(result.orgRole).toBe('ADMIN');
-      // Verificar que usou no máximo 2 queries (findUnique + findFirst)
+      // Org principal vem do primeiro DVincula (-161 antes de -162/-163).
+      expect(result.organizationId).toBe('3');
+      expect(result.organizationName).toBe('Empresa ABC');
+      // availableOrgs[] inclui todas as orgs com vinculo ativo.
+      expect(result.availableOrgs).toHaveLength(1);
+      expect(result.availableOrgs?.[0].role).toBe('ADMIN');
+      // Verificar que usou no máximo 2 queries (findUnique + findMany).
       expect(prisma.dUserGroup.findUnique).toHaveBeenCalledTimes(1);
-      expect(prisma.dVincula.findFirst).toHaveBeenCalledTimes(1);
+      expect(prisma.dVincula.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('lista multiplas orgs em availableOrgs (ADR-V2-030)', async () => {
+      const mockUserGroup = {
+        chave: BigInt(1),
+        usuario: 'multi@test.com',
+        entidades: [{ chave: BigInt(2), nome: 'Multi User' }],
+      };
+      prisma.dUserGroup.findUnique.mockResolvedValue(mockUserGroup);
+      prisma.dVincula.findMany.mockResolvedValue([
+        {
+          idClasse: BigInt(-161),
+          idLocEscritu: BigInt(10),
+          locEscritu: { chave: BigInt(10), nome: 'Org A' },
+        },
+        {
+          idClasse: BigInt(-162),
+          idLocEscritu: BigInt(20),
+          locEscritu: { chave: BigInt(20), nome: 'Org B' },
+        },
+      ]);
+
+      const result = await service.getMe(BigInt(1));
+
+      expect(result.availableOrgs).toHaveLength(2);
+      expect(result.availableOrgs?.[0]).toEqual({
+        id: '10',
+        nome: 'Org A',
+        role: 'ADMIN',
+      });
+      expect(result.availableOrgs?.[1]).toEqual({
+        id: '20',
+        nome: 'Org B',
+        role: 'MEMBER',
+      });
+      // Org default = primeira (ADMIN antes).
+      expect(result.organizationId).toBe('10');
+    });
+  });
+
+  describe('switchOrg', () => {
+    const mockUserGroup = {
+      chave: BigInt(1),
+      usuario: 'multi@test.com',
+      entidades: [{ chave: BigInt(2), nome: 'Multi User' }],
+    };
+
+    it('emite novo par de tokens quando user tem DVincula ativo na org alvo', async () => {
+      prisma.dUserGroup.findUnique.mockResolvedValue(mockUserGroup);
+      prisma.dVincula.findFirst.mockResolvedValueOnce({
+        idClasse: BigInt(-162),
+        idLocEscritu: BigInt(20),
+        locEscritu: { chave: BigInt(20), nome: 'Org B' },
+      });
+      // loadAvailableOrgs (chamado dentro de buildAuthResponse).
+      prisma.dVincula.findMany.mockResolvedValue([]);
+      prisma.dEvento.create.mockResolvedValue({ chave: BigInt(99) });
+
+      const result = await service.switchOrg(BigInt(1), BigInt(20));
+
+      expect(result.accessToken).toBe('mock.jwt.token');
+      expect(result.refreshToken).toBe('new-refresh-token');
+      expect(result.user.organizationId).toBe('20');
+      expect(result.user.organizationName).toBe('Org B');
+      expect(result.user.orgRole).toBe('MEMBER');
+      // Refresh rotacionado (nao gerado).
+      expect(refreshTokenService.rotate).toHaveBeenCalledWith(BigInt(1));
+      expect(refreshTokenService.generate).not.toHaveBeenCalled();
+      // Audit DEvento -501 com action='org.switch'.
+      expect(prisma.dEvento.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            descricao: 'auth.org.switch',
+            metaDados: expect.objectContaining({ action: 'org.switch' }),
+          }),
+        }),
+      );
+    });
+
+    it('lanca ForbiddenException quando user nao tem DVincula ativo na org alvo', async () => {
+      prisma.dUserGroup.findUnique.mockResolvedValue(mockUserGroup);
+      prisma.dVincula.findFirst.mockResolvedValueOnce(null); // membership inexistente
+
+      await expect(service.switchOrg(BigInt(1), BigInt(99))).rejects.toThrow(
+        /membro desta organizacao/i,
+      );
+      // NUNCA emitir token sem validar membership.
+      expect(refreshTokenService.rotate).not.toHaveBeenCalled();
+      expect(jwtService.sign).not.toHaveBeenCalled();
     });
   });
 });

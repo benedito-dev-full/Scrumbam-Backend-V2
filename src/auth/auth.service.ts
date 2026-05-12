@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   forwardRef,
   Inject,
   Injectable,
@@ -15,7 +16,7 @@ import { PrismaService } from '../prisma.service';
 import { RefreshTokenService } from './services/refresh-token.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-import { AuthResponseDto, UserProfileDto } from './dto/auth-response.dto';
+import { AuthResponseDto, AvailableOrgDto, UserProfileDto } from './dto/auth-response.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 // forwardRef para evitar circular dependency AuthModule ↔ OrganizationsModule
 import { OrganizationsService } from '../organizations/organizations.service';
@@ -389,8 +390,11 @@ export class AuthService {
 
     const entidade = userGroup.entidades[0];
 
-    // Query 2: org role + nome da org em JOIN (N+1 ZERO)
-    const orgVinculo = await this.prisma.dVincula.findFirst({
+    // Query 2: TODOS os vinculos ativos do usuario (-161/-162/-163) com nome
+    // da org em JOIN. Ordenados ADMIN antes — o primeiro vira a org "default"
+    // do perfil (compat com /me legado). availableOrgs[] inclui todos para
+    // alimentar o workspace switcher (ADR-V2-030).
+    const orgVinculos = await this.prisma.dVincula.findMany({
       where: {
         idEntidade: entidade.chave,
         idClasse: { in: [BigInt(-161), BigInt(-162), BigInt(-163)] },
@@ -402,14 +406,24 @@ export class AuthService {
       orderBy: { idClasse: 'asc' },
     });
 
+    const primary = orgVinculos[0];
+    const availableOrgs: AvailableOrgDto[] = orgVinculos
+      .filter((v) => v.locEscritu)
+      .map((v) => ({
+        id: v.idLocEscritu.toString(),
+        nome: v.locEscritu!.nome,
+        role: (this.mapOrgRole(v.idClasse) ?? 'MEMBER') as 'ADMIN' | 'MEMBER' | 'VIEWER',
+      }));
+
     return {
       id: userGroup.chave.toString(),
       entidadeId: entidade.chave.toString(),
       email: userGroup.usuario,
       name: entidade.nome,
-      organizationId: orgVinculo?.idLocEscritu?.toString(),
-      organizationName: orgVinculo?.locEscritu?.nome,
-      orgRole: this.mapOrgRole(orgVinculo?.idClasse ?? null),
+      organizationId: primary?.idLocEscritu?.toString(),
+      organizationName: primary?.locEscritu?.nome,
+      orgRole: this.mapOrgRole(primary?.idClasse ?? null),
+      availableOrgs,
     };
   }
 
@@ -517,7 +531,10 @@ export class AuthService {
    * return { ...session, redirectTo: '/intentions' };
    * ```
    */
-  async issueSessionForUser(userGroupId: bigint): Promise<AuthResponseDto> {
+  async issueSessionForUser(
+    userGroupId: bigint,
+    preferredOrgId?: bigint,
+  ): Promise<AuthResponseDto> {
     const userGroup = await this.prisma.dUserGroup.findUnique({
       where: { chave: userGroupId },
       include: {
@@ -536,15 +553,32 @@ export class AuthService {
       throw new NotFoundException('Perfil de usuario nao encontrado');
     }
 
-    const orgVinculo = await this.prisma.dVincula.findFirst({
-      where: {
-        idEntidade: entidade.chave,
-        idClasse: { in: [BigInt(-161), BigInt(-162), BigInt(-163)] },
-        excluido: false,
-      },
-      include: { locEscritu: { select: { chave: true, nome: true } } },
-      orderBy: { idClasse: 'asc' },
-    });
+    // Se preferredOrgId fornecido (ex: accept de convite merge), priorizar
+    // esse vinculo. Senao, comportamento padrao: primeiro vinculo ativo
+    // ordenado por idClasse (ADMIN -161 antes de MEMBER/VIEWER).
+    const preferred =
+      preferredOrgId !== undefined
+        ? await this.prisma.dVincula.findFirst({
+            where: {
+              idEntidade: entidade.chave,
+              idLocEscritu: preferredOrgId,
+              idClasse: { in: [BigInt(-161), BigInt(-162), BigInt(-163)] },
+              excluido: false,
+            },
+            include: { locEscritu: { select: { chave: true, nome: true } } },
+          })
+        : null;
+    const orgVinculo =
+      preferred ??
+      (await this.prisma.dVincula.findFirst({
+        where: {
+          idEntidade: entidade.chave,
+          idClasse: { in: [BigInt(-161), BigInt(-162), BigInt(-163)] },
+          excluido: false,
+        },
+        include: { locEscritu: { select: { chave: true, nome: true } } },
+        orderBy: { idClasse: 'asc' },
+      }));
 
     const orgId = orgVinculo?.idLocEscritu ?? entidade.chave;
     const orgNome = orgVinculo?.locEscritu?.nome ?? '';
@@ -564,6 +598,106 @@ export class AuthService {
       userGroup.chave,
       entidade.chave,
       orgId,
+      userGroup.usuario,
+      entidade.nome,
+      orgNome,
+      orgRole,
+    );
+  }
+
+  /**
+   * Troca a organizacao ativa da sessao (ADR-V2-030).
+   *
+   * Valida que o usuario tem DVincula ativo na org alvo, emite novo par de
+   * tokens (access + refresh rotacionado) com `organizationId` apontando
+   * para a org de destino e emite `DEvento -501` com `action='org.switch'`.
+   *
+   * O refresh token e rotacionado (estrita): tokens antigos sao invalidados.
+   * O frontend DEVE atualizar AMBOS os tokens apos a chamada — usar o
+   * refresh velho falhara com reuse detection.
+   *
+   * Race contra membership removida: a propria validacao de DVincula cobre
+   * — se admin removeu o user da org alvo entre o GET /auth/me e o POST
+   * /auth/switch-org, retorna 403.
+   *
+   * Queries: 3 (DUserGroup+DEntidade JOIN, DVincula da org alvo, availableOrgs).
+   *
+   * @param userGroupId - Chave BigInt do DUserGroup (do JWT atual).
+   * @param targetOrgId - Chave BigInt da org alvo.
+   * @returns AuthResponseDto com tokens novos + perfil com availableOrgs.
+   * @throws {NotFoundException} Se usuario nao existe.
+   * @throws {ForbiddenException} Se nao tem DVincula ativo na org alvo.
+   */
+  async switchOrg(userGroupId: bigint, targetOrgId: bigint): Promise<AuthResponseDto> {
+    // Query 1: DUserGroup + DEntidade (mesmo padrao do login).
+    const userGroup = await this.prisma.dUserGroup.findUnique({
+      where: { chave: userGroupId },
+      include: {
+        entidades: {
+          where: { idClasse: ID_CLASSE_USER, excluido: false },
+          take: 1,
+        },
+      },
+    });
+    if (!userGroup) {
+      throw new NotFoundException('Usuario nao encontrado');
+    }
+    const entidade = userGroup.entidades[0];
+    if (!entidade) {
+      throw new NotFoundException('Perfil de usuario nao encontrado');
+    }
+
+    // Query 2: validar DVincula ativo na org alvo (segurança — cobre
+    // membership removida entre /me e /switch-org).
+    const targetVinculo = await this.prisma.dVincula.findFirst({
+      where: {
+        idEntidade: entidade.chave,
+        idLocEscritu: targetOrgId,
+        idClasse: { in: [BigInt(-161), BigInt(-162), BigInt(-163)] },
+        excluido: false,
+      },
+      include: { locEscritu: { select: { chave: true, nome: true } } },
+    });
+    if (!targetVinculo) {
+      throw new ForbiddenException('Voce nao e membro desta organizacao');
+    }
+
+    const orgNome = targetVinculo.locEscritu?.nome ?? '';
+    const orgRole = this.mapOrgRole(targetVinculo.idClasse);
+
+    // Audit DEvento -501 com action='org.switch'.
+    await this.prisma.dEvento.create({
+      data: {
+        idClasse: ID_CLASSE_USER_LOGIN_EVENT,
+        idEntidade: entidade.chave,
+        descricao: 'auth.org.switch',
+        metaDados: {
+          action: 'org.switch',
+          toOrgId: targetOrgId.toString(),
+          email: userGroup.usuario,
+        } as Prisma.InputJsonValue,
+      },
+    });
+
+    // Emitir novo access token + rotacionar refresh.
+    const accessToken = this.generateAccessToken(
+      userGroup.chave,
+      entidade.chave,
+      targetOrgId,
+      userGroup.usuario,
+    );
+    const newRefreshToken = await this.refreshTokenService.rotate(userGroupId);
+
+    this.logger.log(
+      `org.switch userGroupId=${userGroupId} entidadeId=${entidade.chave} toOrgId=${targetOrgId}`,
+    );
+
+    return this.buildAuthResponse(
+      accessToken,
+      newRefreshToken,
+      userGroup.chave,
+      entidade.chave,
+      targetOrgId,
       userGroup.usuario,
       entidade.nome,
       orgNome,
@@ -598,8 +732,12 @@ export class AuthService {
 
   /**
    * Monta AuthResponseDto padronizado.
+   *
+   * Se `availableOrgs` for omitido, o helper faz a query para popular a
+   * lista (ADR-V2-030). Callers que ja tem essa info em maos podem passar
+   * para evitar query duplicada.
    */
-  private buildAuthResponse(
+  private async buildAuthResponse(
     accessToken: string,
     refreshToken: string,
     userGroupId: bigint,
@@ -609,8 +747,11 @@ export class AuthService {
     name: string,
     orgNome: string,
     orgRole?: string | null,
-  ): AuthResponseDto {
+    availableOrgs?: AvailableOrgDto[],
+  ): Promise<AuthResponseDto> {
     const expiresIn = parseInt(this.configService.get<string>('JWT_EXPIRES_IN', '900'), 10);
+
+    const orgs = availableOrgs ?? (await this.loadAvailableOrgs(entidadeId));
 
     return {
       accessToken,
@@ -625,8 +766,34 @@ export class AuthService {
         organizationId: orgId.toString(),
         organizationName: orgNome,
         orgRole: orgRole ?? undefined,
+        availableOrgs: orgs,
       },
     };
+  }
+
+  /**
+   * Lista todas as DVinculas ativas (-161/-162/-163) do usuario.
+   *
+   * Usado para popular `availableOrgs[]` no AuthResponseDto. 1 query
+   * indexada com JOIN para nome da org — ZERO N+1.
+   */
+  private async loadAvailableOrgs(entidadeId: bigint): Promise<AvailableOrgDto[]> {
+    const vinculos = await this.prisma.dVincula.findMany({
+      where: {
+        idEntidade: entidadeId,
+        idClasse: { in: [BigInt(-161), BigInt(-162), BigInt(-163)] },
+        excluido: false,
+      },
+      include: { locEscritu: { select: { chave: true, nome: true } } },
+      orderBy: { idClasse: 'asc' },
+    });
+    return vinculos
+      .filter((v) => v.locEscritu)
+      .map((v) => ({
+        id: v.idLocEscritu.toString(),
+        nome: v.locEscritu!.nome,
+        role: (this.mapOrgRole(v.idClasse) ?? 'MEMBER') as 'ADMIN' | 'MEMBER' | 'VIEWER',
+      }));
   }
 
   /**
