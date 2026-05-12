@@ -13,10 +13,12 @@
  *     CONTINUA tentando (não para o loop; circuit é só métrica de alerta)
  *   - nunca crasha — todo erro é catch-and-log
  *
- * `tunnelHealthy` é placeholder `true` até a Sub-tarefa 5 implementar o
- * autossh wrapper (que vai inspecionar processo + porta).
+ * `tunnelHealthy` reflete o estado real do wrapper autossh quando o caller
+ * injeta `tunnelHealthCheck` em `HeartbeatLoopOptions`. Se omitido (legacy /
+ * cenários de teste isolados), assume `true` — backward-compat com as
+ * Sub-tarefas 1-3 que ainda não tinham o autossh wrapper.
  *
- * @see Sub-tarefa 5 (autossh wrapper) — substitui `tunnelHealthy = true`
+ * @see Sub-tarefa 5 (autossh wrapper) — injeta `tunnelHealthCheck`
  * @see ADR-V2-008 (DEvento substitui DNotification — heartbeat materializa DEvento -501)
  */
 import { execFile } from 'child_process';
@@ -65,6 +67,13 @@ export interface HeartbeatLoopOptions {
   setIntervalImpl?: (fn: () => void, ms: number) => NodeJS.Timeout;
   /** clearInterval injetável (complemento de setIntervalImpl). */
   clearIntervalImpl?: (handle: NodeJS.Timeout) => void;
+  /**
+   * Callback síncrono que retorna o estado de saúde do reverse tunnel
+   * autossh. Bootstrap (Sub-tarefa 5) passa
+   * `() => autosshWrapper.isHealthy()`. Se omitido, assume `true`
+   * (backward-compat com cenários de teste sem wrapper).
+   */
+  tunnelHealthCheck?: () => boolean;
 }
 
 /**
@@ -88,6 +97,7 @@ export function startHeartbeatLoop(
   const setIntervalFn = options.setIntervalImpl ?? setInterval;
   const clearIntervalFn = options.clearIntervalImpl ?? clearInterval;
   const detectClaude = options.detectClaude ?? defaultDetectClaude;
+  const tunnelHealthCheck = options.tunnelHealthCheck ?? ((): boolean => true);
 
   let stopped = false;
   let consecutiveFailures = 0;
@@ -98,6 +108,19 @@ export function startHeartbeatLoop(
     value: { available: boolean; version: string | null };
     expiresAt: number;
   } | null = null;
+
+  function safeTunnelCheck(): boolean {
+    try {
+      return tunnelHealthCheck();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn(
+        { stage: 'heartbeat.tunnel-check', err: message },
+        'tunnelHealthCheck lancou — reportando false',
+      );
+      return false;
+    }
+  }
 
   async function getClaudeStatus(): Promise<{ available: boolean; version: string | null }> {
     const t = now();
@@ -127,9 +150,10 @@ export function startHeartbeatLoop(
         mem: collectMemFraction(),
         uptime: Math.floor(process.uptime()),
         claudeCodeAvailable: claude.available,
-        // TODO Sub-tarefa 5 (autossh wrapper): inspecionar processo autossh
-        // + porta local e refletir o estado real. Hoje é placeholder.
-        tunnelHealthy: true,
+        // Sub-tarefa 5: bootstrap injeta `() => autosshWrapper.isHealthy()`.
+        // Default `true` quando não injetado (testes isolados / Sub-tarefas
+        // anteriores que não tinham wrapper).
+        tunnelHealthy: safeTunnelCheck(),
         agentVersion,
         claudeVersion: claude.version,
       };

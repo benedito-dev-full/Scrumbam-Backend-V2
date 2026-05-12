@@ -53,7 +53,21 @@
 **Pilares:** N/A (agente cliente — Engine/Seed/Endpoints no backend)
 **ADRs:** ADR-V2-030 (slug via CLAUDE.md), ADR-V2-031 (monorepo agent), ADR-V2-032 (porta, discriminator), ADR-V2-033 (HTTP+HMAC)
 
-#### Sub-tarefa 5: Autossh Wrapper + Lifecycle (PENDENTE)
+#### Sub-tarefa 5: Autossh Wrapper + Lifecycle — ✅ COMPLETA
+**Status:** COMPLETA | **Score:** 9.0/10 APPROVED rodada 1
+- `createAutosshWrapper` modular com circuit breaker 5 crashes/60s → pausa 5min
+- Backoff exponencial 1s → 60s com reset após 60s uptime (detecta run estável)
+- `AutosshHandle.isHealthy()` real (Sub-tarefa 3 placeholder now refletido)
+- Shutdown ordering: heartbeat.stop() → server.stop() → autossh.stop() → exit(0)
+- Dedupe SIGTERM/SIGINT via flag `triggered`, idempotente
+- 17 specs novos: 11 autossh + 6 shutdown; 84/84 total PASS
+
+**Issues encontrados:**
+- MEDIUM (m4): `config.agentSshKeyPath` logado em `spawnAutossh()` linha 312 — remover por futuro V2-035 (usar flag boolean apenas)
+
+**Pilares:** N/A (cliente VPS — não backend)
+**ADRs:** ADR-V2-031 (monorepo agent), ADR-V2-035 (logs sensíveis — futura)
+
 #### Sub-tarefa 6: install.sh + Validação (PENDENTE)
 #### Sub-tarefa 7: Documentação Final + Validação Smoke (PENDENTE)
 

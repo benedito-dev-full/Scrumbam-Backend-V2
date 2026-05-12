@@ -14,6 +14,36 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F13 Task #1 Sub-tarefa 5: Autossh Wrapper + Graceful Shutdown** (V2 F13 Cliente) - 2026-05-12
+  - **Autossh Wrapper Modular:** `agent/src/tunnel/autossh.wrapper.ts`
+    - `createAutosshWrapper(config, logger, options): AutosshHandle` — factory pattern
+    - Circuit breaker: 5 crashes/60s → pausa 5min (evita flap loop ex: chave SSH inválida → 100ms crash → 100 restarts/min)
+    - Backoff exponencial: 1s → 2s → 4s → ... → 60s (cap max, cálculo base 2^step)
+    - Uptime reset: após 60s rodando estável, reseta contador de crashes e step (detecção de "run saudável")
+    - `isHealthy()` exposto: state === 'running' (Sub-tarefa 3 placeholder now real)
+    - Arguments SSH canonizados: `-M 0 -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=accept-new -i <chave> -p <porta> -R <bindHost>:<tunnelPort>:127.0.0.1:<tunnelPort> agent@backend`
+    - Tunáveis: `initialBackoffMs`, `maxBackoffMs`, `crashWindowMs`, `crashThreshold`, `circuitOpenMs`, `uptimeResetMs`, `stopGraceMs`, `spawnImpl`, `setTimeoutImpl`, `now` (testes)
+    - Override para testes: `spawnImpl` mock, fake timers, função "agora" fixa
+  - **Graceful Shutdown Coordinator:** `agent/src/lifecycle/shutdown.ts`
+    - `gracefulShutdown(ctx, signal)` — ordem defensiva:
+      1. `heartbeat.stop()` (para batidas, evita log enganoso)
+      2. `server.stop()` (drena requests in-flight, timeout 30s antes closeAllConnections)
+      3. `autossh.stop()` (só depois servidor fechar, garante requests inbound via tunnel completem)
+      4. `process.exit(0)` (sucesso) ou `exit(1)` (erro em algum step)
+    - `installSignalHandlers([SIGTERM, SIGINT])` — helpers para registrar handlers
+    - Idempotente: dedupe via flag `triggered` (SIGTERM + SIGINT quase-simultâneos = execução única)
+    - Não lança: captura erros por step, loga cada um, continua sequência
+  - **Lifecycle Integration:** `agent/src/index.ts` reordenado
+    - startHeartbeatLoop → startHttpServer → startAutossh → installSignalHandlers → process (listen indefinido até signal)
+  - **Heartbeat Loop Atualizado:** `agent/src/lifecycle/heartbeat-loop.ts`
+    - Injeção opcional `tunnelHealthCheck`: para Sub-tarefa 5 conectar `tunnel.isHealthy()` ao payload (antes retornava `true` sempre)
+  - **Tests Novos:** `agent/__tests__/autossh.spec.ts` (11 specs: spawn success, crash+backoff, circuit breaker 5/60s→5min pausa, reset após uptime, stop SIGTERM→SIGKILL grace, isHealthy, status); `agent/__tests__/shutdown.spec.ts` (6 specs: ordem heartbeat→server→tunnel→exit, error capture, idempotência SIGTERM+SIGINT, exit codes 0/1)
+  - **Build:** tsc clean, 84/84 specs PASS (67 anterior + 17 novos)
+  - **Pilares:** N/A (cliente)
+  - **ADRs:** ADR-V2-031 (agent monorepo), ADR-V2-035 (logs sensíveis — futura, remover agentSshKeyPath)
+  - **Score:** 9.0/10 APPROVED rodada 1
+  - **Issues:** MEDIUM (m4 — config.agentSshKeyPath logado em spawnAutossh ln 312, remover em V2-035)
+
 - **F13 Task #1 Sub-tarefa 4: Handler RUN_CLAUDE_CODE + Session Extraction** (V2 F13 Cliente) - 2026-05-12
   - **Identity Resolver:** `src/claude-code/identity-resolver.ts` lê `projectSlug` via seção H2 em `~/.claude/CLAUDE.md` global (defesa contra path injection backend); suporta labels `- Caminho:` ou `- Path:`; case-sensitive slug; erros `CLAUDE_MD_NOT_FOUND`/`UNKNOWN_PROJECT_SLUG`/`INVALID_CLAUDE_MD_ENTRY`
   - **Allowlist Validator:** `src/claude-code/allowlist.ts` canonicaliza path com `realpathSync` ANTES do prefix check (defesa anti-symlink); boundary `/` evita burla `evil-projetos` vs `evil-projetos-real`; valida contra `config.allowedProjectRoots`

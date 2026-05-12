@@ -4,6 +4,64 @@
 
 ---
 
+## Task #1 Sub-tarefa 5 (F13 Cliente — Agente V2 VPS) — Autossh Wrapper + Lifecycle Coordenado — 🟡 IMPLEMENTER COMPLETO (aguarda Reviewer)
+
+**Module:** automation/agent (subprojeto monorepo `agent/`)
+**Task:** Wrapper modular do `autossh` (reverse tunnel `-R`) + reconnect com backoff exponencial + circuit breaker (5 crashes/60s → pausa 5min) + `lifecycle/shutdown.ts` orquestrando graceful shutdown (heartbeat → server → autossh → exit)
+**Task Status:** Implementer COMPLETE — Reviewer pendente (Sub-tarefa 5 de 7)
+**Fase V2:** F13 (Cliente — Sub-tarefa 5 de 7)
+**Duration:** ~3.5h Implementer
+**Completed (Implementer):** 2026-05-12
+
+**Deliverables:**
+- [x] `src/tunnel/autossh.wrapper.ts` — `createAutosshWrapper(config, logger, options)` spawna `autossh` com args canônicos (`-M 0 -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=accept-new -i <agentSshKeyPath> -p <backendTunnelPort> -R <bindHost>:<tunnelPort>:127.0.0.1:<tunnelPort> agent@<backendTunnelHost>`); estados `idle | starting | running | reconnecting | circuit_open | stopped`; `isHealthy()` exposto p/ heartbeat
+- [x] **Reconnect:** backoff exponencial 1s → 2s → 4s → ... capeado em 60s; `consecutiveBackoffStep` reseta após 60s de uptime estável
+- [x] **Circuit breaker:** 5 crashes consecutivos em janela 60s → status `circuit_open`, pausa 5min antes de retry; loga `circuit_open: true` no logger
+- [x] **stdout/stderr capture:** stderr → `logger.warn`, stdout → `logger.debug` (logger.redact cobre eventuais secrets)
+- [x] **stop():** SIGTERM com grace 5s, escala para SIGKILL se não morrer; marca shutdown definitivo (não reinicia depois)
+- [x] `src/lifecycle/shutdown.ts` — `gracefulShutdown(ctx, signal)` ordem: heartbeat.stop() → server.stop() (drena 30s) → autossh.stop() → exit(0/1); `installSignalHandlers` deduplica SIGTERM + SIGINT concorrentes (apenas o primeiro signal dispara)
+- [x] `src/lifecycle/heartbeat-loop.ts` — adicionado `tunnelHealthCheck?: () => boolean` em `HeartbeatLoopOptions`; `safeTunnelCheck()` blinda contra exceções (reporta false); `tunnelHealthy` no payload reflete estado real do autossh quando injetado
+- [x] `src/index.ts` — bootstrap reordenado: (1) loadConfig + logger; (2) autossh.start(); (3) backendClient + server.start(); (4) heartbeat com `tunnelHealthCheck = () => autossh.isHealthy()`; (5) `installSignalHandlers`
+- [x] `__tests__/autossh.spec.ts` — 11 specs PASS (spawn args corretos, crash → reconnect, backoff exponencial até max, circuit breaker 5/60s + pausa 5min, uptime reset, stop SIGTERM, stop SIGKILL fallback, idle no-op, isHealthy estados, spawn lançando ENOENT)
+- [x] `__tests__/shutdown.spec.ts` — 6 specs PASS (ordem heartbeat→server→tunnel→exit(0); erro em cada etapa não bloqueia próxima e exit(1); server async drena antes do tunnel; installSignalHandlers registra SIGTERM+SIGINT; dedup concorrente)
+- [x] **NÃO criado:** install.sh (Sub-tarefa 6) — escopo respeitado
+- [x] **NÃO mexido:** runner Claude Code (Sub-tarefa 4 já fechada)
+
+**Metrics:**
+- `npm run build`: PASS (tsc → `dist/tunnel/autossh.wrapper.js`, `dist/lifecycle/shutdown.js`)
+- `npm run lint`: PASS (eslint clean, zero warnings, max-warnings 0)
+- `npm test`: PASS 84/84 specs (67 anteriores + 11 autossh + 6 shutdown)
+- Cobertura novos cenários: 17 testes, todos com fake clock + spawn mock (zero IO real)
+
+**Decisão de reuso vs reescrita:**
+- O agente legado tem o autossh INLINE em `index.ts` (não modular, ~30 linhas). NÃO PORTADO — reescrito do zero para encaixar na arquitetura modular V2 (wrapper isolado, testável via mock de spawn, reconnect/circuit breaker próprios).
+- Reaproveitado: lista canônica de args SSH (`-M 0 -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes`), envvar `AUTOSSH_GATETIME=0`, comportamento de `-R bindHost:port:127.0.0.1:port`.
+- Adicionado vs legado:
+  - Modularidade (testabilidade via DI de spawn/clock)
+  - Reconnect próprio (legado dependia de systemd `Restart=always` matando o processo todo)
+  - Circuit breaker (legado entraria em flap loop com chave SSH inválida)
+  - `isHealthy()` para heartbeat consumir o estado real
+  - Graceful shutdown coordenado em módulo dedicado
+
+**Decisões de design:**
+- **autossh por último no shutdown** (defensivo): server.stop() drena requests in-flight ANTES do tunnel cair, garantindo respostas chegarem ao backend.
+- **start() resolve sem esperar tunnel subir:** autossh não emite "ready" sem parsing de stderr. `isHealthy()` reflete o estado em runtime — heartbeat já comunica o status pro backend.
+- **`accept-new` em StrictHostKeyChecking:** primeira conexão aceita host key automaticamente; install.sh (Sub-tarefa 6) vai popular `known_hosts` via `ssh-keyscan` antes de subir o serviço pra produção, eliminando a janela TOFU.
+- **Spawn síncrono lançando** (ex: ENOENT) entra no MESMO fluxo de crash → backoff. Não fail fast no bootstrap; o circuit breaker proteje contra flap se o binário realmente faltar.
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — agente cliente, não acessa DPedido
+- Pilar 2 (Endpoints): N/A — agente consome, não expõe duplicados
+- Pilar 3 (Seed): N/A — zero DClasse nova
+
+**ADRs vinculados:** ADR-V2-033 (HTTP+HMAC contrato cliente/agente)
+
+**Próximo passo:** Reviewer da Sub-tarefa 5 → Documenter fecha → Sub-tarefa 6 (install.sh + systemd unit)
+
+**Plan:** [`workspace/plans/plan-automation-agent-v2-client-task1.md`](../workspace/plans/plan-automation-agent-v2-client-task1.md) §5 Sub-tarefa 5
+
+---
+
 ## Task #1 Sub-tarefa 4 (F13 Cliente — Agente V2 VPS) — Handler RUN_CLAUDE_CODE + Session Extraction — ✅ COMPLETE
 
 **Module:** automation/agent (subprojeto monorepo `agent/`)
