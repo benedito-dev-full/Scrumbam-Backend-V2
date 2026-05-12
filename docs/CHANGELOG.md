@@ -14,6 +14,31 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F13 Task #1 Sub-tarefa 3: Outbound Client + Heartbeat Loop** (V2 F13 Cliente) - 2026-05-12
+  - **Outbound HMAC Signer:** `src/outbound/hmac-sign.ts` assina requests com SHA256 byte-a-byte idêntico ao backend
+    - Algoritmo canonical: `METHOD\npath\ntimestamp\nnonce\nsha256(body)`
+    - Headers padronizados: `x-scrumban-agent-id`, `x-scrumban-timestamp`, `x-scrumban-nonce`, `x-scrumban-signature`
+    - Index signature para compatibilidade `fetch()` HeadersInit
+  - **Backend Client:** `src/outbound/backend-client.ts` com transporte robusto
+    - `sendHeartbeat()` → POST /agents/:id/heartbeat (payload: cpu, mem, uptime, claudeCodeAvailable, tunnelHealthy, agentVersion, claudeVersion)
+    - `sendExecutionResult()` → stub POST /agents/:id/execution-result (shape final ADR-V2-032)
+    - Backoff exponencial: 4xx sem retry (erro permanent), 5xx/rede retry 1-2-4-8-16-32s (cap 60s)
+    - Máximo 5 tentativas, re-assina por retry (replay protection), timeout 10s AbortController
+    - `BackendClientError` com `.status`, `.retryable`, `.attempts`
+  - **Heartbeat Loop:** `src/lifecycle/heartbeat-loop.ts` 30s interval
+    - Coleta CPU (loadavg/cpuCount), MEM (freemem/totalmem), uptime (process.uptime)
+    - Detecta Claude Code via `claude --version` com cache 5min (async, não bloqueia event loop)
+    - Circuit metric: loga `circuit_open: true` após 5 falhas (continua tentando — alertar, não breaker)
+    - Recuperação limpa após sucesso pós-falhas
+    - Nunca crasha (catch-and-log), SIGTERM ordering `heartbeat.stop()` antes `server.stop()`
+    - Interface `HeartbeatHandle` com `stop()` e `triggerNow()` para testes
+  - **Bootstrap Atualizado:** `src/index.ts` startHeartbeatLoop + graceful shutdown ordering
+  - **Tests:** 12 specs PASS (signOutboundRequest, HMAC round-trip middleware real, backoff 4xx/5xx, retry exhaustion, re-sign, payloads, fetchImpl injection)
+  - **Pilares:** N/A (cliente)
+  - **ADRs:** ADR-V2-031, ADR-V2-033, ADR-V2-008
+  - **Score:** 8.8/10 APPROVED rodada 1
+  - **Issues identificados:** MEDIUM — heartbeat-loop.ts sem specs dedicadas (risco regressão); MINOR — agentVersion hardcoded, claudeVersion parse básico, backoff sem jitter
+
 - **F13 Task #1 Sub-tarefa 2: HTTP Server Local + HMAC Middleware + Dispatcher /v1/execute** (V2 F13 Cliente) - 2026-05-12
   - **Servidor:** Express bind 127.0.0.1:tunnelPort (loopback only, defesa contra exposição direta)
   - **HMAC-SHA256:** Algoritmo byte-a-byte idêntico a `remote-execution-client.ts` (backend)

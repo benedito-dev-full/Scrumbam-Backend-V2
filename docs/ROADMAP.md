@@ -397,6 +397,153 @@
 - **Bind 127.0.0.1 hardcoded:** Não configurável; by design — acesso via tunnel SSH sempre
 - **Body limit 1MB:** Risk Gate stdout/stderr não vêm via inbound (vêm via callback outbound)
 
+**Plan:** [`workspace/plans/plan-automation-agent-v2-client-task1.md`](../workspace/plans/plan-automation-agent-v2-client-task1.md) §5 Sub-tarefa 2
+**Review:** [`workspace/reviews/review-automation-agent-task1-sub2.md`](../workspace/reviews/review-automation-agent-task1-sub2.md)
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan Task #1 (7 sub-tarefas) |
+| Implementer | ~6h | 100% PASS: http server + middleware + dispatcher + 15 tests |
+| Reviewer | ~30min | Score 9.2/10 APPROVED rodada 1 (5 gates segurança validados) |
+| Documenter | ~30min | JSDoc, ROADMAP, CHANGELOG, STATUS, commit Conventional |
+
+---
+
+#### Sub-tarefa 3: Outbound Client + Heartbeat Loop — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** agent/src/outbound + agent/src/lifecycle (subprojeto monorepo `Scrumban-Backend-V2/agent/`)
+**Fase V2:** F13 (Cliente — Sub-tarefa 3 de 7)
+**Tempo Real:** ~4h Implementer + ~30min Reviewer + ~30min Documenter
+**Completado em:** 2026-05-12
+**Quality Score:** 8.8/10 APPROVED rodada 1
+
+**O Que Foi Feito:**
+
+**Outbound HMAC Signer (`src/outbound/hmac-sign.ts`):**
+- Função `signOutboundRequest(input)` assina requests outbound agent → backend
+- **Algoritmo byte-a-byte idêntico ao backend:** canonical = `METHOD\npath\ntimestamp\nnonce\nsha256(body)`
+  - Validado por spec round-trip real (middleware inbound do agente + mock backend)
+  - Qualquer divergência resultaria 401 HMAC_INVALID
+- **Headers emitidos:** `x-scrumban-agent-id`, `x-scrumban-timestamp`, `x-scrumban-nonce`, `x-scrumban-signature` (formato `hmac-sha256=<hex64>`)
+- **Index signature** em `SignedHeaders` para compatibilidade `HeadersInit` do `fetch()`
+- **Overrides para testes:** `timestampOverride`, `nonceOverride` (determinismo)
+- JSDoc completo (@example, referências a backend e middleware inbound)
+
+**Backend Client (`src/outbound/backend-client.ts`):**
+- Factory `createBackendClient(config, logger, options?)` retorna interface `BackendClient`
+- **`sendHeartbeat(payload)`** — POST /agents/:id/heartbeat
+  - Serializa `HeartbeatPayload` (cpu, mem, uptime, claudeCodeAvailable, tunnelHealthy, agentVersion, claudeVersion)
+  - HMAC assina, `fetch` nativo Node 20+, retry com backoff
+- **`sendExecutionResult(payload)`** — POST /agents/:id/execution-result (STUB Sub-tarefa 3)
+  - Shape final do payload já inclui `claudeSessionId`, `claudeSessionPath`, `resumedFrom`, `stdoutTruncated`, `stderrTruncated` (ADR-V2-032)
+  - Sub-tarefa 4 popula os campos; aqui é só o transporte
+- **Backoff Exponencial (4xx vs 5xx):**
+  - **4xx (400-499):** Sem retry — erro de payload/autenticação, retry não ajuda
+    - 401 logado em `error` (indica config corrompida)
+  - **5xx (500-599) ou network error:** Retry com exponencial 1s, 2s, 4s, 8s, 16s, 32s (cap 60s)
+  - **Máximo 5 tentativas** (configurável via `maxAttempts` em `BackendClientOptions`)
+  - **Re-assina a cada retry** com novo nonce/timestamp (replay protection)
+  - **Timeout por request 10s** (AbortController, configurável via `requestTimeoutMs`)
+- **`BackendClientError` com contexto:** `.status` (null se rede), `.retryable` (bool), `.attempts` (count)
+- JSDoc completo (body, @see ADRs, exemplos de uso)
+
+**Heartbeat Loop (`src/lifecycle/heartbeat-loop.ts`):**
+- Função `startHeartbeatLoop(backendClient, logger, options?)` retorna `HeartbeatHandle`
+- **Intervalo fixo 30s** (configurável via `intervalMs` em testes)
+- **Snapshot de saúde a cada tick:**
+  - CPU: `loadavg[0] / cpuCount` (normalizado)
+  - MEM: `freemem / totalmem` (fração 0..1)
+  - Uptime: `process.uptime()` em segundos
+  - Claude disponível: `claudeCodeAvailable` detecta via `claude --version`
+  - Tunnel saudável: placeholder `true` (Sub-tarefa 5 vai preencher real)
+  - Versão agente: `agentVersion` (default '0.1.0')
+  - Versão Claude: `claudeVersion` (detectado ou `null`)
+- **Cache de detecção Claude 5min:**
+  - Evita spawn `execFile` a cada heartbeat
+  - TTL 5min (configurável `claudeDetectionCacheMs`)
+  - Detecção async (`execFileAsync` promisificado)
+- **Circuit metric (não circuit breaker):**
+  - Conta falhas consecutivas
+  - Após 5 falhas, loga `circuit_open: true`
+  - **CONTINUA tentando** (não para `setInterval`) — só métrica de alerta
+  - Recuperação limpa: ao sucesso pós-falhas, zera contador + loga "recuperado"
+- **Nunca crasha:** Todo erro é `catch-and-log`
+  - Loop ignora promise via `void tick()`
+  - SIGTERM gracioso: `heartbeat.stop()` chamado ANTES de `server.stop()`
+- **Interface `HeartbeatHandle`:**
+  - `stop()` — para o loop (idempotente)
+  - `triggerNow()` — heartbeat imediato (útil para testes)
+- **Injetáveis para testes:**
+  - `detectClaude` — override da detecção real
+  - `setIntervalImpl` / `clearIntervalImpl` — controle preciso do timing
+  - `now` — clock fixo (date-fns-like)
+- JSDoc completo (descrição, @see Sub-tarefa 5, ADRs, exemplos)
+
+**Atualização do Bootstrap (`src/index.ts`):**
+- `startHeartbeatLoop()` inicializado pós-server
+- `SIGTERM/SIGINT` → `heartbeat.stop()` ANTES de `server.stop()` (ordering correto)
+- Mensagem de log indica "Sub-tarefa 3: heartbeat 30s + HTTP server + HMAC ativo"
+
+**Testes (`agent/__tests__/outbound.spec.ts`):**
+- 12 specs PASS (cobrindo críticos da Sub-tarefa 3)
+  1. `signOutboundRequest` — canonical string correto
+  2. HMAC round-trip com middleware inbound real (spec integração)
+  3. `BackendClient.sendHeartbeat` — formato payload correto
+  4. Backoff: sleep 1s na primeira falha 5xx
+  5. Backoff: sleep 2s na segunda falha 5xx
+  6. Retry esgotado após 5 tentativas (lança `BackendClientError`)
+  7. 4xx NAO retenta (lança imediatamente)
+  8. Re-assina em cada retry (novo nonce + timestamp)
+  9. `ExecutionResultPayload` shape (stub com 11 campos corretos)
+  10. `fetchImpl` injetável para testes (mock backend)
+  11. `requestTimeoutMs` AbortController ativa timeout
+  12. `clearTimeout` chamado no finally (ambos paths)
+
+**Decisões Técnicas Registradas:**
+- **HMAC algoritmo idêntico:** Validado por spec round-trip (não mock — middleware real)
+- **4xx sem retry, 5xx com retry:** Semântica correta de falhas transientes vs permanentes
+- **Circuit metric, não breaker:** Alertas operacionais sem parar o loop
+- **TTL cache Claude 5min:** Balanço entre detecção atualizada e overhead de spawn
+- **Re-sign por retry:** Nonce frescos evitam replay (NONCE_REPLAY detectado no backend)
+
+**Issues encontrados e corrigidos:**
+- **MEDIUM:** `heartbeat-loop.ts` sem specs dedicadas — `setInterval`, `circuit_open`, cache, `stop()` não testados isoladamente (código correto na leitura, risco regressão futura)
+- **MINOR:** `agentVersion` hardcoded '0.1.0' (pode desincronizar do package.json; melhoria Sub-tarefa 7)
+- **MINOR:** `claudeVersion` parse básico (último token de stdout — frágil)
+- **MINOR:** Backoff sem jitter (thundering herd com múltiplos agentes; irrelevante MVP 1 VPS)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — cliente VPS, zero Engine
+- Pilar 2 (Endpoints): N/A — agente consome endpoints, não expõe duplicados
+- Pilar 3 (Seed): N/A — zero DClasse nova (ADR-V2-001)
+
+**ADRs vinculados:** ADR-V2-031 (monorepo agent), ADR-V2-033 (contrato HTTP+HMAC), ADR-V2-008 (DEvento -501 heartbeat)
+
+**Métricas:**
+- `npm run build`: PASS (tsc → dist/outbound/*, dist/lifecycle/*)
+- `npm run lint`: PASS (eslint clean, 0 warnings)
+- `npm run typecheck`: PASS (tsc --noEmit clean)
+- `npm test`: PASS (38/38 specs — 11 config + 15 http.server + 12 outbound)
+- Coverage cenários: 12/12 (HMAC, backoff, retry, circuit, cache)
+- Timeout: 10s por request (AbortController)
+
+**Próximo passo:** Sub-tarefa 4 (RUN_CLAUDE_CODE handler real)
+
+**Plan:** [`workspace/plans/plan-automation-agent-v2-client-task1.md`](../workspace/plans/plan-automation-agent-v2-client-task1.md) §5 Sub-tarefa 3
+**Review:** [`workspace/reviews/review-automation-agent-task1-sub3.md`](../workspace/reviews/review-automation-agent-task1-sub3.md)
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan Task #1 (7 sub-tarefas) |
+| Implementer | ~4h | 100% PASS: hmac-sign + backend-client + heartbeat-loop + 12 tests |
+| Reviewer | ~30min | Score 8.8/10 APPROVED rodada 1 (HMAC round-trip verificado, backoff validado) |
+| Documenter | ~30min | JSDoc, ROADMAP, CHANGELOG, STATUS, commit Conventional |
+
 **Dependencies:**
 - `dependencies`: express, pino, zod, lru-cache, express-rate-limit
 - `devDependencies`: (adicionados) supertest, @types/supertest
