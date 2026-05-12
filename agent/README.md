@@ -1,24 +1,34 @@
 # scrumban-agent
 
-Binário cliente Node.js+TypeScript que roda na VPS do CEO. **Executor passivo** do lado cliente da F13 (Automation Claude Code): recebe comandos do backend Scrumban-Backend-V2 via HTTP+HMAC sobre reverse tunnel SSH (autossh) e invoca `claude -p` no host.
+Binário cliente Node.js+TypeScript que roda na **VPS do CEO**. **Executor passivo** do lado cliente da F13 (Automation Claude Code): recebe comandos do backend Scrumban-Backend-V2 via HTTP+HMAC sobre reverse tunnel SSH (autossh) e invoca `claude -p` no host.
 
 **Princípio:** zero persistência local de domínio. Toda gravação acontece no backend via Engine `OperacaoExecucaoClaude` (DPedido idClasse=-300..-303). O agente só guarda config em `/etc/scrumban-agent/config.json` (modo 0600).
 
 ---
 
-## Estado atual
+## Arquitetura (1 parágrafo)
+
+Backend V2 envia `POST /v1/execute` (HMAC-SHA256, ±5min timestamp, nonce LRU 10min) ao agente, que escuta em `127.0.0.1:<tunnelPort>` (exposto ao backend via reverse tunnel SSH `-R` mantido por `autossh`). O dispatcher discrimina por `type` (`PING`, `RUN_CLAUDE_CODE` no MVP — ADR-V2-037 reserva espaço para `LIST/READ/STREAM_CLAUDE_SESSIONS`). Para `RUN_CLAUDE_CODE` o agente resolve o `cwd` lendo o `projectSlug` em `~/.claude/CLAUDE.md` global (ADR-V2-035 — sem path absoluto no payload), valida o path contra `allowedProjectRoots` (realpath anti-symlink), invoca `claude -p "<prompt>" --output-format json [--resume <id>]` via `execFile` (sem shell), extrai o `session_id` do output JSON (primary) ou do filesystem (fallback FS), e responde de volta ao backend via `POST /agents/:id/execution-result` com `claudeSessionId` para que o Engine `OperacaoExecucaoClaude` grave em `DPedido.dados.claude.sessionId`. Em paralelo, um heartbeat loop envia status a cada 30s incluindo saúde real do tunnel (`autossh.isHealthy()`).
+
+Diagrama ASCII completo: ver `workspace/plans/plan-automation-agent-v2-client-task1.md` §4.
+
+---
+
+## Status — Task #1 (Sub-tarefas 1–7)
 
 | Sub-tarefa | Status | Conteúdo |
 |---|---|---|
-| **1. Scaffolding + config loader** | completa | `package.json`, `tsconfig.json`, `eslint.config.js`, jest, logger (pino com redaction), config schema (zod), config loader (modo 0600), `index.ts` bootstrap mínimo, 11 specs |
-| **2. HTTP server + HMAC + `/v1/execute`** | completa | express bind 127.0.0.1, middleware HMAC (algoritmo idêntico ao backend, `timingSafeEqual`), nonce LRU 10min/10k entries, rate limit 60/min por agentId, dispatcher PING + RUN_CLAUDE_CODE, GET /ping autenticado, graceful shutdown 30s, 15 specs |
-| **3. Outbound + heartbeat** | completa | `backend-client`, `heartbeat-loop` (30s), backoff exponencial, 12 specs |
-| **4. RUN_CLAUDE_CODE + session-parser** | completa | runner (execFile, sem shell), allowlist (realpath anti-symlink), identity-resolver, session parser snake_case + fallback FS, mutex por slug, 29 specs |
-| **5. autossh + lifecycle** | completa | wrapper modular, reconnect com backoff, circuit breaker 5/60s, SIGTERM gracioso ordenado, 17 specs |
-| **6. install.sh + systemd + CLAUDE.md** | completa | install.sh bash (13 fases, idempotente, dry-run), systemd unit (User=scrumban-agent, hardening completo), CLAUDE-md-template.md, uninstall.sh |
-| 7. Docs + ADRs | pendente | ADR-V2-030/031/032 |
+| **1. Scaffolding + config loader** | ✅ completa | `package.json`, `tsconfig.json`, `eslint.config.js`, jest, logger (pino com redaction), config schema (zod), config loader (modo 0600), `index.ts` bootstrap mínimo |
+| **2. HTTP server + HMAC + `/v1/execute`** | ✅ completa | express bind 127.0.0.1, middleware HMAC (algoritmo idêntico ao backend, `timingSafeEqual`), nonce LRU 10min/10k entries, rate limit 60/min por agentId, dispatcher PING + RUN_CLAUDE_CODE (stub), GET /ping autenticado, graceful shutdown 30s |
+| **3. Outbound + heartbeat** | ✅ completa | `backend-client`, `heartbeat-loop` (30s), backoff exponencial, retry em 5xx/rede, circuit metric após 5 falhas |
+| **4. RUN_CLAUDE_CODE + session-parser** | ✅ completa | runner (execFile, sem shell), allowlist (realpath anti-symlink), identity-resolver, session parser snake_case + fallback FS, mutex por slug, ACK 200 síncrono + execution-result async |
+| **5. autossh + lifecycle** | ✅ completa | wrapper modular, reconnect com backoff exponencial, circuit breaker 5/60s → pausa 5min, SIGTERM gracioso ordenado (heartbeat → server → autossh → exit) |
+| **6. install.sh + systemd + CLAUDE.md** | ✅ completa | `install.sh` bash (14 fases, idempotente, dry-run, shellcheck-clean), systemd unit (User=scrumban-agent, hardening completo, EnvironmentFile p/ ANTHROPIC_API_KEY), `CLAUDE-md-template.md`, `uninstall.sh` |
+| **7. Docs + ADRs** | ✅ completa | ADR-V2-035/036/037 redigidos, runbook atualizado, README final |
 
-ADR-V2-031 (em redação): este código mora em monorepo dentro de `Scrumban-Backend-V2/agent/` para versionamento atômico com o backend.
+**Testes:** 84/84 PASS. Build: PASS. Lint: PASS (zero warnings).
+
+**ADRs vinculados:** ADR-V2-001, ADR-V2-005, ADR-V2-006, ADR-V2-008, ADR-V2-013, ADR-V2-033, ADR-V2-035 (identidade slug), ADR-V2-036 (monorepo), ADR-V2-037 (ponteiro de sessão).
 
 ---
 
@@ -68,31 +78,54 @@ Schema validado por `zod` (ver `src/config/schema.ts`). Campos chave:
 ```
 agent/
 ├── src/
-│   ├── index.ts                   # bootstrap (atualmente: carrega config + loga banner)
-│   ├── logger.ts                  # pino com redaction
+│   ├── index.ts                       # bootstrap: config, logger, autossh, server, heartbeat, signal handlers
+│   ├── logger.ts                      # pino com redaction
 │   ├── config/
-│   │   ├── schema.ts              # AgentConfigSchema (zod)
-│   │   └── loader.ts              # loadConfig() — valida modo 0600 + zod
+│   │   ├── schema.ts                  # AgentConfigSchema (zod)
+│   │   └── loader.ts                  # loadConfig() — valida modo 0600 + zod
 │   ├── server/
-│   │   ├── http.server.ts         # express bind 127.0.0.1 + graceful shutdown
-│   │   ├── hmac.middleware.ts     # HMAC-SHA256 (idêntico ao backend) + timingSafeEqual
-│   │   ├── nonce.store.ts         # LRU 10min/10k anti-replay
-│   │   ├── rate-limit.middleware.ts  # 60 req/min por agentId
-│   │   └── dispatcher.ts          # POST /v1/execute (PING + RUN_CLAUDE_CODE stub 501)
-│   ├── handlers/                  # vazio — Sub-tarefa 4 (handler real de RUN_CLAUDE_CODE)
-│   ├── claude-code/               # vazio — Sub-tarefa 4
-│   ├── tunnel/                    # vazio — Sub-tarefa 5
-│   ├── outbound/                  # vazio — Sub-tarefa 3
-│   └── lifecycle/                 # vazio — Sub-tarefas 3 e 5
+│   │   ├── http.server.ts             # express bind 127.0.0.1 + graceful shutdown 30s
+│   │   ├── hmac.middleware.ts         # HMAC-SHA256 (idêntico ao backend) + timingSafeEqual
+│   │   ├── nonce.store.ts             # LRU 10min/10k anti-replay
+│   │   ├── rate-limit.middleware.ts   # 60 req/min por agentId
+│   │   └── dispatcher.ts              # POST /v1/execute (PING + RUN_CLAUDE_CODE)
+│   ├── handlers/
+│   │   └── run-claude-code.handler.ts # ACK 200 síncrono + execution-result async + mutex por slug
+│   ├── claude-code/
+│   │   ├── runner.ts                  # execFile claude -p --output-format json [--resume]
+│   │   ├── session-parser.ts          # session_id snake_case (primary) + fallback FS (mtime)
+│   │   ├── allowlist.ts               # realpath anti-symlink + match em allowedProjectRoots
+│   │   └── identity-resolver.ts       # parser de ~/.claude/CLAUDE.md (slug → cwd)
+│   ├── tunnel/
+│   │   └── autossh.wrapper.ts         # reverse tunnel `-R` + backoff + circuit breaker
+│   ├── outbound/
+│   │   ├── backend-client.ts          # POST /agents/:id/heartbeat + /execution-result
+│   │   └── hmac-sign.ts               # assina requests outbound (mesma chave)
+│   └── lifecycle/
+│       ├── heartbeat-loop.ts          # setInterval 30s; tunnelHealthy via autossh.isHealthy()
+│       └── shutdown.ts                # SIGTERM/SIGINT graceful: heartbeat → server → tunnel → exit
 ├── __tests__/
-│   ├── config.loader.spec.ts      # 11 specs
-│   └── http.server.spec.ts        # 15 specs (HMAC, dispatcher, rate limit, lifecycle)
+│   ├── config.loader.spec.ts          # config 0600 + zod (11 specs)
+│   ├── http.server.spec.ts            # HMAC, dispatcher, rate limit, lifecycle (15 specs)
+│   ├── outbound.spec.ts               # backend-client, heartbeat-loop, backoff (12 specs)
+│   ├── run-claude-code.spec.ts        # handler + runner + session-parser (29 specs)
+│   ├── identity-resolver.spec.ts      # parser CLAUDE.md (12 specs)
+│   ├── autossh.spec.ts                # wrapper, backoff, circuit breaker (11 specs)
+│   └── shutdown.spec.ts               # ordem de shutdown, dedup signals (6 specs)
+├── systemd/
+│   └── scrumban-agent.service         # User=scrumban-agent + hardening completo
+├── install.sh                          # 14 fases, idempotente, dry-run, shellcheck-clean
+├── uninstall.sh                        # interativo (--yes para CI), verifica resíduos
+├── CLAUDE-md-template.md               # template `## <slug>` + `Caminho:`
 ├── package.json
 ├── tsconfig.json
-├── eslint.config.js               # flat config (ESLint 9)
-├── .gitignore
-└── README.md
+├── eslint.config.js                    # flat config (ESLint 9)
+├── jest.config.js
+├── .gitignore                          # node_modules/, dist/, coverage/, .claude/
+└── README.md                           # este arquivo
 ```
+
+Total: 84 specs PASS (~3.4s).
 
 ---
 
@@ -360,3 +393,46 @@ SCRUMBAN_AGENT_CONFIG_PATH=/tmp/agent-cfg.json node dist/index.js
 Atenção: rodar sem `autossh` + `claude` instalados localmente fará os componentes
 correspondentes falharem (autossh wrapper entra em circuit breaker, RUN_CLAUDE_CODE
 retorna 500). Para testes unitários, use `npm test` (mocks).
+
+---
+
+## Limitações conhecidas (will not have no MVP)
+
+Débitos explícitos do Task #1 — documentados, intencionais:
+
+- **Política de retenção de `~/.claude/projects/<encoded-cwd>/*.jsonl`.** O CLI grava sessões indefinidamente; o agente apenas as lê. Crescimento ilimitado de disk é débito reconhecido. ADR futuro quando dor surgir (ex: cron de archive para S3 frio).
+- **Endpoints `LIST_CLAUDE_SESSIONS` / `READ_CLAUDE_SESSION` / `STREAM_CLAUDE_SESSION`.** Reservados em ADR-V2-037 (porta aberta para chat-with-VPS) mas NÃO implementados. Discriminator `type` no `/v1/execute` permite adicionar sem quebrar contrato.
+- **Backend impondo `--session-id <uuid>` ao CLI.** Rejeitado no MVP (ver ADR-V2-037 §Alternativa A). Agente extrai o ID do CLI; não o impõe.
+- **Rotação automática de chaves** (`agentApiKey`, `agentCommandSecret`, SSH key). Processo manual via `uninstall.sh` + `install.sh` documentado no runbook.
+- **Distribuição via GitHub release** com checksum verificado (`--bundle-url`). MVP usa OPÇÃO C bundle-relative (`tar czf` no dev + `scp`).
+- **Múltiplos agentes na mesma VPS.** Suportado teoricamente (cada um com `agentId` e `tunnelPort` próprios), não testado.
+- **Frontend chat-with-VPS.** Depende dos 3 endpoints acima + UI; fora do MVP.
+
+---
+
+## Referências
+
+### ADRs
+
+- **ADR-V2-001** — zero tabela nova (agente não toca banco diretamente).
+- **ADR-V2-005** — Engine `OperacaoExecucaoClaude` extends `OperacaoPedido` (gravação fica no backend).
+- **ADR-V2-006** — Risk via idClasse (-301 LOW / -302 MED / -303 HIGH).
+- **ADR-V2-008** — DEvento substitui DNotification (audit lifecycle).
+- **ADR-V2-013** — Agent como `DEntidade idClasse=-156`.
+- **ADR-V2-033** — Contrato `/v1/execute` outbound + `execution-result` inbound + DEvento sessão lifecycle.
+- **ADR-V2-035** — Identidade via `projectSlug` + `CLAUDE.md` global (sem path no payload).
+- **ADR-V2-036** — Monorepo `Scrumban-Backend-V2/agent/` (versionamento atômico).
+- **ADR-V2-037** — Ponteiro de sessão Claude Code (`claudeSessionId`) — chat-with-VPS futuro.
+
+### Planos e docs
+
+- `workspace/plans/plan-automation-agent-v2-client-task1.md` — plano do agente cliente (este Task).
+- `workspace/plans/plan-automation-backend-side-task2.md` — plano backend complementar (`/v1/execute` outbound + `execution-result` inbound + Engine).
+- `docs/automation-agent-install-runbook.md` — runbook de instalação na VPS (fluxo completo).
+- `docs/automation-security-runbook.md` — peppers/keys do backend.
+- `docs/automation-guide.md` — guia funcional do operador.
+
+### Memória dos agentes (private)
+
+- `.claude/agent-memory/implementer/agent_install_gotchas.md` — gotchas do install.sh.
+- `.claude/agent-memory/implementer/claude_session_extraction.md` — spike CLI session_id.

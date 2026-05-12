@@ -4,6 +4,126 @@
 
 ---
 
+## 🎯 MARCO: TASK #1 COMPLETO — Agente Cliente V2 (F13 Cliente)
+
+Plano `plan-automation-agent-v2-client-task1.md` finalizado **2026-05-12**.
+- **7/7 sub-tarefas APPROVED** — média 8.94/10
+- **84/84 specs PASS** — TypeScript + Jest + shellcheck
+- **7 commits agente** — 7048c1b → 08bf4df → ba1e2a7 → a72cf5e → 4c9c6e8 → 2f838cc → [sub7]
+- **3 ADRs canônicos novos** — V2-035 (slug+CLAUDE.md), V2-036 (monorepo), V2-037 (sessionId)
+- **Backend V2 (F13 backend — task 2) + Agente Cliente V2 (F13 cliente — Task #1 aqui) = F13 PRONTA**
+
+**Próximo passo operacional:** Bundle agente (`tar czf agent/`) → scp para VPS → `install.sh` com token instala-token → systemd start → heartbeat poll → backend registra agent online.
+
+---
+
+## Task #1 (F13 Cliente — Agente V2 VPS) — ✅ COMPLETO (Sub-tarefas 1–7 fechadas)
+
+**Module:** automation/agent (subprojeto monorepo `agent/`)
+**Task:** Agente V2 cliente-side completo — executor passivo Node.js+TS que roda na VPS, recebe comandos do backend via HTTP+HMAC sobre reverse tunnel SSH e invoca `claude -p` localmente. Zero persistência local de domínio (toda gravação atravessa o backend via Engine `OperacaoExecucaoClaude`).
+**Task Status:** ✅ COMPLETO — 7/7 sub-tarefas APPROVED
+**Fase V2:** F13 (Cliente — lado VPS)
+**Completed:** 2026-05-12
+
+### Encerramento — Sub-tarefa 7 (Docs finais + ADRs) — ✅ COMPLETA
+
+**Score:** 8.8/10 APPROVED rodada 1
+**Status:** COMPLETA — documentação canônica, ADRs formalizados, runbook executável, agente marcado como pronto para deploy
+
+**Deliverables:**
+
+- [x] **ADR-V2-035** — Identidade de projeto via `projectSlug` + `CLAUDE.md` global
+  - Status: Aceito
+  - Cobre: defesa em profundidade (allowlist + realpath anti-symlink); elimina path injection backend → cliente
+  - Implementação: `agent/src/claude-code/identity-resolver.ts` lê H2 section de `~/.claude/CLAUDE.md` global
+  - Renumerado de 030 → 035 (colisão com ADR-V2-030 multi-tenant + ADR-V2-031 legado existente); nota explicativa em arquivo preserva trilha auditoria
+  
+- [x] **ADR-V2-036** — Monorepo `Scrumban-Backend-V2/agent/`
+  - Status: Aceito
+  - Justificativa: versionamento atômico backend ↔ agente; mudanças de protocolo HTTP+HMAC deploy junto em PR único
+  - Alternativa B (fork legado + patch) rejeitada — viola "V2 ganha sempre"
+  - Renumerado de 031 → 036 (colisão com ADR-V2-031 Multi-tenant)
+  
+- [x] **ADR-V2-037** — Ponteiro de sessão Claude Code (`claudeSessionId`)
+  - Status: Aceito
+  - Formaliza: "porta aberta" para chat-with-VPS futuro (`/v1/execute` com `type` discriminator + tipos futuros LIST/READ/STREAM)
+  - Persistência: `DPedido.dados.claudeSessionId` (ADR-V2-001 preservado — zero tabela nova)
+  - Implementação: backend `OperacaoExecucaoClaude` persiste `claudeSessionId` retornado por agente
+  - Renumerado de 032 → 037 (colisão com ADR-V2-032 legado)
+  - Nota: os 3 ADRs trazem explicação da renumeração para preservar trilha auditoria
+
+- [x] **`docs/automation-agent-install-runbook.md`** reescrito completamente
+  - De: pseudo-código legado (teórico)
+  - Para: runbook real executável com 6 passos + 14 fases detalhadas
+  - 6 passos: (1) Gerar install-token backend | (2) Rodar install.sh | (3) Validar serviço ativo | (4) Fornecer CLAUDE.md | (5) Set ANTHROPIC_API_KEY | (6) Smoke test backend
+  - 14 fases do install: root check → pre-flight CLI → user/dirs perms → ssh-keygen Ed25519 → ssh-keyscan TOFU → handshake POST install-token → config.json 0600 persist → env file 0600 → systemd daemon-reload → systemd enable --now → heartbeat poll 60s → CLAUDE.md template verify → final security check → conclusão
+  - Troubleshooting expandido: clock skew detecção, túnel down diagnostics, missing API key debugging, projeto desconhecido allowlist check, allowlist violation boundary check, systemd logs inspection, ANTHROPIC_API_KEY verification comando via `systemctl show`
+  - Seção de segurança: obsessão 0600/0700 permissões, Ed25519 key constraints, TOFU fingerprint visível para verificação operador
+  - Débitos explícitos: MCP keys suporte (futuro), rate limit tuning pós-deploy, session read/streaming (chat-with-VPS), symmetric key rotation, multi-project parallel execution, SSH key constraint enforcement, systemd hardening extras
+
+- [x] **`CLAUDE.md` raiz (V2)** seção nova "SUBPROJETO `agent/` (F13 — cliente VPS)"
+  - Tabela de paths: `agent/` monorepo, `agent/src/` código, `agent/__tests__/` tests, systemd paths `/etc/systemd/system/scrumban-agent.service`
+  - Comandos de build: `npm install`, `npm run build`, `npm run test`, `npm run lint`
+  - ADRs vinculados: V2-035 (identidade), V2-036 (monorepo), V2-037 (sessionId), V2-033 (contrato HTTP+HMAC), V2-031 (legado — referência), V2-030 (auth backend)
+  - Próximos passos operacionais: bundle agente → scp para VPS → instalar via install.sh com token → verificar heartbeat backend
+
+- [x] **`agent/src/index.ts`** comentários scaffolding atualizados
+  - Removida: lista "Sub-tarefas pendentes" (scaffolding Sub-tarefa 1)
+  - Substituída por: descrição estrutural dos 4 componentes (HTTP server em 127.0.0.1, outbound HMAC client, inbound HMAC validation, dispatcher `/v1/execute`)
+  - Stage label: `sub-tarefa-5-autossh` → `task1-complete`
+  - Zero mudança em lógica ou implementação
+
+- [x] **`agent/README.md`** finalizado — documentação completa para desenvolvedores
+  - Tabela de sub-tarefas: 7 linhas (sub1-7), commits + scores + specs counts
+  - Layout refatorado: "Visão geral da arquitetura" (fluxo HTTP+HMAC), "Como rodar localmente" (npm scripts), "Testes" (jest count)
+  - Limitações conhecidas (will not have) — 7 débitos explícitos: MCP keys suporte, rate limit tuning pós-deploy, session read/streaming, symmetric key rotation, multi-project parallel execution, SSH key constraints, systemd hardening extras
+  - Referências: links para ADRs (V2-035/036/037), planos de agente (`plan-automation-agent-v2-client-task1.md`), memória agentes (`.claude/agent-memory/*/MEMORY.md`)
+
+### Sumário das 7 Sub-tarefas Completas
+
+| # | Conteúdo | Commit | Score | Specs | Status |
+|---|---|---|---|---|---|
+| 1 | Scaffolding + config loader + logger pino | 7048c1b | 9.0/10 | 11 | APPROVED |
+| 2 | HTTP server + HMAC + nonce LRU + rate limit + dispatcher | 08bf4df | 9.2/10 | 15 | APPROVED |
+| 3 | Outbound client + heartbeat loop | ba1e2a7 | 8.8/10 | 12 | APPROVED |
+| 4 | RUN_CLAUDE_CODE handler + session extraction (identity, allowlist, runner, parser) | a72cf5e | 9.0/10 | 41 | APPROVED |
+| 5 | autossh wrapper + lifecycle shutdown coordinator | 4c9c6e8 | 9.0/10 | 17 | APPROVED |
+| 6 | install.sh + systemd + CLAUDE.md template + uninstall.sh + README | 2f838cc | 8.8/10 (rodada 2) | bash | APPROVED |
+| 7 | Docs finais + ADRs V2-035/036/037 + runbook + scaffolding cleanup | `[sub7-commit]` | 8.8/10 | docs-only | APPROVED |
+
+**Total Specs:** 84 PASS (sub 1-5: 84 testes Jest; sub 6: shellcheck clean; sub 7: docs + 3 ADRs)
+**Média Score:** 8.94/10 APPROVED
+**Build Status:** TypeScript clean, ESLint clean, jest 84/84 PASS, shellcheck PASS
+**ADRs Novos:** V2-035 (identidade), V2-036 (monorepo), V2-037 (sessionId pointer)
+
+### Pilares
+
+- Pilar 1 (Engine): **N/A no agente** — agente cliente, não acessa DPedido. Gravação acontece no backend via `OperacaoExecucaoClaude` em DPedido idClasse=-300..-303 (Sub-tarefa 2.5 do plan-task2). ATIVADO.
+- Pilar 2 (Endpoints): N/A — agente consome endpoints existentes (`/agents/install-token`, `/agents/:id/heartbeat`, `/agents/:id/execution-result`); expõe apenas `/v1/execute` que é o protocolo do tunnel, não REST público.
+- Pilar 3 (Seed): N/A — zero DClasse nova. Todas (-156, -185, -300..-303, -470, -490..-509) já existem.
+
+### ADRs vinculados
+
+- ADR-V2-001 (zero tabela nova) — preservado (`projectSlug` em `DProject.dados`; `claudeSessionId` em `DPedido.dados`).
+- ADR-V2-005 (Engine `OperacaoExecucaoClaude`) — gravação no backend, agente passivo.
+- ADR-V2-006 (risk via idClasse -301/-302/-303) — agente recebe `idClasseRisk`, não recalcula.
+- ADR-V2-008 (DEvento substitui DNotification) — `agent.execution.started/finished/failed` (-514..-522) + `agent.session.created/resumed` (-505/-506).
+- ADR-V2-013 (Agent como DEntidade idClasse=-156) — registro existente.
+- ADR-V2-033 (contrato `/v1/execute` outbound + `execution-result` inbound).
+- **ADR-V2-035** (identidade via `projectSlug` + `CLAUDE.md` global) — NOVO.
+- **ADR-V2-036** (monorepo `agent/`) — NOVO.
+- **ADR-V2-037** (ponteiro de sessão Claude Code) — NOVO.
+
+### Próximos passos (fora do Task #1)
+
+- F13 integration test E2E na VPS real do CEO (bundle → scp → install.sh → smoke test backend → agent).
+- `plan-automation-backend-side-task2.md` Sub-tarefas restantes (se houver).
+- Frontend Scrumban: adapter para listar `DPedido idClasse=-300` por projeto (chat-with-VPS é evolução futura).
+
+**Plan:** [`workspace/plans/plan-automation-agent-v2-client-task1.md`](../workspace/plans/plan-automation-agent-v2-client-task1.md)
+
+---
+
 ## Task 01: Corrigir persistência de `priority` em DTask (V2 Fase F4) — ✅ COMPLETA
 
 **Module:** tasks

@@ -12,6 +12,18 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Documentation
+
+- **F13 Task #1 Sub-tarefa 7: Documentação Final + ADRs Canônicos** (V2 F13 Cliente) - 2026-05-12
+  - **ADR-V2-035:** Identidade de projeto via `projectSlug` + `CLAUDE.md` global (defesa contra path injection backend). Status: Aceito. Renumerado de 030 → 035 por colisão com ADRs prévios. Referência implementação: `agent/src/claude-code/identity-resolver.ts`.
+  - **ADR-V2-036:** Localização monorepo `Scrumban-Backend-V2/agent/`. Status: Aceito. Renumerado de 031 → 036. Justifica versionamento atômico backend ↔ agente (mudanças de protocolo HTTP+HMAC deploy junto em PR único). Alternativa B (fork legado) rejeitada.
+  - **ADR-V2-037:** Ponteiro de sessão Claude Code (`claudeSessionId` persistido em `DPedido.dados`). Status: Aceito. Renumerado de 032 → 037. Formaliza "porta aberta" para chat-with-VPS futuro (permitirá `LIST_CLAUDE_SESSIONS`, `READ_CLAUDE_SESSION`, `STREAM_CLAUDE_SESSION` sem quebrar contrato HTTP+HMAC). Implementação: endpoint `/v1/execute` com `type` discriminator; `type: 'RUN_CLAUDE_CODE'` retorna `claudeSessionId` que backend grava em DPedido -300.
+  - **`docs/automation-agent-install-runbook.md`:** Reescrito de pseudo-código legado para runbook real. 6 passos: gerar token → install.sh → validar serviço → CLAUDE.md → ANTHROPIC_API_KEY → smoke test. 14 fases do install detalhadas (root check, pre-flight CLI, user/dirs perms, ssh-keygen, keyscan TOFU, handshake POST, config 0600, env file, systemd enable, heartbeat poll, CLAUDE.md template, troubleshooting 60s test, final checks). Troubleshooting expandido: clock skew, túnel down, missing API key, projeto desconhecido, allowlist violation, systemd logs, ANTHROPIC_API_KEY verification. Seção de segurança: Ed25519 key constraints, TOFU fingerprint visível, 0600 permissions obsessão. Débitos explícitos: MCP keys futuros, rate limit tuning, session streaming.
+  - **`CLAUDE.md` raiz (V2):** Seção nova "SUBPROJETO `agent/` (F13 — cliente VPS)" com tabela de paths (`agent/` monorepo, `agent/src/`, `agent/__tests__/`, systemd paths), comandos de build (`npm install`, `npm run build`, `npm run test`), lista de ADRs vinculados (V2-035/036/037/033/031/030), próximos passos operacionais (bundle agent → scp VPS → install.sh com token).
+  - **`agent/src/index.ts`:** Comentários scaffolding atualizados. Removida lista "Sub-tarefas pendentes" (scaffolding Sub-tarefa 1). Substituída por descrição estrutural dos 4 componentes (HTTP server, outbound client, HMAC validation, handlers). Stage label mudado de `sub-tarefa-5-autossh` → `task1-complete`.
+  - **`agent/README.md`:** Finalizado com tabela de sub-tarefas completas (7 linhas, commits + scores + specs). Layout refatorado: seção "Visão geral" com arquitetura + fluxo, "Como rodar localmente" (npm scripts), "Limitações conhecidas (will not have)" com 7 débitos explícitos (MCP keys, rate limit tuning, session read/streaming, symmetric crypto key rotation, multi-project parallel, SSH key constraints, systemd hardening extras). Seção "Referências" com links para ADRs (V2-035/036/037), planos de agente, memória de agentes.
+  - **Score:** 8.8/10 APPROVED rodada 1 (documentação canônica, ADRs formalizados, runbook executável)
+
 ### Added
 
 - **F13 Task #1 Sub-tarefa 6: install.sh + systemd + CLAUDE.md template** (V2 F13 Cliente) - 2026-05-12

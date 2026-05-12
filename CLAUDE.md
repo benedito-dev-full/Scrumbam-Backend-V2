@@ -113,10 +113,48 @@ Quando perder contexto, ler nesta ordem:
 | Repo | Localização | Status |
 |------|-------------|--------|
 | Devari-Core (template) | `/Users/devaritecnologia/Documents/Benedito/Devari-Core/` | Template canônico |
-| Scrumban-Backend-V2 (este) | `/Users/devaritecnologia/Documents/Benedito/Scrumban-Backend-V2/` | Refundação canônica em planejamento |
+| Scrumban-Backend-V2 (este) | `/Users/devaritecnologia/Documents/Benedito/Scrumban-Backend-V2/` | Refundação canônica em execução |
 | Scrumban-Backend (legado) | `/Users/devaritecnologia/Documents/Benedito/Scrumbam-Backend/` | Referência funcional (escopo Scrumban-hoje) |
 
 **REGRA:** Scrumban-Backend-V2 é repo SEPARADO. NUNCA implementar V2 dentro do Devari-Core.
+
+---
+
+## SUBPROJETO `agent/` (F13 — cliente VPS)
+
+A pasta `agent/` neste mesmo repositório é o código do **scrumban-agent** — binário Node.js+TS que roda na **VPS** e executa `claude -p` localmente sob comando do backend. Decisão de monorepo formalizada em **ADR-V2-036** (versionamento atômico entre backend e agente — mudanças de protocolo `/v1/execute` em PR único).
+
+| Item | Caminho |
+|------|---------|
+| Código TS | `agent/src/` |
+| Testes (Jest) | `agent/__tests__/` |
+| Instalador / desinstalador | `agent/install.sh`, `agent/uninstall.sh` |
+| systemd unit (hardening) | `agent/systemd/scrumban-agent.service` |
+| Template do `CLAUDE.md` global | `agent/CLAUDE-md-template.md` |
+| README operacional | `agent/README.md` |
+| Runbook de instalação | `docs/automation-agent-install-runbook.md` |
+
+**Build/test/lint isolados** (não é workspace npm):
+
+```bash
+cd agent
+npm install
+npm test          # jest (84 specs ao fim do Task #1)
+npm run build     # tsc → dist/
+npm run lint      # eslint
+npm run typecheck # tsc --noEmit
+```
+
+`agent/node_modules/` e `agent/dist/` ficam fora de git (`agent/.gitignore`). Bundle de deploy gerado on-demand (`tar czf` → `scp` → VPS — OPÇÃO C, ver runbook).
+
+**ADRs específicos do agente:**
+
+- **ADR-V2-035** — Identidade de projeto via `projectSlug` + `CLAUDE.md` global (elimina path injection).
+- **ADR-V2-036** — Monorepo `agent/` (versionamento atômico).
+- **ADR-V2-037** — Ponteiro de sessão Claude Code (`claudeSessionId`) — porta aberta para chat-with-VPS.
+- **ADR-V2-033** — Contrato `/v1/execute` outbound + `execution-result` inbound.
+
+**REGRA:** o agente NÃO toca banco diretamente — toda persistência atravessa endpoints HTTP do backend (Pilar 1 ATIVADO via `OperacaoExecucaoClaude` em DPedido idClasse=-300..-303).
 
 ---
 
