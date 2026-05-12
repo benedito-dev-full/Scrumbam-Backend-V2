@@ -1,7 +1,7 @@
 # Documenter Agent Memory — Scrumban-Backend-V2
 
-**Versão:** 1.1 (atualizado após ADR-V2-028)
-**Última atualização:** 2026-05-11
+**Versão:** 1.2 (atualizado após Sub-tarefa 2.1 F13)
+**Última atualização:** 2026-05-12
 
 ---
 
@@ -380,3 +380,20 @@ export class [Nome]Dto {
   - Fire-and-forget email requer log estruturado (não throw em falha)
   - Anti-enumeração: 404 idêntico em GET e POST (timing-safe respostas)
   - AuthService.issueSessionForUser() novo método (reutiliza JWT pipeline)
+
+### Sub-tarefa 2.1 F13: Seed Agent Session Lifecycle + ADR-V2-033 (2026-05-12)
+- **Scope:** `seeds` (Pilar 3 — estrutural puro)
+- **DClasses:** 2 novas (-505 AGENT_SESSION_CREATED, -506 AGENT_SESSION_RESUMED), idPai=-3 (EVENTOS)
+- **Seed Total:** 45 fixas + 95 específicas = 140 DClasses (ADR-V2-033 +2)
+- **ADR Redigido:** `docs/decisions/ADR-V2-033-contrato-execute-outbound-e-execution-result-inbound.md` (esqueleto, decisão e preenchida)
+- **Commit:** `d7fbc63` (scope `seeds`, type `feat`)
+- **JSDoc Corrigido:** Issue M1 — seed linha 249 (92/137 → 95/140)
+- **Quality:** 9.0/10 APPROVED (Reviewer apreciou hierarquia idPai=-3 superior a sugestão plano)
+- **Workflow:** Implementer (45min) → Reviewer (30min) → Documenter (30min) = 1.75h total
+- **Lições:**
+  - Scope `seeds` válido e oficial (Pilar 3)
+  - CHANGELOG entry type=Added (não type=feat body — type vai em commit, entry va em CHANGELOG estruturado)
+  - STATUS.md usa seção "Agents Performance" para rastrear duração por agent (novo padrão)
+  - ROADMAP entry para Sub-tarefa deve detalhar pilares aplicados e ADRs (modelo seguir Task #2 F5)
+  - Commit com scope `seeds` é padrão para alterações no `prisma/seeds/classes.seed.ts`
+  - ADR-V2-033 é novo ADR (15º da série); redação em progresso (esqueleto completo em 2.5)
