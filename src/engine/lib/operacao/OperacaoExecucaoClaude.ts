@@ -99,9 +99,7 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
    */
   async nova(chaveCustom?: bigint): Promise<void> {
     await super.nova(chaveCustom);
-    this.logger.log(
-      `[${this.correlationId}] Execution iniciada chave=${this.chcriacao}`,
-    );
+    this.logger.log(`[${this.correlationId}] Execution iniciada chave=${this.chcriacao}`);
   }
 
   /**
@@ -141,9 +139,7 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
       });
     }
 
-    this.logger.log(
-      `[${this.correlationId}] Calculando: risk-gate + command-validator`,
-    );
+    this.logger.log(`[${this.correlationId}] Calculando: risk-gate + command-validator`);
 
     // super.calcula() executa _funcPreCalculo(this), _funcCalculo(this), _funcPosCalculo(this)
     // Scripts manipulam this.dados.risk e validam this.dados.command
@@ -190,9 +186,7 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
       approvedBy: params.aprovador,
       decidedAt: new Date().toISOString(),
     };
-    this.logger.log(
-      `[${this.correlationId}] Approved by ${params.aprovador}`,
-    );
+    this.logger.log(`[${this.correlationId}] Approved by ${params.aprovador}`);
   }
 
   /**
@@ -286,8 +280,8 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
    */
   async grava(): Promise<void> {
     // Serializa dados para DPedido.dados Json
-    this.pedidoCab.setValor(new Decimal(0));   // execution não tem valor monetário
-    this.pedidoCab.setDados(this.dados);       // serializa IExecucaoData para Json
+    this.pedidoCab.setValor(new Decimal(0)); // execution não tem valor monetário
+    this.pedidoCab.setDados(this.dados); // serializa IExecucaoData para Json
 
     // 1. Persistência via super.grava() — executa DVFS 6 (pré) e 7 (pós)
     await super.grava();
@@ -469,5 +463,126 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       data: { dados: this.dados as any },
     });
+  }
+
+  /**
+   * Restaura estado do Engine a partir de DPedido já persistido e registra
+   * outcome reportado pelo agente V2 via callback execution-result (ADR-V2-033).
+   *
+   * Diferente de gravarAposAprovacaoManual():
+   *   - NÃO chama aprova() (execução já foi aprovada antes de rodar)
+   *   - NÃO chama scripts DVFS de aprovação
+   *   - Apenas atualiza dados.claude com outcome (sessionId, exitCode, stdout, stderr)
+   *     e dados.audit com claudeSessionPath (INTERNAL — não exposto ao frontend)
+   *   - Executa DVFS chave 7 (pós-gravação) APÓS UPDATE — pr-auto-open se aplicável
+   *
+   * IDEMPOTÊNCIA: chamador (AgentsService) DEVE checar `dados.claude?.finishedAt`
+   * antes de instanciar o Engine — se já presente, retornar `alreadyPersisted=true`
+   * sem invocar este método.
+   *
+   * PILAR 1 PRESERVADO: única tabela transacional tocada é DPedido (idClasse -301/-302/-303),
+   * via UPDATE encapsulado no Engine. Handler `recordExecutionResult` NÃO chama prisma.dPedido.update
+   * direto.
+   *
+   * @param params Outcome reportado pelo agente V2 via POST /agents/:id/execution-result
+   * @param params.dadosExistentes DPedido carregado do banco (chave, dados, idClasse)
+   * @param params.claudeSessionId UUID Claude Code (null se extração falhou)
+   * @param params.claudeSessionPath Caminho absoluto do .jsonl no agente (INTERNAL — vaza filesystem)
+   * @param params.resumedFrom UUID da sessão anterior (null = nova; preenchido = resumed via --resume)
+   * @param params.exitCode Exit code do CLI Claude Code (0 = sucesso)
+   * @param params.success Flag derivado (exitCode === 0 e sem erros operacionais)
+   * @param params.durationMs Duração total em ms
+   * @param params.stdoutTruncated Stdout (max 64KB no payload)
+   * @param params.stderrTruncated Stderr (max 64KB no payload)
+   * @param params.errorCode Categoria de erro se !success
+   */
+  async registrarOutcome(params: {
+    dadosExistentes: {
+      chave: bigint;
+      dados: IExecucaoData;
+      idClasse: bigint;
+    };
+    claudeSessionId: string | null;
+    claudeSessionPath: string | null;
+    resumedFrom: string | null;
+    exitCode: number;
+    success: boolean;
+    durationMs: number;
+    stdoutTruncated: string;
+    stderrTruncated: string;
+    errorCode?: string;
+  }): Promise<void> {
+    // 1. Restaura state sem chamar nova() (chave já existe no banco)
+    this.chcriacao = params.dadosExistentes.chave;
+    this.dados = { ...(params.dadosExistentes.dados as IExecucaoData) };
+    this._classeBase = params.dadosExistentes.idClasse.toString();
+    this._operacaoCalculada = true;
+    this._aprovado = true;
+
+    const nowIso = new Date().toISOString();
+    const previousClaude = this.dados.claude ?? {};
+    const startedAt = previousClaude.startedAt ?? nowIso;
+
+    // 2. Atualiza dados.claude com outcome reportado pelo agente
+    this.dados.claude = {
+      ...previousClaude,
+      sessionId: params.claudeSessionId ?? previousClaude.sessionId,
+      // sessionPath: caminho absoluto do .jsonl — INTERNAL, persistido para audit
+      // mas NÃO exposto em ExecutionResponseDto (Risco #7 do plan).
+      sessionPath: params.claudeSessionPath ?? previousClaude.sessionPath,
+      stdout: params.stdoutTruncated,
+      stderr: params.stderrTruncated,
+      exitCode: params.exitCode,
+      startedAt,
+      finishedAt: nowIso,
+      durationMs: params.durationMs,
+    };
+
+    // 3. Marca outcome no audit trail (idempotency sentinel + errorCode + resumedFrom)
+    // IExecucaoData.audit não modela esses campos opcionais; usa Record<string, unknown>
+    // intermediário e re-cast no final para manter type safety sem `any`.
+    const previousAudit = (this.dados.audit ?? {}) as Record<string, unknown>;
+    const nextAudit: Record<string, unknown> = {
+      ...previousAudit,
+      outcome: { success: params.success, recordedAt: nowIso },
+    };
+    if (params.resumedFrom !== null && params.resumedFrom !== undefined) {
+      nextAudit.resumedFrom = params.resumedFrom;
+    }
+    if (params.errorCode) {
+      nextAudit.errorCode = params.errorCode;
+    }
+    this.dados.audit = nextAudit as unknown as IExecucaoData['audit'];
+
+    // 4. Marca status final em dados.claude já preenchido + sinalizador top-level
+    this.dados.statusCode = params.success
+      ? '-519' // EXEC_STATUS_SUCCESS
+      : '-520'; // EXEC_STATUS_FAILED
+
+    this.logger.log(
+      `[${this.correlationId}] Registrando outcome: chave=${this.chcriacao} success=${params.success} exitCode=${params.exitCode}`,
+    );
+
+    // 5. UPDATE DPedido via método centralizado (Engine encapsula Prisma)
+    await this._atualizarPedidoCompleto();
+
+    // 6. Executa DVFS chave 7 (pós-gravação) se carregada — pr-auto-open etc.
+    //    Carrega scripts se ainda não foram (callback pode chegar em processo distinto)
+    if (!this._funcPosGravacao) {
+      await this['_carregaScriptsGrav']();
+    }
+    if (this._funcPosGravacao) {
+      try {
+        await this._funcPosGravacao(this);
+      } catch (e) {
+        // Pós-gravação não deve derrubar o callback; loga e continua.
+        const err = e as Error;
+        this.logger.warn(
+          `[${this.correlationId}] DVFS chave 7 pós-gravação falhou (não-fatal): ${err.message}`,
+        );
+      }
+    }
+
+    this.logger.log(`[${this.correlationId}] Outcome persistido chave=${this.chcriacao}`);
   }
 }

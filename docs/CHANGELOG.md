@@ -14,6 +14,18 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F13 Sub-tarefa 2.4: Endpoint execution-result inbound + Engine OperacaoExecucaoClaude.registrarOutcome** (V2 F13 Backend-Side Prep) - 2026-05-12
+  - **Endpoint:** `POST /agents/:id/execution-result` (callback inbound agente → backend) com HMAC + AgentAuthGuard
+  - **DTO:** `ExecutionResultDto` (11 campos: executionId, exitCode, success, durationMs, claudeSessionId, claudeSessionPath INTERNAL, resumedFrom, stdout/stderr, errorCode)
+  - **Engine:** `OperacaoExecucaoClaude.registrarOutcome()` encapsula UPDATE em DPedido via Engine (Pilar 1 INVIOLADO — zero Prisma direto no service)
+  - **Segurança:** Isolation dupla (agentId path + DPedido.dados.audit.agentId), idempotência via sentinel `outcome.recordedAt`, ZERO vazamento `claudeSessionPath` em DTOs response
+  - **Eventos:** 4 tipos canônicos — `agent.execution.finished|failed` (sempre), `agent.session.created|resumed` (se claudeSessionId presente); materializa DEvento -496/-505/-506
+  - **Testes:** 11 cenários PASS (payload válido, validações classe/agente, idempotência, session lifecycle, error codes)
+  - **Pilares:** P1 INVIOLADO (Engine encapsula), P2 OK (endpoint específico justificado), P3 RESPEITADO (zero tabela nova)
+  - **ADRs:** ADR-V2-001/-005/-006/-008/-013/-030/-032/-033
+  - **Regressão:** 24 suites / 170 testes automation+engine+eventos PASS
+  - **Review:** APPROVED 8.8/10
+
 - **F13 Sub-tarefa 2.3: ProjectsService slug derivation + migration índice expression** (V2 F13 Backend-Side Prep) - 2026-05-12
   - **Utility:** `slugify(nome)` — lowercase + NFD strip diacríticos + hífens + max 50 chars; `fallbackSlug()` para nomes vazios
   - **Service:** `ProjectsService.create()` deriva slug único (sufixo `-N` resolve colisões); `onModuleInit()` backfill idempotente para projetos legados

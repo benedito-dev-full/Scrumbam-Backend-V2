@@ -403,6 +403,130 @@
 
 ---
 
+### Sub-tarefa 2.4: Endpoint execution-result Inbound + Engine OperacaoExecucaoClaude.registrarOutcome — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** automation (agents callback) + engine (Pilar 1) + eventos
+**Fase V2:** F13 (Automation — Backend-Side Prep, bloqueador Task #1 Sub-5 e F14 frontend)
+**Tempo Real:** ~5h Implementer + ~1.5h Reviewer + ~30min Documenter
+**Completado em:** 2026-05-12
+**Quality Score:** 8.8/10 APPROVED
+
+**O Que Foi Feito:**
+
+**Backend V2 — Callback Inbound + Engine:**
+- **DTO `ExecutionResultDto` (novo arquivo):**
+  - Campos: `executionId` (string→BigInt), `exitCode`, `success`, `durationMs`, `claudeSessionId` (UUID permissivo), `claudeSessionPath` (INTERNAL — audit), `resumedFrom` (UUID opcional), `stdoutTruncated`/`stderrTruncated` (≤64KB), `errorCode` (enum)
+  - Class-validator decorators completos (IsString, IsInt, IsEnum, Matches UUID regex, MaxLength, @ApiProperty/@ApiPropertyOptional)
+  - Response DTO: `ExecutionResultResponseDto { accepted: true, persistedAt: ISO8601, alreadyPersisted?: boolean }`
+  - JSDoc completo em classe e propriedades (exemplo payload, validações, Risco #7 claudeSessionPath)
+
+- **Engine `OperacaoExecucaoClaude.registrarOutcome()` (novo método — Pilar 1):**
+  - Assinatura: `registrarOutcome(params: { dadosExistentes, claudeSessionId, claudeSessionPath, resumedFrom, exitCode, success, durationMs, stdoutTruncated, stderrTruncated, errorCode })`
+  - Validação classe (só -301/-302/-303)
+  - Persiste em `DPedido.dados.claude.{sessionId, sessionPath, stdout, stderr, exitCode, errorCode}`
+  - Persiste em `DPedido.dados.audit.outcome.{success, errorCode, recordedAt}` (sentinel para idempotência)
+  - UPDATE via `prisma.dPedido.update` **encapsulado pelo Engine**, não direto no service (Pilar 1 INVIOLADO)
+  - DVFS chave 7 (pós-gravação) executada APÓS UPDATE COMMIT
+  - JSDoc completo (fluxo, @throws, @example)
+
+- **Controller endpoint `POST /agents/:id/execution-result` (novo):**
+  - `AgentAuthGuard` ativa (HMAC-SHA256 + nonce + rate-limit)
+  - Path param `:id` case-sensitive (agentId)
+  - Body: `ExecutionResultDto` com class-validator automático → 422 se inválido
+  - Swagger: @ApiOperation, @ApiParam, @ApiResponse completos (200/400/401/403/404/409/422)
+  - JSDoc completo (segurança HMAC, isolation, idempotência, Pilar 1)
+
+- **Service `AgentsService.recordExecutionResult()` (novo método):**
+  - Parâmetros: `{ agentId, agentEntity, dto }`
+  - Validações encadeadas:
+    1. `executionId` numérico (BigInt parse com BadRequestException)
+    2. `DPedido.findFirst` por chave (NotFoundException se não encontrado)
+    3. Classe validação (idClasse in {-301,-302,-303}, BadRequestException se fora)
+    4. Isolation dupla: `DPedido.dados.audit.agentId === agentId path` (ForbiddenException) + sanity check `agentEntity.chave.toString() === agentId` (ForbiddenException)
+    5. Idempotência: `dados.audit.outcome.recordedAt` presente? → return `{accepted: true, alreadyPersisted: true, persistedAt: <original>}` sem mutar
+  - Fluxo happy path:
+    - New `OperacaoExecucaoClaude` (sem nova() — já existe)
+    - Call `operacao.registrarOutcome(...)` (Engine encapsula UPDATE)
+    - Emit 2-4 eventos canônicos via `eventProducer.addInternalEvent`:
+      - `agent.execution.finished` se success=true (sempre)
+      - `agent.execution.failed` se success=false (sempre)
+      - `agent.session.created` se claudeSessionId presente + resumedFrom=null
+      - `agent.session.resumed` se claudeSessionId presente + resumedFrom!=null
+  - Return `{accepted: true, persistedAt: ISO8601}`
+  - JSDoc completo (Pilar 1, isolation, idempotência, eventos, exemplo)
+
+- **Event Types (`src/eventos/core/event-types.ts` — +4 tipos):**
+  - `'agent.execution.finished'` — todo execution success=true
+  - `'agent.execution.failed'` — todo execution success=false
+  - `'agent.session.created'` — nova sessão Claude (resumedFrom=null)
+  - `'agent.session.resumed'` — retomou sessão anterior (resumedFrom!=null)
+
+- **Audit Log Consumer (`src/eventos/consumers/audit-log.consumer.ts` — mapeamento):**
+  - `agent.execution.finished|.failed` → DEvento idClasse `-496 EXECUTION_LOG` (reutilizado, não nova classe)
+  - `agent.session.created` → DEvento idClasse `-505 AGENT_SESSION_CREATED`
+  - `agent.session.resumed` → DEvento idClasse `-506 AGENT_SESSION_RESUMED`
+
+**Testes (11 cenários):**
+- Cenário 1: Payload válido persiste + 200 ✅
+- Cenário 2: executionId não encontrado → 404 ✅
+- Cenário 3: idClasse fora {-301,-302,-303} → 400 ✅
+- Cenário 4: executionId de outro agente → 403 ✅
+- Cenário 5: Idempotência (2× mesmo executionId) → alreadyPersisted=true ✅
+- Cenário 6: claudeSessionId + resumedFrom=null → agent.session.created ✅
+- Cenário 7: claudeSessionId + resumedFrom!=null → agent.session.resumed ✅
+- Cenário 8: success=false → agent.execution.failed ✅
+- Cenário 9: claudeSessionId=null → NÃO emite session lifecycle ✅
+- Cenário 10: executionId inválido → 400 ✅
+- Cenário extra: agentEntity.chave !== agentId → 403 ✅
+- Regressão: 24 suites / 170 testes automation+engine+eventos PASS, zero regressão ✅
+
+**Pilares aplicados:**
+- **Pilar 1 (Engine):** ✅ INVIOLADO — ZERO `prisma.dPedido.update` direto no handler/service. TODO UPDATE passa por `OperacaoExecucaoClaude.registrarOutcome()` que encapsula UPDATE + DVFS chave 7. Spec valida via mock chain.
+- **Pilar 2 (Endpoints):** ✅ OK — Endpoint específico `/agents/:id/execution-result` com lógica própria (isolation dupla, idempotência, Engine) — justificativa válida. Sem controller duplicado.
+- **Pilar 3 (Seed):** ✅ RESPEITADO — DClasses -505/-506 adicionadas Sub-tarefa 2.1; mapeamento -496 reutiliza DEvento existente. ZERO tabela nova.
+
+**Segurança (Riscos #6/#7 do plan mitigados):**
+- **Isolation:** Dupla validação — `DPedido.dados.audit.agentId` + `agentEntity.chave` ambos devem casar com path param (403 ForbiddenException)
+- **Vazamento `claudeSessionPath`:** Persiste em `DPedido.dados` para audit backend, mas NÃO exposto em `ExecutionResultResponseDto`, `execution-response.dto.ts`, `task-response.dto.ts` (grep confirma zero ocorrências em DTOs de saída)
+- **HMAC + nonce + rate-limit:** Reutilizado `AgentAuthGuard` (mesmo de /heartbeat)
+
+**Idempotência:**
+- Sentinel: `dados.audit.outcome.recordedAt`. Segundo callback: NO-OP, `alreadyPersisted=true`, `persistedAt=<original>`, zero eventos emitidos.
+
+**ADRs vinculados:** ADR-V2-001 (zero tabela nova), ADR-V2-005 (Engine para DPedido), ADR-V2-006 (Risk via idClasse), ADR-V2-008 (DEvento substitui notificações), ADR-V2-013 (agent como DEntidade), ADR-V2-030 (multi-tenant), ADR-V2-032 (claudeSessionId em DPedido), **ADR-V2-033 (contrato execute/execution-result — finalizado)**
+
+**Build & Testes:**
+- TypeScript: PASS (`npx tsc --noEmit` escopo automation/engine/eventos — 0 novos erros)
+- ESLint: PASS (zero console.log, padrão V2)
+- Unit tests: 11/11 PASS (`execution-result.service.spec.ts`)
+- Regressão: 24 suites / 170 testes PASS, zero regressão
+- N+1 Queries: ZERO (findFirst sem include + evento depois, idempotência via flag memoria)
+- BigInt: 100% serializado em payloads
+
+**Issues Menores (não-bloqueantes):**
+1. **M1:** `claudeSessionId` em `DTask.dados.schema` ainda presente (será removido Sub-tarefa 2.5)
+2. **M2:** `ExecutionResultDto.statusCode` cosmético (string vs number discussão; accepted como-é)
+3. **M3:** `agentTunnelService` ainda stub inline; implementação real F13 final
+
+**Out of scope (follow-ups):**
+- Sub-tarefa 2.5: Remoção `claudeSessionId` de DTask, finalização ADR-V2-033 (decisões a-d)
+- F14: Frontend display callback results + session resumption UX
+
+**Plan:** [`workspace/plans/plan-automation-backend-side-task2.md`](../workspace/plans/plan-automation-backend-side-task2.md) §3 Sub-tarefa 2.4
+**Review:** [`workspace/reviews/review-automation-backend-side-task2-sub4.md`](../workspace/reviews/review-automation-backend-side-task2-sub4.md)
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan Sub-tarefa 2.4 (contratos callback) |
+| Implementer | ~5h | DTO + Controller + Service + Engine.registrarOutcome + Event types + 11 testes |
+| Reviewer | ~1.5h | Score 8.8/10 APPROVED rodada 1 (Pilar 1 INVIOLADO, isolation robusto, 11/11 testes, zero vazamento) |
+| Documenter | ~30min | ADR-V2-033 finalizado, ROADMAP, CHANGELOG, STATUS, 1 commit Conventional |
+
+---
+
 ## F5 — Domínio Estrutural (Tasks + Intentions) — Extensão Modal
 
 ### Task #2: Modal Criar Task com Tipo + Responsável + Canal + Criador — ✅ COMPLETA

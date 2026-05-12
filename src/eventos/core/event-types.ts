@@ -75,6 +75,17 @@ export const EVENT_TYPES = {
   AGENT_ONLINE: 'agent.online',
   AGENT_OFFLINE: 'agent.offline',
   AGENT_HEARTBEAT: 'agent.heartbeat',
+
+  // ============== AGENT EXECUTION OUTCOME (F13 / ADR-V2-033) ==============
+  // Emitidos pelo handler POST /agents/:id/execution-result quando agente V2
+  // reporta término da execução Claude Code. Persistem em DEvento idClasse=-496
+  // (EXECUTION_LOG) via TYPE_TO_CLASSE. Diferenciam-se de execution.succeeded/
+  // failed (genéricos do Engine) por serem específicos do callback do agente.
+  AGENT_EXECUTION_FINISHED: 'agent.execution.finished',
+  AGENT_EXECUTION_FAILED: 'agent.execution.failed',
+  // Session lifecycle: persistem em DEvento idClasse=-505/-506 (seed Sub-tarefa 2.1).
+  AGENT_SESSION_CREATED: 'agent.session.created',
+  AGENT_SESSION_RESUMED: 'agent.session.resumed',
   WEBHOOK_ATTEMPTED: 'webhook.attempted',
   WEBHOOK_AUTO_DISABLED: 'webhook.auto_disabled',
   MCP_CALL: 'mcp.call',

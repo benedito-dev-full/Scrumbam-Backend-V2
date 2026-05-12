@@ -84,6 +84,11 @@ const TYPE_TO_CLASSE: Readonly<Record<string, bigint>> = Object.freeze({
   'agent.online': BigInt(-492),
   'agent.offline': BigInt(-492),
   'agent.heartbeat': BigInt(-492), // AGENT_HEARTBEAT
+  // F13 / ADR-V2-033 — callback execution-result do agente V2
+  'agent.execution.finished': BigInt(-496), // EXECUTION_LOG
+  'agent.execution.failed': BigInt(-496), // EXECUTION_LOG
+  'agent.session.created': BigInt(-505), // AGENT_SESSION_CREATED (seed 2.1)
+  'agent.session.resumed': BigInt(-506), // AGENT_SESSION_RESUMED (seed 2.1)
   'webhook.attempted': BigInt(-491), // WEBHOOK_ATTEMPT
   'webhook.auto_disabled': BigInt(-491), // WEBHOOK_ATTEMPT lifecycle/admin
   'mcp.call': BigInt(-495), // MCP_CALL
