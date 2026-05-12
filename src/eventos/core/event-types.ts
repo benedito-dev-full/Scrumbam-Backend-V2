@@ -86,6 +86,13 @@ export const EVENT_TYPES = {
   // Session lifecycle: persistem em DEvento idClasse=-505/-506 (seed Sub-tarefa 2.1).
   AGENT_SESSION_CREATED: 'agent.session.created',
   AGENT_SESSION_RESUMED: 'agent.session.resumed',
+  // ============== AGENT ↔ PROJECT LINKING (Task 4 sub-tarefas 4.3+4.4) ==============
+  // Emitidos por AgentsService.linkProject/unlinkProject quando vínculo agente-projeto
+  // (DVincula idClasse=-185 AUTOMATION_CLASS_IDS.PROJECT_AGENT) é criado ou soft-deleted.
+  // Persistem em DEvento idClasse=-492 (AGENT_HEARTBEAT — categoria "eventos
+  // administrativos de agente", consistente com agent.registered/online/offline).
+  AGENT_PROJECT_LINKED: 'agent.project.linked',
+  AGENT_PROJECT_UNLINKED: 'agent.project.unlinked',
   WEBHOOK_ATTEMPTED: 'webhook.attempted',
   WEBHOOK_AUTO_DISABLED: 'webhook.auto_disabled',
   MCP_CALL: 'mcp.call',

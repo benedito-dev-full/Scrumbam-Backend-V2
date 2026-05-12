@@ -12,6 +12,25 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Added
+
+- **F13 Task #4 Sub-tarefas 4.3+4.4: endpoints link/unlink/list agente-projeto (multi-project)** (V2 F13 Hotfix) - 2026-05-12
+  - **3 endpoints novos com RBAC duplo** (MANAGER projeto OU ADMIN org via `requireProjectManagerOrOrgAdmin`):
+    - `POST /agents/:id/projects` — vincula agente a projeto (idempotente com flag `alreadyLinked`)
+    - `DELETE /agents/:id/projects/:projectId` — desvincula via soft-delete (`excluido=true`)
+    - `GET /agents/:id/projects` — lista projetos vinculados (batch queries ZERO N+1, retorna `[]` para standalone)
+  - **5 DTOs novos** em `link-agent-project.dto.ts` com class-validator + Swagger + JSDoc
+  - **3 métodos service** (`linkProject`, `unlinkProject`, `listAgentProjects`) + helper RBAC privado
+  - **Eventos registrados** em `event-types.ts` + `audit-log.consumer.ts`:
+    - `agent.project.linked` / `agent.project.unlinked` (reuso idClasse `-492 AGENT_HEARTBEAT`)
+    - Emitidos via `EventProducerService.addInternalEvent()` APÓS persistência (Padrão #7)
+  - **14 specs novos** em `agents-projects.spec.ts` (linkProject 6, unlinkProject 4, listAgentProjects 4)
+  - **45/45 PASS** em `src/automation/agents` (14 novos + 31 regressão zero); **20/20 PASS** em `src/eventos` (zero regressão)
+  - **Pilares:** N/A (estrutural, DVincula -185 existente)
+  - **ADRs:** ADR-V2-001 (zero tabela nova), ADR-V2-003 (RBAC duplo), ADR-V2-013 (Agent como DEntidade)
+  - **MARCO Task #4 COMPLETO** — 4/4 sub-tarefas (4.2 absorvida pela 4.1); 1 agente por VPS agora cuida de N projetos
+  - **Score rodada 2:** 8.5/10 APPROVED (rodada 1 foi 7.0 NEEDS_CHANGES — eventos faltando; hotfix aplicado)
+
 ### Fixed
 
 - **F13 Task #4 Sub-tarefa 4.1: torna projectId opcional no install-token (multi-project agent)** (V2 F13 Hotfix) - 2026-05-12

@@ -9,12 +9,18 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { EventProducerService } from '../../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../../common/services/correlation-id.service';
+import { RoleResolverService } from '../../auth/services/role-resolver.service';
 import OperacaoExecucaoClaude from '../../engine/lib/operacao/OperacaoExecucaoClaude';
 import { IExecucaoData } from '../../engine/lib/interfaces/IExecucaoData';
 import { AUTOMATION_CLASS_IDS } from '../constants/automation-class-ids';
 import { InstallAgentDto, InstallAgentResponseDto } from './dto/install-agent.dto';
 import { HeartbeatDto, HeartbeatResponseDto } from './dto/heartbeat.dto';
 import { ExecutionResultDto, ExecutionResultResponseDto } from './dto/execution-result.dto';
+import {
+  AgentProjectsResponseDto,
+  LinkAgentProjectResponseDto,
+  UnlinkAgentProjectResponseDto,
+} from './dto/link-agent-project.dto';
 import { AgentInstallTokenService } from './agent-install-token.service';
 import { AgentKeyService } from './agent-key.service';
 import { AgentPortAllocatorService } from './agent-port-allocator.service';
@@ -45,7 +51,299 @@ export class AgentsService {
     private readonly portAllocator: AgentPortAllocatorService,
     private readonly eventProducer: EventProducerService,
     private readonly correlationIdService: CorrelationIdService,
+    private readonly roleResolver: RoleResolverService,
   ) {}
+
+  /**
+   * Vincula um agente existente (DEntidade -156) a um projeto via DVincula
+   * idClasse=-185 (PROJECT_AGENT). Operacao idempotente.
+   *
+   * Fluxo:
+   * 1. Valida que o agente existe (DEntidade -156, nao excluido) — 404 se nao.
+   * 2. Valida que o projeto existe (DProject, nao excluido) — 404 se nao.
+   * 3. Valida RBAC: usuario deve ser MANAGER do projeto OU ADMIN da org
+   *    dona (`project.idEstab`). Mesma regra do install-token (DRY).
+   * 4. Idempotencia: busca DVincula ativa com mesma triple
+   *    `(idClasse=-185, idLocEscritu=projectId, idEntidade=agentId, excluido=false)`.
+   *    Se existe, retorna `alreadyLinked: true` sem criar duplicata.
+   * 5. Cria DVincula -185 com `tipo: 'agent'`, `metaDados: { linkedAt, linkedBy }`.
+   * 6. Emite evento `agent.project.linked` via EventProducerService APOS
+   *    persistencia (padrao #7 — eventos pos-commit).
+   *
+   * Sem unique constraint nova: idempotencia garantida por check explicito
+   * antes do create. Race condition (2 POSTs simultaneos) e mitigada por
+   * ser operacao humana de baixa frequencia; ADR futuro pode adicionar
+   * indice unico parcial.
+   *
+   * @param agentId BigInt do agente (DEntidade.chave)
+   * @param projectId BigInt do projeto (DProject.chave)
+   * @param userId BigInt do usuario autenticado (entidadeId do JWT)
+   * @returns `{ agentId, projectId, linked: true, alreadyLinked? }`
+   *
+   * @throws {NotFoundException} Agente nao existe (-156, excluido=false)
+   * @throws {NotFoundException} Projeto nao existe (DProject, excluido=false)
+   * @throws {ForbiddenException} Usuario nao e MANAGER do projeto nem ADMIN da org
+   *
+   * @see ADR-V2-003 (RBAC duplo via DVincula)
+   * @see ADR-V2-013 (Agent = DEntidade -156)
+   */
+  async linkProject(
+    agentId: bigint,
+    projectId: bigint,
+    userId: bigint,
+  ): Promise<LinkAgentProjectResponseDto> {
+    const agent = await this.prisma.dEntidade.findFirst({
+      where: {
+        chave: agentId,
+        idClasse: AUTOMATION_CLASS_IDS.AGENT,
+        excluido: false,
+      },
+      select: { chave: true },
+    });
+    if (!agent) {
+      throw new NotFoundException(`Agente ${agentId.toString()} nao encontrado`);
+    }
+
+    await this.requireProjectManagerOrOrgAdmin(projectId, userId);
+
+    const existing = await this.prisma.dVincula.findFirst({
+      where: {
+        idClasse: AUTOMATION_CLASS_IDS.PROJECT_AGENT,
+        idLocEscritu: projectId,
+        idEntidade: agentId,
+        excluido: false,
+      },
+      select: { chave: true },
+    });
+
+    if (existing) {
+      this.logger.log(
+        `[link] Vinculo agent=${agentId.toString()} project=${projectId.toString()} ja existia (idempotente)`,
+      );
+      return {
+        agentId: agentId.toString(),
+        projectId: projectId.toString(),
+        linked: true,
+        alreadyLinked: true,
+      };
+    }
+
+    await this.prisma.dVincula.create({
+      data: {
+        idClasse: AUTOMATION_CLASS_IDS.PROJECT_AGENT,
+        idLocEscritu: projectId,
+        idEntidade: agentId,
+        tipo: 'agent',
+        metaDados: {
+          linkedAt: new Date().toISOString(),
+          linkedBy: userId.toString(),
+        } as Prisma.InputJsonValue,
+      },
+    });
+
+    await this.eventProducer.addInternalEvent(
+      'agent.project.linked',
+      {
+        agentId: agentId.toString(),
+        projectId: projectId.toString(),
+        linkedBy: userId.toString(),
+      },
+      this.correlationIdService.getOrGenerate(),
+      { source: AgentsService.name },
+    );
+
+    return {
+      agentId: agentId.toString(),
+      projectId: projectId.toString(),
+      linked: true,
+    };
+  }
+
+  /**
+   * Remove (soft-delete) o vinculo entre um agente e um projeto.
+   *
+   * Fluxo:
+   * 1. Valida que o agente existe (-156, nao excluido) — 404 se nao.
+   * 2. Valida RBAC: MANAGER do projeto OU ADMIN da org dona.
+   * 3. Valida que vinculo ativo (DVincula -185) existe — 404 se nao.
+   * 4. Soft-delete: `excluido=true` (preserva audit trail).
+   * 5. Emite evento `agent.project.unlinked` apos persistencia.
+   *
+   * NUNCA hard-delete — padrao soft-delete V2.
+   *
+   * @param agentId BigInt do agente
+   * @param projectId BigInt do projeto
+   * @param userId BigInt do usuario autenticado
+   * @returns `{ agentId, projectId, unlinked: true }`
+   *
+   * @throws {NotFoundException} Agente nao existe
+   * @throws {NotFoundException} Projeto nao existe (validado em requireProjectManagerOrOrgAdmin)
+   * @throws {NotFoundException} Vinculo ativo nao existe
+   * @throws {ForbiddenException} Usuario nao e MANAGER do projeto nem ADMIN da org
+   */
+  async unlinkProject(
+    agentId: bigint,
+    projectId: bigint,
+    userId: bigint,
+  ): Promise<UnlinkAgentProjectResponseDto> {
+    const agent = await this.prisma.dEntidade.findFirst({
+      where: {
+        chave: agentId,
+        idClasse: AUTOMATION_CLASS_IDS.AGENT,
+        excluido: false,
+      },
+      select: { chave: true },
+    });
+    if (!agent) {
+      throw new NotFoundException(`Agente ${agentId.toString()} nao encontrado`);
+    }
+
+    await this.requireProjectManagerOrOrgAdmin(projectId, userId);
+
+    const link = await this.prisma.dVincula.findFirst({
+      where: {
+        idClasse: AUTOMATION_CLASS_IDS.PROJECT_AGENT,
+        idLocEscritu: projectId,
+        idEntidade: agentId,
+        excluido: false,
+      },
+      select: { chave: true },
+    });
+    if (!link) {
+      throw new NotFoundException(
+        `Vinculo nao encontrado entre agente ${agentId.toString()} e projeto ${projectId.toString()}`,
+      );
+    }
+
+    await this.prisma.dVincula.update({
+      where: { chave: link.chave },
+      data: { excluido: true },
+    });
+
+    await this.eventProducer.addInternalEvent(
+      'agent.project.unlinked',
+      {
+        agentId: agentId.toString(),
+        projectId: projectId.toString(),
+        unlinkedBy: userId.toString(),
+      },
+      this.correlationIdService.getOrGenerate(),
+      { source: AgentsService.name },
+    );
+
+    return {
+      agentId: agentId.toString(),
+      projectId: projectId.toString(),
+      unlinked: true,
+    };
+  }
+
+  /**
+   * Lista todos os projetos vinculados ativos a um agente.
+   *
+   * Fluxo (ZERO N+1):
+   * 1. Valida que o agente existe — 404 se nao.
+   * 2. Query 1: DVincula -185 ativa por `idEntidade=agentId, excluido=false`.
+   * 3. Query 2: DProject por `chave IN (vinculos.map(idLocEscritu))` em batch.
+   *    Total: 2 queries (estavel independente da cardinalidade).
+   *
+   * Permissao de leitura (decisao pragmatica): qualquer usuario autenticado
+   * pode listar projetos vinculados a um agente. O agente em si nao expoe
+   * dados sensiveis (apenas nome e idEstab do projeto). Permissao role-by-role
+   * complicaria o caso edge "agente standalone sem vinculos" — revisitar em
+   * F14 se necessario.
+   *
+   * Agente standalone (sem vinculos ativos) retorna `projects: []` — estado
+   * legitimo, nao um erro.
+   *
+   * @param agentId BigInt do agente
+   * @param _userId BigInt do usuario autenticado (atualmente nao usado para
+   *   filtro — permissao simples; reservado para uso futuro)
+   * @returns `{ agentId, projects: AgentProjectItemDto[] }`
+   *
+   * @throws {NotFoundException} Agente nao existe (-156, excluido=false)
+   */
+  async listAgentProjects(agentId: bigint, _userId: bigint): Promise<AgentProjectsResponseDto> {
+    const agent = await this.prisma.dEntidade.findFirst({
+      where: {
+        chave: agentId,
+        idClasse: AUTOMATION_CLASS_IDS.AGENT,
+        excluido: false,
+      },
+      select: { chave: true },
+    });
+    if (!agent) {
+      throw new NotFoundException(`Agente ${agentId.toString()} nao encontrado`);
+    }
+
+    const vinculos = await this.prisma.dVincula.findMany({
+      where: {
+        idClasse: AUTOMATION_CLASS_IDS.PROJECT_AGENT,
+        idEntidade: agentId,
+        excluido: false,
+      },
+      select: { idLocEscritu: true },
+    });
+
+    if (vinculos.length === 0) {
+      return { agentId: agentId.toString(), projects: [] };
+    }
+
+    const projectIds = vinculos.map((v) => v.idLocEscritu);
+    const projects = await this.prisma.dProject.findMany({
+      where: {
+        chave: { in: projectIds },
+        excluido: false,
+      },
+      select: { chave: true, nome: true, idEstab: true },
+    });
+
+    return {
+      agentId: agentId.toString(),
+      projects: projects.map((p) => ({
+        projectId: p.chave.toString(),
+        nome: p.nome,
+        idEstab: p.idEstab !== null ? p.idEstab.toString() : null,
+      })),
+    };
+  }
+
+  /**
+   * Valida que o usuario tem permissao MANAGER no projeto OU ADMIN na org
+   * dona. Helper replicado do `AgentInstallTokenService` para isolamento
+   * do escopo desta sub-tarefa (DRY entre os 2 services foi avaliado e
+   * descartado para nao tocar codigo fora do escopo).
+   *
+   * @param projectId BigInt do projeto
+   * @param userId BigInt do usuario
+   * @throws {NotFoundException} Projeto nao existe
+   * @throws {ForbiddenException} Usuario sem permissao
+   */
+  private async requireProjectManagerOrOrgAdmin(projectId: bigint, userId: bigint): Promise<void> {
+    const project = await this.prisma.dProject.findFirst({
+      where: { chave: projectId, excluido: false },
+      select: { chave: true, idEstab: true },
+    });
+    if (!project) {
+      throw new NotFoundException(`Projeto ${projectId.toString()} nao encontrado`);
+    }
+
+    const projectRole = await this.roleResolver.getProjectRole(userId, projectId);
+    if (projectRole === 'MANAGER') {
+      return;
+    }
+
+    if (project.idEstab) {
+      const orgRole = await this.roleResolver.getOrgRole(userId, project.idEstab);
+      if (orgRole === 'ADMIN') {
+        return;
+      }
+    }
+
+    throw new ForbiddenException(
+      'Acesso negado: requer MANAGER do projeto ou ADMIN da organizacao',
+    );
+  }
 
   /**
    * Instala um agente usando token one-shot.

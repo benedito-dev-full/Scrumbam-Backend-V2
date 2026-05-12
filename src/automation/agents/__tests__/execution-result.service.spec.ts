@@ -87,6 +87,7 @@ describe('AgentsService.recordExecutionResult', () => {
       {} as AgentPortAllocatorService,
       eventProducer as unknown as EventProducerService,
       correlationIdService as unknown as CorrelationIdService,
+      {} as unknown as import('../../../auth/services/role-resolver.service').RoleResolverService,
     );
     return { service, findFirstMock, updateMock, eventProducer };
   }

@@ -89,6 +89,10 @@ const TYPE_TO_CLASSE: Readonly<Record<string, bigint>> = Object.freeze({
   'agent.execution.failed': BigInt(-496), // EXECUTION_LOG
   'agent.session.created': BigInt(-505), // AGENT_SESSION_CREATED (seed 2.1)
   'agent.session.resumed': BigInt(-506), // AGENT_SESSION_RESUMED (seed 2.1)
+  // Task 4 sub-tarefas 4.3+4.4 — vínculo agente↔projeto (DVincula -185)
+  // Reusa -492 AGENT_HEARTBEAT (categoria "eventos administrativos de agente").
+  'agent.project.linked': BigInt(-492),
+  'agent.project.unlinked': BigInt(-492),
   'webhook.attempted': BigInt(-491), // WEBHOOK_ATTEMPT
   'webhook.auto_disabled': BigInt(-491), // WEBHOOK_ATTEMPT lifecycle/admin
   'mcp.call': BigInt(-495), // MCP_CALL

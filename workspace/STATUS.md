@@ -1,12 +1,12 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-12
+**Ultima atualizacao:** 2026-05-12 (Documenter finalizando Task #4 — COMPLETA)
 
 ---
 
-## Task #4 — Agente standalone + Multi-Project Linking (F13 Hotfix) — 1 de 4 sub-tarefas COMPLETA
+## 🎯 Task #4 — Agente standalone + Multi-Project Linking (F13 Hotfix) — ✅ COMPLETA (4/4 sub-tarefas)
 
-Plano `plan-automation-agent-multi-project-task4.md`. Sub-tarefas 4.1 → 4.4 sequenciais.
+Plano `plan-automation-agent-multi-project-task4.md`. Sub-tarefas 4.1+4.2 (absorvida) + 4.3+4.4 (endpoints).
 
 ### ✅ Sub-tarefa 4.1 — DTO + install-token service (projectId opcional) — COMPLETA
 
@@ -34,6 +34,85 @@ Plano `plan-automation-agent-multi-project-task4.md`. Sub-tarefas 4.1 → 4.4 se
 
 **Status:** ✅ COMPLETA — Pronto para Documenter finalizar (JSDoc ✅, ROADMAP ✅, CHANGELOG ✅, STATUS ✅, commit ✅)
 **Próximo:** Sub-tarefa 4.2 (endpoints POST/DELETE/GET /agents/:id/projects)
+
+---
+
+### ✅ Sub-tarefas 4.3 + 4.4 — Endpoints link/unlink/list + Tests — ✅ COMPLETA
+
+**Implementer completou:** 2026-05-12 (rodada 1) + 2026-05-12 (rodada 2 hotfix eventos)
+**Reviewer aprovou:** 2026-05-12 (rodada 2, Score 8.5/10 APPROVED)
+**Módulo:** `src/automation/agents/` + `src/eventos/`
+**Build:** `npm run build` PASS
+**Tests:** 45/45 PASS em `src/automation/agents` (14 novos + 31 regressão zero); 20/20 PASS em `src/eventos` (zero regressão)
+
+**Deliverables:**
+- ✅ `dto/link-agent-project.dto.ts` (NOVO) — 5 DTOs com class-validator + Swagger + JSDoc:
+  - `LinkAgentProjectDto` (body POST)
+  - `LinkAgentProjectResponseDto` (response POST, com `alreadyLinked?` opcional)
+  - `UnlinkAgentProjectResponseDto` (response DELETE)
+  - `AgentProjectItemDto` (item da lista)
+  - `AgentProjectsResponseDto` (response GET)
+- ✅ `agents.service.ts` — 3 métodos novos + helper RBAC privado:
+  - `linkProject(agentId, projectId, userId)` — idempotente (check explícito antes de create); emite `agent.project.linked`
+  - `unlinkProject(agentId, projectId, userId)` — soft-delete (`excluido=true`); emite `agent.project.unlinked`
+  - `listAgentProjects(agentId, _userId)` — 2 queries batch (DVincula + IN DProject) → ZERO N+1
+  - `requireProjectManagerOrOrgAdmin` (private) — replicado do `AgentInstallTokenService` (DRY fora de escopo)
+  - `RoleResolverService` injetado no constructor (4º teste arquivo atualizado)
+- ✅ `agents.controller.ts` — 3 endpoints com `@UseGuards(JwtAuthGuard)` + Swagger completo:
+  - `POST /agents/:id/projects` (200 OK, idempotente)
+  - `DELETE /agents/:id/projects/:projectId` (200 OK, soft-delete)
+  - `GET /agents/:id/projects` (200 OK, retorna `[]` p/ standalone)
+- ✅ `__tests__/agents-projects.spec.ts` (NOVO) — 14 specs:
+  - linkProject: 6 (create OK, alreadyLinked, agent 404, project 404, RBAC 403, ADM org)
+  - unlinkProject: 4 (soft-delete OK, agent 404, link 404, RBAC 403)
+  - listAgentProjects: 4 (lista, vazio standalone, agent 404, idEstab null)
+- ✅ 3 specs existentes atualizados (constructor com RoleResolverService mock): `agents-install.spec.ts`, `agents-heartbeat.spec.ts`, `execution-result.service.spec.ts`
+
+**Eventos:** `agent.project.linked` e `agent.project.unlinked` emitidos via `EventProducerService.addInternalEvent` APÓS persistência (Padrão #7).
+
+**idClasse do DEvento:** Reusa o pipeline padrão do `EventProducerService` (não materializa DEvento direto). Decisão: não criamos idClasse específica nova — fica sob o roteamento padrão de eventos internos `agent.*`. Isso preserva ADR-V2-001.
+
+---
+
+### 🔧 Rodada 2 — Hotfix Reviewer (Score 7.0/10 NEEDS_CHANGES) — APLICADO
+
+**Data:** 2026-05-12
+**Issue (BLOCKER):** Eventos `agent.project.linked` / `agent.project.unlinked` não estavam registrados em `event-types.ts` nem em `TYPE_TO_CLASSE` do `audit-log.consumer.ts`. `EventProducerService.addInternalEvent` rejeita tipos fora de `ALL_EVENT_TYPES_SET` (linha 58-65) → 500 em produção após `prisma.dVincula.create/update` já ter persistido.
+
+**Fix aplicado (2 arquivos, ~10 linhas):**
+
+1. `src/eventos/core/event-types.ts` — adicionados 2 constantes ao bloco AGENT EXECUTION OUTCOME:
+   - `AGENT_PROJECT_LINKED: 'agent.project.linked'`
+   - `AGENT_PROJECT_UNLINKED: 'agent.project.unlinked'`
+   - Comentário explicativo referencia DVincula -185 (AUTOMATION_CLASS_IDS.PROJECT_AGENT) e o reuso de -492 para persistência.
+
+2. `src/eventos/consumers/audit-log.consumer.ts` — adicionadas 2 entradas em `TYPE_TO_CLASSE`:
+   - `'agent.project.linked': BigInt(-492)`
+   - `'agent.project.unlinked': BigInt(-492)`
+   - Reuso explícito de `-492 AGENT_HEARTBEAT` — mesma categoria já usada por `agent.registered`/`agent.online`/`agent.offline`/`agent.heartbeat` ("eventos administrativos de agente"). Evita criar nova DClasse no seed (preserva ADR-V2-001 spirit para hotfix MVP).
+
+**Justificativa da idClasse `-492`:** Range agent disponível no seed = -492 AGENT_HEARTBEAT, -505 AGENT_SESSION_CREATED, -506 AGENT_SESSION_RESUMED. Não existe `-507 AGENT_PROJECT_LINK_LIFECYCLE` declarada. Reuso de -492 é consistente com o pattern já estabelecido pelo consumer para eventos de gestão administrativa do agente (registered/online/offline/heartbeat). Cria nova DClasse específica = task de refactor F14, com ADR; reuso -492 para hotfix é proporcional ao escopo do bloqueio.
+
+**Validação rodada 2:**
+- `npm run build` PASS (exit 0)
+- `npx jest src/automation/agents` → 45/45 PASS, 11 suites, ZERO regressão
+- `npx jest src/eventos` → 20/20 PASS, 3 suites, ZERO regressão
+- Grep confirma presença das 4 entradas (2 em event-types.ts + 2 em audit-log.consumer.ts)
+
+**Sem novos specs:** Os specs existentes em `agents-projects.spec.ts` (14 specs) mockeiam `EventProducerService.addInternalEvent`, então não exercitam a validação de `ALL_EVENT_TYPES_SET`. A correção é cirúrgica em dados estáticos (constantes/mapas); o BadRequestException era 100% determinístico — inspeção visual do diff + presença das constantes em `ALL_EVENT_TYPES_SET` (via `Object.values(EVENT_TYPES)`) já garante o fix. Adicionar spec dedicado de integração seria sobre-engenharia para hotfix.
+
+**Status:** ✅ Fix aplicado — Aguardando Reviewer revalidar (esperado APPROVED ≥ 8.0)
+
+**RBAC:** Helper privado `requireProjectManagerOrOrgAdmin` replicado de `AgentInstallTokenService` (mesma regra: MANAGER projeto OU ADMIN org). Extração para serviço compartilhado avaliada e descartada para não tocar código fora do escopo desta task (issue MEDIUM da 4.1 endereçada).
+
+**Idempotência:** garantida por check explícito (`findFirst` antes de `create`) — não foram criadas unique constraints/migrations (ADR-V2-001).
+
+**Pilares:**
+- Pilar 1 (Engine): N/A (vínculos são estruturais — Prisma direto autorizado)
+- Pilar 2 (Endpoints): Endpoints específicos justificados (semântica de domínio /agents/:id/projects; pattern similar a /heartbeat, /execution-result)
+- Pilar 3 (Seed): N/A (DClasses -156/-185 já existem)
+
+**Status:** ✅ IMPLEMENTAÇÃO PRONTA — Aguardando Reviewer (validar Score ≥ 7.0)
 
 ---
 

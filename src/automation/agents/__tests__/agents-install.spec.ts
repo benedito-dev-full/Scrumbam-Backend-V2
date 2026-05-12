@@ -45,6 +45,7 @@ describe('AgentsService install', () => {
       portAllocator as unknown as AgentPortAllocatorService,
       eventProducer as unknown as EventProducerService,
       { getOrGenerate: jest.fn().mockReturnValue('corr') } as unknown as CorrelationIdService,
+      {} as unknown as import('../../../auth/services/role-resolver.service').RoleResolverService,
     );
 
     const result = await service.install({
@@ -130,6 +131,7 @@ describe('AgentsService install', () => {
       portAllocator as unknown as AgentPortAllocatorService,
       eventProducer as unknown as EventProducerService,
       { getOrGenerate: jest.fn().mockReturnValue('corr') } as unknown as CorrelationIdService,
+      {} as unknown as import('../../../auth/services/role-resolver.service').RoleResolverService,
     );
 
     const result = await service.install({

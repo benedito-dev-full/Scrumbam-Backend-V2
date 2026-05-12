@@ -54,6 +54,86 @@
 
 ---
 
+#### Sub-tarefa 4.3+4.4: Endpoints link/unlink/list + Tests — ✅ COMPLETA
+
+**Status:** COMPLETA
+**Tempo Real:** ~2h Implementer (rodada 1) + ~0.5h Reviewer (rodada 1) + ~1h Implementer (rodada 2 hotfix eventos) + ~0.5h Reviewer (rodada 2) = 4h total
+**Quality Score:** 8.5/10 APPROVED rodada 2 (rodada 1 foi 7.0 NEEDS_CHANGES — eventos faltando)
+
+**O Que Foi Feito:**
+- **DTO (`link-agent-project.dto.ts`):** 5 classes com `class-validator` + Swagger + JSDoc:
+  - `LinkAgentProjectDto` (body POST `/agents/:id/projects`) — `projectId` required string
+  - `LinkAgentProjectResponseDto` (response 200) — `linked: true`, `alreadyLinked?: boolean` (idempotência)
+  - `UnlinkAgentProjectResponseDto` (response 200 DELETE) — `unlinked: true`
+  - `AgentProjectItemDto` (item de lista) — `projectId`, `projectName`, `linkedAt`, `projectSlug`
+  - `AgentProjectsResponseDto` (response GET) — array de `AgentProjectItemDto`
+- **Service (`agents.service.ts`):** 3 métodos + 1 helper RBAC privado:
+  - `linkProject(agentId: bigint, projectId: bigint, userId: bigint)` — idempotente (check explícito DVincula antes create); cria DVincula -185 (PROJECT_AGENT); emite `agent.project.linked` via EventProducerService APÓS persistência
+  - `unlinkProject(agentId: bigint, projectId: bigint, userId: bigint)` — soft-delete (set `excluido=true`); emite `agent.project.unlinked` APÓS update
+  - `listAgentProjects(agentId: bigint, _userId: bigint)` — batch queries (findMany DVincula + IN DProject) → ZERO N+1; retorna array vazio para agente standalone (idLocEscritu=null)
+  - `requireProjectManagerOrOrgAdmin(projectId, userId)` (private) — replicado do AgentInstallTokenService (DRY fora de escopo para hotfix); valida MANAGER projeto OU ADMIN org via RoleResolverService
+- **Controller (`agents.controller.ts`):** 3 endpoints com `@UseGuards(JwtAuthGuard)` + Swagger + JSDoc:
+  - `POST /agents/:id/projects` (LinkAgentProjectDto body) — 200 OK com `alreadyLinked` flag; 400 bad DTO; 403 RBAC; 404 agent/project
+  - `DELETE /agents/:id/projects/:projectId` — 200 OK; 403 RBAC; 404 agent/link
+  - `GET /agents/:id/projects` — 200 OK com array (vazio se standalone); 404 agent
+- **Tests (`agents-projects.spec.ts`):** 14 specs NOVOS:
+  - linkProject: 6 (create DVincula OK, alreadyLinked flag, agent 404, project 404, RBAC 403, ADM org override)
+  - unlinkProject: 4 (soft-delete OK, agent 404, link 404, RBAC 403)
+  - listAgentProjects: 4 (lista batch OK, vazio standalone, agent 404, idEstab null handling)
+- **Eventos (rodada 2 hotfix):** Registrados `agent.project.linked` e `agent.project.unlinked`:
+  - `src/eventos/core/event-types.ts` — constantes novas em bloco AGENT EXECUTION OUTCOME
+  - `src/eventos/consumers/audit-log.consumer.ts` — TYPE_TO_CLASSE map entries (reusos idClasse `-492 AGENT_HEARTBEAT` — categoria "eventos administrativos agente")
+- **Specs atualizados:** 3 arquivos para injetar RoleResolverService mock no constructor AgentsService:
+  - `agents-install.spec.ts` — context with RoleResolverService
+  - `agents-heartbeat.spec.ts` — context with RoleResolverService
+  - `execution-result.service.spec.ts` — context with RoleResolverService
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DVincula é estrutural
+- Pilar 2 (Endpoints): 3 endpoints novos reutilizando controller genérico AgentsController (não criou duplicata)
+- Pilar 3 (Seed): N/A — zero DClasses novas (DClasse -156 AGENT, -185 PROJECT_AGENT, -492 AGENT_HEARTBEAT já existem)
+
+**RBAC Stance:**
+- linkProject/unlinkProject: MANAGER projeto OU ADMIN org (padrão `requireProjectManagerOrOrgAdmin` reutilizado)
+- listAgentProjects: qualquer usuário que conseguiu ler agente (implícito)
+- **DEBT:** listAgentProjects sem RBAC granular (retorna TODOS os projetos vinculados a um agente, sem filtro de visibilidade por usuário) — escopo F16+ ou futuro
+
+**Backward-compat:** 100% preservada — agentes com projectId criados via 4.1 continuam com DVincula automática
+
+**Build:** PASS (`npm run build`)
+**Tests:** 45/45 PASS em `src/automation/agents` (14 novos + 31 regressão zero); 20/20 PASS em `src/eventos` (zero regressão)
+
+**ADRs vinculados:** ADR-V2-001 (zero tabela nova — reuso -492), ADR-V2-003 (RBAC duplo via DVincula), ADR-V2-013 (Agent como DEntidade)
+
+**Rodada 2 (Reviewer hotfix):** Score 8.5/10 APPROVED
+- Issue bloqueador rodada 1 (7.0 NEEDS_CHANGES): eventos não registrados → 500 em produção
+- Fix: constantes event-types.ts + TYPE_TO_CLASSE entries (2 arquivos, ~10 linhas)
+- Justificativa reuso -492: consistente com pattern agente (registered/online/offline/heartbeat), evita criar nova DClasse em hotfix MVP
+
+---
+
+## 🎯 MARCO: Task #4 (Multi-Project Agent) — COMPLETO
+
+**Plano:** `plan-automation-agent-multi-project-task4.md` — **4/4 sub-tarefas fechadas** (4.2 absorvida pela 4.1)
+
+| Sub | Subject | Commit | Score | Status |
+|---|---|---|---|---|
+| 4.1 + 4.2 | projectId opcional + install standalone | `c7cf7be` | 8.2/10 | ✅ APPROVED |
+| 4.3 + 4.4 | endpoints link/unlink/list + tests | `[atual]` | 8.5/10 | ✅ APPROVED rodada 2 |
+
+**Resultado operacional:**
+- ✅ 1 agente por VPS pode cuidar de N projetos
+- ✅ Install standalone (sem projectId) + vincular projetos depois via API POST `/agents/:id/projects`
+- ✅ Backward-compat: install com projectId continua criando vínculo inicial automático (DVincula -185)
+- ✅ RBAC duplo aplicado em endpoints de link/unlink (MANAGER projeto OU ADMIN org)
+- ✅ Eventos registrados: `agent.project.linked` / `agent.project.unlinked` (reuso -492)
+
+**Bug arquitetural corrigido:** projectId obrigatório no install-token forçava N agentes por projeto (1:1). Agora: 1 agente ↔ N projetos via tabela intermediária DVincula -185.
+
+**Destravaçao operacional:** CEO pode finalmente instalar agente standalone na VPS, vincular projetos conforme necessário, escalar sem duplicar agentes por projeto.
+
+---
+
 ## F13 — Cliente: Agente V2 Executor Claude Code (Monorepo `agent/`)
 
 ### Task #1: Agente Cliente V2 (7 Sub-tarefas) — ✅ COMPLETA
