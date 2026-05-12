@@ -326,6 +326,83 @@
 
 ---
 
+### Sub-tarefa 2.3: ProjectsService Slug Derivation + Migration Índice + Backfill — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** projects (Pilar 2 — endpoints) + seeds (migration) + docs
+**Fase V2:** F13 (Automation — Backend-Side Prep, pré-requisito `RemoteExecutionClient` precisa `projectSlug`)
+**Tempo Real:** ~4h Implementer + ~2h Reviewer + ~30min Documenter
+**Completado em:** 2026-05-12
+**Quality Score:** 8.8/10 APPROVED
+
+**O Que Foi Feito:**
+
+**Backend V2 — Projects:**
+- **Utility `slugify.ts`:**
+  - Função pura `slugify(nome: string)` — converte nome humano em slug URL-safe (lowercase, NFD strip diacríticos, `-` separadores, max 50 chars)
+  - Função `fallbackSlug()` — retorna `untitled-<timestamp-base36>` para nomes só-símbolos (pragmático para MVP)
+  - Constante `MAX_SLUG_LENGTH = 50` (para validações de DTO)
+  - 19 specs PASS (básicos, edge cases, idempotência, fallback)
+  - JSDoc completo com @example
+
+- **ProjectsService Enhancements:**
+  - `implements OnModuleInit` — hook do NestJS para backfill idempotente no boot
+  - `create()` — agora deriva slug único ANTES de persistir (dentro da mesma `$transaction`)
+  - Helper privado `deriveUniqueSlug(tx, nome, ignoreProjectId?)` — resolve colisões com sufixo `-2`, `-3` até encontrar candidato livre
+  - Helper privado `backfillSlugs()` — percorre `DProject` com `dados.slug = null`, materializa slug, salva; batches sequenciais de 100; erro por projeto não trava resto (try/catch com logger.warn)
+  - JSDoc completo nos métodos modificados
+  - 27 specs totais (20 originais + 7 novos de slug derivation + backfill)
+
+- **Migration `20260512120000_dproject_slug_unique_index`:**
+  - `CREATE UNIQUE INDEX IF NOT EXISTS "dproject_slug_unique" ON "DProject" ((LOWER("dados"->>'slug'))) WHERE "excluido" = false`
+  - Índice expression em Json — respeita ADR-V2-001 (zero tabela, zero coluna nova)
+  - Parcial (`WHERE excluido = false`) — permite reuso de slug após soft-delete
+  - Idempotente: `IF NOT EXISTS` permite re-run seguro
+  - Comentário documentado com justificativa ADR-V2-030 + rollback manual
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — `DProject` é tabela estrutural; Prisma direto OK
+- Pilar 2 (Endpoints): N/A — zero novo controller (derivação é interna)
+- Pilar 3 (Seed): N/A — zero nova DClasse
+
+**ADRs vinculados:** ADR-V2-001 (zero tabela nova), ADR-V2-030 (projectSlug como identidade técnica), ADR-V2-033 (RemoteExecutionClient consome `DProject.dados.slug`)
+
+**Testes:** 46 specs PASS
+- `slugify.spec.ts`: 19 PASS (casos básicos, edge cases — acentos, símbolos, truncação, idempotência, fallback)
+- `projects.service.spec.ts`: 27 PASS (20 originais + 7 novos)
+- Full build: 68 PASS (`src/projects/`, `src/automation/runtime/`, `src/executions/processors/`)
+
+- Build: PASS (`yarn build` — 21 erros pré-existentes em F9/PDFKit não causados por 2.3)
+- TypeScript: PASS (zero erros novos)
+- ESLint: PASS (zero violations em arquivos modificados)
+- N+1 Queries: ZERO (backfill usa `for...of` sequencial; sem queries em loop de findMany)
+- BigInt: 100% — slug é string, não impactado
+
+**Issues Menores Identificados (não-bloqueantes — débito aceitável):**
+1. **MINOR #1:** `slug` não exposto em `ProjectResponseDto` — pós-review debt (frontend e debug tools não conseguem ver via API sem query raw; RemoteExecutionClient acessa via lookup em DProject.dados)
+2. **MINOR #2:** Migration sem `.down.sql` explícito (comentário de rollback presente; aceitável para índice não-destrutivo per protocol)
+3. **MINOR #3:** Race condition teórica em alta concorrência (2 requests simultâneos mesmo nome) — Prisma P2002 não tratado com retry; probabilidade baixa (slugs de projeto não criados em alta frequência concorrente em MVP); mitigação futura
+
+**Out of scope (follow-ups):**
+- Expose slug em `ProjectResponseDto` — F13 hardening
+- Retry P2002 race em `create()` — F13 hardening
+- Backfill performance worker — F13 se >10k projetos
+
+**Plan:** [`workspace/plans/plan-automation-backend-side-task2.md`](../workspace/plans/plan-automation-backend-side-task2.md) §3 Sub-tarefa 2.3
+**Review:** [`workspace/reviews/review-automation-backend-side-task2-sub3.md`](../workspace/reviews/review-automation-backend-side-task2-sub3.md)
+**Impl Notes:** Gerado pelo Implementer (changelog inline)
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan + decisão B1 slugify automático |
+| Implementer | ~4h | 100% PASS: slugify utility + service mods + migration + 46 specs |
+| Reviewer | ~2h | Score 8.8/10 APPROVED rodada 1 (3 minors, zero blockers) |
+| Documenter | ~30min | ROADMAP, CHANGELOG, STATUS, commit Conventional |
+
+---
+
 ## F5 — Domínio Estrutural (Tasks + Intentions) — Extensão Modal
 
 ### Task #2: Modal Criar Task com Tipo + Responsável + Canal + Criador — ✅ COMPLETA

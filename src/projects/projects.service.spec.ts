@@ -124,7 +124,10 @@ describe('ProjectsService', () => {
       // Arrange
       prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
         const txMock = {
-          dProject: { create: jest.fn().mockResolvedValue(mockProject) },
+          dProject: {
+            create: jest.fn().mockResolvedValue(mockProject),
+            findFirst: jest.fn().mockResolvedValue(null), // sem colisão de slug
+          },
           dVincula: { create: jest.fn().mockResolvedValue({ chave: BigInt(1) }) },
         };
         return fn(txMock);
@@ -159,7 +162,10 @@ describe('ProjectsService', () => {
     it('deve usar prefix "DEV" como default quando não fornecido', async () => {
       prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
         const txMock = {
-          dProject: { create: jest.fn().mockResolvedValue(mockProject) },
+          dProject: {
+            create: jest.fn().mockResolvedValue(mockProject),
+            findFirst: jest.fn().mockResolvedValue(null),
+          },
         };
         return fn(txMock);
       });
@@ -327,7 +333,10 @@ describe('ProjectsService', () => {
 
       prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
         const txMock = {
-          dProject: { create: jest.fn().mockResolvedValue(projWithOrg) },
+          dProject: {
+            create: jest.fn().mockResolvedValue(projWithOrg),
+            findFirst: jest.fn().mockResolvedValue(null), // sem colisão de slug
+          },
           dVincula: {
             create: txVinculaCreate,
             findFirst: txVinculaFindFirst,
@@ -361,7 +370,10 @@ describe('ProjectsService', () => {
 
       prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
         const txMock = {
-          dProject: { create: jest.fn().mockResolvedValue(projWithOrg) },
+          dProject: {
+            create: jest.fn().mockResolvedValue(projWithOrg),
+            findFirst: jest.fn().mockResolvedValue(null),
+          },
           dVincula: { create: jest.fn(), findFirst: jest.fn() },
           dEntidade: {
             findFirst: jest
@@ -382,7 +394,10 @@ describe('ProjectsService', () => {
       const projWithOrg = { ...mockProject, idEstab: BigInt(50) };
       prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
         const txMock = {
-          dProject: { create: jest.fn().mockResolvedValue(projWithOrg) },
+          dProject: {
+            create: jest.fn().mockResolvedValue(projWithOrg),
+            findFirst: jest.fn().mockResolvedValue(null),
+          },
           dVincula: { create: jest.fn(), findFirst: jest.fn() },
           dEntidade: { findFirst: jest.fn().mockResolvedValueOnce(null) },
         };
@@ -397,7 +412,10 @@ describe('ProjectsService', () => {
     it('deve criar projeto órfão quando teamId omitido (teamId=null no response)', async () => {
       prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
         const txMock = {
-          dProject: { create: jest.fn().mockResolvedValue(mockProject) },
+          dProject: {
+            create: jest.fn().mockResolvedValue(mockProject),
+            findFirst: jest.fn().mockResolvedValue(null),
+          },
           dVincula: { create: jest.fn() },
         };
         return fn(txMock);
@@ -534,6 +552,164 @@ describe('ProjectsService', () => {
         (c) => c[0] === 'project.team.linked' || c[0] === 'project.team.unlinked',
       );
       expect(linkedCalls).toHaveLength(0);
+    });
+  });
+
+  describe('create() — slug derivation (ADR-V2-030, Sub-tarefa 2.3)', () => {
+    it('deve gerar dados.slug a partir do nome (slugify simples)', async () => {
+      const txProjectCreate = jest.fn().mockResolvedValue(mockProject);
+      const txProjectFindFirst = jest.fn().mockResolvedValue(null); // sem colisão
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        return fn({
+          dProject: { create: txProjectCreate, findFirst: txProjectFindFirst },
+          dVincula: { create: jest.fn() },
+        });
+      });
+
+      await service.create({ nome: 'Scrumban Backend V2' }, BigInt(100));
+
+      // Verifica que dados.slug foi persistido no create
+      expect(txProjectCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            dados: expect.objectContaining({ slug: 'scrumban-backend-v2' }),
+          }),
+        }),
+      );
+    });
+
+    it('deve adicionar sufixo -2 quando slug base colide com projeto existente', async () => {
+      const txProjectCreate = jest.fn().mockResolvedValue(mockProject);
+      // 1ª findFirst (candidato base "scrumban-backend-v2"): colisão.
+      // 2ª findFirst (candidato "scrumban-backend-v2-2"): livre.
+      const txProjectFindFirst = jest
+        .fn()
+        .mockResolvedValueOnce({ chave: BigInt(99) })
+        .mockResolvedValueOnce(null);
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        return fn({
+          dProject: { create: txProjectCreate, findFirst: txProjectFindFirst },
+          dVincula: { create: jest.fn() },
+        });
+      });
+
+      await service.create({ nome: 'Scrumban Backend V2' }, BigInt(100));
+
+      expect(txProjectFindFirst).toHaveBeenCalledTimes(2);
+      expect(txProjectCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            dados: expect.objectContaining({ slug: 'scrumban-backend-v2-2' }),
+          }),
+        }),
+      );
+    });
+
+    it('deve escalar para -3 quando -2 também colide (cascata)', async () => {
+      const txProjectCreate = jest.fn().mockResolvedValue(mockProject);
+      const txProjectFindFirst = jest
+        .fn()
+        .mockResolvedValueOnce({ chave: BigInt(99) }) // base colide
+        .mockResolvedValueOnce({ chave: BigInt(100) }) // -2 colide
+        .mockResolvedValueOnce(null); // -3 livre
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        return fn({
+          dProject: { create: txProjectCreate, findFirst: txProjectFindFirst },
+          dVincula: { create: jest.fn() },
+        });
+      });
+
+      await service.create({ nome: 'Foo' }, BigInt(100));
+
+      expect(txProjectCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            dados: expect.objectContaining({ slug: 'foo-3' }),
+          }),
+        }),
+      );
+    });
+
+    it('deve aplicar fallback untitled-* quando nome só de símbolos', async () => {
+      const txProjectCreate = jest.fn().mockResolvedValue(mockProject);
+      const txProjectFindFirst = jest.fn().mockResolvedValue(null);
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        return fn({
+          dProject: { create: txProjectCreate, findFirst: txProjectFindFirst },
+          dVincula: { create: jest.fn() },
+        });
+      });
+
+      await service.create({ nome: '!!!!!!' }, BigInt(100));
+
+      const createCallArg = txProjectCreate.mock.calls[0][0];
+      const slugUsed = createCallArg.data.dados.slug as string;
+      expect(slugUsed).toMatch(/^untitled-[a-z0-9]+$/);
+    });
+  });
+
+  describe('onModuleInit() — backfill idempotente (Sub-tarefa 2.3)', () => {
+    it('deve gerar slug para projetos com dados.slug ausente (idempotente)', async () => {
+      // 1ª invocação: retorna 2 projetos pendentes.
+      // 2ª invocação: retorna 0 (nada mais a fazer).
+      prisma.dProject.findMany
+        .mockResolvedValueOnce([
+          { chave: BigInt(10), nome: 'Project Alpha', dados: { prefix: 'DEV' } },
+          { chave: BigInt(11), nome: 'Project Beta', dados: null },
+        ])
+        .mockResolvedValueOnce([]);
+      // Para cada deriveUniqueSlug (1 lookup por projeto, sem colisão): null.
+      prisma.dProject.findFirst.mockResolvedValue(null);
+      prisma.dProject.update.mockResolvedValue({});
+
+      await service.onModuleInit();
+
+      expect(prisma.dProject.update).toHaveBeenCalledTimes(2);
+      // Primeiro projeto: merge com dados existente preservando prefix.
+      expect(prisma.dProject.update).toHaveBeenNthCalledWith(1, {
+        where: { chave: BigInt(10) },
+        data: { dados: { prefix: 'DEV', slug: 'project-alpha' } },
+      });
+      // Segundo projeto: dados era null, vira objeto novo apenas com slug.
+      expect(prisma.dProject.update).toHaveBeenNthCalledWith(2, {
+        where: { chave: BigInt(11) },
+        data: { dados: { slug: 'project-beta' } },
+      });
+    });
+
+    it('deve ser no-op quando rodado 2× (idempotência)', async () => {
+      // 1ª chamada de onModuleInit: 1 projeto.
+      // 2ª chamada: nada (slug já preenchido).
+      prisma.dProject.findMany
+        .mockResolvedValueOnce([{ chave: BigInt(10), nome: 'P', dados: null }])
+        .mockResolvedValueOnce([]) // fim do loop do 1º run
+        .mockResolvedValueOnce([]); // 2º run não acha nada
+      prisma.dProject.findFirst.mockResolvedValue(null);
+      prisma.dProject.update.mockResolvedValue({});
+
+      await service.onModuleInit();
+      await service.onModuleInit();
+
+      // Apenas 1 update no total (não duplicou).
+      expect(prisma.dProject.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('deve continuar processamento quando 1 projeto falha (log warn, não aborta)', async () => {
+      prisma.dProject.findMany
+        .mockResolvedValueOnce([
+          { chave: BigInt(10), nome: 'A', dados: null },
+          { chave: BigInt(11), nome: 'B', dados: null },
+        ])
+        .mockResolvedValueOnce([]);
+      prisma.dProject.findFirst.mockResolvedValue(null);
+      // Update do projeto 10 falha; 11 funciona.
+      prisma.dProject.update
+        .mockRejectedValueOnce(new Error('simulated_db_error'))
+        .mockResolvedValueOnce({});
+
+      await expect(service.onModuleInit()).resolves.toBeUndefined();
+
+      expect(prisma.dProject.update).toHaveBeenCalledTimes(2);
     });
   });
 

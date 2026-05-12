@@ -1,4 +1,10 @@
-import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnModuleInit,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { EventProducerService } from '../eventos/core/event-producer.service';
@@ -12,6 +18,7 @@ import {
   ListProjectResponseDto,
   ProjectStatsDto,
 } from './dto/project-response.dto';
+import { fallbackSlug, slugify } from './utils/slugify';
 
 /** idClasse de DProject no seed F1 (classes canônicas V2). */
 const ID_CLASSE_PROJECT = BigInt(-153); // SCRUMBAN_PROJECT (seed classes.seed.ts)
@@ -71,8 +78,11 @@ export interface FindManyProjectsOptions {
  * @see ADR-V2-029 — Project ↔ Team via DVincula -182
  */
 @Injectable()
-export class ProjectsService {
+export class ProjectsService implements OnModuleInit {
   private readonly logger = new Logger(ProjectsService.name);
+
+  /** Tamanho de batch do backfill de slug em `onModuleInit`. */
+  private static readonly BACKFILL_BATCH_SIZE = 100;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -81,6 +91,34 @@ export class ProjectsService {
     private readonly eventProducer: EventProducerService,
     private readonly correlationIdService: CorrelationIdService,
   ) {}
+
+  /**
+   * Lifecycle NestJS — executa backfill idempotente de `DProject.dados.slug`.
+   *
+   * Necessário para satisfazer a invariante `RemoteExecutionClient` exige
+   * (Sub-tarefa 2.2): todo DProject usado em execução V2 tem `dados.slug`
+   * não-vazio. Projetos criados antes da Sub-tarefa 2.3 não têm slug — este
+   * hook materializa o slug para esses registros sem bloquear o boot do
+   * processo por muito tempo (batches de 100 + skip por já-preenchido).
+   *
+   * Erros individuais são logados como warn e processamento continua —
+   * preferimos boot bem-sucedido com N projetos sem slug a deixar o serviço
+   * inteiro inacessível. Reviewer/Documenter validam que falhas reaparecem
+   * em `DEvento` audit ou métricas.
+   *
+   * @see ADR-V2-030 — projectSlug é identidade técnica
+   */
+  async onModuleInit(): Promise<void> {
+    try {
+      await this.backfillSlugs();
+    } catch (err) {
+      this.logger.error(
+        `backfill_slugs_failed: erro inesperado no backfill de slugs — boot prossegue. ${
+          (err as Error).message
+        }`,
+      );
+    }
+  }
 
   /**
    * Cria projeto com seed completo, membership MANAGER e (opcional) vínculo
@@ -116,10 +154,15 @@ export class ProjectsService {
     );
 
     const project = await this.prisma.$transaction(async (tx) => {
+      // Derivar slug único antes de criar o projeto (ADR-V2-030).
+      // Reutiliza tx para enxergar inserções desta mesma transação.
+      const slug = await this.deriveUniqueSlug(tx, dto.nome);
+
       // Construir dados polimórficos
       const dadosPayload: Record<string, unknown> = {
         prefix: dto.prefix ?? 'DEV',
         automationEnabled: dto.automationEnabled ?? false,
+        slug,
         ...(dto.description ? { description: dto.description } : {}),
         ...(dto.gitRepo ? { gitRepo: dto.gitRepo } : {}),
       };
@@ -734,6 +777,146 @@ export class ProjectsService {
     }
 
     return { statusCounts, totalTasks };
+  }
+
+  // ─── Slug derivation (ADR-V2-030) ────────────────────────────────────────
+
+  /**
+   * Deriva slug único para um projeto a partir do nome.
+   *
+   * Algoritmo:
+   *  1. `slugify(nome)` — normaliza e produz candidato base.
+   *  2. Se candidato vazio (nome só de símbolos), usa `fallbackSlug()`.
+   *  3. Loop de colisão: se `<candidato>` já existe em `DProject.dados.slug`
+   *     (excluido=false), tenta `<candidato>-2`, `<candidato>-3`... até livre.
+   *
+   * Detecção de colisão em DProject.dados (Json) usa Prisma `path` filter,
+   * que mapeia para `dados->>'slug' = ?` no Postgres — coerente com o
+   * índice expression único criado pela migration desta sub-tarefa.
+   *
+   * @param tx - Cliente Prisma (transação ou raiz). Permite reuso dentro
+   *   do `$transaction` do `create()` sem nova conexão.
+   * @param nome - Nome bruto do projeto.
+   * @param ignoreProjectId - Quando informado, ignora colisão com este
+   *   project específico (usado no backfill para não considerar o próprio
+   *   projeto como conflito caso ele já tenha um slug parcial).
+   * @returns Slug único pronto pra persistir em `dados.slug`.
+   */
+  private async deriveUniqueSlug(
+    tx: Prisma.TransactionClient | PrismaService,
+    nome: string,
+    ignoreProjectId?: bigint,
+  ): Promise<string> {
+    const base = slugify(nome) || fallbackSlug();
+    let candidate = base;
+    let suffix = 2;
+
+    // Loop de colisão. Bound superior defensivo (>1000 colisões é sinal de
+    // bug ou ataque — abortar com erro alto pra investigar).
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      if (suffix > 1000) {
+        throw new Error(
+          `slug_collision_overflow: mais de 1000 colisões para base="${base}". Investigar.`,
+        );
+      }
+
+      const conflict = await tx.dProject.findFirst({
+        where: {
+          dados: { path: ['slug'], equals: candidate },
+          excluido: false,
+          ...(ignoreProjectId !== undefined ? { chave: { not: ignoreProjectId } } : {}),
+        },
+        select: { chave: true },
+      });
+
+      if (!conflict) {
+        return candidate;
+      }
+
+      candidate = `${base}-${suffix}`;
+      suffix += 1;
+    }
+  }
+
+  /**
+   * Backfill idempotente: gera `dados.slug` para projetos sem slug.
+   *
+   * Estratégia:
+   *  - Busca em batches de `BACKFILL_BATCH_SIZE` projetos com `dados.slug`
+   *    ausente (Postgres `dados->>'slug' IS NULL`).
+   *  - Para cada um, deriva slug único (respeitando colisão com projetos
+   *    que já têm slug) e dá `dProject.update` mergeando em `dados`.
+   *  - Log início e fim com contadores. Erros individuais como warn.
+   *  - Idempotente: rodar 2× é no-op no segundo run (lista vazia).
+   *
+   * Inline no boot (não em job BullMQ) por simplicidade — DProject realista
+   * tem <10k registros. Se passar disso e o boot ficar lento (>5s), mover
+   * pra worker fica trivial (mesma lógica, só muda quem chama).
+   */
+  private async backfillSlugs(): Promise<void> {
+    let totalProcessed = 0;
+    let totalErrors = 0;
+    let batchIndex = 0;
+
+    // Loop até esgotar projetos sem slug.
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const pending = await this.prisma.dProject.findMany({
+        where: {
+          excluido: false,
+          OR: [
+            { dados: { equals: Prisma.JsonNull } },
+            { dados: { path: ['slug'], equals: Prisma.AnyNull } },
+          ],
+        },
+        select: { chave: true, nome: true, dados: true },
+        take: ProjectsService.BACKFILL_BATCH_SIZE,
+        orderBy: { chave: 'asc' },
+      });
+
+      if (pending.length === 0) {
+        break;
+      }
+
+      if (batchIndex === 0) {
+        this.logger.log(
+          `backfill_slugs_started: ${pending.length} projetos no primeiro batch (batchSize=${ProjectsService.BACKFILL_BATCH_SIZE})`,
+        );
+      }
+
+      for (const proj of pending) {
+        try {
+          const slug = await this.deriveUniqueSlug(this.prisma, proj.nome, proj.chave);
+          const dadosAtuais = (proj.dados as Record<string, unknown> | null) ?? {};
+          const novosDados = { ...dadosAtuais, slug };
+          await this.prisma.dProject.update({
+            where: { chave: proj.chave },
+            data: { dados: novosDados as Prisma.InputJsonValue },
+          });
+          totalProcessed += 1;
+        } catch (err) {
+          totalErrors += 1;
+          this.logger.warn(
+            `backfill_slug_skip projectId=${proj.chave.toString()} reason="${(err as Error).message}"`,
+          );
+        }
+      }
+
+      batchIndex += 1;
+
+      // Defesa final: se o batch retornou menos que o tamanho, não há mais
+      // o que buscar. Sai antes do próximo round-trip.
+      if (pending.length < ProjectsService.BACKFILL_BATCH_SIZE) {
+        break;
+      }
+    }
+
+    if (totalProcessed > 0 || totalErrors > 0) {
+      this.logger.log(
+        `backfill_slugs_finished: processados=${totalProcessed} erros=${totalErrors} batches=${batchIndex}`,
+      );
+    }
   }
 
   // ─── Helpers privados ─────────────────────────────────────────────────────

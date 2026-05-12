@@ -14,6 +14,27 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F13 Sub-tarefa 2.3: ProjectsService slug derivation + migration índice expression** (V2 F13 Backend-Side Prep) - 2026-05-12
+  - **Utility:** `slugify(nome)` — lowercase + NFD strip diacríticos + hífens + max 50 chars; `fallbackSlug()` para nomes vazios
+  - **Service:** `ProjectsService.create()` deriva slug único (sufixo `-N` resolve colisões); `onModuleInit()` backfill idempotente para projetos legados
+  - **Migration:** Índice expression único em `LOWER(dados->>'slug')` com filtro `WHERE excluido = false` (soft-delete-friendly)
+  - **Testes:** 46 PASS (19 slugify + 27 service)
+  - **Pilares:** P1 N/A (estrutural), P2 N/A (zero controller), P3 N/A (zero DClasse)
+  - **ADRs:** ADR-V2-001 (zero tabela), ADR-V2-030 (projectSlug identidade técnica), ADR-V2-033 (RemoteExecutionClient precisa slug)
+  - **Débito menor:** slug não exposto em ProjectResponseDto; race condition P2002 sem retry; backfill sequencial se >10k projetos
+  - **Review:** APPROVED 8.8/10
+
+- **F13 Sub-tarefa 2.2: RemoteExecutionClient refactor + payload V2 + stubs deprecated** (V2 F13 Backend-Side Prep) - 2026-05-12
+  - **Payload V2:** `{type:'RUN_CLAUDE_CODE', executionId, projectSlug, idClasseRisk, prompt, resumeSessionId, timeoutSec, metadata}`
+  - **ACK síncrono:** `execute()` retorna `{accepted:true, executionId}` rápido; resultado via callback `POST /agents/:id/execution-result`
+  - **Removido:** NDJSON streaming, shell-genéricos (workspace, command.executable/args), `OutputAccumulator`
+  - **Stubs:** `ExecutionWorktreeService` + `RollbackService` convertidos em stubs deprecated (V2 decisão: isolation no Claude Code)
+  - **Processor:** `ExecutionRunProcessor` refatorado — novo `dispatchRunClaudeCode()`, validação `VALID_RISK_CLASSES = {-301,-302,-303}`
+  - **Testes:** 22 PASS (10 client + 4 processor + 6 worktree + 2 rollback)
+  - **Rodadas:** Rodada 1 (6.5/10 NEEDS_CHANGES — specs desatualizado) → Rodada 2 (8.5/10 APPROVED — M1+M2 corrigidos, m1 aplicado)
+  - **Pilares:** P1 validação VALID_RISK_CLASSES, P2 callback endpoint (Sub-tarefa 2.4), P3 DClasses canônicas
+  - **ADRs:** ADR-V2-005/-006/-030/-032/-033
+
 - **F8 Task #01: Multi-Tenant Identity + Workspace Switch (ADR-V2-030)** (V2 F8 transversal Auth/Invites) - 2026-05-12
   - **Backend Auth:** `POST /auth/switch-org` novo; `JwtStrategy.validate` agora `async` valida DVincula ativo a cada request (revogação imediata)
   - **Backend Invites:** Merge flow — email já-user convidado outra org cria APENAS DVincula (sem DUserGroup/DEntidade); `getInviteByToken` retorna `flow: 'new_user' | 'existing_user'`

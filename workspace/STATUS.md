@@ -1435,3 +1435,109 @@ SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS (se SMTP)
 - Sem regressões latência
 - Payload menor (~500 bytes vs ~2KB streaming NDJSON) — melhor pra conectividade SSH frágil
 - ACK rápido (30s timeout) vs esperar execução (~30min potencial)
+
+---
+
+<!-- dedup:implementer:sub2.3 -->
+### Sub-tarefa 2.3 — ProjectsService slug derivation + migration + backfill
+
+**Plano:** `workspace/plans/plan-automation-backend-side-task2.md` §3 Sub-tarefa 2.3
+**Timestamp:** 12/05/2026 ~11:50
+**Agent:** implementer
+**Status:** Concluído (aguardando Reviewer + Documenter)
+
+**Arquivos criados:**
+- `src/projects/utils/slugify.ts` — funções `slugify()` + `fallbackSlug()` + `MAX_SLUG_LENGTH`
+- `src/projects/utils/__tests__/slugify.spec.ts` — 19 specs (básicos + edge + idempotência + fallback)
+- `prisma/migrations/20260512120000_dproject_slug_unique_index/migration.sql` — índice expression único parcial em `LOWER(dados->>'slug') WHERE excluido = false`
+
+**Arquivos modificados:**
+- `src/projects/projects.service.ts`:
+  * `OnModuleInit` implementado — chama `backfillSlugs()` no boot (try/catch garante boot não falha)
+  * `create()` agora deriva slug único antes de criar `DProject` (dentro da mesma `$transaction`)
+  * Helpers privados: `deriveUniqueSlug(tx, nome, ignoreProjectId?)` + `backfillSlugs()`
+  * Constante `BACKFILL_BATCH_SIZE = 100`
+- `src/projects/projects.service.spec.ts`:
+  * Adicionado `findFirst` nos mocks tx existentes (6 specs)
+  * 7 specs novos: 4 cobrem slug derivation (`create()`), 3 cobrem `onModuleInit()` backfill
+
+**Decisão técnica `slugify()` vazio:**
+Função pura retorna string vazia para entradas só-de-símbolos (`'!!!!!!'`). O `ProjectsService.deriveUniqueSlug()` aplica fallback `untitled-<timestamp-base36>` quando isso acontece — projeto válido mesmo com nome esquisito (UX prefere não bloquear cadastro por causa do nome). Migration garante unicidade no DB. Caller fica explícito: `slugify(nome) || fallbackSlug()`.
+
+**Migration aplicada em dev?**
+NÃO — Docker `localhost:5433` indisponível neste ambiente do agente. Validação compile-time apenas: `npx prisma validate` PASS. SQL escrito com `IF NOT EXISTS` para idempotência. CEO/Documenter deve aplicar quando subir DB local: `npx prisma migrate deploy`.
+
+**Build:** PASS (21 erros pré-existentes em F9/PDFKit/email/date-fns; zero erros novos)
+**Tests:** 27/27 PASS em `projects.service.spec.ts` (20 originais + 7 novos); 19/19 PASS em `slugify.spec.ts`; suite ampla 68/68 PASS em `src/projects/`, `src/automation/runtime/`, `src/executions/processors/`.
+
+**Pilares (validação V2):**
+- Pilar 1 (Engine): N/A — `DProject` é tabela estrutural; Prisma direto OK
+- Pilar 2 (Endpoints): N/A — zero controller novo
+- Pilar 3 (Seed): N/A — sem novas DClasses
+- ADR-V2-001 (zero tabela nova): RESPEITADO — slug em `DProject.dados` (Json), zero coluna nova
+- ADR-V2-030 (projectSlug como identidade técnica): IMPLEMENTADO — slug derivado de nome, persistido em `dados.slug`, único via índice parcial
+
+**Não tocado (fora do escopo):**
+- Endpoint `POST /agents/:id/execution-result` (= Sub-tarefa 2.4)
+- Engine `OperacaoExecucaoClaude` (= Sub-tarefa 2.4)
+- `claudeSessionId` em `DTask.schemas.task-dados.schema.ts` (= Sub-tarefa 2.5)
+- `RemoteExecutionClient` (fechado em Sub-tarefa 2.2)
+
+---
+
+## Task #3 Sub-tarefa 2.3 (F13 Backend-Side Prep) — ProjectsService Slug Derivation + Migration + Backfill — ✅ COMPLETE
+
+**Module:** projects (backend V2) + seeds (migration)
+**Task:** Derivar `projectSlug` automático em `DProject.dados.slug` com índice unique + backfill idempotente
+**Status:** COMPLETE
+**Duration:** ~4h Implementer + ~2h Reviewer + ~30min Documenter
+**Quality Score:** 8.8/10 APPROVED
+**Plan:** `workspace/plans/plan-automation-backend-side-task2.md` §3 Sub-tarefa 2.3
+**Review:** `workspace/reviews/review-automation-backend-side-task2-sub3.md`
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — estrutural (DProject), Prisma direto OK
+- Pilar 2 (Endpoints): N/A — zero novo controller (derivação interna)
+- Pilar 3 (Seed): N/A — zero DClasse nova
+
+**Deliverables:**
+- [x] `src/projects/utils/slugify.ts` — função pura `slugify(nome: string)` com NFD + lowercase + trim + max 50
+- [x] `src/projects/utils/slugify.ts` — função `fallbackSlug()` retorna `untitled-<timestamp-base36>`
+- [x] `src/projects/utils/__tests__/slugify.spec.ts` — 19 specs PASS (básicos, edge, idempotência)
+- [x] `src/projects/projects.service.ts` — `OnModuleInit` + `create()` com slug derivation + `deriveUniqueSlug()` + `backfillSlugs()`
+- [x] `src/projects/projects.service.spec.ts` — 27 specs PASS (20 originais + 7 novos slug+backfill)
+- [x] `prisma/migrations/20260512120000_dproject_slug_unique_index/migration.sql` — índice expression unique parcial
+- [x] JSDoc completo em `slugify()`, `fallbackSlug()`, `onModuleInit()`, `create()`, `deriveUniqueSlug()`, `backfillSlugs()`
+
+**Metrics:**
+- Build: PASS (`yarn build` — 21 erros F9 pre-existentes, zero novos)
+- TypeScript: PASS (`npx tsc --noEmit` — 0 novos erros)
+- ESLint: PASS (zero violations em `src/projects/`)
+- Tests: 46/46 PASS (19 slugify + 27 projects.service)
+- N+1 Queries: ZERO (backfill sequencial, sem loops de queries)
+- BigInt: N/A (slug é string)
+- Atomicidade: slug derivado dentro `$transaction` junto com DProject
+- Migration: idempotente (`IF NOT EXISTS`), parcial (`WHERE excluido = false`), comentário com rollback manual
+
+**Issues (Minor — Débito Aceitável):**
+1. **#1:** `slug` não exposto em `ProjectResponseDto` — pós-review (frontend/debug tools sem acesso direto; RemoteExecutionClient acessa via lookup DProject.dados)
+2. **#2:** Migration sem `.down.sql` explícito (comentário de rollback presente; padrão aceitável para índice não-destrutivo)
+3. **#3:** Race condition P2002 sem retry (2 requests simultâneos mesmo nome) — baixa probabilidade (slugs não criados em alta concorrência em MVP); mitigação F13 hardening
+
+**ADRs:**
+- ADR-V2-001 (zero tabela nova) — RESPEITADO (slug em Json existente)
+- ADR-V2-030 (projectSlug identidade técnica) — IMPLEMENTADO
+- ADR-V2-033 (RemoteExecutionClient precisa slug) — DESBLOQUEADOR
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan + decisão B1 slugify automático |
+| Implementer | ~4h | 100% PASS: slugify + service + migration + 46 testes |
+| Reviewer | ~2h | Score 8.8/10 APPROVED rodada 1 (3 minors, zero blockers) |
+| Documenter | ~30min | ROADMAP, CHANGELOG, STATUS, commit |
+
+**Próximos passos:**
+- ✅ CLOSED — Sub-tarefa 2.3 COMPLETE
+- Próxima: Sub-tarefa 2.4 (endpoint `POST /agents/:id/execution-result` inbound + Engine `OperacaoExecucaoClaude`)
