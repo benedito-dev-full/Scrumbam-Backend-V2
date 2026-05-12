@@ -147,7 +147,11 @@ export class TeamsService {
     });
 
     // Quem cria vira LEAD do time — sempre pode editar/deletar
-    return this.buildResponse(team, orgId, prefix, 1, { canEdit: true, canDelete: true });
+    return this.buildResponse(team, orgId, prefix, 1, {
+      canEdit: true,
+      canDelete: true,
+      myCargo: 'LEAD',
+    });
   }
 
   /**
@@ -247,13 +251,15 @@ export class TeamsService {
     const items = pageTeams.map((t) => {
       const dados = t.dados as Record<string, unknown> | null;
       const prefix = (dados?.key as string) ?? 'DEV';
-      const canManage = cargoMap.get(t.chave.toString()) === 'LEAD' || isOrgAdmin;
+      const cargo = cargoMap.get(t.chave.toString()) ?? null;
+      const myCargo = cargo === 'LEAD' || cargo === 'MEMBER' ? (cargo as 'LEAD' | 'MEMBER') : null;
+      const canManage = cargo === 'LEAD' || isOrgAdmin;
       return this.buildResponse(
         t,
         orgId,
         prefix,
         countMap.get(t.chave.toString()) ?? 0,
-        { canEdit: canManage, canDelete: canManage },
+        { canEdit: canManage, canDelete: canManage, myCargo },
         dados,
       );
     });
@@ -356,13 +362,15 @@ export class TeamsService {
         const orgId = team.idEstab?.toString() ?? '';
         const meta = v.metaDados as Record<string, unknown> | null;
         const cargo = (meta?.cargo as string) ?? 'MEMBER';
+        const myCargo =
+          cargo === 'LEAD' || cargo === 'MEMBER' ? (cargo as 'LEAD' | 'MEMBER') : null;
         const canManage = cargo === 'LEAD' || adminOrgSet.has(orgId);
         return this.buildResponse(
           team,
           orgId,
           prefix,
           countMap.get(team.chave.toString()) ?? 0,
-          { canEdit: canManage, canDelete: canManage },
+          { canEdit: canManage, canDelete: canManage, myCargo },
           dados,
         );
       });
@@ -423,6 +431,7 @@ export class TeamsService {
 
     const meta = membership.metaDados as Record<string, unknown> | null;
     const cargo = (meta?.cargo as string) ?? 'MEMBER';
+    const myCargo = cargo === 'LEAD' || cargo === 'MEMBER' ? (cargo as 'LEAD' | 'MEMBER') : null;
     // Só checa ADMIN da org se ainda não for LEAD (otimização: evita query desnecessária)
     let isOrgAdmin = false;
     if (cargo !== 'LEAD' && team.idEstab) {
@@ -451,7 +460,7 @@ export class TeamsService {
       orgId,
       prefix,
       memberCount,
-      { canEdit: canManage, canDelete: canManage },
+      { canEdit: canManage, canDelete: canManage, myCargo },
       dados,
     );
   }
@@ -517,9 +526,26 @@ export class TeamsService {
       },
     });
 
-    const memberCount = await this.prisma.dVincula.count({
-      where: { idLocEscritu: teamId, idClasse: ID_CLASSE_TEAM_MEMBERSHIP, excluido: false },
-    });
+    const [memberCount, userMembership] = await Promise.all([
+      this.prisma.dVincula.count({
+        where: { idLocEscritu: teamId, idClasse: ID_CLASSE_TEAM_MEMBERSHIP, excluido: false },
+      }),
+      // Re-busca cargo do usuário para preencher myCargo (pode ser ADMIN da
+      // org que editou um time sem ser membro — nesse caso myCargo=null).
+      this.prisma.dVincula.findFirst({
+        where: {
+          idLocEscritu: teamId,
+          idEntidade: userEntidadeId,
+          idClasse: ID_CLASSE_TEAM_MEMBERSHIP,
+          excluido: false,
+        },
+        select: { metaDados: true },
+      }),
+    ]);
+    const userMeta = userMembership?.metaDados as Record<string, unknown> | null;
+    const userCargo = userMeta?.cargo as string | undefined;
+    const myCargo =
+      userCargo === 'LEAD' || userCargo === 'MEMBER' ? (userCargo as 'LEAD' | 'MEMBER') : null;
 
     const updatedDados = updated.dados as Record<string, unknown> | null;
     const prefix = (updatedDados?.key as string) ?? 'DEV';
@@ -530,7 +556,7 @@ export class TeamsService {
       orgId,
       prefix,
       memberCount,
-      { canEdit: true, canDelete: true },
+      { canEdit: true, canDelete: true, myCargo },
       updatedDados,
     );
   }
@@ -902,7 +928,11 @@ export class TeamsService {
     orgId: string,
     prefix: string,
     memberCount: number,
-    permissions: { canEdit: boolean; canDelete: boolean },
+    permissions: {
+      canEdit: boolean;
+      canDelete: boolean;
+      myCargo: 'LEAD' | 'MEMBER' | null;
+    },
     dados?: Record<string, unknown> | null,
   ): TeamResponseDto {
     const teamDados = dados ?? (team.dados as Record<string, unknown> | null);
@@ -919,6 +949,7 @@ export class TeamsService {
       atualizadoEm: team.atualizadoEm.toISOString(),
       canEdit: permissions.canEdit,
       canDelete: permissions.canDelete,
+      myCargo: permissions.myCargo,
     };
   }
 }

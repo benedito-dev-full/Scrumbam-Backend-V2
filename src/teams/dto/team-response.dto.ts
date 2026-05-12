@@ -80,6 +80,22 @@ export class TeamResponseDto {
   atualizadoEm!: string;
 
   /**
+   * Cargo do usuário autenticado neste time (`LEAD` ou `MEMBER`),
+   * ou `null` se o usuário não é membro (ex: ADMIN da org que ainda
+   * não foi adicionado ao time).
+   *
+   * Permite ao frontend mostrar o próprio cargo sem precisar de query
+   * adicional a `/teams/:id/members`.
+   */
+  @ApiPropertyOptional({
+    description: 'Cargo do usuário autenticado neste time',
+    example: 'LEAD',
+    enum: ['LEAD', 'MEMBER'],
+    nullable: true,
+  })
+  myCargo?: 'LEAD' | 'MEMBER' | null;
+
+  /**
    * Indica se o usuário autenticado pode editar este time.
    *
    * Verdadeiro quando o usuário é LEAD do time ou ADMIN da organização pai.
