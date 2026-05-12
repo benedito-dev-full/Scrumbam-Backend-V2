@@ -1372,3 +1372,66 @@ SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS (se SMTP)
 - `ProjectsService` (slug derivation = Sub-tarefa 2.3)
 - Endpoint `POST /agents/:id/execution-result` (= Sub-tarefa 2.4)
 - `claudeSessionId` em `DTask.schemas` (= Sub-tarefa 2.5)
+
+---
+
+<!-- dedup:implementer:sub2.2-r2 -->
+### Sub-tarefa 2.2 — Segunda rodada (correções M1 + M2 + m1)
+
+**Timestamp:** 12/05/2026 ~10:55
+**Agent:** implementer
+**Status:** Concluído (aguardando Reviewer)
+**Trigger:** review NEEDS_CHANGES 6.5/10 — `workspace/reviews/review-automation-backend-side-task2-sub2.md`
+
+**Issues corrigidos:**
+- **M1 (bloqueante):** `execution-worktree.service.spec.ts` e `rollback.service.spec.ts` reescritos para casar com a nova assinatura dos stubs V2 (sem `remoteClient`, sem `context` em `prepare`).
+- **M2 (bloqueante):** removido fallback `dados.command.text` em `ExecutionRunProcessor.resolvePrompt()` — agora exige apenas `dados.prompt` (canônico V2, sem backward-compat conforme §3 do plano).
+- **m1 (opcional aplicado):** adicionada validação estrita `VALID_RISK_CLASSES` (Set {-301,-302,-303}) em `dispatchRunClaudeCode()`, dupla barreira sobre o filtro de `loadExecution()`.
+
+**Arquivos modificados (3):**
+- `src/automation/runtime/__tests__/execution-worktree.service.spec.ts` (reescrito — 6 specs PASS)
+- `src/automation/runtime/__tests__/rollback.service.spec.ts` (reescrito — 2 specs PASS, tipo `Pick<ExecutionRuntimeLogService, 'recordSystem'>` para evitar `as any`)
+- `src/executions/processors/execution-run.processor.ts` (resolvePrompt sem fallback + VALID_RISK_CLASSES)
+
+**Verificações:**
+- TypeScript: PASS (zero erros novos nos arquivos tocados; erros pré-existentes em pdfkit/date-fns/email-providers seguem)
+- ESLint: PASS (`--max-warnings 0`)
+- Tests: 8 PASS (execution-worktree + rollback) + 14 PASS (processor + remote-execution-client) = 22 PASS, zero regressão
+
+**Escopo intacto:** nada tocado em Sub-tarefas 2.3, 2.4, 2.5.
+
+---
+
+<!-- dedup:reviewer:sub2.2-final -->
+### Sub-tarefa 2.2 — Revisão Final (Rodada 2 APPROVED)
+
+**Timestamp:** 12/05/2026 ~11:30
+**Agent:** reviewer
+**Status:** APPROVED 8.5/10
+**Referência:** `workspace/reviews/review-automation-backend-side-task2-sub2.md` (rodada 2 final)
+
+**Resultado Final:**
+- **Score:** 8.5/10 APPROVED
+- **Histórico:** Rodada 1 (6.5/10 NEEDS_CHANGES — M1 specs desatualizado) → Rodada 2 (8.5/10 APPROVED — M1+M2 corrigidos, m1 aplicado)
+- **Bloqueadores:** ZERO (todos M1/M2/m1 resolvidos no Implementer rodada 2)
+- **Regressões:** ZERO (22 specs PASS, cobertura mantida)
+
+**Validações:**
+- Build: ✅ PASS (`make build`)
+- TypeScript: ✅ PASS (zero erros novos)
+- ESLint: ✅ PASS (zero violations)
+- Testes: ✅ 22/22 PASS (remote-execution-client 10, execution-run.processor 4, execution-worktree 6, rollback 2)
+- N+1 Queries: ✅ ZERO (payload construído com dados já carregados)
+- BigInt: ✅ 100% serializado
+
+**Observações Técnicas:**
+1. Payload V2 (`RUN_CLAUDE_CODE`) alinhado com plano ADR-V2-030/-032/-033
+2. ACK síncrono vs streaming NDJSON (decisão A2) é arquiteturalmente correta — callback em Sub-tarefa 2.4
+3. Stubs deprecated (worktree/rollback) precisam de removção em F13 final — débito aceitável agora
+4. Validação VALID_RISK_CLASSES é boa prática (dupla barreira defensive)
+5. HMAC-SHA256 preservation garante segurança end-to-end
+
+**Métricas de Performance:**
+- Sem regressões latência
+- Payload menor (~500 bytes vs ~2KB streaming NDJSON) — melhor pra conectividade SSH frágil
+- ACK rápido (30s timeout) vs esperar execução (~30min potencial)

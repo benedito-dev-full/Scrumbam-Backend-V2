@@ -21,6 +21,19 @@ const EXECUTION_CLASSES = [
 ];
 
 /**
+ * Set de idClasseRisk validos (defensive double-check). A primeira barreira
+ * eh `loadExecution()` que ja filtra `idClasse IN EXECUTION_CLASSES` na
+ * query Prisma; esta validacao garante que, se algo bizarro chegar via
+ * outra via, `dispatchRunClaudeCode()` falha barulhento ao inves de mandar
+ * idClasseRisk fora do contrato para o agente.
+ */
+const VALID_RISK_CLASSES = new Set<number>([
+  Number(AUTOMATION_CLASS_IDS.EXEC_LOW),
+  Number(AUTOMATION_CLASS_IDS.EXEC_MEDIUM),
+  Number(AUTOMATION_CLASS_IDS.EXEC_HIGH),
+]);
+
+/**
  * Timeout default (segundos) entregue ao agente caso `DPedido.dados.timeoutSec`
  * (ou equivalente) nao esteja preenchido. Plan-task1 §4 sugere 1800s (30min)
  * para execucoes Claude Code.
@@ -144,7 +157,7 @@ export class ExecutionRunProcessor extends WorkerHost {
     const timeoutSec = this.resolveTimeoutSec(input.pedido.dados);
     const idClasseRisk = Number(input.pedido.idClasse);
 
-    if (!Number.isInteger(idClasseRisk) || idClasseRisk > 0) {
+    if (!VALID_RISK_CLASSES.has(idClasseRisk)) {
       throw new Error(`idClasseRisk invalido (${idClasseRisk}) — esperado -301/-302/-303`);
     }
 
@@ -185,23 +198,19 @@ export class ExecutionRunProcessor extends WorkerHost {
   }
 
   /**
-   * Extrai prompt do usuario do `DPedido.dados`. Tenta na ordem:
-   * 1. `dados.prompt` (canonico V2)
-   * 2. `dados.command.text` (legado — texto livre que virava command shell)
+   * Extrai prompt do usuario de `DPedido.dados.prompt` (canonico V2).
    *
-   * Falha se ambos ausentes.
+   * Falha barulhento se ausente — sem backward-compat com `command.text`
+   * (modelo legado removido pelo plan-task2 §3 Sub-tarefa 2.2). Jobs antigos
+   * de BullMQ ja falhariam antes em `resolveProjectSlug()` por ausencia de
+   * `DProject.dados.slug`, entao o fallback seria inutil de qualquer forma.
    */
   private resolvePrompt(dados: Record<string, unknown>): string {
-    const direct = this.asString(dados.prompt);
-    if (direct) return direct;
-
-    const command = this.asRecord(dados.command);
-    const fromCommand = this.asString(command?.text);
-    if (fromCommand) return fromCommand;
-
-    throw new Error(
-      'DPedido.dados.prompt ausente (e dados.command.text tambem) — prompt obrigatorio no protocolo V2',
-    );
+    const prompt = this.asString(dados.prompt);
+    if (!prompt) {
+      throw new Error('DPedido.dados.prompt ausente — prompt obrigatorio no protocolo V2');
+    }
+    return prompt;
   }
 
   /**

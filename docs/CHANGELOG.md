@@ -55,6 +55,19 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
   - **Review:** APPROVED 9.0/10
   - **Issue M1 Corrigido:** JSDoc seed linha 249 atualizado (92/137 → 95/140 DClasses)
 
+- **F13 Sub-tarefa 2.2: Refactor RemoteExecutionClient — Payload V2 + Stubs Deprecated** (V2 F13 Backend-Side Prep) - 2026-05-12
+  - **RemoteExecutionClient:** Reescrito com payload V2 (`type:'RUN_CLAUDE_CODE'`, `projectSlug`, `idClasseRisk`, `prompt`, `resumeSessionId`, `timeoutSec`)
+  - **ACK Síncrono:** `execute()` retorna apenas `{accepted:true}` via fetch síncrono; streaming NDJSON removido (decisão A2 — resultado via callback)
+  - **Remoções:** campos shell-genéricos (`workspace`, `command.executable/args/cwd/env`), `consumeStream()`, `OutputAccumulator`
+  - **HMAC:** Headers HMAC-SHA256 preservados (algoritmo idêntico, corpo V2)
+  - **Stubs Deprecated:** `ExecutionWorktreeService` e `RollbackService` convertidos em stubs (worktree/rollback responsabilidade do Claude Code, não agente V2)
+  - **ExecutionRunProcessor:** Refatorado com `dispatchRunClaudeCode()`; construtor 8→5 deps; validação estrita VALID_RISK_CLASSES
+  - **Pilares:** P1 validação Risk (-301/-302/-303); P2 respeitado (sem novo controller); P3 DClasses canônicas
+  - **ADRs:** ADR-V2-005, ADR-V2-006, ADR-V2-030, ADR-V2-032, **ADR-V2-033**
+  - **Testes:** 22 specs PASS (10 client + 4 processor + 6 worktree + 2 rollback); Build PASS; Zero N+1 queries
+  - **Issues Corrigidas:** Rodada 1 (M1 spec files); Rodada 2 (M2 fallback removido; m1 VALID_RISK_CLASSES constantes)
+  - **Review:** APPROVED 8.5/10 (rodada 2; rodada 1 foi 6.5/10)
+
 - **Modal Criar Task com Tipo + Responsável + Canal + Criador** (V2 F5 extensão) - 2026-05-11
   - **Backend (tasks):** `CreateTaskDto` + `UpdateTaskDto` com campo `taskType?: string` (enum FEATURE|BUG|IMPROVEMENT|REVIEW|EXPLAIN)
   - **Schema:** `TaskDados` estendida com `taskType?: string` (persistido em Json — ADR-V2-001)

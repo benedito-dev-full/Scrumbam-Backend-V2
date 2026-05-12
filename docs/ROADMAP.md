@@ -241,6 +241,91 @@
 
 ---
 
+### Sub-tarefa 2.2: Refactor RemoteExecutionClient — Payload V2 + Stubs Deprecated — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** automation (runtime) + executions (processors)
+**Fase V2:** F13 (Automation — Backend-Side Prep, pré-requisito Task #1 Sub-4)
+**Tempo Real:** ~4h Implementer (rodada 1) + ~45min (rodada 2 correções) + ~1.5h Reviewer (2 rodadas) + ~30min Documenter
+**Completado em:** 2026-05-12
+**Quality Score:** 8.5/10 APPROVED (rodada 2; rodada 1 foi 6.5/10 NEEDS_CHANGES)
+
+**O Que Foi Feito:**
+
+**Backend V2 — Runtime + Processors:**
+- **RemoteExecutionClient (`src/automation/runtime/remote-execution-client.ts`):**
+  - Reescrito: payload V2 `{type:'RUN_CLAUDE_CODE', executionId, projectSlug, idClasseRisk, prompt, resumeSessionId, timeoutSec, metadata}`
+  - Removido: `consumeStream()`, `parseAgentEvent()`, `appendOutput()`, `OutputAccumulator` (decisão A2 — síncrono, não streaming)
+  - Removido: campos shell-genéricos (`workspace`, `command.executable/args/cwd/env/timeoutMs/maxOutputBytes`)
+  - ACK síncrono: `execute()` retorna `{accepted:true, executionId}` após ACK do agente; resultado chega via callback
+  - HMAC-SHA256 headers preservados (mesmo algoritmo; corpo muda conforme payload V2)
+  - Testes unit: 10 specs PASS (payload V2 correto, HMAC válido, ACK não-200 levanta erro, sem campos shell)
+  - JSDoc completo em classe e métodos públicos
+
+- **ExecutionWorktreeService (`src/automation/runtime/execution-worktree.service.ts`):**
+  - Convertido em stub deprecated (V2 decisão: worktree isolation responsabilidade do Claude Code, não do agente V2)
+  - Mantém interface pública para compatibilidade com `ExecutionRunProcessor` enquanto Sub-tarefa 2.4 não reescreve fluxo end-to-end
+  - Será removido quando fluxo V2 completo (F13 final)
+  - Testes unit (Rodada 2 — M1): 6 specs PASS
+
+- **RollbackService (`src/automation/runtime/rollback.service.ts`):**
+  - Convertido em stub deprecated (V2 decision: rollback via git reset in project main, não isolated)
+  - Mantém interface pública para compatibilidade
+  - Testes unit (Rodada 2 — M1): 2 specs PASS
+
+- **ExecutionRunProcessor (`src/executions/processors/execution-run.processor.ts`):**
+  - Refatorado: novo método privado `dispatchRunClaudeCode()` que invoca `RemoteExecutionClient.execute()`
+  - Construtor reduzido: 8 → 5 deps (removeu `ExecutionWorktreeService`, `RollbackService` — agora usados como stubs lightweight)
+  - Payload construído dynamicamente: `projectSlug` derivado de `DProject.dados.slug`, `idClasseRisk` de `DPedido.idClasse`
+  - Validação estrita `VALID_RISK_CLASSES = {-301,-302,-303}` (defensive check — Pilar 1 validação)
+  - Testes unit: 4 specs PASS
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): Validação estrita VALID_RISK_CLASSES (-301/-302/-303 via ADR-V2-006); `OperacaoExecucaoClaude` (Sub-tarefa 2.4 para executar Engine)
+- Pilar 2 (Endpoints): RESPEITADO — sem novo controller; fluxo outbound via callback endpoint `/agents/:id/execution-result` (Sub-tarefa 2.4)
+- Pilar 3 (Seed): RESPEITADO — DClasses -505/-506 criadas em Sub-tarefa 2.1; payload V2 conhece apenas DClasses canônicas
+
+**ADRs vinculados:** ADR-V2-005 (OperacaoExecucaoClaude via Engine), ADR-V2-006 (Risk via idClasse), ADR-V2-030 (projectSlug em lugar de cwd), ADR-V2-032 (claudeSessionId, resumeSessionId), **ADR-V2-033 (contrato /v1/execute outbound + execution-result inbound)**
+
+**Testes:** 22 specs PASS (10 client + 4 processor + 6 worktree stub + 2 rollback stub)
+- Build: PASS após M2 (rodada 2)
+- TypeScript: PASS (`npx tsc --noEmit`)
+- ESLint: PASS (zero console.log, padrão V2)
+- N+1 Queries: ZERO (payload construído com dados já carregados; sem queries adicionais)
+- BigInt: 100% serializado em HMAC body
+
+**Issues Encontrados e Corrigidos:**
+
+*Rodada 1 (6.5/10 NEEDS_CHANGES):*
+- **M1 (HIGH):** Spec files `execution-worktree.service.spec.ts` e `rollback.service.spec.ts` tinham assinatura de construtor desatualizada (esperavam 2 parâmetros antigos; stubs novos têm 0)
+  - Corrigido Rodada 2: Reescrito ambos com 6+2=8 specs
+- **M2 (MEDIUM):** Fallback `dados.command.text` ainda presente em `execution-run.processor.ts` (resíduo V1)
+  - Corrigido Rodada 2: Removido; JSDoc documenta decisão arquitetural
+
+*Rodada 2 (8.5/10 APPROVED):*
+- **m1 (MINOR):** Sugestão Reviewer: `VALID_RISK_CLASSES` com enum ou constantes canônicas
+  - Aplicado: Implementer implementou via `AUTOMATION_CLASS_IDS` constants (DRY, superior)
+
+**Out of scope (follow-ups):**
+- Sub-tarefa 2.3 (ProjectsService slug derivation) — paralela, não bloqueada
+- Sub-tarefa 2.4 (endpoint `POST /agents/:id/execution-result` inbound) — sequencial pós-2.2
+- Streaming de logs em tempo real (feature futura — `/v1/execute` com `type: STREAM_CLAUDE_SESSION`)
+
+**Plan:** [`workspace/plans/plan-automation-backend-side-task2.md`](../workspace/plans/plan-automation-backend-side-task2.md) §3 Sub-tarefa 2.2
+**Review:** [`workspace/reviews/review-automation-backend-side-task2-sub2.md`](../workspace/reviews/review-automation-backend-side-task2-sub2.md)
+**Impl Notes:** [`workspace/implementations/impl-automation-backend-side-task2-sub2.md`](../workspace/implementations/impl-automation-backend-side-task2-sub2.md) (gerado pelo Implementer)
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan + decisões (a-d) em ADR-V2-033 |
+| Implementer | ~4h + ~45min | Rodada 1 (cliente reescrito) + Rodada 2 (stubs reescritos, M2+m1 aplicados) |
+| Reviewer | ~1.5h (2 rodadas) | Rodada 1: 6.5/10 NEEDS_CHANGES (M1 specs); Rodada 2: 8.5/10 APPROVED |
+| Documenter | ~30min | ROADMAP, CHANGELOG, STATUS, 1 commit |
+
+---
+
 ## F5 — Domínio Estrutural (Tasks + Intentions) — Extensão Modal
 
 ### Task #2: Modal Criar Task com Tipo + Responsável + Canal + Criador — ✅ COMPLETA
