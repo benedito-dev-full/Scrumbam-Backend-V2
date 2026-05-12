@@ -11,9 +11,16 @@ import { RoleResolverService } from '../../auth/services/role-resolver.service';
 import { AUTOMATION_CLASS_IDS } from '../constants/automation-class-ids';
 import { AgentKeyService } from './agent-key.service';
 
+/**
+ * Resultado do consumo de um install token one-shot.
+ *
+ * `projectId` é NULLABLE — quando o token foi gerado standalone
+ * (sem `projectId`), o agente nasce sem vínculo de projeto e o
+ * vínculo deve ser criado depois via `POST /agents/:id/projects`.
+ */
 export interface ConsumedInstallToken {
   tokenId: bigint;
-  projectId: bigint;
+  projectId: bigint | null;
   createdBy: bigint;
 }
 
@@ -26,11 +33,34 @@ export class AgentInstallTokenService {
     private readonly agentKeyService: AgentKeyService,
   ) {}
 
+  /**
+   * Gera um install token one-shot para registro de novo agente.
+   *
+   * Quando `projectId` é fornecido, valida RBAC (MANAGER do projeto OU
+   * ADMIN da org) e o agente nascerá automaticamente vinculado a esse
+   * projeto via DVincula -185 no `install`.
+   *
+   * Quando `projectId` é `null`, o token é gerado standalone — qualquer
+   * usuário autenticado JWT pode gerar (controller já cobre via
+   * `JwtAuthGuard`). O agente nasce sem vínculo e o `createdBy` torna-se
+   * o "dono operacional" inicial (idLocEscritu da DEntidade). Vínculos
+   * de projeto são criados depois via `POST /agents/:id/projects`
+   * (sub-tarefa 4.3, não coberta nesta sub-tarefa).
+   *
+   * @param projectId - ID do projeto (opcional). `null` = standalone.
+   * @param createdBy - ID (DEntidade.chave) do usuário gerando o token.
+   * @returns Token plaintext (exibido uma única vez), ID do registro DTabela e expiração.
+   *
+   * @throws {NotFoundException} Quando `projectId` é fornecido mas o projeto não existe.
+   * @throws {ForbiddenException} Quando `projectId` é fornecido e o usuário não tem MANAGER/ADMIN.
+   */
   async createInstallToken(
-    projectId: bigint,
+    projectId: bigint | null,
     createdBy: bigint,
   ): Promise<{ token: string; installTokenId: bigint; expiresAt: Date }> {
-    await this.requireProjectManagerOrOrgAdmin(projectId, createdBy);
+    if (projectId !== null) {
+      await this.requireProjectManagerOrOrgAdmin(projectId, createdBy);
+    }
 
     const ttlMin = parseInt(
       this.configService.get<string>('AGENT_INSTALL_TOKEN_TTL_MIN', '10'),
@@ -49,7 +79,7 @@ export class AgentInstallTokenService {
         idLocEscrituracao: projectId,
         dados: {
           tokenHash,
-          projectId: projectId.toString(),
+          projectId: projectId !== null ? projectId.toString() : null,
           createdBy: createdBy.toString(),
           expiresAt: expiresAt.toISOString(),
           used: false,
@@ -97,7 +127,9 @@ export class AgentInstallTokenService {
     if (!expiresAt || Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) {
       throw new ConflictException('Token de instalacao expirado');
     }
-    if (!row.idLocEscrituracao || !row.dEntidadeId) {
+    // `dEntidadeId` (createdBy) é OBRIGATÓRIO para audit do install.
+    // `idLocEscrituracao` (projectId) é OPCIONAL — null = token standalone.
+    if (!row.dEntidadeId) {
       throw new ConflictException('Token de instalacao inconsistente');
     }
 
@@ -114,15 +146,12 @@ export class AgentInstallTokenService {
 
     return {
       tokenId: row.chave,
-      projectId: row.idLocEscrituracao,
+      projectId: row.idLocEscrituracao ?? null,
       createdBy: row.dEntidadeId,
     };
   }
 
-  private async requireProjectManagerOrOrgAdmin(
-    projectId: bigint,
-    userId: bigint,
-  ): Promise<void> {
+  private async requireProjectManagerOrOrgAdmin(projectId: bigint, userId: bigint): Promise<void> {
     const project = await this.prisma.dProject.findFirst({
       where: { chave: projectId, excluido: false },
       select: { chave: true, idEstab: true },
@@ -143,6 +172,8 @@ export class AgentInstallTokenService {
       }
     }
 
-    throw new ForbiddenException('Acesso negado: requer MANAGER do projeto ou ADMIN da organizacao');
+    throw new ForbiddenException(
+      'Acesso negado: requer MANAGER do projeto ou ADMIN da organizacao',
+    );
   }
 }

@@ -29,17 +29,73 @@ export class AgentsController {
     private readonly agentsService: AgentsService,
   ) {}
 
+  /**
+   * Gera token one-shot para instalacao de agente (com ou sem projeto vinculado).
+   *
+   * Endpoint protegido via JWT. Permite criar um token para instalar um agente standalone
+   * (sem projeto) ou vinculado a um projeto específico.
+   *
+   * Comportamentos:
+   * - Com `projectId`: validação RBAC (usuário MANAGER do projeto OU ADMIN da org)
+   * - Sem `projectId` (standalone): qualquer usuário autenticado JWT pode gerar
+   *   (agente fica órfão, link para projetos criado depois via POST /agents/:id/projects)
+   *
+   * @param dto - DTO com `projectId` opcional (string contendo BigInt)
+   * @param req - Request autenticado com JWT (extrai `entidadeId` do user)
+   * @returns Token one-shot com TTL 15min
+   *
+   * @throws {UnauthorizedException} Quando JWT ausente ou inválido
+   * @throws {ForbiddenException} Quando `projectId` fornecido e usuário sem role de MANAGER/ADMIN
+   * @throws {NotFoundException} Quando `projectId` fornecido mas projeto não existe
+   *
+   * @example
+   * ```bash
+   * # Gerar token com projeto vinculado (RBAC validado)
+   * curl -X POST http://localhost:3000/api/v1/agents/install-token \
+   *   -H "Authorization: Bearer $TOKEN" \
+   *   -H "Content-Type: application/json" \
+   *   -d '{"projectId":"123"}'
+   * ```
+   *
+   * @example
+   * ```bash
+   * # Gerar token standalone (nenhuma validação RBAC além de autenticação)
+   * curl -X POST http://localhost:3000/api/v1/agents/install-token \
+   *   -H "Authorization: Bearer $TOKEN" \
+   *   -H "Content-Type: application/json" \
+   *   -d '{}'
+   * ```
+   *
+   * @example
+   * ```json
+   * // Response (201 Created)
+   * {
+   *   "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+   *   "installTokenId": "789",
+   *   "expiresAt": "2026-05-12T15:30:00Z"
+   * }
+   * ```
+   */
   @Post('install-token')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Gerar token one-shot de instalacao de agent' })
+  @ApiOperation({
+    summary: 'Gerar token one-shot de instalacao de agent',
+    description:
+      'Cria token para instalar agente standalone (sem projeto) ou vinculado a projeto específico',
+  })
   @ApiResponse({ status: 201, type: GenerateInstallTokenResponseDto })
+  @ApiResponse({ status: 401, description: 'JWT inválido/ausente' })
+  @ApiResponse({ status: 403, description: 'Usuário sem permissão no projeto' })
+  @ApiResponse({ status: 404, description: 'Projeto não encontrado' })
   async generateInstallToken(
     @Body() dto: GenerateInstallTokenDto,
     @Request() req: { user: { entidadeId: string } },
   ): Promise<GenerateInstallTokenResponseDto> {
     const result = await this.installTokenService.createInstallToken(
-      BigInt(dto.projectId),
+      dto.projectId !== undefined && dto.projectId !== null && dto.projectId !== ''
+        ? BigInt(dto.projectId)
+        : null,
       BigInt(req.user.entidadeId),
     );
     return {

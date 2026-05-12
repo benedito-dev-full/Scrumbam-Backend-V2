@@ -47,6 +47,26 @@ export class AgentsService {
     private readonly correlationIdService: CorrelationIdService,
   ) {}
 
+  /**
+   * Instala um agente usando token one-shot.
+   *
+   * Comportamento condicional:
+   * - Se o token foi gerado COM `projectId`: cria DEntidade -156 com
+   *   `idLocEscritu = projectId` E cria DVincula -185 (agente↔projeto)
+   *   atomicamente. Comportamento histórico preservado (backward-compat).
+   * - Se o token foi gerado SEM `projectId` (standalone): cria DEntidade
+   *   -156 com `idLocEscritu = createdBy` (usuário que gerou o token
+   *   torna-se o "dono" inicial para audit) e **NÃO** cria DVincula -185.
+   *   Vínculos de projeto devem ser criados depois via
+   *   `POST /agents/:id/projects` (sub-tarefa 4.3).
+   *
+   * Audit: `dados.installedBy` registra SEMPRE o usuário que gerou o token
+   * (independente de standalone ou vinculado), permitindo trilha de auditoria
+   * mesmo após o agente ser vinculado/desvinculado de projetos.
+   *
+   * @param dto Payload com installToken + hostname + metadados do agente.
+   * @returns Agent ID, API key plaintext (exibida uma única vez), command secret e porta de túnel.
+   */
   async install(dto: InstallAgentDto): Promise<InstallAgentResponseDto> {
     const agentApiKey = this.agentKeyService.generateSecret(32);
     const agentCommandSecret = this.agentKeyService.generateSecret(32);
@@ -58,13 +78,18 @@ export class AgentsService {
       const consumed = await this.installTokenService.consumeInstallToken(tx, dto.installToken);
       const tunnelPort = await this.portAllocator.allocate(tx);
 
+      // Standalone (projectId=null): `idLocEscritu` recai sobre o usuário que
+      // gerou o token (createdBy) para preservar dono operacional inicial.
+      // Vinculado (projectId!=null): comportamento histórico.
+      const idLocEscritu = consumed.projectId !== null ? consumed.projectId : consumed.createdBy;
+
       const agent = await tx.dEntidade.create({
         data: {
           idClasse: AUTOMATION_CLASS_IDS.AGENT,
           nome: dto.hostname,
-          idLocEscritu: consumed.projectId,
+          idLocEscritu,
           dados: {
-            projectId: consumed.projectId.toString(),
+            projectId: consumed.projectId !== null ? consumed.projectId.toString() : null,
             installTokenId: consumed.tokenId.toString(),
             installedBy: consumed.createdBy.toString(),
             hostname: dto.hostname,
@@ -83,18 +108,22 @@ export class AgentsService {
         select: { chave: true },
       });
 
-      await tx.dVincula.create({
-        data: {
-          idClasse: AUTOMATION_CLASS_IDS.PROJECT_AGENT,
-          idLocEscritu: consumed.projectId,
-          idEntidade: agent.chave,
-          tipo: 'agent',
-          metaDados: {
-            installedAt: new Date().toISOString(),
-            installTokenId: consumed.tokenId.toString(),
-          } as Prisma.InputJsonValue,
-        },
-      });
+      // Vínculo agente↔projeto: SOMENTE quando o token tinha projectId.
+      // Standalone vincula projetos depois via POST /agents/:id/projects.
+      if (consumed.projectId !== null) {
+        await tx.dVincula.create({
+          data: {
+            idClasse: AUTOMATION_CLASS_IDS.PROJECT_AGENT,
+            idLocEscritu: consumed.projectId,
+            idEntidade: agent.chave,
+            tipo: 'agent',
+            metaDados: {
+              installedAt: new Date().toISOString(),
+              installTokenId: consumed.tokenId.toString(),
+            } as Prisma.InputJsonValue,
+          },
+        });
+      }
 
       return { agentId: agent.chave, tunnelPort };
     });

@@ -12,6 +12,18 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Fixed
+
+- **F13 Task #4 Sub-tarefa 4.1: torna projectId opcional no install-token (multi-project agent)** (V2 F13 Hotfix) - 2026-05-12
+  - **Problema:** `POST /agents/install-token` exigia `projectId` obrigatório, impedindo instalar 1 agente para N projetos (CEO opera >10 projetos por VPS, precisava de 10 agentes — absurdo operacionalmente)
+  - **Solução:** DTO `GenerateInstallTokenDto` agora marca `projectId` como `@IsOptional()`. Service `createInstallToken(projectId?: bigint)` aceita `null`, persiste em DTabela -473. `install()` condicional: standalone cria `DEntidade -156` com `idLocEscritu=createdBy` (dono inicial), **NÃO cria DVincula -185** (link vem depois via POST `/agents/:id/projects` em sub-tarefa 4.3)
+  - **Backward-compat:** 100% preservada — install COM projectId mantém DVincula automática
+  - **Tests:** 4 specs novos (createInstallToken COM/SEM projectId, consumeInstallToken standalone, install standalone) + regressão 60/60 anterior PASS
+  - **Pilares:** N/A (estrutural, Prisma direto para DVincula)
+  - **ADRs:** ADR-V2-001, ADR-V2-013
+  - **Score:** 8.2/10 APPROVED
+  - **Issue:** MEDIUM (RBAC standalone ausente — mitigação em 4.3 quando endpoint de link aplicar RBAC)
+
 ### Documentation
 
 - **F13 Task #1 Sub-tarefa 7: Documentação Final + ADRs Canônicos** (V2 F13 Cliente) - 2026-05-12

@@ -4,6 +4,39 @@
 
 ---
 
+## Task #4 — Agente standalone + Multi-Project Linking (F13 Hotfix) — 1 de 4 sub-tarefas COMPLETA
+
+Plano `plan-automation-agent-multi-project-task4.md`. Sub-tarefas 4.1 → 4.4 sequenciais.
+
+### ✅ Sub-tarefa 4.1 — DTO + install-token service (projectId opcional) — COMPLETA
+
+**Implementer completou:** 2026-05-12
+**Reviewer aprovou:** 2026-05-12 (Score 8.2/10)
+**Módulo:** `src/automation/agents/`
+**Build:** `make build` PASS
+**Tests:** 60/60 PASS no escopo `src/automation` (4 specs novos)
+
+**Deliverables:**
+- ✅ `generate-install-token.dto.ts` — `projectId` `@IsOptional()` + `@ApiPropertyOptional`
+- ✅ `agent-install-token.service.ts` — `createInstallToken(projectId: bigint | null)` com lógica condicional; `consumeInstallToken` aceita `idLocEscrituracao` nulo
+- ✅ `agents.service.ts` — `install()` condicional (standalone COM/SEM DVincula)
+- ✅ `agents.controller.ts` — JSDoc completo com exemplos standalone
+- ✅ `agent-install-token.service.spec.ts` — 4 specs (create COM/SEM, consume standalone)
+- ✅ `agents-install.spec.ts` — 1 spec (install standalone = idLocEscritu=createdBy, sem DVincula)
+
+**Backward-compat:** 100% (install COM projectId = comportamento anterior)
+**RBAC:** Standalone = qualquer JWT; Vinculado = MANAGER projeto OU ADMIN org (padrão `requireProjectManagerOrOrgAdmin` reutilizado)
+
+**Pilares:**
+- Pilar 1 (Engine): N/A (estrutural)
+- Pilar 2 (Endpoints): N/A (reusa AgentsController)
+- Pilar 3 (Seed): N/A (DClasses -156/-185 já existem)
+
+**Status:** ✅ COMPLETA — Pronto para Documenter finalizar (JSDoc ✅, ROADMAP ✅, CHANGELOG ✅, STATUS ✅, commit ✅)
+**Próximo:** Sub-tarefa 4.2 (endpoints POST/DELETE/GET /agents/:id/projects)
+
+---
+
 ## 🎯 MARCO: TASK #1 COMPLETO — Agente Cliente V2 (F13 Cliente)
 
 Plano `plan-automation-agent-v2-client-task1.md` finalizado **2026-05-12**.

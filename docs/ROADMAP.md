@@ -8,6 +8,52 @@
 
 ---
 
+## F13 — Backend: Task #4 Agente Standalone + Multi-Project Linking
+
+### Task #4: Agente Standalone + Multi-Project Linking (Hotfix arquitetural) — ✅ SUB-TAREFA 4.1 COMPLETA
+
+**Status:** Sub-tarefa 4.1 — ✅ COMPLETA (3 de 4 sub-tarefas)
+**Módulo V2:** automation/agents (`src/automation/agents/`)
+**Fase V2:** F13 (Automation Claude — hotfix pós-handoff)
+**ADRs vinculados:** ADR-V2-001 (zero tabela nova), ADR-V2-003 (RBAC duplo via DVincula), ADR-V2-013 (Agent como DEntidade -156), ADR-V2-028 (Bearer auth)
+
+#### Sub-tarefa 4.1: projectId opcional no install-token — ✅ COMPLETA
+
+**Status:** COMPLETA
+**Tempo Real:** ~1.5h Implementer + ~0.5h Reviewer
+**Quality Score:** 8.2/10 APPROVED rodada 1
+
+**O Que Foi Feito:**
+- **DTO (`generate-install-token.dto.ts`):** `projectId` marcado `@IsOptional()` + `@ApiPropertyOptional`
+- **Service (`agent-install-token.service.ts`):**
+  - `createInstallToken(projectId: bigint | null, createdBy: bigint)` — quando `projectId === null`, pula validação `requireProjectManagerOrOrgAdmin`, grava `idLocEscrituracao: null` em DTabela -473
+  - `ConsumedInstallToken.projectId: bigint | null` — permite token sem projeto
+  - `consumeInstallToken`: tolera `idLocEscrituracao` nulo (retorna `projectId: null`)
+- **Service (`agents.service.ts`):**
+  - `install()` condicional:
+    - Com `projectId !== null`: comportamento histórico (cria DEntidade -156 + DVincula -185)
+    - Sem `projectId` (standalone): cria DEntidade -156 com `idLocEscritu = consumed.createdBy` (dono inicial), **NÃO cria DVincula** (link vem depois via endpoint 4.3)
+  - Backward-compat 100% — install com projectId mantém comportamento anterior
+- **Controller (`agents.controller.ts`):**
+  - `generateInstallToken`: passa `null` quando body não contém projectId
+  - JSDoc completo com exemplos standalone + com-projeto
+- **Tests:** 4 specs novos (createInstallToken COM/SEM projectId, consumeInstallToken com idLocEscrituracao null, install standalone sem DVincula) + regressão 60/60 anterior PASS
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DVincula é estrutural
+- Pilar 2 (Endpoints): N/A — reusa controller existente
+- Pilar 3 (Seed): N/A — zero DClasses novas (DClasse -156 AGENT, -185 PROJECT_AGENT já existem)
+
+**RBAC Stance:**
+- Standalone: qualquer usuário JWT autenticado pode gerar token (conscientemente decidido pelo plano)
+- Vinculado: MANAGER projeto OU ADMIN org (reusa pattern `requireProjectManagerOrOrgAdmin`)
+- **MEDIUM Issue:** RBAC standalone ausente — mitigação natural em 4.3 (endpoint de link aplicará RBAC antes criar DVincula)
+
+**Build:** PASS (`make build` — TypeScript clean, 0 errors)
+**Tests:** 60/60 PASS (+ 4 novos em install-token/agents-install)
+
+---
+
 ## F13 — Cliente: Agente V2 Executor Claude Code (Monorepo `agent/`)
 
 ### Task #1: Agente Cliente V2 (7 Sub-tarefas) — ✅ COMPLETA
