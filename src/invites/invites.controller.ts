@@ -7,6 +7,7 @@ import { CreateInviteDto } from './dto/create-invite.dto';
 import { AcceptInviteDto } from './dto/accept-invite.dto';
 import { InviteInfoDto } from './dto/invite-info.dto';
 import { AcceptInviteResponseDto } from './dto/accept-invite-response.dto';
+import { PendingInviteDto } from './dto/pending-invite.dto';
 
 import { AuthCompositeGuard } from '../auth/guards/auth-composite.guard';
 import { CurrentUser, JwtPayload } from '../auth/decorators/current-user.decorator';
@@ -83,6 +84,37 @@ export class InvitesController {
       `POST /organizations/${orgId}/invites email=${dto.email.toLowerCase()} role=${dto.role} inviter=${user.entidadeId}`,
     );
     return this.invitesService.createInvite(orgId, dto, BigInt(user.entidadeId));
+  }
+
+  /**
+   * Lista convites pendentes da organizacao (ADMIN).
+   *
+   * Retorna apenas convites em status PENDING e nao expirados, sem dados
+   * sensiveis (tokenHash NUNCA exposto). Validacao de ADMIN no service.
+   *
+   * @example
+   * ```bash
+   * curl https://api.scrumban.com.br/api/v1/organizations/100/invites \
+   *   -H "Authorization: Bearer <jwt>"
+   * ```
+   */
+  @Get('organizations/:orgId/invites')
+  @UseGuards(AuthCompositeGuard)
+  @ApiOperation({
+    summary: 'Lista convites pendentes da organizacao (ADMIN)',
+    description: 'Retorna PENDING + nao expirados. NAO expoe tokenHash.',
+  })
+  @ApiParam({ name: 'orgId', description: 'Chave BigInt da organizacao' })
+  @ApiResponse({ status: 200, description: 'Lista de convites pendentes', type: [PendingInviteDto] })
+  @ApiResponse({ status: 401, description: 'Nao autenticado' })
+  @ApiResponse({ status: 403, description: 'Nao e ADMIN' })
+  @ApiResponse({ status: 404, description: 'Org nao encontrada' })
+  async listPending(
+    @Param('orgId') orgId: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<{ invites: PendingInviteDto[] }> {
+    const invites = await this.invitesService.listPendingInvites(orgId, BigInt(user.entidadeId));
+    return { invites };
   }
 
   /**

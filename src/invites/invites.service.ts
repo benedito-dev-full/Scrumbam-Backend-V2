@@ -23,6 +23,7 @@ import { CreateInviteDto } from './dto/create-invite.dto';
 import { AcceptInviteDto } from './dto/accept-invite.dto';
 import { InviteInfoDto } from './dto/invite-info.dto';
 import { AcceptInviteResponseDto } from './dto/accept-invite-response.dto';
+import { PendingInviteDto } from './dto/pending-invite.dto';
 
 /** idClasses canonicos (seed F1 + ADR-V2-028). */
 const ID_CLASSE_USER_GROUP = BigInt(-46);
@@ -650,6 +651,71 @@ export class InvitesService {
       return inv;
     }
     return null;
+  }
+
+  /**
+   * Lista convites pendentes (PENDING + nao expirados) de uma organizacao.
+   *
+   * Requer requesterUserId ser ADMIN da org (DVincula -161). Retorna apenas
+   * dados sanitizados — SEM tokenHash, SEM flow, SEM targetUserId.
+   *
+   * @throws {NotFoundException} Org inexistente.
+   * @throws {ForbiddenException} Requester nao e ADMIN.
+   */
+  async listPendingInvites(orgId: string, requesterUserId: bigint): Promise<PendingInviteDto[]> {
+    const orgIdBigInt = BigInt(orgId);
+
+    const [org, requesterVinculo] = await Promise.all([
+      this.prisma.dEntidade.findFirst({
+        where: { chave: orgIdBigInt, idClasse: BigInt(-152), excluido: false },
+        select: { chave: true },
+      }),
+      this.prisma.dVincula.findFirst({
+        where: {
+          idLocEscritu: orgIdBigInt,
+          idEntidade: requesterUserId,
+          idClasse: ID_CLASSE_ORG_ADMIN,
+          excluido: false,
+        },
+        select: { chave: true },
+      }),
+    ]);
+
+    if (!org) {
+      throw new NotFoundException(`Organizacao ${orgId} nao encontrada`);
+    }
+    if (!requesterVinculo) {
+      throw new ForbiddenException('Apenas ADMIN da organizacao pode listar convites');
+    }
+
+    const candidates = await this.prisma.dTabela.findMany({
+      where: {
+        idClasse: ID_CLASSE_INVITE_TOKEN,
+        idLocEscrituracao: orgIdBigInt,
+        excluido: false,
+      },
+      orderBy: { criadoEm: 'desc' },
+      take: 200,
+    });
+
+    const now = Date.now();
+    const result: PendingInviteDto[] = [];
+    for (const inv of candidates) {
+      const meta = inv.metaDados as unknown as InviteMetaDados | null;
+      if (!meta) continue;
+      if (meta.usedAt) continue;
+      if (meta.status !== 'PENDING') continue;
+      if (!meta.expiresAt) continue;
+      if (new Date(meta.expiresAt).getTime() <= now) continue;
+      result.push({
+        id: inv.chave.toString(),
+        email: inv.nome,
+        role: meta.role,
+        createdAt: inv.criadoEm.toISOString(),
+        expiresAt: meta.expiresAt,
+      });
+    }
+    return result;
   }
 
   /**
