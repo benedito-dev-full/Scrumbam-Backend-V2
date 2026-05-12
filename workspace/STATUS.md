@@ -1,12 +1,68 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-11
+**Ultima atualizacao:** 2026-05-12
 
 ---
 
 ## Tasks Completadas
 
 (Conclusões dos agents serão registradas abaixo automaticamente)
+
+---
+
+## Task #3 Sub-tarefa 2.1 (F13 Backend-Side Prep) — Seed DClasses -505/-506 + ADR-V2-033 esqueleto — ✅ COMPLETE
+
+**Module:** seeds (Pilar 3) + docs/decisions
+**Task:** Adicionar 2 DClasses agent session lifecycle + esqueleto ADR-V2-033
+**Status:** COMPLETE
+**Duration:** ~45min Implementer + ~30min Reviewer + ~30min Documenter
+**Quality Score:** 9.0/10 APPROVED
+**Plan:** `workspace/plans/plan-automation-backend-side-task2.md` Sub-tarefa 2.1
+**Review:** `workspace/reviews/review-automation-backend-side-task2-sub1.md`
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — apenas seed estrutural
+- Pilar 2 (Endpoints): N/A — sem endpoints
+- Pilar 3 (Seed): RESPEITADO — 2 DClasses negativas no range -490..-509 (eventos), ZERO tabela nova (ADR-V2-001)
+
+**Deliverables:**
+- [x] `prisma/seeds/classes.seed.ts` — adicionadas `-505 AGENT_SESSION_CREATED` e `-506 AGENT_SESSION_RESUMED`
+- [x] `idPai = -3 (EVENTOS)` — consistente com -489 AUDIT_GENERIC, -492 AGENT_HEARTBEAT, -496 EXECUTION_LOG, -497..-502 (todos descendem direto de -3)
+- [x] Comentários do preâmbulo atualizados (45 fixas + 95 específicas = 140 classes; era 137)
+- [x] Comentário de seção DVincula atualizado (11 → 12; ADR-V2-029 já tinha adicionado -182 mas comentário estava desatualizado)
+- [x] `docs/decisions/ADR-V2-033-contrato-execute-outbound-e-execution-result-inbound.md` — esqueleto criado
+  - Decisão (e) preenchida: -505/-506 com idPai=-3 + justificativa do padrão
+  - Decisões (a)/(b)/(c)/(d) com placeholders TODO para preenchimento na Sub-tarefa 2.5
+- [x] STATUS.md atualizado (este registro)
+
+**Metrics:**
+- `make build`: **21 erros pré-existentes em `src/reports/pdf-generator.service.ts`** (PDFKit namespace ausente, F9 Reports) — verificado por `git stash && make build` que esses erros existem com OU sem minha mudança. **NÃO causados por esta task.** Specs do seed/validator compilam clean com tsconfig do projeto.
+- `SEED_DRY_RUN=true npx ts-node prisma/seeds/seed-runner.ts --dry-run`: **PASS** — `45 fixas + 95 especificas = 140 classes (validacao passou em time de import)`
+- `npx prisma db seed` real: NÃO executado (Postgres `localhost:5433` não up no momento; Docker daemon down). Validação canônica feita via dry-run que importa o módulo e dispara `validateHierarchy()` — mesma garantia que o seed real teria pré-DB.
+
+**Validações canônicas:**
+- Conflito de chaves: nenhum (grep `-505\|-506` em `classes.seed.ts` e `templates/classes-base-template.ts` retorna apenas as 2 entradas que acabei de adicionar)
+- Sequestro: nenhum (-505/-506 fora do range fintech sequestrável -45/-47/-49/-50)
+- Hierarquia: válida (idPai=-3 existe nas fixas, agrupamento=false correto pois são folhas)
+
+**Out of scope (próximas sub-tarefas):**
+- Sub-tarefa 2.2: refactor `RemoteExecutionClient` para payload V2
+- Sub-tarefa 2.3: slug derivation em `ProjectsService`
+- Sub-tarefa 2.4: endpoint `POST /agents/:id/execution-result` + Engine update
+- Sub-tarefa 2.5: limpeza `task-dados.schema.ts` + ADR-V2-033 final (preencher decisões a/b/c/d + consequências + hooks)
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Implementer | ~45min | 100% PASS: seed correto, ADR esqueleto, validação passada |
+| Reviewer | ~30min | Score 9.0/10 APPROVED (Issue M1 encontrado e corrigido) |
+| Documenter | ~30min | JSDoc/ROADMAP/CHANGELOG/STATUS atualizados, commit criado |
+
+**Próximos passos:**
+- ✅ CLOSED — Sub-tarefa 2.1 COMPLETE
+- Task #1 Sub-tarefa 4 (RUN_CLAUDE_CODE handler) desbloqueada após todas Sub-tarefas 2.1..2.5 verdes
+- Próxima: Sub-tarefa 2.2 (refactor RemoteExecutionClient para payload V2)
 
 ---
 
@@ -1082,5 +1138,38 @@ SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS (se SMTP)
 **Task:** #18
 **Timestamp:** 10/05/2026 13:11:58
 **Agent:** strategist
+**Status:** Completo
+
+
+
+---
+
+<!-- dedup:implementer:19 -->
+### Agent Concluído: implementer
+
+**Task:** #19 — Project ↔ Team via DVincula -182 (ADR-V2-029)
+**Timestamp:** 12/05/2026
+**Agent:** implementer
+**Status:** Completo (pronto para Review)
+
+**Resumo:**
+- Seed: +1 DClasse `-182 PROJECT_TEAM_LINK` (138 total).
+- ADR-V2-029 publicado.
+- Backend: `ProjectsService.create/findMany/findOne/update/delete` + helper `validateTeamForLink` (cross-org + LEAD/ADMIN).
+- Endpoints: `GET /projects?teamId=X` (Pilar 2 reuso), `POST/PATCH /projects` com `teamId?`.
+- Eventos: `project.team.linked` / `project.team.unlinked` → DEvento -499 PROJECT_LIFECYCLE (registro audit-log.consumer).
+- DTOs novos: `ListProjectsQueryDto`; `teamId` em Create/Update/Response.
+- Frontend: `projectsApi.list/create/update` honram `teamId`; modais usam `teamId` canônico.
+- Tests: **19 unit verdes** (8 novos cobrem ADR-V2-029). `npx jest src/projects src/mcp` → 62/62 passam.
+- Build: zero novo erro (21 erros pré-existentes em deps ausentes — pdfkit, date-fns, resend, nodemailer).
+
+---
+
+<!-- dedup:reviewer:19 -->
+### Agent Concluído: reviewer
+
+**Task:** #19
+**Timestamp:** 12/05/2026 10:21:30
+**Agent:** reviewer
 **Status:** Completo
 

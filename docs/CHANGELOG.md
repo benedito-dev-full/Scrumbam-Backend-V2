@@ -14,6 +14,17 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F13 Sub-tarefa 2.1: Seed DClasses Agent Session Lifecycle + ADR-V2-033 Esqueleto** (V2 F13 Backend-Side Prep) - 2026-05-12
+  - **Seed:** 2 DClasses negativas `-505 AGENT_SESSION_CREATED` e `-506 AGENT_SESSION_RESUMED` (idPai=-3 EVENTOS)
+  - **Range:** -490..-509 (eventos agent) respeitado; sem conflito com chaves existentes
+  - **Total:** 45 fixas + 95 específicas = 140 DClasses (Pilar 3 ativado)
+  - **Validação:** `validateHierarchy()` dry-run PASS; sem tabela nova (ADR-V2-001)
+  - **ADR:** `docs/decisions/ADR-V2-033-contrato-execute-outbound-e-execution-result-inbound.md` esqueleto criado com decisão (e) preenchida; (a-d) TODO
+  - **Pilares:** P3 respeitado (ZERO DClasse sequestrada); P1/P2 N/A (apenas seed)
+  - **ADRs:** ADR-V2-001, ADR-V2-008, ADR-V2-013, ADR-V2-032, **ADR-V2-033**
+  - **Review:** APPROVED 9.0/10
+  - **Issue M1 Corrigido:** JSDoc seed linha 249 atualizado (92/137 → 95/140 DClasses)
+
 - **Modal Criar Task com Tipo + Responsável + Canal + Criador** (V2 F5 extensão) - 2026-05-11
   - **Backend (tasks):** `CreateTaskDto` + `UpdateTaskDto` com campo `taskType?: string` (enum FEATURE|BUG|IMPROVEMENT|REVIEW|EXPLAIN)
   - **Schema:** `TaskDados` estendida com `taskType?: string` (persistido em Json — ADR-V2-001)

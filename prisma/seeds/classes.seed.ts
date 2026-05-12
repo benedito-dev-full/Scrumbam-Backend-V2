@@ -4,11 +4,12 @@
  * Composicao do seed (ADR-V2-019: monolitico):
  *   - 45 classes fixas universais Devari-Core (range -1..-110), via spread de
  *     `templates/classes-base-template.ts`.
- *   - 92 classes especificas Scrumban-V2 (range -150..-527), declaradas
+ *   - 95 classes especificas Scrumban-V2 (range -150..-527), declaradas
  *     neste arquivo, agrupadas por seccao (DEntidade, DVincula, DPedido,
  *     DTabela, DEvento, DTabela secundario) com comentarios `// === ... ===`.
  *
- * Total: 137 DClasses (ADR-V2-026: +1 AUDIT_GENERIC; ADR-V2-028: +6 INVITE_*).
+ * Total: 140 DClasses (ADR-V2-026: +1 AUDIT_GENERIC; ADR-V2-028: +6 INVITE_*;
+ *   ADR-V2-029: +1 PROJECT_TEAM_LINK; ADR-V2-033: +2 AGENT_SESSION_*).
  *
  * Validacao automatica:
  *   `validateHierarchy(classes)` e chamado no topo deste modulo. Qualquer
@@ -73,28 +74,30 @@ function esp(
 }
 
 /**
- * Array de classes especificas Scrumban-V2 (92 entradas).
+ * Array de classes especificas Scrumban-V2 (95 entradas).
  *
  * Ordem:
  *   1. DEntidade — 7 (sub-tipos de Pessoa: USER, PLATFORM_SCRUMBAN,
  *      ORGANIZATION, SCRUMBAN_PROJECT, SCRUMBAN_TASK, AGENT, TEAM).
- *   2. DVincula — 11 (relacoes Org-User, Project-User, Team, Project-Agent,
- *      Telegram).
+ *   2. DVincula — 12 (relacoes Org-User, Project-User, Team, Project-Agent,
+ *      Telegram, Project-Team).
+ *      ADR-V2-029 (+1 PROJECT_TEAM_LINK).
  *   3. DPedido — 4 (EXECUTION + EXEC_LOW/MED/HIGH para Pilar 1 / F6).
  *   4. DTabela principal — 35 (SPRINT, PRIORITY, TASK_TYPE, STATUS V3,
  *      CHANNEL, WEBHOOK, API_KEY, MCP_KEY, INSTALL_TOKEN, PAIRING_TOKEN,
  *      ISSUE_COUNTER).
- *   5. DEvento — 14 (AUDIT_GENERIC, NOTIFICATION, WEBHOOK_ATTEMPT,
+ *   5. DEvento — 16 (AUDIT_GENERIC, NOTIFICATION, WEBHOOK_ATTEMPT,
  *      AGENT_HEARTBEAT, TELEGRAM_*, MCP_CALL, EXECUTION_LOG, audit logs,
- *      INVITE_LIFECYCLE).
+ *      INVITE_LIFECYCLE, AGENT_SESSION_CREATED, AGENT_SESSION_RESUMED).
  *      ADR-V2-026 (+1 AUDIT_GENERIC) + ADR-V2-027 (rename
  *      PROJECT_DELETED → PROJECT_LIFECYCLE; ORG_DELETED → ORG_LIFECYCLE)
- *      + ADR-V2-028 (+1 INVITE_LIFECYCLE).
+ *      + ADR-V2-028 (+1 INVITE_LIFECYCLE)
+ *      + ADR-V2-033 (+2 AGENT_SESSION_CREATED/RESUMED).
  *   6. DTabela secundario — 21 (AGENT_STATUS, EXEC_STATUS, RISK_LEVEL,
  *      INVITE_TOKEN, INVITE_STATUS_*).
  *      ADR-V2-028 (+5 INVITE_TOKEN, INVITE_STATUS_PENDING/ACCEPTED/EXPIRED/REVOKED).
  *
- * Soma: 7 + 11 + 4 + 35 + 14 + 21 = 92.
+ * Soma: 7 + 12 + 4 + 35 + 16 + 21 = 95.
  */
 const classesEspecificas: DClasseSeed[] = [
   // === DEntidade — sub-tipos de Pessoa (5) + DProject/DTask (2) ===
@@ -107,7 +110,7 @@ const classesEspecificas: DClasseSeed[] = [
   esp(-156, 'AGENT', 'Agente Claude Code', -43),
   esp(-180, 'TEAM', 'Time', -43),
 
-  // === DVincula — relacoes (11) ===
+  // === DVincula — relacoes (12) ===
   // Filhos de ENTIDADES (-37) por convencao do plano-mestre §3.2
   esp(-160, 'ORG_USER_LINK', 'Vinculo Org-Usuario', -37, true),
   esp(-161, 'ORG_ROLE_ADMIN', 'Org Role: ADMIN', -160),
@@ -118,6 +121,11 @@ const classesEspecificas: DClasseSeed[] = [
   esp(-172, 'PROJECT_ROLE_MEMBER', 'Project Role: MEMBER', -170),
   esp(-173, 'PROJECT_ROLE_VIEWER', 'Project Role: VIEWER', -170),
   esp(-181, 'TEAM_MEMBERSHIP', 'Vinculo Team-User', -37),
+  // ADR-V2-029: vincula Project a Team via DVincula (idLocEscritu=teamId,
+  // idEntidade=projectId). N:1 (1 projeto pertence a no maximo 1 time, valida-
+  // do no service). Permite que projetos sejam orfaos (sem time) — vinculo
+  // ausente = teamId null no response.
+  esp(-182, 'PROJECT_TEAM_LINK', 'Vinculo Project-Team', -37),
   esp(-185, 'PROJECT_AGENT', 'Vinculo Project-Agent', -37),
   esp(-186, 'TELEGRAM_LINK', 'Vinculo User-Telegram chat', -37),
 
@@ -197,6 +205,15 @@ const classesEspecificas: DClasseSeed[] = [
     'Audit: lifecycle de convite (sent/accepted/expired/revoked via metaDados._meta.action)',
     -3,
   ),
+  // ADR-V2-033 (sub-tarefa 2.1): DEventos de session lifecycle Claude Code.
+  // Materializados pelo handler de `POST /agents/:id/execution-result` quando
+  // o agente V2 reporta `claudeSessionId` apos uma execucao concluir.
+  // idPai=-3 (EVENTOS) seguindo a convencao consistente dos demais DEventos
+  // de agent (-489 AUDIT_GENERIC, -492 AGENT_HEARTBEAT, -496 EXECUTION_LOG).
+  // NAO ha agrupador intermediario para eventos agent — todos descendem
+  // diretamente de -3, mantendo o padrao polimorfico DEvento+idClasse.
+  esp(-505, 'AGENT_SESSION_CREATED', 'Sessao Claude Code criada', -3),
+  esp(-506, 'AGENT_SESSION_RESUMED', 'Sessao Claude Code retomada', -3),
 
   // === DTabela — status lookups secundarios (21) ===
   // Filhos de STATUS (-52)
@@ -229,7 +246,7 @@ const classesEspecificas: DClasseSeed[] = [
 ];
 
 /**
- * Array completo do seed (45 fixas + 92 especificas = 137 DClasses).
+ * Array completo do seed (45 fixas + 95 especificas = 140 DClasses).
  * Validado automaticamente em time de import (validateHierarchy abaixo).
  */
 export const classes: DClasseSeed[] = [...classesFixas, ...classesEspecificas];

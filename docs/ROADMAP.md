@@ -2,12 +2,51 @@
 
 **Versao:** 1.0
 **Mantido por:** Documenter Agent V2
-**Atualizado em:** 2026-05-10
+**Atualizado em:** 2026-05-12
 
 > Este documento rastreia tasks por Fase (F0..F17). Strategist abre, Implementer entrega, Reviewer valida, Documenter fecha. Cada task tem entrada com Status, Modulo, Fase, Tempo Real, Quality Score, Pilares aplicados e ADRs vinculados.
 >
 > Bíblia operacional: `docs/plano/00-PLANO-MESTRE.md` (17 fases, ADRs, escopo).
 > Workflow agents: ver `CLAUDE.md` §SISTEMA MULTI-AGENT.
+
+---
+
+## F13 — Automation Claude Code — Backend-Side Prep
+
+### Sub-tarefa 2.1: Seed DClasses Agent Session Lifecycle + ADR-V2-033 Esqueleto — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** seeds (Pilar 3) + docs/decisions
+**Fase V2:** F13 (Automation — Backend-Side Prep, pré-requisito Task #1 Sub-4)
+**Tempo Real:** ~45min Implementer + ~30min Reviewer + ~30min Documenter
+**Completado em:** 2026-05-12
+**Quality Score:** 9.0/10 APPROVED
+
+**O Que Foi Feito:**
+- **Seed (Pilar 3):**
+  - Adicionadas 2 DClasses negativas: `-505 AGENT_SESSION_CREATED` e `-506 AGENT_SESSION_RESUMED`
+  - `idPai = -3 (EVENTOS)` — consistente com padrão de DEventos de agent (-489, -492, -496, -497..-502)
+  - Range -490..-509 (eventos agent) respeitado; sem conflito com chaves existentes
+  - Validação automática via `validateHierarchy()` em time de import (dry-run PASS)
+  - Total seed atualizado: 45 fixas + 95 específicas = 140 DClasses
+
+- **ADR-V2-033 Esqueleto:**
+  - Arquivo criado: `docs/decisions/ADR-V2-033-contrato-execute-outbound-e-execution-result-inbound.md`
+  - 5 seções: Contexto, Decisões (a/b/c/d/e), Consequências, Hooks, Referências
+  - Decisão (e) completamente preenchida: seleção de DClasses -505/-506, justificativa
+  - Decisões (a/b/c/d) com placeholders TODO para Sub-tarefa 2.5
+  - Referências cruzadas: ADR-V2-001, -005, -006, -008, -013, -030, -032
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — Sub-tarefa 2.1 é puramente estrutural (seed)
+- Pilar 2 (Endpoints): N/A — sem endpoints novos
+- Pilar 3 (Seed): ✅ RESPEITADO — DClasses negativas no range canônico, ZERO tabela nova (ADR-V2-001)
+
+**ADRs vinculados:** ADR-V2-001 (zero tabela nova), ADR-V2-008 (DEvento substitui notificações), ADR-V2-013 (agent como dentidade), ADR-V2-032 (claudeSessionId em DPedido), **ADR-V2-033 (novo — contrato execute/execution-result)**
+
+**Plan:** [`workspace/plans/plan-automation-backend-side-task2.md`](../workspace/plans/plan-automation-backend-side-task2.md) §3 Sub-tarefa 2.1
+**Review:** [`workspace/reviews/review-automation-backend-side-task2-sub1.md`](../workspace/reviews/review-automation-backend-side-task2-sub1.md)
+**Impl Notes:** Entregues pelo Implementer (changelog inline nos arquivos)
 
 ---
 
