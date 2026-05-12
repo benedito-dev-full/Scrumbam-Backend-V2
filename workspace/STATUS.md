@@ -10,6 +10,63 @@
 
 ---
 
+## Task #19 (F5 Extensão) — Project ↔ Team Link via DVincula -182 — ✅ COMPLETE
+
+**Module:** projects (backend V2) + teams (backend V2) + seeds + eventos + frontend
+**Task:** Modelar Project ↔ Team via DVincula -182 com cross-org guard, filtro paginado, cascade no delete
+**Status:** COMPLETE
+**Duration:** ~3h Implementer + ~1.5h Reviewer + ~1h Documenter
+**Quality Score:** 8.0/10 APPROVED
+**Plan:** `workspace/plans/plan-2026-05-12-team-project-link.md`
+**Review:** `workspace/reviews/review-projects-team-link-task19.md`
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — tabelas estruturais (DProject, DVincula), Prisma direto
+- Pilar 2 (Endpoints): REUTILIZADO — GET /projects?teamId=X (sem novo controller)
+- Pilar 3 (Seed): RESPEITADO — 1 DClasse -182, ZERO tabela nova (ADR-V2-001)
+
+**Deliverables:**
+- [x] Seed: `-182 PROJECT_TEAM_LINK` (idPai=-37 ENTIDADES)
+- [x] DTOs: `ListProjectsQueryDto` + `teamId` em Create/Update/Response
+- [x] `validateTeamForLink()` — cross-org guard + LEAD/ADMIN
+- [x] `findMany()` — batch N+1 ZERO + cursor+teamId bug fix
+- [x] `create/update/delete()` — vínculo -182 gerenciado atomicamente
+- [x] `TeamsService.delete()` — cascade -182 corrigido (pós-review)
+- [x] Eventos `project.team.linked/unlinked` via DEvento -499
+- [x] Frontend: `projectsApi.list/create/update` + modais
+- [x] Testes: 27/27 verdes (include 2 regressão)
+
+**Metrics:**
+- Build: PASS (0 novos erros TypeScript/ESLint)
+- Tests: 27/27 unit tests PASS (projects.service, teams.service, mcp-tools)
+- N+1 Queries: ZERO (batch paralelo: 4–5 queries/request)
+- BigInt: 100% serializado
+- Atomicidade: $transaction em create, update, delete
+- Cross-Org: enforçado (team.idEstab === project.idEstab)
+
+**Bugs Corrigidos (Pós-Review):**
+1. **HIGH:** cursor+teamId perdido na paginação — spreads sobrescreviam silenciosamente
+2. **MEDIUM:** Cascade faltante de -182 no TeamsService.delete()
+
+**ADRs:**
+- ADR-V2-029 (Project ↔ Team via DVincula -182) — PUBLICADO
+- ADR-V2-001 (ZERO tabela nova) — RESPEITADO
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan + ADR-V2-029 completo |
+| Implementer | ~3h | 100% PASS: impl correta, pós-review fixes |
+| Reviewer | ~1.5h | Score 8.0/10 APPROVED (2 bugs encontrados) |
+| Documenter | ~1h | JSDoc 100%, ROADMAP, CHANGELOG, STATUS, commit |
+
+**Próximos passos:**
+- ✅ CLOSED — Task #19 COMPLETE
+- Próxima: Próxima task do roadmap (F5-bis ou F6)
+
+---
+
 ## Task #3 Sub-tarefa 2.1 (F13 Backend-Side Prep) — Seed DClasses -505/-506 + ADR-V2-033 esqueleto — ✅ COMPLETE
 
 **Module:** seeds (Pilar 3) + docs/decisions
@@ -1171,5 +1228,60 @@ SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS (se SMTP)
 **Task:** #19
 **Timestamp:** 12/05/2026 10:21:30
 **Agent:** reviewer
+**Status:** Completo
+
+
+---
+
+<!-- dedup:documenter:19 -->
+### Agent Concluído: documenter
+
+**Task:** #19
+**Timestamp:** 12/05/2026 10:24:10
+**Agent:** documenter
+**Status:** Completo
+
+
+---
+
+<!-- dedup:reviewer:01 -->
+### Agent Concluído: reviewer
+
+**Task:** #01
+**Timestamp:** 12/05/2026 10:25:12
+**Agent:** reviewer
+**Status:** Completo
+
+
+---
+
+<!-- dedup:documenter:01 -->
+### Agent Concluído: documenter
+
+**Task:** #01
+**Timestamp:** 12/05/2026 10:27:35
+**Agent:** documenter
+**Status:** Completo
+
+
+---
+
+<!-- dedup:strategist:01 -->
+### Agent Concluído: strategist
+
+**Task:** #01
+**Timestamp:** 12/05/2026 10:27:35
+**Agent:** strategist
+**Status:** Completo
+
+
+---
+
+<!-- dedup:implementer:01 -->
+### Agent Concluído: implementer
+
+**Task:** #01
+**Timestamp:** 12/05/2026 10:27:35
+**Agent:** implementer
 **Status:** Completo
 

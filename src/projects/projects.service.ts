@@ -1,9 +1,4 @@
-import {
-  ForbiddenException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { EventProducerService } from '../eventos/core/event-producer.service';
@@ -32,6 +27,26 @@ const PROJECT_ROLE_CLASSES = [
   ID_CLASSE_PROJECT_VIEWER,
 ];
 
+/** idClasse de DEntidade TEAM (seed F1). */
+const ID_CLASSE_TEAM = BigInt(-180);
+/** idClasse de DVincula TEAM_MEMBERSHIP (cargo em metaDados). */
+const ID_CLASSE_TEAM_MEMBERSHIP = BigInt(-181);
+/** idClasse de DVincula PROJECT_TEAM_LINK (ADR-V2-029). */
+const ID_CLASSE_PROJECT_TEAM_LINK = BigInt(-182);
+/** idClasse de DVincula ORG_ROLE_ADMIN (seed F1). */
+const ID_CLASSE_ORG_ADMIN = BigInt(-161);
+
+/**
+ * Opções para `findMany()`.
+ *
+ * @see ADR-V2-029 (teamId filter)
+ */
+export interface FindManyProjectsOptions {
+  cursor?: string;
+  limit?: number;
+  /** Filtra por DVincula -182 (PROJECT_TEAM_LINK). Ausente = todos. */
+  teamId?: string;
+}
 
 /**
  * Service de projetos (DProject).
@@ -43,13 +58,17 @@ const PROJECT_ROLE_CLASSES = [
  * 1. DProject
  * 2. DVincula -171 (PROJECT_ROLE_MANAGER) para o criador
  * 3. SeedBootstrapService.seedProject() → 9 statuses V3 + 1 sprint default
+ * 4. DVincula -182 (PROJECT_TEAM_LINK) se `teamId` informado (ADR-V2-029)
  *
- * Audit DEvento -499 emitido APÓS commit.
+ * Audit DEvento -499 emitido APÓS commit. Eventos
+ * `project.team.linked` / `project.team.unlinked` para mudanças de vínculo
+ * de team (ADR-V2-029).
  *
  * @see PrismaService — acesso ao banco
  * @see SeedBootstrapService — seed de statuses + sprint
  * @see ProjectMembersService — gestão de membros
  * @see EventProducerService — emissão canônica de eventos (audit pós-commit)
+ * @see ADR-V2-029 — Project ↔ Team via DVincula -182
  */
 @Injectable()
 export class ProjectsService {
@@ -64,26 +83,37 @@ export class ProjectsService {
   ) {}
 
   /**
-   * Cria projeto com seed completo e membership MANAGER.
+   * Cria projeto com seed completo, membership MANAGER e (opcional) vínculo
+   * de time (ADR-V2-029).
    *
-   * Transaction atômica (3 etapas):
+   * Transaction atômica (3–4 etapas):
    * 1. DProject (tabela canônica)
    * 2. DVincula -171 (MANAGER) para o criador
    * 3. seedProject(): 9 statuses V3 + 1 sprint default
+   * 4. DVincula -182 (PROJECT_TEAM_LINK) se `dto.teamId` informado, após
+   *    validar cross-org + permissão no time (LEAD ou ORG_ADMIN).
    *
-   * Audit project.created emitido APÓS commit.
+   * Eventos emitidos APÓS commit:
+   *  - `project.created` (sempre)
+   *  - `project.team.linked` (apenas se `teamId` fornecido)
    *
-   * @param dto - Dados do projeto (nome, prefix, description, orgId...)
+   * @param dto - Dados do projeto (nome, prefix, description, orgId, teamId...)
    * @param userEntidadeId - Chave BigInt da DEntidade do criador
-   * @returns ProjectResponseDto com memberCount=1
+   * @returns ProjectResponseDto com memberCount=1 e `teamId` resolvido
+   *
+   * @throws {NotFoundException} Quando `teamId` inválido (time inexistente)
+   * @throws {ForbiddenException} Cross-org leak ou sem permissão no time
    *
    * @example
    * ```typescript
-   * const project = await service.create({ nome: 'Scrumban V2', prefix: 'DEV' }, BigInt(userId));
+   * const project = await service.create({ nome: 'Scrumban V2', teamId: '200' }, BigInt(userId));
    * ```
    */
   async create(dto: CreateProjectDto, userEntidadeId: bigint): Promise<ProjectResponseDto> {
-    this.logger.log(`Criando projeto nome="${dto.nome}" para user=${userEntidadeId}`);
+    this.logger.log(
+      `Criando projeto nome="${dto.nome}" para user=${userEntidadeId}` +
+        (dto.teamId ? ` (team=${dto.teamId})` : ''),
+    );
 
     const project = await this.prisma.$transaction(async (tx) => {
       // Construir dados polimórficos
@@ -111,8 +141,27 @@ export class ProjectsService {
       // 3. Seed: 9 statuses V3 + 1 sprint default
       await this.seedBootstrap.seedProject(tx, proj.chave);
 
+      // 4. (opcional) Vincular ao time (ADR-V2-029)
+      if (dto.teamId) {
+        await this.validateTeamForLink(
+          tx,
+          BigInt(dto.teamId),
+          proj.idEstab ?? null,
+          userEntidadeId,
+        );
+        await tx.dVincula.create({
+          data: {
+            idClasse: ID_CLASSE_PROJECT_TEAM_LINK,
+            idLocEscritu: BigInt(dto.teamId),
+            idEntidade: proj.chave,
+          },
+        });
+      }
+
       return proj;
     });
+
+    const correlationId = this.correlationIdService.getOrGenerate();
 
     // Audit APÓS commit — tipo project.created → idClasse=-499 PROJECT_LIFECYCLE (ADR-V2-027)
     await this.eventProducer.addInternalEvent(
@@ -123,43 +172,107 @@ export class ProjectsService {
         prefix: dto.prefix ?? 'DEV',
         userId: userEntidadeId.toString(),
       },
-      this.correlationIdService.getOrGenerate(),
+      correlationId,
       { source: ProjectsService.name },
     );
 
-    return this.buildResponse(project, 1);
+    // Audit APÓS commit — vínculo de team criado (ADR-V2-029)
+    if (dto.teamId) {
+      await this.eventProducer.addInternalEvent(
+        'project.team.linked',
+        {
+          projectId: project.chave.toString(),
+          teamId: dto.teamId,
+          previousTeamId: null,
+          userId: userEntidadeId.toString(),
+        },
+        correlationId,
+        { source: ProjectsService.name },
+      );
+    }
+
+    return this.buildResponse(project, 1, dto.teamId ?? null);
   }
 
   /**
-   * Lista projetos onde o usuário é membro.
+   * Lista projetos onde o usuário é membro, com filtro opcional por time.
    *
    * Busca DVincula roles [-171,-172,-173] WHERE idEntidade=userEntidadeId
-   * e retorna DProjects correspondentes. N+1 ZERO via include.
+   * e retorna DProjects correspondentes. N+1 ZERO via batch paralelo:
+   * 1 query para roles, 1 query pré-resolvendo teamProjectIds (se filtrado),
+   * 3 queries em paralelo (DProjects, member counts, team links).
    *
-   * @param userEntidadeId - Chave BigInt da DEntidade do usuário
-   * @param cursor - Cursor para paginação (última chave retornada)
-   * @param limit - Quantidade de itens por página (default: 20, max: 100)
-   * @returns Lista paginada de projetos
+   * Se `opts.teamId` informado, intersecta com projetos vinculados ao time
+   * via DVincula -182 PROJECT_TEAM_LINK (ADR-V2-029). Implementa validação
+   * de cross-org no service (soft-delete antes de create na mesma transação).
+   *
+   * Cursor pagination escalável. Bug crítico corrigido: ao combinar filtro
+   * `teamId + cursor`, ambos ficam no mesmo `idLocEscritu` object para evitar
+   * que spread consecutivo sobrescreva silenciosamente a condição de team.
+   *
+   * @param userEntidadeId - Chave BigInt da DEntidade do usuário logado
+   * @param opts - Opções (cursor, limit, teamId)
+   * @returns Promise com lista paginada de ProjectResponseDto (`teamId` resolvido)
+   *
+   * @throws {NotFoundException} Se time (ao filtrado) não existe
    *
    * @example
    * ```typescript
-   * const { items } = await service.findMany(BigInt(userId));
+   * // Lista todos os projetos do usuário (primeira página)
+   * const page1 = await service.findMany(BigInt(userId));
+   *
+   * // Filtra apenas projetos do time 200
+   * const filtered = await service.findMany(BigInt(userId), { teamId: '200', limit: 20 });
+   *
+   * // Paginação com cursor
+   * const page2 = await service.findMany(BigInt(userId), { cursor: '15' });
    * ```
+   *
+   * @see ADR-V2-029 — Project ↔ Team via DVincula -182
+   * @see FindManyProjectsOptions — interface de opções
    */
   async findMany(
     userEntidadeId: bigint,
-    cursor?: string,
-    limit = 20,
+    opts: FindManyProjectsOptions = {},
   ): Promise<ListProjectResponseDto> {
-    const take = Math.min(limit, 100);
+    const { cursor, teamId } = opts;
+    const take = Math.min(opts.limit ?? 20, 100);
 
-    // Query: DVincula das project-roles do usuário com include de DProject
+    // 1) Se filtrado por team, pré-resolver os projectIds do time.
+    let teamProjectIds: bigint[] | undefined;
+    if (teamId) {
+      const teamLinks = await this.prisma.dVincula.findMany({
+        where: {
+          idLocEscritu: BigInt(teamId),
+          idClasse: ID_CLASSE_PROJECT_TEAM_LINK,
+          excluido: false,
+        },
+        select: { idEntidade: true },
+      });
+      teamProjectIds = teamLinks.map((v) => v.idEntidade).filter((v): v is bigint => v !== null);
+
+      if (teamProjectIds.length === 0) {
+        return { items: [], pagination: { hasMore: false, nextCursor: null } };
+      }
+    }
+
+    // 2) Query: DVincula das project-roles do usuário, intersectado opcionalmente
+    //    com os projectIds do time.
     const vinculos = await this.prisma.dVincula.findMany({
       where: {
         idEntidade: userEntidadeId,
         idClasse: { in: PROJECT_ROLE_CLASSES },
         excluido: false,
-        ...(cursor ? { idLocEscritu: { lt: BigInt(cursor) } } : {}),
+        // Combina filtros de team + cursor no mesmo objeto idLocEscritu.
+        // Spreads consecutivos com a mesma chave fazem o segundo sobrescrever
+        // o primeiro silenciosamente — bug detectado no review da Task 19.
+        ...(teamProjectIds && cursor
+          ? { idLocEscritu: { in: teamProjectIds, lt: BigInt(cursor) } }
+          : teamProjectIds
+            ? { idLocEscritu: { in: teamProjectIds } }
+            : cursor
+              ? { idLocEscritu: { lt: BigInt(cursor) } }
+              : {}),
       },
       select: {
         idLocEscritu: true,
@@ -176,8 +289,8 @@ export class ProjectsService {
       return { items: [], pagination: { hasMore: false, nextCursor: null } };
     }
 
-    // Batch: buscar DProjects + contagem de membros (2 queries adicionais)
-    const [projects, memberCounts] = await Promise.all([
+    // 3) Batch: DProjects + contagem de membros + vínculos de team (N+1 ZERO).
+    const [projects, memberCounts, teamLinks] = await Promise.all([
       this.prisma.dProject.findMany({
         where: { chave: { in: projectIds }, excluido: false },
         orderBy: { chave: 'desc' },
@@ -191,18 +304,36 @@ export class ProjectsService {
         },
         _count: { chave: true },
       }),
+      this.prisma.dVincula.findMany({
+        where: {
+          idEntidade: { in: projectIds },
+          idClasse: ID_CLASSE_PROJECT_TEAM_LINK,
+          excluido: false,
+        },
+        select: { idEntidade: true, idLocEscritu: true },
+      }),
     ]);
 
     const countMap = new Map(
       memberCounts.map((mc) => [mc.idLocEscritu.toString(), mc._count.chave]),
     );
-
-    const items: ProjectResponseDto[] = projects.map((p) =>
-      this.buildResponse(p, countMap.get(p.chave.toString()) ?? 0),
+    const teamMap = new Map(
+      teamLinks
+        .filter((t) => t.idEntidade !== null)
+        .map((t) => [(t.idEntidade as bigint).toString(), t.idLocEscritu.toString()]),
     );
 
-    const nextCursor =
-      hasMore ? pageVinculos[pageVinculos.length - 1].idLocEscritu.toString() : null;
+    const items: ProjectResponseDto[] = projects.map((p) =>
+      this.buildResponse(
+        p,
+        countMap.get(p.chave.toString()) ?? 0,
+        teamMap.get(p.chave.toString()) ?? null,
+      ),
+    );
+
+    const nextCursor = hasMore
+      ? pageVinculos[pageVinculos.length - 1].idLocEscritu.toString()
+      : null;
 
     return { items, pagination: { hasMore, nextCursor } };
   }
@@ -235,7 +366,7 @@ export class ProjectsService {
    *
    * @param id - Chave BigInt do projeto (string)
    * @param userEntidadeId - Chave BigInt do usuário (deve ser membro)
-   * @returns ProjectResponseDto
+   * @returns ProjectResponseDto (`teamId` resolvido)
    *
    * @throws {NotFoundException} Se projeto não encontrado
    * @throws {ForbiddenException} Se usuário não é membro
@@ -248,7 +379,7 @@ export class ProjectsService {
   async findOne(id: string, userEntidadeId: bigint): Promise<ProjectResponseDto> {
     const projectId = BigInt(id);
 
-    const [project, vinculo] = await Promise.all([
+    const [project, vinculo, teamLink] = await Promise.all([
       this.prisma.dProject.findFirst({
         where: { chave: projectId, excluido: false },
       }),
@@ -260,6 +391,14 @@ export class ProjectsService {
           excluido: false,
         },
         select: { chave: true },
+      }),
+      this.prisma.dVincula.findFirst({
+        where: {
+          idEntidade: projectId,
+          idClasse: ID_CLASSE_PROJECT_TEAM_LINK,
+          excluido: false,
+        },
+        select: { idLocEscritu: true },
       }),
     ]);
 
@@ -278,23 +417,34 @@ export class ProjectsService {
       },
     });
 
-    return this.buildResponse(project, memberCount);
+    return this.buildResponse(project, memberCount, teamLink?.idLocEscritu.toString() ?? null);
   }
 
   /**
    * Atualiza projeto (apenas MANAGER pode).
    *
+   * Suporta atualização do vínculo de time (ADR-V2-029) via `dto.teamId`:
+   *  - `'teamId' in dto === false` → vínculo inalterado.
+   *  - `dto.teamId === null` → soft-delete do vínculo atual (desvincula).
+   *  - `dto.teamId === string` → soft-delete antigo + cria novo (reatribui).
+   *
+   * Eventos emitidos APÓS commit:
+   *  - `project.team.linked` (X→Y ou null→Y)
+   *  - `project.team.unlinked` (X→null)
+   *
    * @param id - Chave BigInt do projeto (string)
    * @param dto - Campos a atualizar
    * @param userEntidadeId - Chave BigInt do MANAGER executante
-   * @returns ProjectResponseDto atualizada
+   * @returns ProjectResponseDto atualizada (`teamId` resolvido)
    *
    * @throws {NotFoundException} Se projeto não encontrado
-   * @throws {ForbiddenException} Se usuário não é MANAGER
+   * @throws {ForbiddenException} Se usuário não é MANAGER, ou se time
+   *   informado é de outra org ou sem permissão (LEAD/ADMIN).
    *
    * @example
    * ```typescript
-   * const updated = await service.update('1', { nome: 'Novo Nome' }, BigInt(managerId));
+   * await service.update('1', { teamId: '200' }, BigInt(managerId));     // reatribui
+   * await service.update('1', { teamId: null }, BigInt(managerId));      // desvincula
    * ```
    */
   async update(
@@ -313,6 +463,28 @@ export class ProjectsService {
       throw new NotFoundException(`Projeto ${id} não encontrado`);
     }
 
+    // Determinar se o teamId foi enviado pelo cliente (incluindo null
+    // explícito). Não usar `dto.teamId !== undefined` — distinção pode ser
+    // perdida por validators/serializers.
+    const teamIdProvided = 'teamId' in dto;
+
+    // Resolver teamId anterior (para audit de previousTeamId e detecção
+    // no-op). Single query indexada.
+    let previousTeamLinkId: bigint | null = null;
+    let previousTeamId: string | null = null;
+    if (teamIdProvided) {
+      const existing = await this.prisma.dVincula.findFirst({
+        where: {
+          idEntidade: projectId,
+          idClasse: ID_CLASSE_PROJECT_TEAM_LINK,
+          excluido: false,
+        },
+        select: { chave: true, idLocEscritu: true },
+      });
+      previousTeamLinkId = existing?.chave ?? null;
+      previousTeamId = existing?.idLocEscritu.toString() ?? null;
+    }
+
     const dadosAtuais = (project.dados as Record<string, unknown>) ?? {};
     const novosDados: Record<string, unknown> = {
       ...dadosAtuais,
@@ -322,13 +494,40 @@ export class ProjectsService {
       ...(dto.description !== undefined ? { description: dto.description } : {}),
     };
 
-    const updated = await this.prisma.dProject.update({
-      where: { chave: projectId },
-      data: {
-        ...(dto.nome !== undefined ? { nome: dto.nome } : {}),
-        ...(dto.description !== undefined ? { descricao: dto.description } : {}),
-        dados: novosDados as Prisma.InputJsonValue,
-      },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const u = await tx.dProject.update({
+        where: { chave: projectId },
+        data: {
+          ...(dto.nome !== undefined ? { nome: dto.nome } : {}),
+          ...(dto.description !== undefined ? { descricao: dto.description } : {}),
+          dados: novosDados as Prisma.InputJsonValue,
+        },
+      });
+
+      if (teamIdProvided) {
+        // Soft-delete vínculo atual (se houver) ANTES de criar novo —
+        // garante invariante N:1 mesmo em caso de race condition no
+        // service (a transação serializa os UPDATEs).
+        if (previousTeamLinkId !== null) {
+          await tx.dVincula.update({
+            where: { chave: previousTeamLinkId },
+            data: { excluido: true },
+          });
+        }
+
+        if (dto.teamId !== null && dto.teamId !== undefined) {
+          await this.validateTeamForLink(tx, BigInt(dto.teamId), u.idEstab ?? null, userEntidadeId);
+          await tx.dVincula.create({
+            data: {
+              idClasse: ID_CLASSE_PROJECT_TEAM_LINK,
+              idLocEscritu: BigInt(dto.teamId),
+              idEntidade: projectId,
+            },
+          });
+        }
+      }
+
+      return u;
     });
 
     const memberCount = await this.prisma.dVincula.count({
@@ -339,16 +538,66 @@ export class ProjectsService {
       },
     });
 
-    return this.buildResponse(updated, memberCount);
+    // Resolver teamId final para o response (após commit).
+    let finalTeamId: string | null;
+    if (teamIdProvided) {
+      finalTeamId = dto.teamId ?? null;
+    } else {
+      const current = await this.prisma.dVincula.findFirst({
+        where: {
+          idEntidade: projectId,
+          idClasse: ID_CLASSE_PROJECT_TEAM_LINK,
+          excluido: false,
+        },
+        select: { idLocEscritu: true },
+      });
+      finalTeamId = current?.idLocEscritu.toString() ?? null;
+    }
+
+    // Audit APÓS commit (ADR-V2-029) — apenas se mudou de fato.
+    if (teamIdProvided && previousTeamId !== finalTeamId) {
+      const correlationId = this.correlationIdService.getOrGenerate();
+      if (finalTeamId === null) {
+        await this.eventProducer.addInternalEvent(
+          'project.team.unlinked',
+          {
+            projectId: id,
+            teamId: null,
+            previousTeamId,
+            userId: userEntidadeId.toString(),
+          },
+          correlationId,
+          { source: ProjectsService.name },
+        );
+      } else {
+        await this.eventProducer.addInternalEvent(
+          'project.team.linked',
+          {
+            projectId: id,
+            teamId: finalTeamId,
+            previousTeamId,
+            userId: userEntidadeId.toString(),
+          },
+          correlationId,
+          { source: ProjectsService.name },
+        );
+      }
+    }
+
+    return this.buildResponse(updated, memberCount, finalTeamId);
   }
 
   /**
    * Soft-delete do projeto.
    *
    * Cascades em transaction:
-   * - DVincula de membros do projeto
+   * - DVincula de membros do projeto (`idLocEscritu=projectId`)
    * - DTask do projeto (soft delete)
    * - DProject (soft delete)
+   *
+   * Vínculos `-182 PROJECT_TEAM_LINK` (`idEntidade=projectId`) também são
+   * soft-deletados pelo `updateMany` por `idEntidade` — `excluido=true`
+   * preserva o histórico.
    *
    * Audit project.deleted emitido APÓS commit.
    *
@@ -377,9 +626,19 @@ export class ProjectsService {
     }
 
     await this.prisma.$transaction(async (tx) => {
-      // Cascade: DVincula dos membros
+      // Cascade: DVincula dos membros (idLocEscritu=projectId).
       await tx.dVincula.updateMany({
         where: { idLocEscritu: projectId, excluido: false },
+        data: { excluido: true },
+      });
+
+      // Cascade: DVincula -182 PROJECT_TEAM_LINK (idEntidade=projectId).
+      await tx.dVincula.updateMany({
+        where: {
+          idEntidade: projectId,
+          idClasse: ID_CLASSE_PROJECT_TEAM_LINK,
+          excluido: false,
+        },
         data: { excluido: true },
       });
 
@@ -438,8 +697,15 @@ export class ProjectsService {
         dEntidadeId: projectId,
         idClasse: {
           in: [
-            BigInt(-441), BigInt(-442), BigInt(-443), BigInt(-444), BigInt(-445),
-            BigInt(-446), BigInt(-447), BigInt(-448), BigInt(-449),
+            BigInt(-441),
+            BigInt(-442),
+            BigInt(-443),
+            BigInt(-444),
+            BigInt(-445),
+            BigInt(-446),
+            BigInt(-447),
+            BigInt(-448),
+            BigInt(-449),
           ],
         },
         excluido: false,
@@ -447,9 +713,7 @@ export class ProjectsService {
       select: { chave: true, nome: true, idClasse: true },
     });
 
-    const statusIdToName = new Map(
-      statusTabelas.map((s) => [s.chave.toString(), s.nome]),
-    );
+    const statusIdToName = new Map(statusTabelas.map((s) => [s.chave.toString(), s.nome]));
 
     // Contar tasks por status
     const taskCounts = await this.prisma.dTask.groupBy({
@@ -474,6 +738,18 @@ export class ProjectsService {
 
   // ─── Helpers privados ─────────────────────────────────────────────────────
 
+  /**
+   * Valida que o usuário é MANAGER do projeto.
+   *
+   * Helper para autorização. Usado em operações que alteram projeto
+   * (update, delete, etc.). Lança ForbiddenException se não é MANAGER.
+   *
+   * @param projectId - Chave BigInt do projeto
+   * @param userId - Chave BigInt do usuário
+   * @throws {ForbiddenException} Se não é MANAGER
+   *
+   * @private
+   */
   private async requireManagerRole(projectId: bigint, userId: bigint): Promise<void> {
     const vinculo = await this.prisma.dVincula.findFirst({
       where: {
@@ -490,6 +766,92 @@ export class ProjectsService {
     }
   }
 
+  /**
+   * Valida que o time pode ser vinculado ao projeto (ADR-V2-029):
+   *  1. Team existe (DEntidade idClasse=-180, excluido=false).
+   *  2. Cross-org: team.idEstab === projectOrgId (bloqueia leak entre orgs).
+   *  3. Permissão: usuário é LEAD do time OU ORG_ADMIN da org.
+   *
+   * @param tx - Cliente de transação ou this.prisma (tipos compatíveis).
+   * @param teamId - Chave BigInt do time.
+   * @param projectOrgId - Chave BigInt da org do projeto (pode ser null se
+   *   projeto sem org explícita — nesse caso só LEAD valida).
+   * @param userId - Chave BigInt do usuário.
+   *
+   * @throws {NotFoundException} Time não encontrado.
+   * @throws {ForbiddenException} Cross-org leak ou sem permissão.
+   */
+  private async validateTeamForLink(
+    tx: Prisma.TransactionClient | PrismaService,
+    teamId: bigint,
+    projectOrgId: bigint | null,
+    userId: bigint,
+  ): Promise<void> {
+    // 1. Team existe?
+    const team = await tx.dEntidade.findFirst({
+      where: {
+        chave: teamId,
+        idClasse: ID_CLASSE_TEAM,
+        excluido: false,
+      },
+      select: { chave: true, idEstab: true },
+    });
+
+    if (!team) {
+      throw new NotFoundException(`Time ${teamId} não encontrado`);
+    }
+
+    // 2. Cross-org: time e projeto têm de pertencer à mesma org.
+    //    Se projeto tem orgId definido, team.idEstab DEVE bater.
+    //    Se projeto não tem orgId (null), aceitamos apenas times sem org
+    //    (caso raro — apenas para preservar fluxos legados).
+    if (projectOrgId !== null) {
+      if (team.idEstab !== projectOrgId) {
+        throw new ForbiddenException('Time selecionado não pertence a esta organização');
+      }
+    } else if (team.idEstab !== null) {
+      throw new ForbiddenException('Time selecionado não pertence a esta organização');
+    }
+
+    // 3. Permissão: LEAD do time OU ORG_ADMIN da org.
+    const membership = await tx.dVincula.findFirst({
+      where: {
+        idLocEscritu: teamId,
+        idEntidade: userId,
+        idClasse: ID_CLASSE_TEAM_MEMBERSHIP,
+        excluido: false,
+      },
+      select: { metaDados: true },
+    });
+
+    const meta = membership?.metaDados as Record<string, unknown> | null;
+    const cargo = meta?.cargo as string | undefined;
+
+    if (cargo === 'LEAD') {
+      return; // LEAD do time — autorizado
+    }
+
+    if (team.idEstab) {
+      const isOrgAdmin = await tx.dVincula.findFirst({
+        where: {
+          idLocEscritu: team.idEstab,
+          idEntidade: userId,
+          idClasse: ID_CLASSE_ORG_ADMIN,
+          excluido: false,
+        },
+        select: { chave: true },
+      });
+
+      if (isOrgAdmin) {
+        return; // ADMIN da org — autorizado
+      }
+    }
+
+    throw new ForbiddenException(
+      'Acesso negado: requer cargo LEAD no time ou ADMIN na organização',
+    );
+  }
+
   private buildResponse(
     project: {
       chave: bigint;
@@ -501,6 +863,7 @@ export class ProjectsService {
       atualizadoEm: Date;
     },
     memberCount: number,
+    teamId: string | null,
   ): ProjectResponseDto {
     const dados = project.dados as Record<string, unknown> | null;
 
@@ -508,14 +871,12 @@ export class ProjectsService {
       id: project.chave.toString(),
       nome: project.nome,
       prefix: (dados?.prefix as string | null) ?? 'DEV',
-      description:
-        (dados?.description as string | null | undefined) ??
-        project.descricao ??
-        null,
+      description: (dados?.description as string | null | undefined) ?? project.descricao ?? null,
       orgId: project.idEstab?.toString() ?? null,
       memberCount,
       automationEnabled: (dados?.automationEnabled as boolean | null) ?? false,
       gitRepo: (dados?.gitRepo as string | null) ?? null,
+      teamId,
       criadoEm: project.criadoEm.toISOString(),
       atualizadoEm: project.atualizadoEm.toISOString(),
     };

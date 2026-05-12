@@ -11,6 +11,89 @@
 
 ---
 
+## F5 — Domínio Estrutural (extensão pós-F5)
+
+### Task #19: Project ↔ Team via DVincula -182 + Cross-Org Guard + Fix Paginação — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** projects + teams + seeds + eventos
+**Fase V2:** F5 (patch incremental — bug fix + feature correlata)
+**Tempo Real:** ~3h Implementer + ~1.5h Reviewer + ~1h Documenter
+**Completado em:** 2026-05-12
+**Quality Score:** 8.0/10 APPROVED
+
+**O Que Foi Feito:**
+
+**Backend V2:**
+- **Seed:** Nova DClasse `-182 PROJECT_TEAM_LINK` (idPai=-37 ENTIDADES; total 138 classes)
+- **DTOs:**
+  - `ListProjectsQueryDto` (novo) — cursor + limit + `teamId` filter
+  - `CreateProjectDto.teamId` — vincula ao time no create (opcional)
+  - `UpdateProjectDto.teamId` — reatribui ou desvincula (null)
+  - `ProjectResponseDto.teamId` — expõe teamId resolvido em todas as respostas
+- **ProjectsService:**
+  - `validateTeamForLink()` — cross-org guard (team.idEstab === project.idEstab) + LEAD/ADMIN
+  - `findMany()` — N+1 ZERO via batch paralelo; **cursor+teamId bug corrigido** (ambos em mesmo idLocEscritu object)
+  - `create()` — cria vínculo -182 atomicamente se `teamId` informado
+  - `update()` — soft-delete antigo + create novo (reatribui); ou soft-delete só (desvincula); detecta mudança via `'teamId' in dto`
+  - `delete()` — cascade soft-delete de vínculos -182
+- **TeamsService:**
+  - `delete()` — cascade soft-delete de -182 PROJECT_TEAM_LINK (pós-review fix)
+- **EventProducerService:**
+  - Tipos `PROJECT_TEAM_LINKED` / `PROJECT_TEAM_UNLINKED` adicionados
+  - Mapeamento em `audit-log.consumer.ts` → DEvento -499 PROJECT_LIFECYCLE
+  - Emitidos APÓS commit apenas se `teamId` mudou de fato
+
+**Frontend:**
+- `src/lib/api/projects.ts` — `list/create/update` honram `teamId`
+- `task-to-intention.ts` — adapter prioriza `raw.teamId` top-level
+- Modais (`new-project-modal.tsx`, `edit-project-modal.tsx`) — usam `teamId` canônico
+
+**Testes:** 27/27 verdes (3 suites) — include 2 regressão dos bugs corrigidos
+- Bug #1: cursor+teamId perdido na paginação (agora corrigido)
+- Bug #2: cascade falta de -182 ao deletar time (agora corrigido)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — tabelas estruturais (DProject, DEntidade, DVincula), Prisma direto correto
+- Pilar 2 (Endpoints): REUTILIZADO — `GET /projects?teamId=X` reusa controller específico existente; **NÃO** criado `GET /teams/:id/projects` (wrapper thin — ADR-V2-009 opcional para follow-up)
+- Pilar 3 (Seed): ✅ RESPEITADO — 1 DClasse negativa (-182), ZERO tabela nova (ADR-V2-001)
+
+**ADRs vinculados:** ADR-V2-001 (zero tabela nova), ADR-V2-029 (Project ↔ Team via DVincula -182)
+
+**Métricas:**
+- Build: PASS (`npm run build` backend + frontend)
+- TypeScript: PASS (`npx tsc --noEmit` — 0 novos erros)
+- ESLint: PASS (`npx eslint src/projects src/teams --max-warnings 0`)
+- Tests: 27/27 PASS (projects.service, teams.service, mcp-tools.spec)
+- N+1 Queries: ZERO (batch paralelo 3 queries; soft-delete + create na mesma tx)
+- BigInt: 100% serializado em responses
+- Atomicidade: $transaction ACID em create + update + delete
+- Cross-Org Guard: enforçado via `team.idEstab === project.idEstab`
+
+**Issues Encontrados e Corrigidos (Pós-Review):**
+1. **HIGH:** Bug #1 — Filtro `teamId` perdido ao paginar com cursor (spreads sobrescreviam idLocEscritu)
+2. **MEDIUM:** Bug #2 — Cascade faltante de -182 no delete de time
+
+**Out of scope (follow-ups):**
+- Wrapper thin `GET /teams/:id/projects` (ADR-V2-009) — só se UI exigir
+- Índice parcial único em -182 — opcional se invariante N:1 violar em prod
+- E2E tests — responsabilidade de F14
+
+**Plan:** [`workspace/plans/plan-2026-05-12-team-project-link.md`](../workspace/plans/plan-2026-05-12-team-project-link.md)
+**Impl Notes:** [`workspace/implementations/impl-projects-team-link-task19.md`](../workspace/implementations/impl-projects-team-link-task19.md)
+**Review:** [`workspace/reviews/review-projects-team-link-task19.md`](../workspace/reviews/review-projects-team-link-task19.md)
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan + ADR-V2-029 redigido |
+| Implementer | ~3h | 100% PASS: backend + frontend + testes |
+| Reviewer | ~1.5h | Score 8.0/10 APPROVED (2 bugs encontrados e corrigidos) |
+| Documenter | ~1h | JSDoc 100%, ROADMAP, CHANGELOG, STATUS, 2 commits |
+
+---
+
 ## F13 — Automation Claude Code — Backend-Side Prep
 
 ### Sub-tarefa 2.1: Seed DClasses Agent Session Lifecycle + ADR-V2-033 Esqueleto — ✅ COMPLETA

@@ -14,6 +14,18 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F5 Task #19: Project ↔ Team via DVincula -182** (V2 F5 extensão pós-F5) - 2026-05-12
+  - **Seed:** DClasse -182 PROJECT_TEAM_LINK (idPai=-37 ENTIDADES) — total 138 classes
+  - **DTOs:** `ListProjectsQueryDto` com `teamId` filter; `CreateProjectDto.teamId`; `UpdateProjectDto.teamId` com `@ValidateIf`; `ProjectResponseDto.teamId` top-level
+  - **Backend:** `validateTeamForLink` cross-org + LEAD/ADMIN; batch paralelo N+1 ZERO; cursor+teamId bug corrigido em `findMany`
+  - **Eventos:** `project.team.linked` / `project.team.unlinked` → DEvento -499 PROJECT_LIFECYCLE (emitidos APÓS commit)
+  - **Cascade:** Soft-delete de -182 ao deletar time (pós-review fix Bug #2)
+  - **Frontend:** `projectsApi.list/create/update` honram `teamId`; modais usam `teamId` canônico
+  - **Pilares:** P1 N/A (estrutural); P2 reusado (GET /projects?teamId=X); P3 respeitado (ZERO tabela nova — ADR-V2-001)
+  - **ADRs:** ADR-V2-029 (Project ↔ Team via DVincula -182)
+  - **Testes:** 27/27 PASS (include 2 regressão dos bugs corrigidos: cursor+teamId loss, cascade -182)
+  - **Review:** APPROVED 8.0/10
+
 - **F13 Sub-tarefa 2.1: Seed DClasses Agent Session Lifecycle + ADR-V2-033 Esqueleto** (V2 F13 Backend-Side Prep) - 2026-05-12
   - **Seed:** 2 DClasses negativas `-505 AGENT_SESSION_CREATED` e `-506 AGENT_SESSION_RESUMED` (idPai=-3 EVENTOS)
   - **Range:** -490..-509 (eventos agent) respeitado; sem conflito com chaves existentes

@@ -20,6 +20,7 @@ import {
 /** idClasses para times e memberships (seed F1). */
 const ID_CLASSE_TEAM = BigInt(-180);
 const ID_CLASSE_TEAM_MEMBERSHIP = BigInt(-181);
+const ID_CLASSE_PROJECT_TEAM_LINK = BigInt(-182);
 const ID_CLASSE_ISSUE_COUNTER = BigInt(-475);
 
 /** idClasses de RBAC de org (para verificar membership na org). */
@@ -562,18 +563,30 @@ export class TeamsService {
   }
 
   /**
-   * Soft-delete de time.
+   * Soft-delete de time com cascade de vínculos e contadores.
+   *
+   * Transaction atômica que soft-deleta:
+   * 1. DVincula -181 (TEAM_MEMBERSHIP) — todos os membros do time
+   * 2. DVincula -182 (PROJECT_TEAM_LINK) — all project links (ADR-V2-029)
+   * 3. DTabela -475 (ISSUE_COUNTER)
+   * 4. DEntidade (o time próprio)
+   *
+   * Cascade de -182 preserva histórico enquanto elimina referências zumbis
+   * após deletar um time. Implementação corrigida no review da Task 19.
    *
    * @param id - Chave BigInt do time (string)
    * @param userEntidadeId - Chave BigInt do usuário (deve ser LEAD ou ADMIN da org)
+   * @returns Promise void
    *
    * @throws {NotFoundException} Se time não encontrado
-   * @throws {ForbiddenException} Se não autorizado
+   * @throws {ForbiddenException} Se não é LEAD do time ou ORG_ADMIN da org
    *
    * @example
    * ```typescript
    * await service.delete('200', BigInt(userId));
    * ```
+   *
+   * @see ADR-V2-029 — Cascade de PROJECT_TEAM_LINK ao deletar time
    */
   async delete(id: string, userEntidadeId: bigint): Promise<void> {
     const teamId = BigInt(id);
@@ -590,9 +603,16 @@ export class TeamsService {
     await this.requireLeadOrAdminRole(teamId, team.idEstab, userEntidadeId);
 
     await this.prisma.$transaction(async (tx) => {
-      // Cascade: DVincula memberships
+      // Cascade: DVincula memberships (-181 TEAM_MEMBERSHIP)
       await tx.dVincula.updateMany({
         where: { idLocEscritu: teamId, idClasse: ID_CLASSE_TEAM_MEMBERSHIP, excluido: false },
+        data: { excluido: true },
+      });
+
+      // Cascade: DVincula project-team links (-182 PROJECT_TEAM_LINK) — ADR-V2-029.
+      // Sem este cascade, vínculos ficam zumbis após delete do time (review Task 19).
+      await tx.dVincula.updateMany({
+        where: { idLocEscritu: teamId, idClasse: ID_CLASSE_PROJECT_TEAM_LINK, excluido: false },
         data: { excluido: true },
       });
 
