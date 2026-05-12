@@ -425,6 +425,34 @@ export class [Nome]Dto {
   - Commit com scope `seeds` é padrão para alterações no `prisma/seeds/classes.seed.ts`
   - ADR-V2-033 é novo ADR (15º da série); redação em progresso (esqueleto completo em 2.5)
 
+### Sub-tarefa 4.1 F13: projectId opcional no install-token (2026-05-12)
+- **Scope:** `automation` (Pilar 1 N/A | Pilar 2 REUTILIZADO | Pilar 3 N/A)
+- **Problema:** CEO não conseguia instalar 1 agente para N projetos (VPS V2 tem >10 projetos, precisava de 10 agentes)
+- **Solução:** `GenerateInstallTokenDto.projectId` → `@IsOptional()` + `AgentInstallTokenService.createInstallToken(projectId: bigint | null)` condicional + `AgentsService.install()` sem DVincula -185 quando standalone
+- **Key Files:**
+  - `agents.controller.ts`: JSDoc novo em `generateInstallToken()` com ejemplos standalone + com-projeto (30 linhas)
+  - `agent-install-token.service.ts`: `createInstallToken()` condicional (pula `requireProjectManagerOrOrgAdmin` quando null)
+  - `agents.service.ts`: `install()` condicional (`idLocEscritu = createdBy` standalone, sem DVincula)
+- **Tests:** 4 specs novos (create COM/SEM projectId, consume standalone, install standalone) + 60/60 total PASS
+- **JSDoc Pattern:** Controller endpoint agora usa JSDoc 50+ linhas com:
+  - Descricão breve + comportamentos detalhados (COM/SEM projectId)
+  - @param, @returns, @throws (401/403/404)
+  - 2 @example blocks (curl standalone + curl com-projeto)
+  - @example json response
+  - ADRs vinculados em top
+- **Commit:** `c7cf7be` (scope `automation`, type `fix`, body 60 linhas)
+- **Backward-compat:** 100% (install COM projectId = comportamento anterior DVincula automática)
+- **Quality:** 8.2/10 APPROVED (Reviewer)
+- **Workflow:** Implementer (1.5h) → Reviewer (0.5h) → Documenter (0.5h JSDoc + docs) = 2.5h total
+- **RBAC Decisions:**
+  - Standalone = qualquer JWT autenticado (conscientemente decidido, mitigação em 4.3)
+  - Vinculado = MANAGER projeto OU ADMIN org (reusa `requireProjectManagerOrOrgAdmin`)
+  - idLocEscritu standalone = createdBy (dono inicial = usuário que gerou token)
+- **Lições:**
+  - Controller JSDoc deve detalhar comportamentos condicionalidades e RBAC
+  - MEDIUM ISSUE pode ser aceptável se mitigação vem em sub-tarefa seguinte (documentar explícitamente)
+  - Backward-compat crítica em hotfixes — verificar que COM projectId não regride
+
 ### Task 01 F4: Corrigir persistência de `priority` em DTask (2026-05-12)
 - **Scope:** `tasks` (Pilar 2 — reutilizar endpoint genérico)
 - **ADR Redigido:** `docs/decisions/ADR-V2-034-priority-dtabela-por-projeto.md` (nova, padrão Priority como DTabela escopada)
