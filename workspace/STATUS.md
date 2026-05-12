@@ -58,11 +58,11 @@
 
 ---
 
-## Task #1 Sub-tarefa 6 (F13 Cliente — Agente V2 VPS) — install.sh + systemd + CLAUDE.md template — 🟡 IMPLEMENTER RODADA 2 COMPLETO (aguarda Reviewer)
+## Task #1 Sub-tarefa 6 (F13 Cliente — Agente V2 VPS) — install.sh + systemd + CLAUDE.md template — ✅ COMPLETA (APPROVED 8.8/10 rodada 2)
 
 **Module:** automation/agent (subprojeto monorepo `agent/`)
 **Task:** Instalador bash idempotente (14 fases, dry-run, shellcheck-clean), systemd unit com hardening completo + EnvironmentFile p/ ANTHROPIC_API_KEY, template do CLAUDE.md global, uninstall.sh, README expandido com troubleshooting
-**Task Status:** Implementer RODADA 2 COMPLETE — Reviewer pendente (Sub-tarefa 6 de 7)
+**Task Status:** COMPLETA — Score 8.8/10 APPROVED rodada 2 (Sub-tarefa 6 de 7)
 **Fase V2:** F13 (Cliente — Sub-tarefa 6 de 7)
 **Duration:** ~4h Implementer rodada 1 + ~45min rodada 2
 **Completed (Implementer rodada 1):** 2026-05-12

@@ -12,6 +12,19 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Added
+
+- **F13 Task #1 Sub-tarefa 6: install.sh + systemd + CLAUDE.md template** (V2 F13 Cliente) - 2026-05-12
+  - **install.sh (14 fases):** Root check, pre-flight CLI 2.1.139+, user/dirs com perms 0700/0600 rigorosas, ssh-keygen Ed25519 + ssh-keyscan TOFU visível, handshake POST install-token, config.json 0600 persisted, EnvironmentFile /etc/scrumban-agent/environment 0600 com placeholder ANTHROPIC_API_KEY, systemd start via `systemctl enable --now scrumban-agent`, heartbeat poll 60s verificação daemon status
+  - **uninstall.sh:** Idempotente, preserva config.json (força delete com `--force`), remove systemd unit + user + directories
+  - **systemd/scrumban-agent.service:** Hardenizado com `NoNewPrivileges=yes`, `ProtectSystem=strict`, `ProtectHome=read-only`, `EnvironmentFile=/etc/scrumban-agent/environment`, `MemoryMax=512M`, restart auto com backoff
+  - **CLAUDE-md-template.md:** Template para `/root/.claude/CLAUDE.md` (não auto-populado por segurança — risco prompt injection; operador fornece manualmente)
+  - **README troubleshooting:** Seções ANTHROPIC_API_KEY env, systemd logs, common errors, backoff behavior
+  - **shellcheck PASS:** install.sh (lint estático), uninstall.sh validados
+  - **Idempotência comprovada:** User/dirs criados só se não existem, EnvironmentFile preservado, CLAUDE.md skipped se já existe, systemd daemon-reload sempre
+  - **Issues resolvidos (rodada 2):** M1 (.claude/ raiz — movido), M2 (ANTHROPIC_API_KEY em env file), M3 (ssh-keyscan TOFU visível no log)
+  - **Score:** 8.8/10 APPROVED rodada 2
+
 ### Fixed
 
 - **F4 Task 01: Corrigir persistência de `priority` em DTask** (V2 F4) - 2026-05-12
