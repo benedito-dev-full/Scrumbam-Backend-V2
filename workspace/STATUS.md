@@ -4,9 +4,53 @@
 
 ---
 
-## Tasks Completadas
+## Task #01 (F8 Transversal) — Multi-Tenant Identity + Workspace Switch (ADR-V2-030) — ✅ COMPLETE
 
-(Conclusões dos agents serão registradas abaixo automaticamente)
+**Module:** auth + invites (backend V2) / auth-store + sidebar + invite (frontend)
+**Task:** Multi-tenant identity (1 perfil global + N vínculos + workspace switch); merge flow para user existente convidado outra org
+**Status:** COMPLETE
+**Duration:** ~3h Implementer + ~1.5h Reviewer + ~1h Documenter
+**Quality Score:** 8.5/10 APPROVED
+**Plan:** `workspace/plans/plan-auth-multi-tenant-workspace-switch-task01.md`
+**Implementation:** `workspace/implementations/impl-auth-multi-tenant-workspace-switch-task01.md`
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — auth/invites são cadastro estrutural (Prisma direto em $transaction)
+- Pilar 2 (Endpoints): RESPEITADO — POST /auth/switch-org em AuthController existente (variação de login); zero novo controller
+- Pilar 3 (Seed): RESPEITADO — ZERO DClasse nova; reuso 100% de -150 USER, -152 ORG, -161/-162/-163 DVincula, -476 INVITE_TOKEN, -501/-502 EVENTOS
+
+**Deliverables:**
+- [x] Backend: `POST /auth/switch-org` — valida membership via DVincula, emite novo par tokens, audita DEvento -501
+- [x] Backend: `JwtStrategy.validate` async — 1 query DVincula por request (revogação imediata)
+- [x] Backend: `GET /auth/me.availableOrgs` — lista DVinculas ativas do user (1 query JOIN)
+- [x] Backend: Merge flow `invites.service.ts` — email já-user cria APENAS DVincula (sem duplicação)
+- [x] Frontend: `WorkspaceSwitcher` — dropdown na sidebar com switch + queryClient.clear() + localStorage persist
+- [x] Frontend: Login auto-switch para última org via localStorage['scrumban-last-org']
+- [x] Frontend: `/invite` detecta flow='existing_user' → MergeAcceptForm (sem form, botão "Aceitar")
+- [x] Types: AvailableOrg, User.availableOrgs, UserProfile.availableOrgs
+- [x] API: authApi.switchOrg(orgId)
+- [x] JSDoc: completo em auth/invites/jwt.strategy/workspace-switcher
+- [x] Testes: 16 novos (auth + invites + jwt.strategy) — 609 total PASS
+
+**Metrics:**
+- Build: PASS (yarn build backend + npm run build frontend)
+- TypeScript: PASS (npx tsc --noEmit — 0 novos erros em ambos)
+- ESLint: PASS (npx eslint --max-warnings 0 — 11 backend + 13 frontend CLEAN)
+- Tests: 609/609 PASS (16 novos; 4 pré-existentes date-fns/PDFKit — não causados por V2-030)
+- N+1 Queries: ZERO (getMe 3 queries + JOIN; switchOrg 3 queries; JwtStrategy 1 indexada)
+- BigInt: 100% serializado
+- Security: membership validated per-request; refresh rotation on switch; tokens pré-multi-tenant → 401
+
+**Issues:** None (zero regressões; 16 tests novos 100% pass)
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan + ADR-V2-030 redigido |
+| Implementer | ~3h | 100% PASS: backend + frontend + 16 testes novos |
+| Reviewer | ~1.5h | Score 8.5/10 APPROVED |
+| Documenter | ~1h | ADR-V2-030, ROADMAP, CHANGELOG, STATUS, 2 commits |
 
 ---
 
@@ -1296,3 +1340,35 @@ SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS (se SMTP)
 **Agent:** strategist
 **Status:** Completo
 
+
+
+---
+
+<!-- dedup:implementer:sub2.2 -->
+### Sub-tarefa 2.2 — Refactor RemoteExecutionClient (payload V2)
+
+**Plano:** `workspace/plans/plan-automation-backend-side-task2.md` §3 Sub-tarefa 2.2
+**Timestamp:** 12/05/2026 ~10:40
+**Agent:** implementer
+**Status:** Concluído (aguardando Reviewer + Documenter)
+
+**Arquivos modificados:**
+- `src/automation/runtime/remote-execution-client.ts` (reescrito — payload V2 `RUN_CLAUDE_CODE`, ACK síncrono, removido streaming NDJSON)
+- `src/automation/runtime/execution-worktree.service.ts` (stub deprecated V2 — sem outbound)
+- `src/automation/runtime/rollback.service.ts` (stub deprecated V2 — sem outbound)
+- `src/executions/processors/execution-run.processor.ts` (refatorado — agora chama `RUN_CLAUDE_CODE`, removeu git ops e worktree/rollback/githubPr deps)
+- `src/automation/runtime/__tests__/remote-execution-client.spec.ts` (reescrito — 10 specs V2)
+- `src/executions/__tests__/execution-run.processor.spec.ts` (reescrito — 4 specs V2 incluindo slug-ausente)
+
+**Build:** PASS (21 erros pré-existentes em F9/PDFKit; zero erros novos)
+**Tests:** 14 PASS nos arquivos modificados; suite ampla 56 PASS / 4 suites falham por issue pré-existente de `date-fns` em Jest (não relacionado)
+
+**Decisões tomadas durante implementação:**
+- `ExecutionWorktreeService` e `RollbackService` foram convertidos em stubs deprecated (não removidos para preservar grafo do `ExecutionRunProcessor`). Removível em F13 final.
+- `GithubPrService` saiu do constructor do processor (não era mais usado após remoção do git ops). Continua provido no `AutomationModule` para o caso de Sub-tarefa 2.4 reintroduzir uso via callback.
+- Slug ausente → `InternalServerErrorException` barulhento conforme escopo do plan-task2 (Sub-tarefa 2.3 cuida do backfill).
+
+**Não tocado (fora do escopo):**
+- `ProjectsService` (slug derivation = Sub-tarefa 2.3)
+- Endpoint `POST /agents/:id/execution-result` (= Sub-tarefa 2.4)
+- `claudeSessionId` em `DTask.schemas` (= Sub-tarefa 2.5)

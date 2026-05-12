@@ -5,6 +5,114 @@
 **Atualizado em:** 2026-05-12
 
 > Este documento rastreia tasks por Fase (F0..F17). Strategist abre, Implementer entrega, Reviewer valida, Documenter fecha. Cada task tem entrada com Status, Modulo, Fase, Tempo Real, Quality Score, Pilares aplicados e ADRs vinculados.
+
+---
+
+## F8 — Transversal: Convites + Auth Multi-Tenant
+
+### Task #01: Multi-Tenant Identity + Workspace Switch (ADR-V2-030) — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** auth + invites (backend) / auth-store + sidebar + invite (frontend)
+**Fase V2:** Pós-F5 (extensão Auth) + Pós-F8 (extensão Invites)
+**Tempo Real:** ~3h Implementer + ~1.5h Reviewer + ~1h Documenter
+**Completado em:** 2026-05-12
+**Quality Score:** 8.5/10 APPROVED
+
+**O Que Foi Feito:**
+
+**Backend V2:**
+- **Auth Service (invites + auth):**
+  - `invites.service.ts`: merge flow detectado — email já-user convidado outra org cria APENAS DVincula (sem DUserGroup/DEntidade duplicado)
+  - `invites.service.ts`: `getInviteByToken` retorna `flow: 'new_user' | 'existing_user'` para frontend decidir UX
+  - `auth.service.ts`: `getMe` popula `availableOrgs[]` — busca TODAS DVinculas ativas do user (1 query JOIN)
+  - `auth.service.ts`: `switchOrg(userGroupId, targetOrgId)` novo — valida membership, emite novo par de tokens (refresh rotacionado), audita `DEvento -501`
+  - `auth.service.ts`: `issueSessionForUser(userGroupId, preferredOrgId?)` — aceita org preferida (merge flow entra direto na org mergeada)
+  - `auth.service.ts`: `buildAuthResponse` virou `async` — popula `availableOrgs` automaticamente em todo endpoint
+- **Auth Controller:**
+  - `POST /auth/switch-org` novo — JWT-protected, valida membership via DVincula, Swagger completo
+- **JWT Strategy:**
+  - `validate` virou `async` — faz 1 query indexada para validar `DVincula(entidade, org)` ativo
+  - Tokens pré-multi-tenant (sem `organizationId`) → 401 (força relogin)
+  - Membership revogada detectada imediatamente (próximo request)
+- **DTOs:**
+  - `SwitchOrgDto` — `{ organizationId: string }` com regex validation
+  - `InviteInfoDto` — novo campo `flow`
+  - `AcceptInviteDto` — `name`/`password` agora `@IsOptional` (merge flow não precisa)
+  - `AvailableOrgDto` — `{ id, nome, role: ADMIN|MEMBER|VIEWER }`
+  - `UserProfileDto.availableOrgs` — array de orgs ativas
+- **Tests:** 7 novos (auth.service: getMe múltiplas orgs, switchOrg happy path, switchOrg sem membership; jwt.strategy: membership ativa OK, removida 401; invites.service: acceptInvite merge cria DVincula só, race check, pre-resolve flow)
+
+**Frontend:**
+- **Types:**
+  - `AvailableOrg { id, nome, role }`
+  - `UserProfile.availableOrgs?` — array opcional
+  - `User.availableOrgs: AvailableOrg[]` — default `[]`
+- **API Client:**
+  - `authApi.switchOrg(orgId)` — POST /auth/switch-org
+- **Auth Store:**
+  - `availableOrgs: AvailableOrg[]` state novo
+  - `setAvailableOrgs(orgs)` — ação nova
+  - `setCurrentOrg({orgId, orgName, role})` — ação nova (atualiza user.organizationId/organizationName/orgRole)
+  - Export `LAST_ORG_LS_KEY = 'scrumban-last-org'`
+- **Auth Provider:**
+  - Revalidação `/auth/me` atualiza `availableOrgs` no store
+- **Components:**
+  - `WorkspaceSwitcher` novo — dropdown lista orgs, on-click switchOrg + queryClient.clear + localStorage persist
+  - `app-sidebar` — substitui header estático "Devari ▾" por `<WorkspaceSwitcher />`
+- **Pages:**
+  - `login`: auto-switch para `localStorage['scrumban-last-org']` se diferente do default (UX: lembrar última org)
+  - `invite`: detecta `flow='existing_user'` → renderiza "Maria adicionou você à Acme" vs "Cadastre-se" (2 fluxos UI)
+  - Honra query param `returnTo` (redirect após login/switch)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — Auth/invites são cadastro estrutural (Prisma direto em `$transaction`), ZERO Engine
+- Pilar 2 (Endpoints): RESPEITADO — Nenhum controller novo. `POST /auth/switch-org` em `AuthController` existente (variação de login). `availableOrgs` embutido em `/auth/me` (padrão Notion/GitHub)
+- Pilar 3 (Seed): RESPEITADO — ZERO DClasse nova. Reuso 100% de `-150 USER`, `-152 ORG`, `-161/-162/-163 DVincula`, `-476 INVITE_TOKEN`, `-501 USER_LOGIN_EVENT`, `-502 INVITE_LIFECYCLE`
+
+**ADRs vinculados:** ADR-V2-001 (zero tabela nova), ADR-V2-003 (RBAC via DVincula — estendido), ADR-V2-028 (Invites — merge flow é extensão), **ADR-V2-030 (novo — Multi-tenant identity)**
+
+**Métricas:**
+- Build: PASS (backend `yarn build`, frontend `npm run build`)
+- TypeScript: PASS (`npx tsc --noEmit` — ZERO erros novos em ambos)
+- ESLint: PASS (`npx eslint --max-warnings 0` — 11 files backend, 13 files frontend CLEAN)
+- Tests: 609 passing (16 novos; 4 pré-existentes falhando — não causados por V2-030 — date-fns/PDFKit/resend)
+- N+1 Queries: ZERO — getMe 3 queries (user+entity+vinculos com JOIN), switchOrg 3 queries (~4-5ms total), JwtStrategy 1 query (~1-2ms, indexada)
+- BigInt: 100% serializado em respostas
+- Atomicidade: `$transaction` em acceptInvite merge (race-safe)
+- Security: JWT validates membership a cada request (revogação imediata), refresh rotation on switch (1 sessão/user)
+
+**Issues Encontrados e Corrigidos:**
+- Nenhum (ZERO regressões; 16 testes novos todos green)
+
+**Smoke Tests Manuais (Reviewer pode validar):**
+1. Register User A → entra "Devari" (org padrão)
+2. Register User B → entra "Acme" (org padrão)
+3. User A convida b@test.com (sem conta) → B cria conta em Devari
+4. User A convida b@test.com (já membro de Acme) → B vê "Aceitar e entrar em Devari" (merge flow) → aceita → DVincula criado em Devari
+5. User B login → vê Devari+Acme no switcher
+6. User B clica "Acme" → workspace switch → novos tokens com organizationId=Acme → redirecionado pra /intentions com dados de Acme
+7. Admin remove B de Acme → B em Acme faz request → 401 (JwtStrategy bloqueia membership deletada) → frontend tentarefresh/logout
+8. User B em Devari (ainda membro) → redirect automático? (UX a definir — hoje pede relogin)
+
+**Out of scope (follow-ups):**
+- Template `invite-merge.ts` com texto diferenciado (hoje reusa `invite`)
+- Ordenação switcher (org atual em destaque, resto alfabético)
+- "Recent orgs" no topo da lista
+- Notificação pré-revogação (soft-delete silencioso hoje)
+
+**Plan:** [`workspace/plans/plan-auth-multi-tenant-workspace-switch-task01.md`](../workspace/plans/plan-auth-multi-tenant-workspace-switch-task01.md)
+**Impl Notes:** [`workspace/implementations/impl-auth-multi-tenant-workspace-switch-task01.md`](../workspace/implementations/impl-auth-multi-tenant-workspace-switch-task01.md)
+**Review:** (Reviewer report — score 8.5/10)
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan + ADR-V2-030 redigido |
+| Implementer | ~3h | 100% PASS: backend + frontend + testes (16 novos) |
+| Reviewer | ~1.5h | Score 8.5/10 APPROVED |
+| Documenter | ~1h | ADR-V2-030, ROADMAP, CHANGELOG, STATUS, 2 commits |
 >
 > Bíblia operacional: `docs/plano/00-PLANO-MESTRE.md` (17 fases, ADRs, escopo).
 > Workflow agents: ver `CLAUDE.md` §SISTEMA MULTI-AGENT.

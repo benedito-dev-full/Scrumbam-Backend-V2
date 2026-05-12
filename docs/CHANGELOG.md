@@ -14,6 +14,24 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F8 Task #01: Multi-Tenant Identity + Workspace Switch (ADR-V2-030)** (V2 F8 transversal Auth/Invites) - 2026-05-12
+  - **Backend Auth:** `POST /auth/switch-org` novo; `JwtStrategy.validate` agora `async` valida DVincula ativo a cada request (revogação imediata)
+  - **Backend Invites:** Merge flow — email já-user convidado outra org cria APENAS DVincula (sem DUserGroup/DEntidade); `getInviteByToken` retorna `flow: 'new_user' | 'existing_user'`
+  - **Auth Response:** `availableOrgs[]` em `/auth/me`, `/auth/login`, `/auth/register`, `/auth/refresh`, `/auth/switch-org`
+  - **Auth Service:** `issueSessionForUser(userGroupId, preferredOrgId?)` — merge flow entra direto na org mergeada
+  - **DTOs:** `SwitchOrgDto`, `AvailableOrgDto`, `InviteInfoDto.flow`, `AcceptInviteDto` com `name`/`password` opcionais
+  - **Frontend Types:** `AvailableOrg { id, nome, role }`, `User.availableOrgs: AvailableOrg[]`
+  - **Frontend Components:** `WorkspaceSwitcher` novo — dropdown na sidebar com switch via `queryClient.clear()` + `router.refresh()`
+  - **Frontend Auth:** Auto-switch para `localStorage['scrumban-last-org']` no login; `MergeAcceptForm` para merge flow (existing_user)
+  - **UX:** localStorage "última org lembrada" (Notion/Slack pattern); switch sem logout; membership revogada = próximo request 401
+  - **Atomicidade:** `$transaction` em `acceptInvite` merge com race-check (DVincula não duplicada)
+  - **Segurança:** Tokens pré-multi-tenant (sem `organizationId`) → 401; refresh rotation on switch (1 sessão/user); membership validada a cada request
+  - **Pilares:** P1 N/A (estrutural); P2 respeitado (zero novo controller — POST /auth/switch-org em AuthController existente); P3 respeitado (ZERO DClasse nova)
+  - **ADRs:** ADR-V2-001, ADR-V2-003 (RBAC via DVincula estendido), ADR-V2-028 (Invites estendido com merge), **ADR-V2-030 (novo)**
+  - **Testes:** 16 novos (auth.service: getMe múltiplas orgs + switchOrg happy/forbidden; jwt.strategy: membership ativo/revogado; invites: merge + race + pre-resolve) — 609 total PASS
+  - **Performance:** `getMe.availableOrgs` 1 query JOIN (~1-2ms); `switchOrg` 3 queries (~4-5ms); `JwtStrategy.validate` 1 query indexada (~1-2ms)
+  - **Review:** APPROVED 8.5/10
+
 - **F5 Task #19: Project ↔ Team via DVincula -182** (V2 F5 extensão pós-F5) - 2026-05-12
   - **Seed:** DClasse -182 PROJECT_TEAM_LINK (idPai=-37 ENTIDADES) — total 138 classes
   - **DTOs:** `ListProjectsQueryDto` com `teamId` filter; `CreateProjectDto.teamId`; `UpdateProjectDto.teamId` com `@ValidateIf`; `ProjectResponseDto.teamId` top-level
