@@ -12,6 +12,29 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Removed
+
+- **F13 Sub-tarefa 2.5: Remove claudeSessionId residual de AutomationData** (V2 F13 Backend-Side Prep — Conclusão) - 2026-05-12
+  - **Campo:** `AutomationData.claudeSessionId?: string` removido de `src/tasks/schemas/task-dados.schema.ts`
+  - **Razão:** Resíduo morto — zero consumidores (grep confirma); canônico é `DPedido.dados.claude.sessionId` via Engine `OperacaoExecucaoClaude` (Pilar 1)
+  - **JSDoc:** Interface `AutomationData` atualizada com nota canônica explícita referenciando `DPedido.dados.claude.sessionId` e responsabilidade Engine
+  - **Impacto:** Elimina ambiguidade (qual é a fonte verdadeira? — agora inambíguo)
+  - **Testes:** 70/70 tasks.service PASS; 11/11 execution-result PASS — zero regressão
+  - **Build:** `make build` PASS (zero erros novos)
+  - **Referência:** ADR-V2-033 decisão (c) — Remoção de `claudeSessionId` de DTask
+
+### Changed
+
+- **F13 Sub-tarefa 2.5: Consolidação ADR-V2-033 com 5 decisões técnicas (a-e)** (V2 F13 Backend-Side Prep — Conclusão) - 2026-05-12
+  - **Status:** ADR-V2-033 finalizado → Status: Aceito (todas 5 decisões consolidadas com referências a commits)
+  - **Decisão (a) Síncrono vs NDJSON:** A2 síncrono — RemoteExecutionClient `execute()` retorna ACK rápido, resultado via callback (Sub-tarefa 2.2 `21323ab`)
+  - **Decisão (b) Origem projectSlug:** B1 derivação automática — `ProjectsService.create()` gera slug único de `nome`, no `DProject.dados.slug` (Sub-tarefa 2.3 `769f617`)
+  - **Decisão (c) claudeSessionId de DTask:** Removido — Pilar 1 preciso (Sub-tarefa 2.5 este commit)
+  - **Decisão (d) Validação CLI Claude:** D3 spike operacional — CEO/orchestrator em paralelo (não bloqueia backend V2)
+  - **Decisão (e) DClasses sessão:** -505/-506 reservadas em seed, materializadas em callback `execution-result` (Sub-tarefa 2.1 `d7fbc63`)
+  - **Consequências:** Destrava Task #1 Sub-tarefa 4 (RUN_CLAUDE_CODE handler agente V2 client-side)
+  - **Referências:** Cruzadas com ADR-V2-001/-005/-006/-008/-013/-030/-032; histórico em commits da cadeia 2.1-2.5
+
 ### Added
 
 - **F13 Sub-tarefa 2.4: Endpoint execution-result inbound + Engine OperacaoExecucaoClaude.registrarOutcome** (V2 F13 Backend-Side Prep) - 2026-05-12

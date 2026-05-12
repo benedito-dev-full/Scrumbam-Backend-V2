@@ -31,10 +31,16 @@ export interface CaptureData {
 }
 
 /**
- * Dados de automação Claude Code.
+ * Dados de automação Claude Code (resumo agregado por task).
+ *
+ * **Nota canônica (ADR-V2-033 — Sub-tarefa 2.5):**
+ * `claudeSessionId` foi removido daqui. A fonte canônica é
+ * `DPedido.dados.claude.sessionId` (gravado pelo Engine
+ * `OperacaoExecucaoClaude.registrarOutcome()`). DTask é estrutural
+ * para cards Scrumban; rastreamento de sessão Claude Code é
+ * responsabilidade do DPedido de execução (idClasse -300/-301/-302/-303).
  */
 export interface AutomationData {
-  claudeSessionId?: string;
   executions?: number;
   lastExecutedAt?: string;
   riskScore?: number;

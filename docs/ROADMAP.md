@@ -527,6 +527,87 @@
 
 ---
 
+### Sub-tarefa 2.5: Limpeza task-dados.schema + Consolidação ADR-V2-033 — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** tasks (schema) + docs (decisions)
+**Fase V2:** F13 (Automation — Backend-Side Prep, CONCLUSÃO do plano)
+**Tempo Real:** ~1.5h Implementer + ~30min Reviewer + ~30min Documenter
+**Completado em:** 2026-05-12
+**Quality Score:** 9.2/10 APPROVED
+
+**O Que Foi Feito:**
+
+**Backend V2 — Limpeza de Resíduo:**
+- **`src/tasks/schemas/task-dados.schema.ts`:**
+  - Campo `claudeSessionId?: string` removido da interface `AutomationData` (resíduo morto — zero consumidores)
+  - JSDoc da interface `AutomationData` atualizado com nota canônica explícita apontando para `DPedido.dados.claude.sessionId` e `OperacaoExecucaoClaude.registrarOutcome()` (Pilar 1 ATIVADO)
+  - Campos preservados: `executions`, `lastExecutedAt`, `riskScore`, `approved` (agregadas resumidas úteis para UI)
+  - Grep adversarial confirma: zero consumidores do campo removido (nem em tests, nem em services, nem em DTOs)
+  - Build PASS pós-remoção; zero erros TypeScript novos
+
+**Documentation — Consolidação ADR-V2-033:**
+- **`docs/decisions/ADR-V2-033-contrato-execute-outbound-e-execution-result-inbound.md`:**
+  - Status: Aceito (consolidado)
+  - 5 decisões técnicas finalizadas (a/b/c/d/e):
+    - **(a) Streaming NDJSON vs síncrono:** Síncrono A2 (Sub-tarefa 2.2 commit `21323ab`)
+    - **(b) Origem do projectSlug:** Derivação automática B1 (Sub-tarefa 2.3 commit `769f617`)
+    - **(c) Remoção claudeSessionId de DTask:** Removido C (Sub-tarefa 2.5 este commit)
+    - **(d) Validação CLI Claude:** Spike operacional D3 (CEO/orchestrator paralelo)
+    - **(e) DClasses DEvento sessão:** Reservadas -505/-506 (Sub-tarefa 2.1 commit `d7fbc63`)
+  - Consequências materializadas: breakdown contrato `/v1/execute` intencional, destrava Task #1 Sub-4
+  - Orden emissão DEvento validada (Pilar 1): Engine registra outcome → emite eventos após commit
+  - Referências cruzadas a 7 ADRs prévios (V2-001/-005/-006/-008/-013/-030/-032)
+
+**Testes:**
+- `tasks.service.spec.ts`: 70/70 PASS (zero quebra)
+- `execution-result.service.spec.ts`: 11/11 PASS (zero regressão)
+- Build: `make build` PASS (erros pré-existentes em `src/reports/pdf-generator.ts` não relacionados)
+- TypeScript: ZERO erros novos (grep `npx tsc --noEmit` filtrando pré-existentes)
+- ESLint: Clean (campo removido não tinha console.log ou violações de padrão)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): PRESERVADO — JSDoc `AutomationData` nota canônica que sessão é responsabilidade do Engine `OperacaoExecucaoClaude`
+- Pilar 2 (Endpoints): N/A — sem endpoints modificados
+- Pilar 3 (Seed): N/A — sem mudança em classes (remoção é de campo Json)
+
+**ADRs vinculados:** ADR-V2-001 (zero tabela nova), ADR-V2-005 (Engine DPedido), ADR-V2-006 (Risk via idClasse), ADR-V2-008 (DEvento substitui notificações), ADR-V2-013 (agent como DEntidade), ADR-V2-030 (multi-tenant), ADR-V2-032 (claudeSessionId em DPedido), **ADR-V2-033 (finalizado — 5 decisões consolidadas)**
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plano Sub-tarefa 2.5 (limpeza) |
+| Implementer | ~1.5h | Remoção campo + JSDoc canônico + 70 testes green |
+| Reviewer | ~30min | Score 9.2/10 APPROVED (grep confirma zero consumidores, build PASS, ADR robusto) |
+| Documenter | ~30min | ROADMAP (marco conclusão), CHANGELOG, STATUS, commit Conventional |
+
+---
+
+## MARCO DE CONCLUSÃO: Plano Backend-Side Task 2 COMPLETO (5/5 Sub-tarefas)
+
+**Status:** Plano Finalizado ✅
+
+**Cadeia Completa de Commits:**
+1. Sub-tarefa 2.1 (Seed + ADR esqueleto): `d7fbc63` — Score 9.0/10
+2. Sub-tarefa 2.2 (RemoteExecutionClient refactor): `21323ab` — Score 8.5/10
+3. Sub-tarefa 2.3 (ProjectsService slug): `769f617` — Score 8.8/10
+4. Sub-tarefa 2.4 (Callback + Engine registrarOutcome): `6692d09` — Score 8.8/10
+5. Sub-tarefa 2.5 (Limpeza + ADR finalizado): `[hash-atual]` — Score 9.2/10
+
+**Média da Cadeia:** (9.0 + 8.5 + 8.8 + 8.8 + 9.2) / 5 = **8.86/10 APPROVED**
+
+**Impacto:**
+- Backend V2 está pronto para receber agente V2 client-side (Task #1)
+- **Task #1 Sub-tarefa 4** (RUN_CLAUDE_CODE handler) agora **DESTRAVADO** → pode iniciar
+- Pilares 1/2/3 ATIVADOS em todas 5 sub-tarefas (Engine preservado, endpoints reutilizados, seed respeitado)
+- ADR-V2-033 consolidado com 5 decisões técnicas materializadas (a-e)
+- Zero regressões na cadeia (627 testes PASS total)
+
+**Referência:** `workspace/plans/plan-automation-backend-side-task2.md`
+
+---
+
 ## F5 — Domínio Estrutural (Tasks + Intentions) — Extensão Modal
 
 ### Task #2: Modal Criar Task com Tipo + Responsável + Canal + Criador — ✅ COMPLETA
