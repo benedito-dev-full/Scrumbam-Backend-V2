@@ -324,10 +324,21 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 | Task 1 | domain-structural | F5 | 8.0 | APPROVED | parseInt(limit) em 4 controllers; for...of vs createMany no bootstrap; TeamsService sem AuditService |
 | Task 2 | executions (F6) | F6 | 8.5 | APPROVED | ScheduleModule.forRoot() duplicado; testes de integração I1-I4 ausentes (unit tests cobrem os casos) |
 | Task 1 sub1 | agent scaffolding | F13 cliente | **9.0** | **APPROVED** | 4 MINORs: branches loader não cobertas (EPERM/isFile), ownership check ausente, discrepância jest.config.js no handoff, 0% coverage logger/index (esperado) |
+| Task 1 sub6 | agent install+systemd | F13 cliente | **7.4** | **NEEDS_CHANGES** | M1: agent/.claude/ na localização errada (não commitada). M2: ANTHROPIC_API_KEY gap — claude CLI não vai autenticar. M3: ssh-keyscan stderr silenciado perde diagnóstico TOFU. |
 
 Detalhes: [F2 scores](project_f2_scores.md) | [F3 scores](project_f3_scores.md) | [F5 scores](project_f5_scores.md)
 
 ---
+
+## PADRÕES APRENDIDOS F13 TASK1 SUB6 (Agente V2 — install.sh + systemd + CLAUDE.md)
+
+- **`agent/.claude/` fora da localização canônica**: a memória do Implementer deve estar SEMPRE em `.claude/agent-memory/implementer/` na raiz do repo. Subprojetos monorepo (como `agent/`) NÃO devem ter seu próprio `.claude/`. Verificar `git ls-files agent/.claude/` → deve retornar vazio. Se retornar arquivos, pedir remoção e migração de conteúdo.
+- **ANTHROPIC_API_KEY em serviços systemd com user dedicado**: qualquer install.sh que cria um service user dedicado E invoca um CLI externo que requer autenticação (ex: `claude`, `gh`, `aws`) DEVE configurar como a API key chega ao processo. Três formas: (1) EnvironmentFile + placeholder no install, (2) instrução de `sudo -u <user> <cli> setup` no resumo final, (3) campo no config.json + passagem via `env: { ...process.env, KEY: config.key }` no execFile. Ausência de qualquer das três = MEDIUM bloqueante.
+- **ssh-keyscan `2>/dev/null` descarta fingerprint de TOFU**: redirecionar stderr do ssh-keyscan para /dev/null em instalação de produção é securamente problemático — o operador perde a única oportunidade de verificar o fingerprint. Emitir pelo menos via `warn` ou logar em arquivo separado. Não é CRITICAL (TOFU é padrão aceito para MVP) mas é MEDIUM.
+- **`shellcheck -x` no review de bash**: sempre usar `-x` (segue source) para shellcheck em scripts que incluem outros arquivos. Sem `-x`, supressões de sourced files não são validadas. Verificar `shellcheck -x install.sh uninstall.sh` → exit 0.
+- **Idempotência de instalador via `config.json` como sentinel**: padrão correto para installs que consomem token one-shot. O sentinel mais robusto é o arquivo de config (não uma flag, não um diretório). Se `config.json` existe → falha rápido com mensagem "rode uninstall.sh primeiro". Aceitar como padrão para F13.
+- **`ProtectHome=read-only` permite leitura cross-user**: com `ProtectHome=read-only`, `/root/.claude/CLAUDE.md` com `chmod 0644` É legível pelo service user `scrumban-agent` — o path não fica inaccessible como com `=yes`. Decisão arquitetural válida para o trade-off CEO-usa-root.
+- **`PrivateTmp=true` no systemd cobre `claude` CLI**: o `claude` CLI quando invocado via `execFile` do Node usa o mesmo namespace de `/tmp` do processo pai. `PrivateTmp=true` no service garante que arquivos temporários do claude ficam no `/tmp` privado — não vaza para o `/tmp` do sistema. Aceitar como pattern de hardening adequado.
 
 ## PADRÕES VIOLADOS RECORRENTES (atualizar após cada review)
 

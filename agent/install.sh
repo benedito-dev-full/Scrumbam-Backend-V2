@@ -31,6 +31,8 @@
 #   - User scrumban-agent: criado só se não existe
 #   - Chave SSH: gerada só se /etc/scrumban-agent/ssh_key ausente
 #   - Handshake: rejeita se config.json já existe (force=--reinstall não suportado)
+#   - EnvironmentFile (/etc/scrumban-agent/environment): preservado se já existe
+#   - CLAUDE.md (/root/.claude/CLAUDE.md): preservado se já existe
 #   - systemd: daemon-reload + restart sempre
 #
 set -euo pipefail
@@ -50,6 +52,9 @@ SERVICE_USER="scrumban-agent"
 SERVICE_NAME="scrumban-agent"
 CONFIG_FILE="${CONFIG_DIR}/config.json"
 SSH_KEY_PATH="${CONFIG_DIR}/ssh_key"
+# EnvironmentFile carregado pelo systemd unit. Guarda ANTHROPIC_API_KEY
+# (ou ANTHROPIC_AUTH_TOKEN) — sem ela o `claude -p` falha com authentication_error.
+ENV_FILE_PATH="${CONFIG_DIR}/environment"
 # CLAUDE.md do CEO — root é o owner por padrão (CEO acessa via sudo).
 # Trade-off documentado no README §"Onde mora o CLAUDE.md global".
 CLAUDE_MD_PATH="/root/.claude/CLAUDE.md"
@@ -338,7 +343,27 @@ ok "handshake OK — agentId=${AGENT_ID} tunnelPort=${TUNNEL_PORT}"
 # ────────────────────────────────────────────────
 log "capturando host key SSH de ${BACKEND_TUNNEL_HOST}:${BACKEND_TUNNEL_PORT}..."
 KNOWN_HOSTS_FILE="${STATE_DIR}/.ssh/known_hosts"
-run "sudo -u ${SERVICE_USER} ssh-keyscan -p ${BACKEND_TUNNEL_PORT} ${BACKEND_TUNNEL_HOST} >> ${KNOWN_HOSTS_FILE} 2>/dev/null || true"
+# ssh-keyscan imprime o fingerprint no stderr — é o hash que o operador deve
+# verificar (TOFU: Trust On First Use). NÃO descartar com 2>/dev/null.
+# Redirecionamos stderr para o terminal do operador E para o log de install.
+INSTALL_LOG_FILE="${LOG_DIR}/install.log"
+if [[ "${DRY_RUN}" -eq 0 ]]; then
+  mkdir -p "${LOG_DIR}"
+  warn "ssh-keyscan: fingerprint do host abaixo (anote/compare manualmente para TOFU):"
+  # stdout (linhas de known_hosts) -> arquivo; stderr (fingerprint) -> tee
+  # ao log + terminal do operador. `|| true` mantém continuidade se host down.
+  # shellcheck disable=SC2024
+  # sudo redireciona stdout do processo do user scrumban-agent; o shellcheck
+  # SC2024 aponta "redirecionamento como root" mas aqui é intencional —
+  # queremos que o arquivo seja escrito pelo user scrumban-agent.
+  sudo -u "${SERVICE_USER}" ssh-keyscan -p "${BACKEND_TUNNEL_PORT}" "${BACKEND_TUNNEL_HOST}" \
+    >> "${KNOWN_HOSTS_FILE}" \
+    2> >(tee -a "${INSTALL_LOG_FILE}" >&2) \
+    || true
+else
+  printf '\033[0;35m[dry-run]\033[0m ssh-keyscan -p %s %s >> %s (stderr visível ao operador)\n' \
+    "${BACKEND_TUNNEL_PORT}" "${BACKEND_TUNNEL_HOST}" "${KNOWN_HOSTS_FILE}"
+fi
 run "chown ${SERVICE_USER}:${SERVICE_USER} ${KNOWN_HOSTS_FILE}"
 run "chmod 0644 ${KNOWN_HOSTS_FILE}"
 
@@ -382,6 +407,43 @@ fi
 
 run "chown ${SERVICE_USER}:${SERVICE_USER} ${CONFIG_FILE}"
 run "chmod 0600 ${CONFIG_FILE}"
+
+# ────────────────────────────────────────────────
+# 9b. EnvironmentFile placeholder (ANTHROPIC_API_KEY etc.)
+# ────────────────────────────────────────────────
+# Sem `ANTHROPIC_API_KEY` (ou `ANTHROPIC_AUTH_TOKEN`), o `claude -p` falha com
+# `authentication_error` na primeira execução do RUN_CLAUDE_CODE em produção.
+# Criamos um placeholder 0600 owner=scrumban-agent. O operador edita manualmente
+# após a instalação. Idempotente: NÃO sobrescreve se já existe.
+log "preparando EnvironmentFile em ${ENV_FILE_PATH}..."
+if [[ "${DRY_RUN}" -eq 0 && ! -f "${ENV_FILE_PATH}" ]]; then
+  cat > "${ENV_FILE_PATH}" <<'ENVEOF'
+# /etc/scrumban-agent/environment
+#
+# Carregado pelo systemd (EnvironmentFile=-/etc/scrumban-agent/environment).
+# Variáveis aqui ficam no environment do processo Node, e portanto do `claude`
+# que ele invoca via child_process.execFile.
+#
+# Configure UMA das opções abaixo (descomente e preencha):
+#
+# ANTHROPIC_API_KEY=sk-ant-...
+# ANTHROPIC_AUTH_TOKEN=...
+#
+# Após preencher, recarregue o serviço:
+#   sudo systemctl restart scrumban-agent
+ENVEOF
+  warn "${ENV_FILE_PATH} criado VAZIO (placeholder). Preencha ANTHROPIC_API_KEY antes do primeiro RUN_CLAUDE_CODE."
+elif [[ "${DRY_RUN}" -eq 0 && -f "${ENV_FILE_PATH}" ]]; then
+  ok "${ENV_FILE_PATH} já existe — preservado (idempotente)"
+else
+  printf '\033[0;35m[dry-run]\033[0m cria placeholder em %s\n' "${ENV_FILE_PATH}"
+fi
+if [[ "${DRY_RUN}" -eq 0 ]]; then
+  run "chown ${SERVICE_USER}:${SERVICE_USER} ${ENV_FILE_PATH}"
+  run "chmod 0600 ${ENV_FILE_PATH}"
+else
+  printf '\033[0;35m[dry-run]\033[0m chown/chmod 0600 em %s\n' "${ENV_FILE_PATH}"
+fi
 
 # ────────────────────────────────────────────────
 # 10. systemd unit
@@ -463,9 +525,20 @@ echo "  configFile:  ${CONFIG_FILE} (modo 0600, owner ${SERVICE_USER})"
 echo "  service:     ${SERVICE_NAME}.service"
 echo "  status:      $(systemctl is-active "${SERVICE_NAME}.service" 2>/dev/null || echo 'unknown')"
 echo ""
-echo "Próximos passos:"
-echo "  1. Edite ${CLAUDE_MD_PATH} com os projetos reais (slugs + caminhos)"
-echo "  2. Garanta que os caminhos estão sob: ${ALLOWED_ROOTS_RAW}"
-echo "  3. Acompanhe logs:    journalctl -u ${SERVICE_NAME}.service -f"
-echo "  4. Para desinstalar:  sudo bash uninstall.sh"
+warn "ATENÇÃO: ANTHROPIC_API_KEY ainda NÃO foi configurada."
+warn "Sem ela, o primeiro RUN_CLAUDE_CODE vai falhar com authentication_error."
+echo ""
+echo "Próximos passos OBRIGATÓRIOS:"
+echo "  1. Configure as credenciais do Claude Code:"
+echo "       sudo \$EDITOR ${ENV_FILE_PATH}"
+echo "     Descomente UMA das linhas e preencha:"
+echo "       ANTHROPIC_API_KEY=sk-ant-..."
+echo "     OU"
+echo "       ANTHROPIC_AUTH_TOKEN=..."
+echo "     Depois:  sudo systemctl restart ${SERVICE_NAME}"
+echo ""
+echo "  2. Edite ${CLAUDE_MD_PATH} com os projetos reais (slugs + caminhos)"
+echo "  3. Garanta que os caminhos estão sob: ${ALLOWED_ROOTS_RAW}"
+echo "  4. Acompanhe logs:    journalctl -u ${SERVICE_NAME}.service -f"
+echo "  5. Para desinstalar:  sudo bash uninstall.sh"
 echo ""

@@ -13,6 +13,10 @@ Restart=always
 RestartSec=5
 WorkingDirectory=/var/lib/scrumban-agent
 Environment=NODE_ENV=production
+# Credenciais do Claude Code CLI (ANTHROPIC_API_KEY etc.). O `-` prefix
+# faz o systemd NÃO falhar se o arquivo ainda não existir — install.sh
+# cria um placeholder e o operador preenche manualmente.
+EnvironmentFile=-/etc/scrumban-agent/environment
 StandardOutput=journal
 StandardError=journal
 

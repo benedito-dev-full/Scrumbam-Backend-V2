@@ -4,3 +4,8 @@ coverage/
 *.tsbuildinfo
 .DS_Store
 *.log
+
+# Memória dos agents do projeto vive APENAS em <repo-root>/.claude/agent-memory/,
+# NUNCA dentro de agent/. Ignorar defensivamente p/ evitar duplicação acidental
+# (incidente Sub-tarefa 6 rodada 1).
+.claude/

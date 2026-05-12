@@ -36,12 +36,54 @@ Razão: credenciais (`agentApiKey`, `agentCommandSecret`) ficam em texto plano n
 
 Se reviewer pedir `--reinstall`, pedir justificativa caso-de-uso explícito antes de adicionar.
 
-## Shellcheck: 2 suppressions justificadas
+## Decisão 4: ANTHROPIC_API_KEY via EnvironmentFile (Opção A — rodada 2)
+
+`systemd/scrumban-agent.service` carrega `/etc/scrumban-agent/environment` (0600 owner scrumban-agent) via `EnvironmentFile=-...` (prefixo `-` = não falha se ausente). `install.sh` fase 9b cria esse arquivo com placeholder comentado:
+
+```
+# ANTHROPIC_API_KEY=sk-ant-...
+# ANTHROPIC_AUTH_TOKEN=...
+```
+
+Operador edita após instalação. Sem isso, `claude -p` falha com `authentication_error` na primeira execução. Mensagem final do install pede explicitamente para preencher.
+
+Alternativas descartadas:
+- **Opção B (`claude setup` interativo):** depende de comando interativo do Claude Code que pode não existir; difícil de automatizar via Ansible/Terraform.
+- **Hardcode no install.sh:** vazaria secret em logs de CI/CD.
+- **Variável da sessão do CEO:** systemd herda só env de sistema, não da sessão.
+
+Opção A é explícita, idempotente, configurável por terceiros, e o `systemctl restart` é único requisito para aplicar.
+
+`uninstall.sh` apaga `/etc/scrumban-agent/` inteiro — env file vai junto. Sem mudança específica lá.
+
+## Decisão 5: ssh-keyscan stderr é VISÍVEL (TOFU consciente — rodada 2)
+
+`ssh-keyscan` imprime o fingerprint no stderr. Rodada 1 redirecionava com `2>/dev/null` — perdia o hash que o operador deveria verificar manualmente (Trust On First Use). Rodada 2 corrigiu:
+
+```bash
+sudo -u scrumban-agent ssh-keyscan -p "${BACKEND_TUNNEL_PORT}" "${BACKEND_TUNNEL_HOST}" \
+  >> "${KNOWN_HOSTS_FILE}" \
+  2> >(tee -a "${INSTALL_LOG_FILE}" >&2) \
+  || true
+```
+
+stdout (linhas do known_hosts) → arquivo. stderr (fingerprint) → tee em log + terminal do operador (via process substitution). Warning explícito pede para anotar/comparar.
+
+`|| true` mantido porque ssh-keyscan pode falhar em host down sem bloquear install (operador roda novamente). Log em `/var/log/scrumban-agent/install.log` facilita debug.
+
+## Shellcheck: 3 suppressions justificadas (rodada 2)
 
 1. **SC2294** em `run() { eval "$@" }`: eval é intencional — os comandos contém redirects (`>/dev/null`), pipes (`|`) e expansões. Input vem só de constantes hardcoded no script. Comentário inline justifica.
 2. **SC2034** em `for i in $(seq 1 30)`: trocado para `for _ in ...` (variável de loop não usada).
+3. **SC2024** em `sudo -u scrumban-agent ssh-keyscan ... >> "${KNOWN_HOSTS_FILE}"`: shellcheck aponta que `>>` é interpretado como root (não como o user de `sudo -u`). Intencional aqui — queremos o stdout do processo (já trocado para scrumban-agent via sudo) anexado ao arquivo, e o arquivo já é owned por scrumban-agent. Comentário inline justifica.
 
 Se aparecer mais shellcheck warning em PRs futuros, NÃO suprimir sem justificativa escrita.
+
+## Pasta `agent/.claude/` é PROIBIDA (rodada 2 — incidente M1)
+
+Toda memória de agents do projeto vive em `<repo-root>/.claude/agent-memory/<role>/`. Em rodada 1, criei por engano `agent/.claude/agent-memory/implementer/` — duplicação órfã que nenhum agent futuro leria.
+
+Corrigido: conteúdo migrado para a localização canônica, `agent/.claude/` deletada, `.claude/` adicionado ao `agent/.gitignore` com comentário. Quem editar `agent/` no futuro: NUNCA criar `.claude/` lá dentro. O gitignore impede o commit acidental, mas vale o lembrete consciente.
 
 ## Pre-flight Claude Code CLI versão mínima
 

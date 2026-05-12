@@ -136,7 +136,7 @@ sudo bash install.sh \
 No futuro a distribuição pode migrar para release GitHub via `--bundle-url` (não
 implementado neste MVP).
 
-### O que o install.sh faz (13 fases)
+### O que o install.sh faz (14 fases)
 
 1. Parse args + validações (root, distro Ubuntu/Debian).
 2. Pre-flight: `timedatectl set-ntp true` (clock skew quebra HMAC ±5min) + deps
@@ -149,12 +149,20 @@ implementado neste MVP).
 7. Faz handshake `POST /agents/install-token` com a pub key + hostname. Recebe
    `agentId`, `agentApiKey`, `agentCommandSecret`, `tunnelPort`.
 8. `ssh-keyscan` do `backendTunnelHost` → `known_hosts` (evita TOFU prompt).
+   O fingerprint impresso pelo `ssh-keyscan` é mostrado ao operador (stderr
+   via `tee` + log em `/var/log/scrumban-agent/install.log`) para verificação
+   manual de identidade.
 9. Grava `/etc/scrumban-agent/config.json` (0600, owner do agente).
-10. Instala systemd unit, `daemon-reload`, `enable`, `restart`.
-11. Se `/root/.claude/CLAUDE.md` ausente, copia `CLAUDE-md-template.md`
+10. Cria `/etc/scrumban-agent/environment` (0600) — placeholder VAZIO para
+    `ANTHROPIC_API_KEY` ou `ANTHROPIC_AUTH_TOKEN`. O systemd unit carrega esse
+    arquivo via `EnvironmentFile=-...`. **Operador precisa preencher após o
+    install** (ver §Troubleshooting → `RUN_CLAUDE_CODE` falha). Preservado se
+    já existir (idempotente).
+11. Instala systemd unit, `daemon-reload`, `enable`, `restart`.
+12. Se `/root/.claude/CLAUDE.md` ausente, copia `CLAUDE-md-template.md`
     (preserva se já existe — não popula automaticamente, evita prompt injection).
-12. Aguarda até 60s pelo heartbeat do agente nos logs (`journalctl`).
-13. Imprime resumo final.
+13. Aguarda até 60s pelo heartbeat do agente nos logs (`journalctl`).
+14. Imprime resumo final com avisos de pendências (env file, CLAUDE.md).
 
 ### Idempotência
 
@@ -259,7 +267,24 @@ Causas comuns:
 
 ### `RUN_CLAUDE_CODE` falha
 
-1. **Claude Code CLI ausente ou versão antiga:**
+1. **`ANTHROPIC_API_KEY` ausente (causa mais comum na primeira instalação):**
+   O `claude -p` retorna `authentication_error`. O `install.sh` cria
+   `/etc/scrumban-agent/environment` VAZIO — o operador precisa preencher.
+   ```bash
+   sudo $EDITOR /etc/scrumban-agent/environment
+   # Descomente e preencha uma das linhas:
+   # ANTHROPIC_API_KEY=sk-ant-...
+   # ANTHROPIC_AUTH_TOKEN=...
+   sudo systemctl restart scrumban-agent
+   ```
+   Para verificar que a variável chegou no processo:
+   ```bash
+   sudo systemctl show scrumban-agent --property=Environment | grep -i anthropic
+   # OU (depende da versão do systemd):
+   sudo cat /proc/$(pgrep -u scrumban-agent -f 'node.*scrumban-agent')/environ \
+     | tr '\0' '\n' | grep -i anthropic
+   ```
+2. **Claude Code CLI ausente ou versão antiga:**
    ```bash
    sudo -u scrumban-agent bash -c 'command -v claude && claude --version'
    ```
@@ -267,9 +292,9 @@ Causas comuns:
    ```bash
    sudo /usr/bin/npm install -g @anthropic-ai/claude-code
    ```
-2. **Slug desconhecido (`UNKNOWN_PROJECT_SLUG`):** o `CLAUDE.md` não tem
+3. **Slug desconhecido (`UNKNOWN_PROJECT_SLUG`):** o `CLAUDE.md` não tem
    uma seção `## <slug>` para o projeto. Edite `/root/.claude/CLAUDE.md`.
-3. **Caminho fora da allowlist (`WORKSPACE_OUTSIDE_ALLOWED_ROOT`):** o path
+4. **Caminho fora da allowlist (`WORKSPACE_OUTSIDE_ALLOWED_ROOT`):** o path
    do `CLAUDE.md` não está sob `allowedProjectRoots`. Ou ajuste o `CLAUDE.md`
    ou edite `/etc/scrumban-agent/config.json` (`allowedProjectRoots`) +
    `systemctl restart scrumban-agent`.

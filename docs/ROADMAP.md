@@ -12,7 +12,7 @@
 
 ### Task #1: Agente Cliente V2 (7 Sub-tarefas) — EM PROGRESSO (4 de 7 COMPLETAS)
 
-**Status:** EM PROGRESSO (Sub-tarefas 1, 2, 3, 4 COMPLETAS; 5, 6, 7 PENDENTES)
+**Status:** EM PROGRESSO (Sub-tarefas 1, 2, 3, 4, 5, 6 COMPLETAS; 7 PENDENTE)
 **Módulo V2:** automation/agent (executor passivo de Claude Code via HTTP+HMAC em VPS remota)
 **Fase V2:** F13 Cliente
 **Tempo Real:** ~5h (sub1) + ~6h (sub2) + ~4h (sub3) + ~7h (sub4) = 22h implementação
@@ -68,7 +68,19 @@
 **Pilares:** N/A (cliente VPS — não backend)
 **ADRs:** ADR-V2-031 (monorepo agent), ADR-V2-035 (logs sensíveis — futura)
 
-#### Sub-tarefa 6: install.sh + Validação (PENDENTE)
+#### Sub-tarefa 6: install.sh + systemd + CLAUDE.md template — ✅ COMPLETA
+**Status:** COMPLETA | **Score:** 8.8/10 APPROVED rodada 2
+- `install.sh` 14 fases: root check, pre-flight CLI 2.1.139+, user/dirs com perms rigorosos, ssh-keygen Ed25519 + ssh-keyscan TOFU visível, handshake POST install-token, config.json 0600, env file 0600 com placeholder ANTHROPIC_API_KEY, systemd start, heartbeat poll 60s, CLAUDE.md template
+- `uninstall.sh` idempotente (preserva config.json se `--force` não-passed)
+- `systemd/scrumban-agent.service` hardenizado: NoNewPrivileges, ProtectSystem=strict, ProtectHome=read-only, EnvironmentFile, MemoryMax=512M
+- `CLAUDE-md-template.md` fornecido (não populado automaticamente — risco prompt injection)
+- README troubleshooting expandido + seção ANTHROPIC_API_KEY
+- shellcheck PASS, dry-run funcional, idempotência comprovada
+- Issues resolvidos (rodada 2): M1 (.claude/ raiz), M2 (ANTHROPIC_API_KEY env), M3 (ssh-keyscan TOFU visível)
+
+**Pilares:** N/A (cliente VPS — não backend)
+**ADRs:** V2-030 (CLAUDE.md global), V2-031 (monorepo), V2-033 (contrato)
+
 #### Sub-tarefa 7: Documentação Final + Validação Smoke (PENDENTE)
 
 ---

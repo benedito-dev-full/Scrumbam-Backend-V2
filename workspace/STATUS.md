@@ -58,14 +58,47 @@
 
 ---
 
-## Task #1 Sub-tarefa 6 (F13 Cliente — Agente V2 VPS) — install.sh + systemd + CLAUDE.md template — 🟡 IMPLEMENTER COMPLETO (aguarda Reviewer)
+## Task #1 Sub-tarefa 6 (F13 Cliente — Agente V2 VPS) — install.sh + systemd + CLAUDE.md template — 🟡 IMPLEMENTER RODADA 2 COMPLETO (aguarda Reviewer)
 
 **Module:** automation/agent (subprojeto monorepo `agent/`)
-**Task:** Instalador bash idempotente (13 fases, dry-run, shellcheck-clean), systemd unit com hardening completo, template do CLAUDE.md global, uninstall.sh, README expandido com troubleshooting
-**Task Status:** Implementer COMPLETE — Reviewer pendente (Sub-tarefa 6 de 7)
+**Task:** Instalador bash idempotente (14 fases, dry-run, shellcheck-clean), systemd unit com hardening completo + EnvironmentFile p/ ANTHROPIC_API_KEY, template do CLAUDE.md global, uninstall.sh, README expandido com troubleshooting
+**Task Status:** Implementer RODADA 2 COMPLETE — Reviewer pendente (Sub-tarefa 6 de 7)
 **Fase V2:** F13 (Cliente — Sub-tarefa 6 de 7)
-**Duration:** ~4h Implementer
-**Completed (Implementer):** 2026-05-12
+**Duration:** ~4h Implementer rodada 1 + ~45min rodada 2
+**Completed (Implementer rodada 1):** 2026-05-12
+**Completed (Implementer rodada 2):** 2026-05-12 — corrigidos M1, M2, M3 do review
+
+### Rodada 2 — Correções dos issues MEDIUM do Reviewer (score 7.4/10 NEEDS_CHANGES)
+
+- **M1 — `agent/.claude/` na localização errada:**
+  - Movido `agent_install_gotchas.md` para `<repo-root>/.claude/agent-memory/implementer/agent_install_gotchas.md` (canônico)
+  - Deletado `agent/.claude/` inteiro (era duplicação órfã)
+  - Adicionado `.claude/` ao `agent/.gitignore` defensivamente (com comentário)
+  - Atualizado pointer no `MEMORY.md` raiz com nota apontando para `agent_install_gotchas.md` e aviso explícito de que `agent/.claude/` é PROIBIDA
+- **M2 — `ANTHROPIC_API_KEY` (Opção A escolhida — EnvironmentFile):**
+  - `systemd/scrumban-agent.service`: adicionado `EnvironmentFile=-/etc/scrumban-agent/environment` (prefixo `-` = opcional, não falha se ausente)
+  - `install.sh` fase 9b nova: cria `/etc/scrumban-agent/environment` 0600 owner `scrumban-agent` com placeholder comentado (`# ANTHROPIC_API_KEY=...`, `# ANTHROPIC_AUTH_TOKEN=...`); idempotente (não sobrescreve se já existe)
+  - Mensagem final do install.sh: warning vermelho explícito + 1º passo obrigatório dos próximos passos é editar o env file
+  - README §Troubleshooting → `RUN_CLAUDE_CODE` falha: item 1 (causa mais comum) cobre ANTHROPIC_API_KEY com comandos de verificação (`systemctl show ... Environment`, `/proc/$pid/environ`)
+  - Documentado em phase 10 do README (14 fases agora vs 13)
+- **M3 — `ssh-keyscan` stderr silenciado:**
+  - Removido `2>/dev/null`
+  - stdout (linhas para known_hosts) continua redirecionando para o arquivo
+  - stderr (fingerprint TOFU) agora vai para tee → `/var/log/scrumban-agent/install.log` + terminal do operador (via process substitution `2> >(tee -a ... >&2)`)
+  - Warning explícito antes da chamada pedindo ao operador para anotar/comparar
+  - Comentário no install.sh explica TOFU
+  - shellcheck `SC2024` (redirect como root para arquivo de outro user) suprimido com comentário inline justificando — a intenção é que o arquivo seja escrito pelo user scrumban-agent (não pelo root)
+
+**Validação rodada 2:**
+- `shellcheck -x install.sh uninstall.sh` → PASS (zero warnings, agora 3 suppressions justificadas)
+- Dry-run: PASS — novas mensagens aparecem corretamente:
+  - `>>> preparando EnvironmentFile em /etc/scrumban-agent/environment...`
+  - `[dry-run] cria placeholder em /etc/scrumban-agent/environment`
+  - `>>> capturando host key SSH de ... (stderr visível ao operador)`
+  - Resumo final com warning vermelho `ATENÇÃO: ANTHROPIC_API_KEY ainda NÃO foi configurada` + passos obrigatórios
+- `npm test` PASS (84/84) — sem impacto em TS, só docs/install/systemd
+
+### Rodada 1 — Implementação original
 
 **Deliverables:**
 - [x] `agent/install.sh` (458 LOC) — 13 fases: parse args + validações (root, distro, idempotência); pre-flight (NTP, Node 20+, autossh, jq, curl, Claude Code CLI ≥ 2.1.139 via `semver_ge`); user `scrumban-agent` (system, nologin); diretórios (`/opt/scrumban-agent`, `/etc/scrumban-agent` 0700, `/var/lib/scrumban-agent` 0700, `/var/log/scrumban-agent` 0750); copy bundle `dist/`; gerar par Ed25519 (idempotente); handshake `POST /agents/install-token` com `{token, hostname, sshPubKey, agentVersion}`, recebe `{agentId, agentApiKey, agentCommandSecret, tunnelPort}`; ssh-keyscan → known_hosts; grava config.json via jq (0600, owner scrumban-agent); systemd unit copy + daemon-reload + enable + restart; CLAUDE.md template bootstrap (só se ausente, sem popular automaticamente); heartbeat poll 60s via journalctl; resumo final colorido
