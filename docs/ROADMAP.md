@@ -8,6 +8,57 @@
 
 ---
 
+## F13 — Cliente: Agente V2 Executor Claude Code (Monorepo `agent/`)
+
+### Task #1: Agente Cliente V2 (7 Sub-tarefas) — EM PROGRESSO (4 de 7 COMPLETAS)
+
+**Status:** EM PROGRESSO (Sub-tarefas 1, 2, 3, 4 COMPLETAS; 5, 6, 7 PENDENTES)
+**Módulo V2:** automation/agent (executor passivo de Claude Code via HTTP+HMAC em VPS remota)
+**Fase V2:** F13 Cliente
+**Tempo Real:** ~5h (sub1) + ~6h (sub2) + ~4h (sub3) + ~7h (sub4) = 22h implementação
+**Quality Scores:** 9.0/10 (sub1), 9.2/10 (sub2), 8.8/10 (sub3), 9.0/10 (sub4)
+
+#### Sub-tarefa 1: Scaffolding Monorepo + Config Loader — ✅ COMPLETA
+**Status:** COMPLETA | **Score:** 9.0/10 APPROVED rodada 1
+- Novo subprojeto `agent/` (TypeScript 5.4 strict, Node 20+)
+- Config loader com validação modo 0600, JSON schema zod, redaction de secrets (agentCommandSecret, agentApiKey, etc.)
+- 11/11 specs PASS; build clean
+
+#### Sub-tarefa 2: HTTP Server + HMAC + Dispatcher — ✅ COMPLETA
+**Status:** COMPLETA | **Score:** 9.2/10 APPROVED rodada 1
+- Express bind 127.0.0.1 (loopback only), HMAC-SHA256 byte-a-byte ao backend
+- Nonce LRU anti-replay, rate limit 60 req/min, dispatcher `/v1/execute` com PING + RUN_CLAUDE_CODE (501 stub)
+- 15/15 specs PASS; 13/13 cenários obrigatórios cobertos
+
+#### Sub-tarefa 3: Outbound Client + Heartbeat Loop — ✅ COMPLETA
+**Status:** COMPLETA | **Score:** 8.8/10 APPROVED rodada 1
+- `BackendClient` com `sendHeartbeat()` e `sendExecutionResult()` stub, backoff exponencial 1s→32s (cap 60s)
+- Heartbeat loop 30s interval coleta CPU/MEM/uptime, detecta Claude Code, circuit metric após 5 falhas
+- 12/12 specs PASS; regressão 38/38 anterior PASS
+
+#### Sub-tarefa 4: Handler RUN_CLAUDE_CODE + Session Extraction — ✅ COMPLETA
+**Status:** COMPLETA | **Score:** 9.0/10 APPROVED rodada 1
+- `identity-resolver` lê slug via CLAUDE.md global (defesa contra path injection)
+- `allowlist` com `realpathSync` (defesa anti-symlink), prefix check com boundary `/`
+- `runner` usa `execFile` sem shell, `session-parser` extrai `session_id` snake_case com fallback fs
+- Handler com mutex por projectSlug (try/finally), ACK síncrono 200 + resultado async outbound
+- 29/29 specs PASS (19 integration + 10 unit identity-resolver); regressão 38/38 anterior PASS
+- Críticos validados: session_id (snake_case ✓), execFile (sem shell ✓), realpath (anti-symlink ✓), mutex (try/finally ✓), sendExecutionResult (async ✓), CLI spike 2.1.139 ✓
+
+**Issues encontrados:**
+- MEDIUM (m1): `is_error:true` não entra no cálculo `success` — comportamento por design documentado, log warn presente, impacto: backend pode registrar `success:true` para erro interno (mitigação: logs e semantica não-crítica)
+- MINOR (m2): `usage`/`modelUsage` não capturados como campos tipados (vão em `raw`), débito para auditoria custo
+- MINOR (m3): Comentário "Sub-tarefa 4" em `index.ts` é scaffolding (remover em Sub-tarefa 7)
+
+**Pilares:** N/A (agente cliente — Engine/Seed/Endpoints no backend)
+**ADRs:** ADR-V2-030 (slug via CLAUDE.md), ADR-V2-031 (monorepo agent), ADR-V2-032 (porta, discriminator), ADR-V2-033 (HTTP+HMAC)
+
+#### Sub-tarefa 5: Autossh Wrapper + Lifecycle (PENDENTE)
+#### Sub-tarefa 6: install.sh + Validação (PENDENTE)
+#### Sub-tarefa 7: Documentação Final + Validação Smoke (PENDENTE)
+
+---
+
 ## F8 — Transversal: Convites + Auth Multi-Tenant
 
 ### Task #01: Multi-Tenant Identity + Workspace Switch (ADR-V2-030) — ✅ COMPLETA

@@ -14,6 +14,20 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F13 Task #1 Sub-tarefa 4: Handler RUN_CLAUDE_CODE + Session Extraction** (V2 F13 Cliente) - 2026-05-12
+  - **Identity Resolver:** `src/claude-code/identity-resolver.ts` lê `projectSlug` via seção H2 em `~/.claude/CLAUDE.md` global (defesa contra path injection backend); suporta labels `- Caminho:` ou `- Path:`; case-sensitive slug; erros `CLAUDE_MD_NOT_FOUND`/`UNKNOWN_PROJECT_SLUG`/`INVALID_CLAUDE_MD_ENTRY`
+  - **Allowlist Validator:** `src/claude-code/allowlist.ts` canonicaliza path com `realpathSync` ANTES do prefix check (defesa anti-symlink); boundary `/` evita burla `evil-projetos` vs `evil-projetos-real`; valida contra `config.allowedProjectRoots`
+  - **Runner:** `src/claude-code/runner.ts` usa `execFile` (sem shell) com args como array, timeout configurável, `windowsHide: true`; retorna `{ exitCode, timedOut, stdout, stderr, error }`
+  - **Session Parser:** `src/claude-code/session-parser.ts` extrai `session_id` (snake_case — **CRÍTICO: não é `uuid`**) do JSON output Claude Code; valida UUID via regex; fallback `findNewSessionIdFromFilesystem` se JSON corrompido (busca arquivo `.claude/projects/<encoded-cwd>/session_<id>.jsonl`)
+  - **Handler:** `src/handlers/run-claude-code.handler.ts` orquestra: mutex por projectSlug (307 linhas, try/finally), identity resolver, allowlist, runner, session parser; ACK síncrono `200 {accepted, executionId}` + resultado async via `backendClient.sendExecutionResult()`; mapeamento HTTP: 200 ok, 400 bad payload, 403 WORKSPACE_OUTSIDE_ALLOWED_ROOT, 409 PROJECT_BUSY (mutex), 422 UNKNOWN_PROJECT_SLUG, 500 CLAUDE_MD_NOT_FOUND
+  - **Tests:** `__tests__/identity-resolver.spec.ts` 10 specs (extração com múltiplos labels, case-sensitivity, slug inexistente, CRLF, I/O erros); `__tests__/run-claude-code.spec.ts` 19 specs (14 cenários integração RUN_CLAUDE_CODE + 5 payload validation, incluindo traversal+symlink)
+  - **Build:** tsc clean, 67/67 specs PASS (incluindo regressão 38/38 anterior)
+  - **Pilares:** N/A (cliente)
+  - **ADRs:** ADR-V2-030 (slug via CLAUDE.md), ADR-V2-032 (porta claudeSessionId, discriminator), ADR-V2-033 (HTTP+HMAC contrato)
+  - **Score:** 9.0/10 APPROVED rodada 1
+  - **Issues:** MEDIUM (m1 — is_error:true não entra success, título teste enganoso); MINOR (m2 — usage não tipado; m3 — comentário Sub-tarefa 4 é scaffolding)
+  - **CLI versão pinada:** 2.1.139 (spike confirmou session_id snake_case; a documentar install.sh Sub-tarefa 6)
+
 - **F13 Task #1 Sub-tarefa 3: Outbound Client + Heartbeat Loop** (V2 F13 Cliente) - 2026-05-12
   - **Outbound HMAC Signer:** `src/outbound/hmac-sign.ts` assina requests com SHA256 byte-a-byte idêntico ao backend
     - Algoritmo canonical: `METHOD\npath\ntimestamp\nnonce\nsha256(body)`

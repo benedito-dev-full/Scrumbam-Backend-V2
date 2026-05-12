@@ -9,10 +9,12 @@
  *  - Sub-tarefa 3: outbound HMAC signer + BackendClient (backoff exponencial
  *    + retry só em 5xx/rede) + heartbeat loop (setInterval 30s, circuit
  *    metric após 5 falhas, cache 5min na detecção do Claude Code).
+ *  - Sub-tarefa 4: handler RUN_CLAUDE_CODE (identity-resolver via CLAUDE.md,
+ *    allowlist com realpath, runner `claude -p --output-format json`,
+ *    session-parser com fallback FS, mutex local por projectSlug, ACK 200
+ *    síncrono + execution-result outbound async).
  *
  * Sub-tarefas pendentes:
- *  - Sub-tarefa 4: handler real de RUN_CLAUDE_CODE (runner + allowlist +
- *    identity-resolver + session-parser).
  *  - Sub-tarefa 5: autossh wrapper + lifecycle completo (vai preencher
  *    `tunnelHealthy` real no heartbeat).
  *  - Sub-tarefa 6: install.sh + systemd unit.
@@ -24,6 +26,7 @@
  *   SCRUMBAN_AGENT_CONFIG_PATH=/tmp/cfg.json node dist/index.js
  */
 import { loadConfig } from './config/loader';
+import { createProjectMutex } from './handlers/run-claude-code.handler';
 import { startHeartbeatLoop, type HeartbeatHandle } from './lifecycle/heartbeat-loop';
 import { createLogger } from './logger';
 import { createBackendClient } from './outbound/backend-client';
@@ -34,11 +37,16 @@ const AGENT_VERSION = '0.1.0';
 async function bootstrap(): Promise<void> {
   const config = loadConfig();
   const logger = createLogger(config.logLevel);
-  const server = createServer(config, logger);
+
+  // BackendClient e mutex são criados ANTES do server porque o dispatcher
+  // (criado dentro de `createServer`) precisa deles para registrar o
+  // handler RUN_CLAUDE_CODE (Sub-tarefa 4).
+  const backendClient = createBackendClient(config, logger);
+  const mutex = createProjectMutex();
+  const server = createServer(config, logger, { backendClient, mutex });
 
   await server.start();
 
-  const backendClient = createBackendClient(config, logger);
   const heartbeat: HeartbeatHandle = startHeartbeatLoop(backendClient, logger, {
     agentVersion: AGENT_VERSION,
   });
@@ -50,9 +58,9 @@ async function bootstrap(): Promise<void> {
       backendBaseUrl: config.backendBaseUrl,
       tunnelPort: config.tunnelPort,
       allowedProjectRoots: config.allowedProjectRoots,
-      stage: 'sub-tarefa-3-outbound-heartbeat',
+      stage: 'sub-tarefa-4-run-claude-code',
     },
-    'scrumban-agent pronto (Sub-tarefa 3: heartbeat 30s + HTTP server + HMAC ativo)',
+    'scrumban-agent pronto (Sub-tarefa 4: RUN_CLAUDE_CODE handler ativo)',
   );
 
   // Graceful shutdown — para heartbeat ANTES do server (heartbeat usa fetch

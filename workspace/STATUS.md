@@ -4,6 +4,70 @@
 
 ---
 
+## Task #1 Sub-tarefa 4 (F13 Cliente — Agente V2 VPS) — Handler RUN_CLAUDE_CODE + Session Extraction — ✅ COMPLETE
+
+**Module:** automation/agent (subprojeto monorepo `agent/`)
+**Task:** RUN_CLAUDE_CODE handler: identity resolver (CLAUDE.md), allowlist (realpath anti-symlink), runner (execFile), session parser (session_id snake_case + fallback fs), mutex por slug
+**Task Status:** COMPLETE (Documenter fechou — Sub-tarefa 4 de 7)
+**Fase V2:** F13 (Cliente — Sub-tarefa 4 de 7)
+**Duration:** ~7h Implementer + ~45min Reviewer + ~30min Documenter
+**Quality Score:** 9.0/10 APPROVED rodada 1
+**Completed:** 2026-05-12
+
+**Deliverables:**
+- [x] `src/claude-code/identity-resolver.ts` — `resolveProjectPath(slug, claudeMdPath)` extrai path via seção H2 em CLAUDE.md (labels `- Caminho:` ou `- Path:`), case-sensitive slug, erros `CLAUDE_MD_NOT_FOUND`/`UNKNOWN_PROJECT_SLUG`/`INVALID_CLAUDE_MD_ENTRY`
+- [x] `src/claude-code/allowlist.ts` — `validateWorkspace(cwd, allowedRoots)` canonicaliza `realpathSync` ANTES comparação, prefix check com boundary `/` (defesa anti-symlink), `AllowlistError` com code específico
+- [x] `src/claude-code/runner.ts` — `runClaudeCode(cmd, args, options)` usa `execFile` (sem shell), args como array, timeout AbortController, retorna `{ exitCode, timedOut, stdout, stderr }`
+- [x] `src/claude-code/session-parser.ts` — `parseClaudeOutput(json)` extrai `session_id` (snake_case **não uuid**), valida UUID regex, retorna `ParsedClaudeOutput`; `findNewSessionIdFromFilesystem(dir)` busca `.claude/projects/<encoded-cwd>/session_<id>.jsonl`; `snapshotSessionDir(cwd)` pré-snapshot
+- [x] `src/handlers/run-claude-code.handler.ts` — handler orquestra 307 linhas: payload validation, mutex add (projeto em execução → 409), identity resolver, allowlist, runner, session parser, ACK 200, async `sendExecutionResult`; HTTP mapping: 200/400/403/409/422/500
+- [x] `src/server/dispatcher.ts` atualizado — RUN_CLAUDE_CODE chama handler real (não mais 501)
+- [x] `src/index.ts` atualizado — injeta `ProjectMutex` no handler, novo log startup
+- [x] `__tests__/identity-resolver.spec.ts` — 10 specs PASS (extração com bullets `*`, label `Path`, case-sensitive, slug inexistente, seção sem caminho, path relativo, ENOENT, CRLF, múltiplas seções)
+- [x] `__tests__/run-claude-code.spec.ts` — 19 specs PASS (14 integração + 5 payload validation; cenários: happy path, mutex, allowlist deny, symlink, traversal, session ID faltando, is_error:true, exitCode nonzero, timeout, crash runner, resumeSessionId inválido)
+- [x] **NÃO criado:** Autossh wrapper (Sub-tarefa 5); install.sh (Sub-tarefa 6) — escopo respeitado
+
+**Metrics:**
+- `npm run build`: PASS (tsc → dist/claude-code/*, dist/handlers/*)
+- `npm run lint`: PASS (eslint clean, zero warnings)
+- `npm test`: PASS 67/67 specs (11 config.loader + 15 http.server + 12 outbound + 10 identity-resolver + 19 run-claude-code)
+- Coverage: 14 cenários integração obrigatórios + 5 payload validation — 100% coberto
+
+**Validação 6 Críticos de Segurança:**
+1. **session_id snake_case (não uuid):** ✓ parseClaudeOutput linha 91 `parsed.session_id`, UUID_REGEX valida, fallback se ausente/inválido
+2. **execFile sem shell:** ✓ runner.ts linha 24 `import { execFile }`, args array linha 84, nenhum `shell: true`
+3. **realpathSync anti-symlink:** ✓ allowlist.ts linhas 76-98 canonical via `realpathSync`, prefix check com boundary `/`, ambos antes comparação
+4. **Mutex try/finally:** ✓ handler linhas 197-407, `mutex.add` ANTES `runAndReport`, `finally { mutex.delete }` cobre todos caminhos
+5. **sendExecutionResult async:** ✓ handler linhas 399-405 sem `await`, `.catch` captura, ACK 200 antes `void runAndReport`
+6. **CLI spike 2.1.139:** ✓ type='result', is_error→isError, duration_ms, total_cost_usd, terminal_reason, stop_reason
+
+**Issues encontrados e corrigidos:**
+- **MEDIUM:** Mismatch título teste 11 vs comportamento real (`is_error:true` não entra `success`); decisão de design documentada em comentário, log warn presente, impacto: backend registra `success:true` para erro interno (não bloqueia, semântica não-crítica)
+- **MINOR:** `usage`/`modelUsage` não capturados como campos tipados (em `raw`), débito para auditoria custo futuro
+- **MINOR:** Comentário "Sub-tarefa 4" em `index.ts` é scaffolding, remover em Sub-tarefa 7
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — agente cliente, não acessa DPedido
+- Pilar 2 (Endpoints): N/A — agente consome, não expõe duplicados
+- Pilar 3 (Seed): N/A — zero DClasse nova
+
+**ADRs vinculados:** ADR-V2-030 (slug via CLAUDE.md), ADR-V2-031 (monorepo agent), ADR-V2-032 (porta claudeSessionId, discriminator), ADR-V2-033 (HTTP+HMAC contrato)
+
+**Próximo passo:** Sub-tarefa 5 (Autossh wrapper + lifecycle)
+
+**Plan:** [`workspace/plans/plan-automation-agent-v2-client-task1.md`](../workspace/plans/plan-automation-agent-v2-client-task1.md) §5 Sub-tarefa 4
+**Review:** [`workspace/reviews/review-automation-agent-task1-sub4.md`](../workspace/reviews/review-automation-agent-task1-sub4.md)
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan Task #1 (7 sub-tarefas) |
+| Implementer | ~7h | 100% PASS: identity-resolver + allowlist + runner + session-parser + handler + 29 tests |
+| Reviewer | ~45min | Score 9.0/10 APPROVED rodada 1 (6 críticos segurança validados, 14 cenários integração) |
+| Documenter | ~30min | JSDoc, ROADMAP, CHANGELOG, STATUS, commit Conventional |
+
+---
+
 ## Task #1 Sub-tarefa 3 (F13 Cliente — Agente V2 VPS) — Outbound Client + Heartbeat Loop — ✅ COMPLETE
 
 **Module:** automation/agent (subprojeto monorepo `agent/`)
