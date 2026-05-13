@@ -224,3 +224,203 @@ describe('RemoteExecutionClient (V2 protocol)', () => {
     expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:22001/v1/execute', expect.anything());
   });
 });
+
+describe('RemoteExecutionClient.dispatch (generic)', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    global.fetch = originalFetch;
+  });
+
+  it('envia type generico (SET_ENV) com payload arbitrario e headers HMAC', async () => {
+    const { client, keyService } = buildClient();
+    const fetchMock = mockFetchOk({
+      accepted: true,
+      varsWritten: ['GITHUB_TOKEN'],
+      restartScheduled: true,
+    });
+
+    const result = await client.dispatch<
+      { vars: Record<string, string>; restartAfter: boolean },
+      { accepted: boolean; varsWritten: string[]; restartScheduled: boolean }
+    >(
+      'SET_ENV',
+      { vars: { GITHUB_TOKEN: 'ghp_xxx' }, restartAfter: true },
+      {
+        agent: {
+          agentId: '32',
+          tunnelPort: 20032,
+          agentCommandSecretEncrypted: 'encrypted-secret',
+        },
+        correlationId: 'corr-env-1',
+        executionId: 'exec-uuid-1',
+      },
+    );
+
+    expect(result).toEqual({
+      accepted: true,
+      varsWritten: ['GITHUB_TOKEN'],
+      restartScheduled: true,
+    });
+
+    expect(keyService.decryptCommandSecret).toHaveBeenCalledWith('encrypted-secret');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:20032/v1/execute',
+      expect.objectContaining({ method: 'POST' }),
+    );
+
+    const body = readBody(fetchMock);
+    expect(body.type).toBe('SET_ENV');
+    expect(body.vars).toEqual({ GITHUB_TOKEN: 'ghp_xxx' });
+    expect(body.restartAfter).toBe(true);
+    const metadata = body.metadata as Record<string, unknown>;
+    expect(metadata.correlationId).toBe('corr-env-1');
+    expect(typeof metadata.issuedAt).toBe('string');
+
+    const headers = readHeaders(fetchMock);
+    expect(headers['x-scrumban-agent-id']).toBe('32');
+    expect(headers['x-scrumban-execution-id']).toBe('exec-uuid-1');
+    expect(headers['x-scrumban-signature']).toMatch(/^hmac-sha256=[a-f0-9]{64}$/);
+  });
+
+  it('envia GENERATE_DEPLOY_KEY com projectSlug + comment', async () => {
+    const { client } = buildClient();
+    const fetchMock = mockFetchOk({
+      accepted: true,
+      publicKey: 'ssh-ed25519 AAAA... scrumban-agent@my-slug',
+      fingerprint: 'SHA256:abcd',
+      alreadyExisted: false,
+    });
+
+    const result = await client.dispatch<
+      { projectSlug: string; comment: string },
+      { accepted: boolean; publicKey: string; fingerprint: string; alreadyExisted: boolean }
+    >(
+      'GENERATE_DEPLOY_KEY',
+      { projectSlug: 'my-slug', comment: 'scrumban-agent@my-slug' },
+      {
+        agent: {
+          agentId: '32',
+          tunnelPort: 20032,
+          agentCommandSecretEncrypted: 'encrypted',
+        },
+        correlationId: 'corr-dk-1',
+      },
+    );
+
+    expect(result.publicKey).toContain('ssh-ed25519');
+    expect(result.fingerprint).toBe('SHA256:abcd');
+
+    const body = readBody(fetchMock);
+    expect(body.type).toBe('GENERATE_DEPLOY_KEY');
+    expect(body.projectSlug).toBe('my-slug');
+    expect(body.comment).toBe('scrumban-agent@my-slug');
+  });
+
+  it('correlationId/executionId opcionais — gera UUID quando omitidos', async () => {
+    const { client } = buildClient();
+    const fetchMock = mockFetchOk({ accepted: true });
+
+    await client.dispatch<{ vars: Record<string, string>; restartAfter: boolean }, unknown>(
+      'SET_ENV',
+      { vars: { GIT_BOT_NAME: 'Bot' }, restartAfter: false },
+      {
+        agent: {
+          agentId: '32',
+          tunnelPort: 20032,
+          agentCommandSecretEncrypted: 'encrypted',
+        },
+      },
+    );
+
+    const body = readBody(fetchMock);
+    const metadata = body.metadata as Record<string, unknown>;
+    expect(typeof metadata.correlationId).toBe('string');
+    expect((metadata.correlationId as string).length).toBeGreaterThan(0);
+
+    const headers = readHeaders(fetchMock);
+    expect(typeof headers['x-scrumban-execution-id']).toBe('string');
+    expect(headers['x-scrumban-execution-id'].length).toBeGreaterThan(0);
+  });
+
+  it('lanca ServiceUnavailableException quando agente retorna HTTP nao-2xx', async () => {
+    const { client } = buildClient();
+    mockFetchError(500, { errorCode: 'INTERNAL_ERROR' });
+
+    await expect(
+      client.dispatch(
+        'SET_ENV',
+        { vars: {}, restartAfter: false },
+        {
+          agent: {
+            agentId: '32',
+            tunnelPort: 20032,
+            agentCommandSecretEncrypted: 'enc',
+          },
+        },
+      ),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
+  it('lanca ServiceUnavailableException quando body JSON invalido', async () => {
+    const { client } = buildClient();
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new Error('invalid JSON');
+      },
+    } as FetchMockResponse) as unknown as FetchMock;
+    global.fetch = fetchMock as unknown as typeof global.fetch;
+
+    await expect(
+      client.dispatch(
+        'SET_ENV',
+        { vars: {}, restartAfter: false },
+        {
+          agent: {
+            agentId: '32',
+            tunnelPort: 20032,
+            agentCommandSecretEncrypted: 'enc',
+          },
+        },
+      ),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
+  it('lanca ServiceUnavailableException quando network falha', async () => {
+    const { client } = buildClient();
+    const fetchMock = jest
+      .fn()
+      .mockRejectedValue(new Error('ECONNREFUSED')) as unknown as FetchMock;
+    global.fetch = fetchMock as unknown as typeof global.fetch;
+
+    await expect(
+      client.dispatch(
+        'SET_ENV',
+        { vars: {}, restartAfter: false },
+        {
+          agent: {
+            agentId: '32',
+            tunnelPort: 20032,
+            agentCommandSecretEncrypted: 'enc',
+          },
+        },
+      ),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
+  it('REGRESSAO: execute() ainda funciona apos refactor (back-compat)', async () => {
+    const { client } = buildClient();
+    const fetchMock = mockFetchOk({ accepted: true, executionId: '10' });
+
+    const result = await client.execute(baseRequest());
+
+    expect(result).toEqual({ accepted: true, executionId: '10' });
+    const body = readBody(fetchMock);
+    expect(body.type).toBe('RUN_CLAUDE_CODE');
+    expect(body.prompt).toBe('refatore o servico X');
+  });
+});

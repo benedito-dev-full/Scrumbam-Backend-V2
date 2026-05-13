@@ -464,6 +464,91 @@ else
 fi
 
 # ────────────────────────────────────────────────
+# 9c. Sudoers entry — escopo MÍNIMO (plan-2026-05-13 §10.1, ADR-V2-041)
+# ────────────────────────────────────────────────
+# Permite ao user scrumban-agent rodar EXATAMENTE 1 comando como root:
+#   sudo /bin/systemctl restart scrumban-agent
+# Necessário para o handler SET_ENV reiniciar o próprio serviço após
+# reescrever /etc/scrumban-agent/environment.
+#
+# Segurança:
+#   - SEM wildcards.
+#   - SEM ALL=ALL.
+#   - Path absoluto `/bin/systemctl` (ou `/usr/bin/systemctl` se necessário).
+#   - Comando único — qualquer outra invocação sudo cai no padrão (senha).
+#   - Validação via `visudo -c` ANTES de ativar — sintaxe inválida não
+#     brick o sudo geral.
+SUDOERS_FILE="/etc/sudoers.d/${SERVICE_NAME}"
+SUDOERS_FILE_NEW="${SUDOERS_FILE}.new"
+
+log "configurando sudoers entry (escopo minimo)..."
+# Detecta path real do systemctl. Em Ubuntu/Debian moderno é /usr/bin/systemctl
+# com symlink em /bin/systemctl. Resolvemos para o canônico para evitar
+# inconsistência entre distros.
+SYSTEMCTL_PATH="$(command -v systemctl 2>/dev/null || echo /bin/systemctl)"
+SUDOERS_RULE="${SERVICE_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_PATH} restart ${SERVICE_NAME}"
+
+if [[ "${DRY_RUN}" -eq 0 ]]; then
+  echo "${SUDOERS_RULE}" > "${SUDOERS_FILE_NEW}"
+  chmod 0440 "${SUDOERS_FILE_NEW}"
+  # Validação obrigatória: visudo -c rejeita sintaxe inválida.
+  if visudo -cf "${SUDOERS_FILE_NEW}" >/dev/null; then
+    mv "${SUDOERS_FILE_NEW}" "${SUDOERS_FILE}"
+    ok "sudoers entry criada: ${SUDOERS_FILE}"
+  else
+    rm -f "${SUDOERS_FILE_NEW}"
+    err "sintaxe sudoers invalida — entry NAO ativada (sudo geral intacto)"
+    exit 1
+  fi
+else
+  printf '\033[0;35m[dry-run]\033[0m criaria %s com:\n  %s\n' \
+    "${SUDOERS_FILE}" "${SUDOERS_RULE}"
+  printf '\033[0;35m[dry-run]\033[0m validaria com visudo -c antes de ativar\n'
+fi
+
+# ────────────────────────────────────────────────
+# 9d. Gitconfig placeholder do user scrumban-agent (plan §5 Fase 3.2)
+# ────────────────────────────────────────────────
+# Cria ~scrumban-agent/.gitconfig com defaults SE NÃO existir. Idempotente.
+# Necessário para o `claude -p` (que herda o ambiente do agent) conseguir
+# fazer `git commit` em projetos onde abrir PR depois (PR automático =
+# próxima task, fora deste escopo). Override editável via PUT /agents/:id/git-bot.
+GITCONFIG_PATH="${STATE_DIR}/.gitconfig"
+log "preparando gitconfig placeholder em ${GITCONFIG_PATH}..."
+if [[ "${DRY_RUN}" -eq 0 && ! -f "${GITCONFIG_PATH}" ]]; then
+  cat > "${GITCONFIG_PATH}" <<'GITEOF'
+# /var/lib/scrumban-agent/.gitconfig
+#
+# Defaults do bot Git do scrumban-agent. Override via PUT /agents/:id/git-bot.
+[user]
+  name = Scrumban Bot
+  email = bot@scrumban.app
+[core]
+  editor = true
+[commit]
+  gpgsign = false
+GITEOF
+  chown "${SERVICE_USER}:${SERVICE_USER}" "${GITCONFIG_PATH}"
+  chmod 0644 "${GITCONFIG_PATH}"
+  ok "gitconfig placeholder criado"
+elif [[ "${DRY_RUN}" -eq 0 && -f "${GITCONFIG_PATH}" ]]; then
+  ok "${GITCONFIG_PATH} ja existe — preservado (idempotente)"
+else
+  printf '\033[0;35m[dry-run]\033[0m criaria gitconfig placeholder em %s (se ausente)\n' \
+    "${GITCONFIG_PATH}"
+fi
+
+# ────────────────────────────────────────────────
+# 9e. Diretório de deploy keys SSH per-projectSlug (plan §5 Fase 3.3)
+# ────────────────────────────────────────────────
+# Onde o handler GENERATE_DEPLOY_KEY persiste pares ed25519:
+#   /etc/scrumban-agent/ssh-keys/<slug>      (priv, 0600)
+#   /etc/scrumban-agent/ssh-keys/<slug>.pub  (pub,  0644)
+SSH_KEYS_DIR="${CONFIG_DIR}/ssh-keys"
+log "preparando ${SSH_KEYS_DIR}..."
+run "install -d -o ${SERVICE_USER} -g ${SERVICE_USER} -m 0700 ${SSH_KEYS_DIR}"
+
+# ────────────────────────────────────────────────
 # 10. systemd unit
 # ────────────────────────────────────────────────
 log "instalando systemd unit..."

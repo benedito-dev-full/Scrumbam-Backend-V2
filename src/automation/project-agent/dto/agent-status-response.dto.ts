@@ -26,7 +26,11 @@ export class ProjectAgentStatusItemDto {
   @ApiPropertyOptional({ description: 'Versao do Claude Code reportada no heartbeat' })
   claudeVersion?: string | null;
 
-  @ApiProperty({ description: 'Porta local do tunnel reverso no backend', example: 20000, nullable: true })
+  @ApiProperty({
+    description: 'Porta local do tunnel reverso no backend',
+    example: 20000,
+    nullable: true,
+  })
   tunnelPort!: number | null;
 
   @ApiProperty({ description: 'Resultado do probe TCP em 127.0.0.1:tunnelPort' })
@@ -37,6 +41,19 @@ export class ProjectAgentStatusItemDto {
 
   @ApiPropertyOptional({ description: 'Codigo de erro do probe quando indisponivel' })
   tunnelError?: string;
+
+  /**
+   * Slug canonico do projeto (persistido em DVincula -185 metaDados.projectSlug).
+   * Auto-derivado de project.nome no `linkAgent`. Usado pelo agente para resolver
+   * o path local via `~/.claude/CLAUDE.md` (ADR-V2-035) e para nomear a deploy
+   * key SSH (`/etc/scrumban-agent/ssh-keys/<slug>`).
+   */
+  @ApiPropertyOptional({
+    description: 'Slug canonico do projeto (DVincula metaDados.projectSlug)',
+    example: 'dinpayz-backend',
+    nullable: true,
+  })
+  projectSlug?: string | null;
 }
 
 export class ProjectAgentStatusResponseDto {
