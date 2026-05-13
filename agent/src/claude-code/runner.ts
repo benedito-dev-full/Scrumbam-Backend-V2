@@ -81,7 +81,22 @@ export async function runClaudeCode(input: RunnerInput): Promise<RunnerResult> {
     input.timeoutSec && input.timeoutSec > 0 ? input.timeoutSec : DEFAULT_TIMEOUT_SEC;
   const execFn = input.execFileImpl ?? execFile;
 
-  const args: string[] = ['-p', input.prompt, '--output-format', 'json'];
+  // `--dangerously-skip-permissions`:
+  //   No modo `-p` (headless/non-interactive), o Claude Code recusa Edit/Write
+  //   por padrao porque nao tem como pedir confirmacao ao usuario. Em
+  //   contexto de automation remota disparada pela UI, o usuario JA aprovou
+  //   ao clicar "Executar" (e Risk Gate ja classificou + Approval Flow ja
+  //   filtrou HIGH risk). Sem esta flag, todo run-claude-code termina em
+  //   "permission denied" e working tree fica limpo (claude apenas planeja
+  //   sem aplicar). Container do agent roda como `scrumban-agent` (sem root)
+  //   dentro de allowedProjectRoots — blast radius contido.
+  const args: string[] = [
+    '-p',
+    input.prompt,
+    '--output-format',
+    'json',
+    '--dangerously-skip-permissions',
+  ];
   if (input.resumeSessionId && input.resumeSessionId.length > 0) {
     args.push('--resume', input.resumeSessionId);
   }
