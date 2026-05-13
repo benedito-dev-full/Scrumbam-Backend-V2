@@ -154,6 +154,53 @@ Plano `plan-automation-agent-multi-project-task4.md`. Sub-tarefas 4.1+4.2 (absor
 
 ---
 
+## 🎯 Task 1 (F13 Backend) — Alinhamento HMAC agent ↔ backend — ✅ COMPLETA
+
+**Plano:** `plan-automation-backend-hmac-alignment-task1.md`
+**Implementer aprovado:** 2026-05-13 (Score 8.8/10)
+**Reviewer aprovado:** 2026-05-13 (Score 8.8/10)
+
+### ✅ Implementação Completa
+
+**Módulo:** automation/agents (`src/automation/agents/` + `agent/`)
+**Fase V2:** F13 (Automation Backend — correção de protocolo HMAC)
+**Build:** `make build` PASS
+**Tests:** 13/13 specs guard + 84/84 specs agent total PASS
+
+**O Que Foi Feito:**
+
+**Backend (reescrita inbound auth):**
+- ✅ `src/main.ts` — preserva `rawBody` via `express.json({ verify })` para HMAC do body
+- ✅ `src/automation/agents/dto/heartbeat.dto.ts` — amplia DTO (CPU, mem, uptime, claudeCodeAvailable, tunnelHealthy)
+- ✅ `src/automation/agents/agents.service.ts` — persiste novos campos em `dEntidade.dados`
+- ✅ `src/automation/agents/guards/agent-auth.guard.ts` — reescrita completa para validar HMAC-SHA256 (headers `x-scrumban-*`, canonical idêntico, timingSafeEqual, normalização path `/api/v\d+`, códigos erro estruturados)
+- ✅ `src/automation/agents/__tests__/agent-auth.guard.spec.ts` — 13 specs (12 obrigatórios + 1 extra R1 path normalization)
+
+**Agent (revert protocolo simplificado):**
+- ✅ `agent/src/outbound/hmac-sign.ts` — restaura headers `x-scrumban-*`, implementa HMAC de body, atualiza JSDoc
+- ✅ `agent/src/outbound/backend-client.ts` — remove `agentApiKey` da chamada
+- ✅ `agent/__tests__/` — atualiza specs (bindHost, URLs com `/api/v1`)
+
+**Decisões Tomadas:**
+- Path canônico normalizado: `^\/api\/v\d+` stripado para casar com agent que assina path relativo (`/agents/32/heartbeat`)
+- HMAC validado com `timingSafeEqual` (não `==`) — defesa contra timing attacks
+- `apiKeyHash` preservado como legado; candidato a remoção em ADR-V2-041
+
+**Pilares:**
+- Pilar 1 (Engine): N/A (autenticação, não transacional)
+- Pilar 2 (Endpoints): N/A (endpoint específico /agents/:id/*, não genérico)
+- Pilar 3 (Seed): N/A (zero DClasses novas)
+
+**ADRs:**
+- ✅ **ADR-V2-040 (NOVO):** HMAC bilateral agent ↔ backend (status: Aceito). Completa ADR-V2-033.
+- ADR-V2-033 (contrato HTTP+HMAC): Completada
+- ADR-V2-035/036/037 (agent): Não tocadas
+
+**Quality Score:** 8.8/10 APPROVED
+**Status:** ✅ COMPLETA — Pronto para deploy via Dokploy + validação canária agent argus (agentId=32)
+
+---
+
 ## 🎯 MARCO: TASK #1 COMPLETO — Agente Cliente V2 (F13 Cliente)
 
 Plano `plan-automation-agent-v2-client-task1.md` finalizado **2026-05-12**.

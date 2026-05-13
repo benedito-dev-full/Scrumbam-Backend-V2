@@ -185,6 +185,7 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 | Task#2 sub4 | automation-backend-side | F13 | **8.8** | **APPROVED** | Pilar 1 inviolado; isolation dupla camada; zero vazamento sessionPath; decisão -496 reutilização pragmática; 11/11 specs |
 | Task#1 sub2 | automation-agent (cliente VPS) | F13 | **9.2** | **APPROVED** | 5 críticos de segurança OK; HMAC byte-a-byte; bind 127.0.0.1 hardcoded; nonce pós-HMAC; 26/26 specs; zero scope creep |
 | Task#1 sub4 | automation-agent (cliente VPS) | F13 | **9.0** | **APPROVED** | 6 críticos segurança OK; session_id snake_case; execFile sem shell; realpathSync+prefix check; mutex try/finally; ACK async+.catch; 67/67 specs; M1: is_error não entra no success |
+| Task#1 (hmac-alignment) | automation-hmac-guard | F13 | **8.8** | **APPROVED** | timingSafeEqual OK; rawBody ok; secret nunca vaza; 13/13 specs; M1: regex /api/v\d+ fragil se API_PREFIX não for padrão; M2: sem spec para decryptCommandSecret que lança |
 
 ## PADRÕES APRENDIDOS F13 TASK1 SUB4 (Agente V2 — RUN_CLAUDE_CODE + session extraction)
 
@@ -196,6 +197,15 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 - **`is_error:true` no output JSON do Claude Code não entra automaticamente no campo `success`**: a lógica `success = exitCode === 0 && parsedSuccess && !timedOut` não considera `isError`. Isso é decisão de design aceitável para MVP (log de warn presente, comportamento detectável), mas gera débito semântico: o backend pode registrar `success:true` em execuções que o Claude Code reportou como erro. Verificar se a intenção foi explicitamente documentada — se ausente, pontuar como M1.
 - **Teste com título prometendo comportamento que o assert não verifica**: quando um teste diz "X → Y" no título mas o assert não verifica Y explicitamente (apenas um comportamento diferente relacionado), é MEDIUM — não CRITICAL. Não bloqueia aprovação se o comportamento documentado em comentário é razoável para MVP, mas registrar como débito de qualidade.
 - **Slug sanitização como defesa em profundidade contra injection em parsers de texto**: `projectSlug` deve ser validado com regex estrita (`/^[a-zA-Z0-9._-]+$/`) ANTES de ser usado para buscar seção em arquivo de texto. Sem essa sanitização, um slug como `## evil\n- Caminho: /etc` poderia manipular o parser line-by-line. Verificar presença no `validatePayload`.
+
+## PADRÕES APRENDIDOS F13 TASK hmac-alignment (AgentAuthGuard rewrite)
+
+- **`timingSafeEqual` com guarda de comprimento dupla**: verificar `providedBuf.length !== expectedBuf.length || providedBuf.length === 0` ANTES de `timingSafeEqual`. Sem o `length === 0`, um buffer vazio casado com outro vazio poderia passar (timingSafeEqual retorna true para buffers vazios iguais). Padrão correto: ambas as guards presentes.
+- **Regex `/^\/api\/v\d+/` para strip de prefix é funcional mas frágil**: casa com `/api/v1foo/agents/...` e produz `foo/agents/...` (path inválido). Na prática seguro enquanto `API_PREFIX = 'api/v1'` (default hardcoded e o único usado), mas se `API_PREFIX` for configurado como `api/v2beta`, o guard quebraria. Registrar como M1 (risco teórico, não bloqueante).
+- **Spec de "decifragem falha" é bom-ter mas não está nos 12 obrigatórios**: o plano de review listou este cenário como ponto crítico, mas o plano de implementação listou apenas 12 cenários sem este. O guard TEM o try/catch correto com `deny()`. Ausência do spec é M2 (cobertura parcial mas fluxo funciona). Não bloqueia aprovação.
+- **`bodyParser: false` + `express.json({ verify })` é o padrão correto para HMAC do body**: sem `verify`, o rawBody não fica disponível e o guard seria forçado a usar `JSON.stringify(req.body)` — que reordena campos e invalida qualquer HMAC. Verificar sempre que guard usa `req.rawBody` e NÃO `JSON.stringify(req.body)`.
+- **Spec cobrindo path normalização (R1) como cenário extra é boa prática**: quando há risco documentado (R1 do plano), ter spec explícito de happy path COM prefix e SEM prefix prova o comportamento em ambos os casos. Adicionar ao checklist de review para F13.
+- **Ordem de validações do guard importa por custo**: headers cheap → timestamp cheap → nonce Redis (medium) → agentId match cheap → load DB + decrypt (caro). Desvio desta ordem = MAJOR se decrypt vem antes do nonce (permite flood de decifragens via replay).
 
 ## PADRÕES APRENDIDOS F7
 

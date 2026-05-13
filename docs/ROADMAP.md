@@ -2313,6 +2313,74 @@ SMTP_PASS=...
 
 ---
 
+### Task #2: Cancelamento/Revogação de Convites Pendentes — ✅ COMPLETA
+
+**Status:** Completo  
+**Módulo V2:** invites (refinamento ADR-V2-028)  
+**Fase V2:** Pós-F8 (transversal — refinamento ADR-V2-028)  
+**Tempo Real:** ~1.5h Implementer + ~0.5h Reviewer + ~30min Documenter  
+**Completado em:** 2026-05-13  
+**Quality Score:** 8.5/10 APPROVED  
+
+**O Que Foi Feito:**
+
+- **Endpoint Novo:**
+  - `DELETE /organizations/:orgId/invites/:inviteId` — JWT + ADMIN, hard delete com audit trail
+
+- **Service `InvitesService.cancelInvite()`:**
+  - 3 queries paralelas (org, requesterVincula ADMIN, invite)
+  - Validações: 404 genérico (anti-enumeração), 403 RBAC, 409 se já ACCEPTED
+  - **Emite DEvento ANTES de deletar** (ordem invertida intencional — Risco #1 do plano, mitigado)
+  - Hard delete via `prisma.dTabela.delete()` (seguro: sem FK vivo em DVincula)
+  - Idempotente para status EXPIRED (emite com flag `previousStatus: 'EXPIRED'`)
+  - Race condition revoke-vs-accept documentada (rara em produção, 2+ dias sem aceite)
+
+- **Controller Handler `cancel()`:**
+  - Rate limit 10/min/ip (mais permissivo que create de 3/min — limpeza é menos sensível a abuso)
+  - Swagger completo com @ApiResponse para todos os status codes
+  - JSDoc atualizado (Crítica M1 Reviewer: tabela now 5 endpoints)
+
+- **DTOs:**
+  - Response: `{ id: string; revokedAt: string }`
+
+- **Testes:**
+  - 8 unit tests em `invites.service.spec.ts` (happy path, 403, 404 org, 404 invite, 404 outra org, 409 ACCEPTED, idempotente EXPIRED, race P2025)
+  - 4 integration tests em `invites.controller.spec.ts` (200 OK, 403, 404, 409)
+  - 32/32 specs PASS
+  - 4 testes preexistentes destravados (`.overrideGuard(ThrottlerGuard)` colateral bug fix)
+
+- **Audit Trail (DEvento -502):**
+  - Evento `invite.revoked` registrado ANTES do hard delete
+  - Payload: inviteId, orgId, email, role, actorUserId, revokedAt, previousStatus
+
+- **Seed:**
+  - ZERO DClasses novas — reutiliza idClasse -502 INVITE_LIFECYCLE (existente)
+
+**Smoke test integrado (verde):**
+- `npm run build` PASS
+- `npm run lint` PASS (max-warnings 0)
+- `npm run test -- invites` PASS (32 specs, 100% verde)
+- ZERO N+1 queries (3 paralelas + 1 delete)
+- BigInt serializado como string
+- Hard delete seguro (sem FK constraints violadas)
+
+**Pilares aplicados:**
+- Pilar 1: N/A — tabela estrutural, Prisma direto
+- Pilar 2: REUTILIZADO — adiciona handler ao InvitesController existente (5 endpoints totais)
+- Pilar 3: RESPEITADO — ZERO DClasses novas (reuso -502)
+
+**Dívidas Técnicas Resolvidas:**
+- ✅ `DELETE /invites/:id` implementado (era débito de Task #1)
+- Próximo (future): webhook notificação à org de revogação
+
+**ADRs vinculados:** ADR-V2-001 (ZERO tabela nova), ADR-V2-003 (RBAC duplo), ADR-V2-008 (DEvento audit), ADR-V2-028 (Invites — cancellation é extensão)
+
+**Plan:** [`workspace/plans/plan-invites-cancel-pending-invite-taskCancelInvite.md`](../workspace/plans/plan-invites-cancel-pending-invite-taskCancelInvite.md)  
+**Review:** APPROVED 8.5/10  
+**Documentation:** JSDoc 100%, CHANGELOG + ROADMAP + STATUS atualizados  
+
+---
+
 ## Proximas fases (preview)
 
 | Fase | Nome | Pilar dominante |
