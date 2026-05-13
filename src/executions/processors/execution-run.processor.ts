@@ -198,19 +198,44 @@ export class ExecutionRunProcessor extends WorkerHost {
   }
 
   /**
-   * Extrai prompt do usuario de `DPedido.dados.prompt` (canonico V2).
+   * Extrai prompt do usuario.
    *
-   * Falha barulhento se ausente — sem backward-compat com `command.text`
-   * (modelo legado removido pelo plan-task2 §3 Sub-tarefa 2.2). Jobs antigos
-   * de BullMQ ja falhariam antes em `resolveProjectSlug()` por ausencia de
-   * `DProject.dados.slug`, entao o fallback seria inutil de qualquer forma.
+   * Preferencia: `DPedido.dados.prompt` (canonico V2).
+   *
+   * Fallback: `DPedido.dados.command.args` apos o flag `-p` (formato legado
+   * gerado pelo `ExecutionsService.execute` quando recebe `ExecuteCommandDto`
+   * com `command.args: ["-p", "<prompt>", ...]`). O fallback existe porque
+   * a sub-tarefa 2.2 (plan-automation-backend-side-task2) removeu o uso de
+   * `command.text` no consumer, mas a sub-tarefa correspondente que
+   * atualizaria o producer para popular `dados.prompt` diretamente nao foi
+   * realizada — esta camada ponte deixa producer atual e consumer V2
+   * conviverem ate o backfill canonico ser implementado.
+   *
+   * Falha barulhento se nenhum dos dois caminhos resolver — execucao sem
+   * prompt nao tem como rodar.
    */
   private resolvePrompt(dados: Record<string, unknown>): string {
-    const prompt = this.asString(dados.prompt);
-    if (!prompt) {
-      throw new Error('DPedido.dados.prompt ausente — prompt obrigatorio no protocolo V2');
+    const direct = this.asString(dados.prompt);
+    if (direct) return direct;
+
+    const command = this.asRecord(dados.command);
+    const args = Array.isArray(command?.args) ? (command!.args as unknown[]) : null;
+    if (args) {
+      // Procura o primeiro `-p` ou `--print` e pega o token seguinte.
+      for (let i = 0; i < args.length - 1; i++) {
+        const flag = args[i];
+        if (flag === '-p' || flag === '--print') {
+          const next = args[i + 1];
+          if (typeof next === 'string' && next.trim().length > 0) {
+            return next;
+          }
+        }
+      }
     }
-    return prompt;
+
+    throw new Error(
+      'DPedido.dados.prompt ausente — protocolo V2 espera `dados.prompt` (canonico) ou `dados.command.args` no formato `["-p", "<prompt>"]` (legado, deprecated).',
+    );
   }
 
   /**
