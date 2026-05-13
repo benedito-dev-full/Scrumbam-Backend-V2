@@ -258,6 +258,9 @@ export class ProjectAgentLinkService {
         .filter((link) => link.entidade)
         .map(async (link) => {
           const dados = (link.entidade!.dados as Record<string, unknown> | null) ?? {};
+          const meta = (link.metaDados as Record<string, unknown> | null) ?? {};
+          const projectSlug =
+            typeof meta.projectSlug === 'string' ? (meta.projectSlug as string) : null;
           const tunnelPort = this.parseTunnelPort(dados.tunnelPort);
           const probe = await this.agentTunnelService.probe(tunnelPort);
 
@@ -273,6 +276,7 @@ export class ProjectAgentLinkService {
             tunnelPort,
             tunnelOk: probe.tunnelOk,
             tunnelLatencyMs: probe.latencyMs,
+            projectSlug,
             ...(probe.error ? { tunnelError: probe.error } : {}),
           };
         }),

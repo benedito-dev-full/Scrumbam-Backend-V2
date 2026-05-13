@@ -180,10 +180,16 @@ export class AgentEnvService {
       { source: AgentEnvService.name },
     );
 
+    const gitBotName =
+      typeof agent.dados.gitBotName === 'string' ? (agent.dados.gitBotName as string) : null;
+    const gitBotEmail =
+      typeof agent.dados.gitBotEmail === 'string' ? (agent.dados.gitBotEmail as string) : null;
     return {
       hasGithubToken: nextStatus.hasGithubToken,
       hasAnthropicKey: nextStatus.hasAnthropicKey,
       lastEnvUpdatedAt: nextStatus.lastEnvUpdatedAt,
+      gitBotName,
+      gitBotEmail,
     };
   }
 
@@ -197,10 +203,16 @@ export class AgentEnvService {
   async getEnvStatus(agentId: bigint, _userId: bigint): Promise<EnvStatusResponseDto> {
     const agent = await this.findAgentOrThrow(agentId);
     const status = this.parseEnvStatus(agent.dados);
+    const gitBotName =
+      typeof agent.dados.gitBotName === 'string' ? (agent.dados.gitBotName as string) : null;
+    const gitBotEmail =
+      typeof agent.dados.gitBotEmail === 'string' ? (agent.dados.gitBotEmail as string) : null;
     return {
       hasGithubToken: status.hasGithubToken,
       hasAnthropicKey: status.hasAnthropicKey,
       lastEnvUpdatedAt: status.lastEnvUpdatedAt,
+      gitBotName,
+      gitBotEmail,
     };
   }
 

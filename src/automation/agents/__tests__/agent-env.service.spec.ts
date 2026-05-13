@@ -357,6 +357,8 @@ describe('AgentEnvService.getEnvStatus', () => {
       hasGithubToken: true,
       hasAnthropicKey: false,
       lastEnvUpdatedAt: '2026-05-13T18:00:00Z',
+      gitBotName: null,
+      gitBotEmail: null,
     });
     expect(remoteClient.dispatch).not.toHaveBeenCalled();
   });
@@ -378,7 +380,31 @@ describe('AgentEnvService.getEnvStatus', () => {
       hasGithubToken: false,
       hasAnthropicKey: false,
       lastEnvUpdatedAt: null,
+      gitBotName: null,
+      gitBotEmail: null,
     });
+  });
+
+  it('retorna gitBotName/Email quando configurados em dados', async () => {
+    const prisma = buildPrismaMock();
+    prisma.dEntidade.findFirst.mockResolvedValue(
+      baseAgent(PROJECT_ID, {
+        gitBotName: 'Custom Bot',
+        gitBotEmail: 'custom@scrumban.app',
+      }),
+    );
+
+    const service = buildService({
+      prisma,
+      remoteClient: { dispatch: jest.fn() },
+      eventProducer: { addInternalEvent: jest.fn() },
+      roleResolver: { getProjectRole: jest.fn(), getOrgRole: jest.fn() },
+    });
+
+    const result = await service.getEnvStatus(AGENT_ID, USER_ID);
+
+    expect(result.gitBotName).toBe('Custom Bot');
+    expect(result.gitBotEmail).toBe('custom@scrumban.app');
   });
 
   it('404 quando agente nao existe', async () => {

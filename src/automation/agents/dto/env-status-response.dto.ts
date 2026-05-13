@@ -49,4 +49,28 @@ export class EnvStatusResponseDto {
     nullable: true,
   })
   lastEnvUpdatedAt!: string | null;
+
+  /**
+   * Nome configurado do bot Git (DEntidade -156 dados.gitBotName).
+   * Plaintext porque NAO e sensivel (publico em `git log`).
+   * `null` se nunca foi configurado via `PUT /agents/:id/git-bot`.
+   */
+  @ApiPropertyOptional({
+    description: 'Nome atual do bot Git (null se nunca configurado)',
+    example: 'Scrumban Bot',
+    nullable: true,
+  })
+  gitBotName!: string | null;
+
+  /**
+   * Email configurado do bot Git (DEntidade -156 dados.gitBotEmail).
+   * Plaintext porque NAO e sensivel (publico em `git log`).
+   * `null` se nunca foi configurado.
+   */
+  @ApiPropertyOptional({
+    description: 'Email atual do bot Git (null se nunca configurado)',
+    example: 'bot@scrumban.app',
+    nullable: true,
+  })
+  gitBotEmail!: string | null;
 }
