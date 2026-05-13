@@ -25,17 +25,18 @@ import { CurrentUser, JwtPayload } from '../auth/decorators/current-user.decorat
 /**
  * Controller de convites por email (ADR-V2-028).
  *
- * Tres endpoints com niveis de auth distintos:
+ * Cinco endpoints com niveis de auth distintos:
  *
- * | Endpoint                                  | Auth                          | Rate limit  |
- * |-------------------------------------------|-------------------------------|-------------|
- * | POST /organizations/:orgId/invites        | JWT + ADMIN da org (service)  | 3/min/ip    |
- * | GET  /invites/:token                      | Publico                       | -           |
- * | POST /invites/:token/accept               | Publico                       | -           |
+ * | Endpoint                                     | Auth                          | Rate limit  |
+ * |----------------------------------------------|-------------------------------|-------------|
+ * | POST /organizations/:orgId/invites           | JWT + ADMIN da org (service)  | 3/min/ip    |
+ * | GET  /organizations/:orgId/invites           | JWT + ADMIN da org (service)  | -           |
+ * | DELETE /organizations/:orgId/invites/:inviteId | JWT + ADMIN da org (service) | 10/min/ip   |
+ * | GET  /invites/:token                         | Publico                       | -           |
+ * | POST /invites/:token/accept                  | Publico                       | -           |
  *
- * Anti-enumeracao: GET e POST/accept retornam 404 identico para
- * token invalido/expirado/usado. NUNCA revelam motivo especifico para
- * chamador nao autenticado.
+ * Anti-enumeracao: GET /invites/:token e POST /invites/:token/accept retornam 404 identico
+ * para token invalido/expirado/usado. NUNCA revelam motivo especifico para chamador nao autenticado.
  *
  * O token raw NUNCA aparece em logs — somente o hash ou o inviteId.
  */
