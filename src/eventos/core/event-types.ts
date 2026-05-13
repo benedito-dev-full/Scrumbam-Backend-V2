@@ -93,6 +93,16 @@ export const EVENT_TYPES = {
   // administrativos de agente", consistente com agent.registered/online/offline).
   AGENT_PROJECT_LINKED: 'agent.project.linked',
   AGENT_PROJECT_UNLINKED: 'agent.project.unlinked',
+  // ============== VPS CONFIG VIA FRONTEND (Task 2026-05-13) ==============
+  // Emitidos quando ADMIN da org reescreve env vars (PAT/ANTHROPIC_KEY) ou git bot
+  // no agente via PUT /agents/:id/env|git-bot, e quando MANAGER projeto gera/revoga
+  // deploy key SSH per-repo. Persistem em DEvento idClasse=-496 (reuso semantico
+  // EXECUTION_LOG_EVENT como categoria "audit administrativo do agente/projeto").
+  // ADR-V2-041 (env management), ADR-V2-042 (deploy key automation pull-only).
+  AGENT_ENV_UPDATED: 'agent.env.updated',
+  AGENT_GITBOT_UPDATED: 'agent.gitbot.updated',
+  PROJECT_DEPLOY_KEY_GENERATED: 'project.deploy-key.generated',
+  PROJECT_DEPLOY_KEY_REVOKED: 'project.deploy-key.revoked',
   WEBHOOK_ATTEMPTED: 'webhook.attempted',
   WEBHOOK_AUTO_DISABLED: 'webhook.auto_disabled',
   MCP_CALL: 'mcp.call',

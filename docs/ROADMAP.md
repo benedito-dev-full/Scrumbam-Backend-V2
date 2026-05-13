@@ -2381,6 +2381,106 @@ SMTP_PASS=...
 
 ---
 
+### Task #3: Configuração VPS de Agente via Frontend (Env + Deploy Key) — ✅ FASE 4/5 COMPLETA
+
+**Status:** Fase 4/5 Completa (Backend: env management + deploy-key automation)  
+**Módulo V2:** automation/agents + automation/project-agent  
+**Fase V2:** F13 (Automation — Backend: credential + SSH key management)  
+**Tempo Real:** ~3h Implementer (F4) + ~1h Reviewer + ~30min Documenter  
+**Completado em:** 2026-05-13  
+**Quality Score:** 8.3/10 APPROVED (gap MÉDIO fechado pós-revisão: spec criada 16 testes verdes)  
+
+**Plano:** [`workspace/plans/plan-2026-05-13-vps-project-config-via-frontend.md`](../workspace/plans/plan-2026-05-13-vps-project-config-via-frontend.md)
+
+#### Fase 4: Backend — Env Management + Deploy Key Automation ✅ COMPLETA
+
+**O Que Foi Feito:**
+
+**Env Management Service (`agent-env.service.ts`):**
+- `setEnv(agentId, dto, userId)` — dispatcher outbound `SET_ENV` via HMAC, persiste `envStatus` (hasGithubToken/hasAnthropicKey + lastEnvUpdatedAt) em DEntidade -156
+  - Backend NUNCA persiste plaintext — apenas booleanos de status
+  - Validações: 404 agente, 403 RBAC (ADMIN org), 422 se DTO vazio, 503 se HMAC falha
+  - Emite `agent.env.updated` evento APÓS persistência (Padrão #7)
+  - Suporta: githubToken (`ghp_...` ou `github_pat_...`), anthropicApiKey (`sk-ant-...`), anthropicAuthToken
+- `getEnvStatus(agentId, userId)` — lê status booleanos (sem outbound, sem plaintext)
+- `setGitBot(agentId, dto, userId)` — atualiza gitBotName/Email em dados, dispara SET_ENV com `GIT_BOT_NAME/EMAIL`, emite `agent.gitbot.updated`
+- RBAC: ADMIN da org dona (via `idLocEscritu` → org parent)
+
+**Deploy Key Service (`deploy-key.service.ts`):**
+- `generateDeployKey(projectId, agentId, comment, userId)` — dispatcher outbound `GENERATE_DEPLOY_KEY`, recebe pubkey + fingerprint, persiste em DVincula -185 metaDados
+  - Idempotência dupla: agent checa `/etc/scrumban-agent/ssh-keys/<slug>` (reusa se existe), backend sobrescreve metaDados (permite regeneração)
+  - Validações: 404 projeto/agente/vinculo, 409 se vinculo sem projectSlug, 403 RBAC (MANAGER projeto OU ADMIN org), 503 se HMAC falha
+  - Emite `project.deploy-key.generated` evento APÓS persistência
+  - Privada NUNCA sai de VPS (decisão CEO + ADR-V2-042)
+- `getDeployKey(projectId, agentId, userId)` — lê metaDados + retorna sshConfigSnippet (sem outbound)
+- `revokeDeployKey(projectId, agentId, userId)` — soft-delete metaDados (sem chamar agente), emite `project.deploy-key.revoked`
+- RBAC: MANAGER projeto OU ADMIN org (padrão `requireProjectManagerOrOrgAdmin`)
+
+**ProjectSlug Auto-Derivation (`project-agent-link.service.ts`):**
+- `slugifyProjectName(nome, fallbackChave)` — NFD normalize, lowercase, `[^a-z0-9]→-`, max 64 chars, fallback `project-<chave>`
+- `PROJECT_SLUG_REGEX = /^[a-z0-9-]{1,64}$/` — defensivo contra path injection (validação frontend + backend)
+- Idempotência: preserva slug válido existente, gera novo se inválido
+- Persiste em DVincula -185 metaDados.projectSlug (caminhos create + update)
+
+**Controllers (HTTPEndpoints):**
+- `agent-env.controller.ts` (PUT /agents/:id/env, GET /agents/:id/env-status, PUT /agents/:id/git-bot)
+- `deploy-key.controller.ts` (POST/GET/DELETE /projects/:id/agent/:agentId/deploy-key)
+
+**DTOs (5 classes novas com class-validator + Swagger):**
+- `SetAgentEnvDto` — githubToken?, anthropicApiKey?, anthropicAuthToken? (todos opcionais, ≥8 chars)
+- `SetGitBotDto` — name, email (DTO simples)
+- `EnvStatusResponseDto` — hasGithubToken, hasAnthropicKey, lastEnvUpdatedAt
+- `DeployKeyResponseDto` — publicKey, fingerprint, sshConfigSnippet, instructions, generatedAt, alreadyExisted
+- `DeployKeyResponseDto` pode usar `dto/generate-deploy-key.dto.ts` (reutilizável)
+
+**Runtime Generalization:**
+- `RemoteExecutionClient.dispatch<TReq,TRes>(cmd, req)` — método público genérico (antes era `execute()` apenas)
+- `execute()` preservado como wrapper (`dispatch('RUN_CLAUDE_CODE', ...)`)
+- Suporta: RUN_CLAUDE_CODE, SET_ENV, GENERATE_DEPLOY_KEY, etc.
+
+**Event Types Registered:**
+- `AGENT_ENV_UPDATED`, `AGENT_GITBOT_UPDATED`, `PROJECT_DEPLOY_KEY_GENERATED`, `PROJECT_DEPLOY_KEY_REVOKED` em `event-types.ts`
+
+**Wiring (automation.module.ts):**
+- 4 novos services + 2 novos controllers
+- Providers injetados corretamente (PrismaService, EventProducerService, RoleResolverService, CorrelationIdService)
+
+**Testes:**
+- 16 unit tests `agent-env.service.spec.ts` (setEnv happy path + validações, getEnvStatus, setGitBot, outbound dispatch, persistência status, eventos)
+- 16 unit tests `deploy-key.service.spec.ts` (generateDeployKey happy path + validações, getDeployKey, revokeDeployKey, idempotência, projectSlug validation)
+- 32 testes novos PASS — Build: PASS (`npm run build`)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — env/deploy-key são configuração estrutural (Prisma direto em transaction)
+- Pilar 2 (Endpoints): 5 endpoints novos (env set, env status, git-bot set, deploy-key gen/get/revoke), reutilizando controllers existentes (não criou duplicata)
+- Pilar 3 (Seed): RESPEITADO — ZERO DClasses novas (-156 AGENT, -185 PROJECT_AGENT, -302/-303 GITBOT já existem)
+
+**ADRs vinculados:** ADR-V2-001 (zero tabela nova), ADR-V2-030, ADR-V2-033 (contrato HTTP+HMAC), ADR-V2-035 (projectSlug via CLAUDE.md), ADR-V2-036 (monorepo agent), **ADR-V2-041 (Env Management via API HMAC — novo)**, **ADR-V2-042 (Deploy Key Automation pull-only — novo)**
+
+**Follow-ups MINOR (Reviewer):**
+- Extrair `requireProjectManagerOrOrgAdmin` como public method em ProjectAgentLinkService (DRY — atualmente duplicado em DeployKeyService)
+- Mover `GenerateDeployKeyDto` inline → `dto/generate-deploy-key.dto.ts`
+- Pre-existente: TS2554 em `src/common/cache/ttl-cache.service.spec.ts:59` (issue separada)
+
+**Próximas Fases (F5/5):**
+- Fase 5: Frontend (3 painéis: EnvCredentials, GitBot, LinkedProjects) + integração deploy-key UI
+- Teste E2E: fluxo completo frontend → API → agente VPS
+
+**Plan:** [`workspace/plans/plan-2026-05-13-vps-project-config-via-frontend.md`](../workspace/plans/plan-2026-05-13-vps-project-config-via-frontend.md)  
+**Impl Notes:** Integrados em código (F4 backend) / Pendentes (F5 frontend)  
+**Review:** APPROVED 8.3/10 (gap MÉDIO: spec criada pós-revisão 16 testes verdes)  
+
+**Agents Performance (F4 Backend):**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan (5 fases) |
+| Implementer | ~3h | 100% PASS: backend + 32 testes + smoke |
+| Reviewer | ~1h | 8.3/10 APPROVED (issue MÉDIO: spec criada pós-review) |
+| Documenter | ~30min | JSDoc 100%, ROADMAP, CHANGELOG, STATUS, ADRs, commit |
+
+---
+
 ## Proximas fases (preview)
 
 | Fase | Nome | Pilar dominante |

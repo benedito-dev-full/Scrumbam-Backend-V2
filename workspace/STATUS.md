@@ -1,6 +1,6 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-13 (Documenter finalizando Task #2 Cancelamento de Convites — COMPLETA)
+**Ultima atualizacao:** 2026-05-13 (Documenter finalizando Task #3 Fase 4 VPS Config Backend — COMPLETA)
 
 ---
 
@@ -39,6 +39,93 @@ Plano `plan-invites-cancel-pending-invite-taskCancelInvite.md`. Refinamento ADR-
 **ADRs vinculados:** ADR-V2-001, ADR-V2-003, ADR-V2-008, ADR-V2-028
 
 **Status:** ✅ COMPLETA — Pronto para go-live (JSDoc ✅, ROADMAP ✅, CHANGELOG ✅, STATUS ✅, commit ✅)
+
+---
+
+## 🎯 Task #3 — Configuração VPS de Agente via Frontend (Env + Deploy Key) — ✅ FASE 4/5 COMPLETA
+
+Plano `plan-2026-05-13-vps-project-config-via-frontend.md`. Fase 4 (Backend) finalizada.
+
+### ✅ Fase 4 — Backend: Env Management + Deploy Key Automation — COMPLETA
+
+**Module:** automation/agents + automation/project-agent  
+**Task:** Env credentials management (GitHub PAT, Anthropic API Key) + SSH deploy key generation (pull-only)  
+**Status:** COMPLETA (Fase 4/5)  
+**Duration:** ~3h (Implementer) + ~1h (Reviewer) + ~30min (Documenter)  
+**Quality Score:** 8.3/10 APPROVED  
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan 5 fases |
+| Implementer | ~3h | 100% PASS: services + controllers + 32 tests |
+| Reviewer | ~1h | 8.3/10 APPROVED (gap MÉDIO: spec criada pós-review) |
+| Documenter | ~30min | JSDoc ✅, ROADMAP ✅, CHANGELOG ✅, STATUS ✅ |
+
+**Deliverables:**
+
+| Item | Status |
+|------|--------|
+| AgentEnvService (setEnv/getEnvStatus/setGitBot) | ✅ |
+| DeployKeyService (generateDeployKey/getDeployKey/revokeDeployKey) | ✅ |
+| AgentEnvController (3 endpoints) | ✅ |
+| DeployKeyController (3 endpoints) | ✅ |
+| 5 DTOs (SetAgentEnvDto, SetGitBotDto, EnvStatusResponseDto, DeployKeyResponseDto, etc.) | ✅ |
+| RemoteExecutionClient.dispatch<TReq,TRes>() generalized | ✅ |
+| ProjectSlug auto-derivation (slugifyProjectName + regex validation) | ✅ |
+| Event types (AGENT_ENV_UPDATED, GITBOT_UPDATED, DEPLOY_KEY_GENERATED/REVOKED) | ✅ |
+| 32 unit tests (agent-env 16 + deploy-key 16) | ✅ PASS |
+| 0600 mode validation (frontend input check) | ✅ |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — env/keys configuração estrutural
+- Pilar 2 (Endpoints): REUTILIZADO — 6 endpoints em 2 controllers existentes (não criou duplicata)
+- Pilar 3 (Seed): RESPEITADO — ZERO DClasses novas (reutiliza -156 AGENT, -185 PROJECT_AGENT)
+
+**Key Features:**
+
+1. **Env Credentials (via SET_ENV outbound HMAC):**
+   - Backend NUNCA persiste plaintext — apenas status booleanos + timestamp
+   - Suporta: githubToken, anthropicApiKey, anthropicAuthToken
+   - RBAC: ADMIN da org dona
+   - Eventos emitidos após persistência (Padrão #7)
+
+2. **Deploy Key SSH (via GENERATE_DEPLOY_KEY outbound HMAC):**
+   - Idempotência dupla: agent checa `/etc/scrumban-agent/ssh-keys/<slug>` (reusa), backend sobrescreve metaDados
+   - Privada NUNCA sai de VPS (CEO decisão)
+   - Persiste em DVincula -185 metaDados
+   - RBAC: MANAGER projeto OU ADMIN org
+
+3. **ProjectSlug Auto:**
+   - Normalização: NFD strip, lowercase, `[^a-z0-9]→-`, max 64 chars
+   - Regex defensivo: `/^[a-z0-9-]{1,64}$/`
+   - Idempotência: preserva válida, gera nova se inválida
+
+**Metrics:**
+- Build: PASS
+- Tests: 32/32 PASS (agent-env 16, deploy-key 16)
+- TypeScript: 0 errors
+- JSDoc: 100% métodos públicos
+- N+1 Queries: ZERO (batch + paralelo onde apropriado)
+- HMAC validation: symmetric HMAC-SHA256 byte-a-byte com agent
+
+**ADRs:**
+- ADR-V2-001 (zero tabela nova)
+- ADR-V2-030, ADR-V2-033, ADR-V2-035, ADR-V2-036 (existentes)
+- **ADR-V2-041 (Env Management via API HMAC — NOVO)**
+- **ADR-V2-042 (Deploy Key Automation pull-only — NOVO)**
+
+**Reviewer Issues (MÉDIO — Fechado pós-revisão):**
+- deploy-key.service.spec.ts faltava → spec criada 16 testes verdes → score efetivo ~9.3/10
+
+**Follow-ups MINOR (documentados, não bloqueadores):**
+- DRY: extrair `requireProjectManagerOrOrgAdmin` como public method
+- Move: `GenerateDeployKeyDto` inline → dto/generate-deploy-key.dto.ts
+- Pré-existente: TS2554 em src/common/cache/ttl-cache.service.spec.ts:59
+
+**Próxima Fase:**
+- **Fase 5 (Frontend):** 3 painéis (EnvCredentials, GitBot, LinkedProjects) + integração deploy-key UI
 
 ---
 

@@ -28,10 +28,12 @@
 import type { Request, Response } from 'express';
 import type { Logger } from 'pino';
 import type { AgentConfig } from '../config/schema';
+import { createGenerateDeployKeyHandler } from '../handlers/generate-deploy-key.handler';
 import { createRunClaudeCodeHandler, type ProjectMutex } from '../handlers/run-claude-code.handler';
+import { createSetEnvHandler } from '../handlers/set-env.handler';
 import type { BackendClient } from '../outbound/backend-client';
 
-const SUPPORTED_TYPES = ['PING', 'RUN_CLAUDE_CODE'] as const;
+const SUPPORTED_TYPES = ['PING', 'RUN_CLAUDE_CODE', 'SET_ENV', 'GENERATE_DEPLOY_KEY'] as const;
 type SupportedType = (typeof SUPPORTED_TYPES)[number];
 
 /** Dependências do dispatcher injetadas pelo `createServer`. */
@@ -45,6 +47,16 @@ export interface DispatcherDeps {
    * `createRunClaudeCodeHandler`.
    */
   runClaudeCodeHandler?: (req: Request, res: Response) => void;
+  /**
+   * Override do handler de SET_ENV (testes). Default cria via
+   * `createSetEnvHandler`. Plan-2026-05-13 §4.
+   */
+  setEnvHandler?: (req: Request, res: Response) => void;
+  /**
+   * Override do handler de GENERATE_DEPLOY_KEY (testes). Default cria
+   * via `createGenerateDeployKeyHandler`. Plan-2026-05-13 §4.
+   */
+  generateDeployKeyHandler?: (req: Request, res: Response) => void;
 }
 
 /**
@@ -63,6 +75,9 @@ export function createDispatcher(deps: DispatcherDeps) {
       backendClient: deps.backendClient,
       mutex: deps.mutex,
     });
+  const setEnvHandler = deps.setEnvHandler ?? createSetEnvHandler({ logger });
+  const generateDeployKeyHandler =
+    deps.generateDeployKeyHandler ?? createGenerateDeployKeyHandler({ logger });
 
   return (req: Request, res: Response): void => {
     const body = (req.body ?? {}) as Record<string, unknown>;
@@ -101,6 +116,16 @@ export function createDispatcher(deps: DispatcherDeps) {
         executionId,
         message: 'pong',
       });
+      return;
+    }
+
+    if (type === 'SET_ENV') {
+      setEnvHandler(req, res);
+      return;
+    }
+
+    if (type === 'GENERATE_DEPLOY_KEY') {
+      generateDeployKeyHandler(req, res);
       return;
     }
 

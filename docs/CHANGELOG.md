@@ -12,6 +12,43 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Added
+
+- **F13 Task #3 Fase 4: Backend Env Management + Deploy Key Automation (ADR-V2-041 + ADR-V2-042)** - 2026-05-13
+  - **Env Credentials Management:**
+    - `AgentEnvService` com `setEnv()` (githubToken, anthropicApiKey, anthropicAuthToken via outbound `SET_ENV`), `getEnvStatus()` (status booleanos sem plaintext), `setGitBot()` (gitBotName/Email)
+    - Backend NUNCA persiste plaintext — apenas status booleanos + lastEnvUpdatedAt em DEntidade -156 `dados.envStatus`
+    - RBAC: ADMIN da org dona; validações HMAC outbound (ServiceUnavailableException se falha)
+    - Eventos: `agent.env.updated` / `agent.gitbot.updated` emitidos APÓS persistência (Padrão #7)
+  - **Deploy Key Automation (pull-only):**
+    - `DeployKeyService` com `generateDeployKey()` (dispatcher `GENERATE_DEPLOY_KEY`, recebe pubkey+fingerprint, persiste em DVincula -185 metaDados)
+    - Idempotência dupla: agent checa `/etc/scrumban-agent/ssh-keys/<slug>` (reusa), backend sobrescreve (permite regen)
+    - `getDeployKey()` (lê metaDados + sshConfigSnippet), `revokeDeployKey()` (soft-delete metaDados)
+    - RBAC: MANAGER projeto OU ADMIN org
+    - Privada NUNCA sai de VPS (decisão CEO + ADR-V2-042)
+    - Eventos: `project.deploy-key.generated` / `project.deploy-key.revoked`
+  - **ProjectSlug Auto-Derivation:**
+    - `slugifyProjectName()` — NFD normalize, lowercase, `[^a-z0-9]→-`, max 64 chars
+    - `PROJECT_SLUG_REGEX = /^[a-z0-9-]{1,64}$/` — defensivo contra path injection
+    - Idempotência: preserva slug válido, gera novo se inválido
+    - Persiste em DVincula -185 metaDados.projectSlug
+  - **Runtime Generalization:**
+    - `RemoteExecutionClient.dispatch<TReq,TRes>(cmd, req)` — método público genérico (RUN_CLAUDE_CODE, SET_ENV, GENERATE_DEPLOY_KEY, etc.)
+    - `execute()` preservado como wrapper
+  - **Controllers (5 endpoints novos):**
+    - `PUT /agents/:id/env` — atualizar credenciais (HMAC outbound)
+    - `GET /agents/:id/env-status` — status booleanos (sem plaintext)
+    - `PUT /agents/:id/git-bot` — atualizar git identity
+    - `POST /projects/:id/agent/:agentId/deploy-key` — gerar chave SSH
+    - `GET /projects/:id/agent/:agentId/deploy-key` — consultar pubkey+snippet
+    - `DELETE /projects/:id/agent/:agentId/deploy-key` — revogar chave
+  - **DTOs (5 classes):** SetAgentEnvDto, SetGitBotDto, EnvStatusResponseDto, DeployKeyResponseDto, GenerateDeployKeyDto
+  - **Tests:** 32 unit tests novos (agent-env 16 + deploy-key 16) — 100% PASS
+  - **Pilares:** Pilar 2 REUTILIZADO (endpoints novos em controllers existentes); Pilar 3 RESPEITADO (ZERO DClasses novas)
+  - **ADRs:** ADR-V2-001, ADR-V2-030, ADR-V2-033, ADR-V2-035, ADR-V2-036, **ADR-V2-041 (novo), **ADR-V2-042 (novo)
+  - **Quality Score:** 8.3/10 APPROVED (gap MÉDIO fechado pós-revisão: spec criada 16 testes verdes)
+  - **Próximo:** Fase 5 Frontend (3 painéis: EnvCredentials, GitBot, LinkedProjects)
+
 ### Security
 
 - **F13 Task #1 Backend: Alinhamento HMAC bilateral agent ↔ backend (ADR-V2-040)** - 2026-05-13
