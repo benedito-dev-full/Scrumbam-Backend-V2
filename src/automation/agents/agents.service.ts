@@ -13,6 +13,7 @@ import { RoleResolverService } from '../../auth/services/role-resolver.service';
 import OperacaoExecucaoClaude from '../../engine/lib/operacao/OperacaoExecucaoClaude';
 import { IExecucaoData } from '../../engine/lib/interfaces/IExecucaoData';
 import { AUTOMATION_CLASS_IDS } from '../constants/automation-class-ids';
+import { AgentListItemDto, AgentListStatus, ListAgentsQueryDto } from './dto/list-agents.dto';
 import { InstallAgentDto, InstallAgentResponseDto } from './dto/install-agent.dto';
 import { HeartbeatDto, HeartbeatResponseDto } from './dto/heartbeat.dto';
 import { ExecutionResultDto, ExecutionResultResponseDto } from './dto/execution-result.dto';
@@ -498,6 +499,63 @@ export class AgentsService {
       statusCode: AUTOMATION_CLASS_IDS.AGENT_STATUS_ONLINE.toString(),
       lastSeen: now.toISOString(),
     };
+  }
+
+  /**
+   * Lista agents (DEntidade -156) visíveis ao usuário autenticado, com status
+   * calculado em runtime a partir de `dados.lastSeen` (janela de 90s).
+   *
+   * Filtragem por organização fica como TODO — por ora retorna todos os agents
+   * não excluídos. Justificativa: enquanto a UI `/vps` é apenas leitura admin,
+   * o gating fino fica para refinement em ADR posterior (org_role + DVincula).
+   */
+  async listAgents(query: ListAgentsQueryDto): Promise<AgentListItemDto[]> {
+    const where: Prisma.DEntidadeWhereInput = {
+      idClasse: AUTOMATION_CLASS_IDS.AGENT,
+      excluido: false,
+    };
+    if (query.search) {
+      where.nome = { contains: query.search, mode: 'insensitive' };
+    }
+
+    const agents = await this.prisma.dEntidade.findMany({
+      where,
+      select: { chave: true, nome: true, dados: true, criadoEm: true },
+      orderBy: { chave: 'desc' },
+      take: 200,
+    });
+
+    const ONLINE_WINDOW_MS = 90_000;
+    const now = Date.now();
+
+    const items: AgentListItemDto[] = agents.map((a) => {
+      const dados = (a.dados as Record<string, unknown> | null) ?? {};
+      const lastSeenRaw = typeof dados.lastSeen === 'string' ? dados.lastSeen : null;
+      const lastSeenMs = lastSeenRaw ? new Date(lastSeenRaw).getTime() : null;
+
+      let status: AgentListStatus;
+      if (lastSeenMs === null || Number.isNaN(lastSeenMs)) {
+        status = AgentListStatus.NEVER_CONNECTED;
+      } else if (now - lastSeenMs < ONLINE_WINDOW_MS) {
+        status = AgentListStatus.ONLINE;
+      } else {
+        status = AgentListStatus.OFFLINE;
+      }
+
+      return {
+        id: a.chave.toString(),
+        nome: a.nome ?? '',
+        status,
+        hostname: typeof dados.hostname === 'string' ? dados.hostname : null,
+        agentVersion: typeof dados.agentVersion === 'string' ? dados.agentVersion : null,
+        tunnelPort: typeof dados.tunnelPort === 'number' ? dados.tunnelPort : null,
+        lastHeartbeat: lastSeenRaw,
+        installedAt: typeof dados.installedAt === 'string' ? dados.installedAt : null,
+        createdAt: a.criadoEm.toISOString(),
+      };
+    });
+
+    return query.status ? items.filter((a) => a.status === query.status) : items;
   }
 
   async findAgentForAuth(agentId: bigint): Promise<AuthenticatedAgent> {

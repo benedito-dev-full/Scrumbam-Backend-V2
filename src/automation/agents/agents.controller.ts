@@ -7,6 +7,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Query,
   Request,
   UseGuards,
 } from '@nestjs/common';
@@ -27,6 +28,7 @@ import {
   LinkAgentProjectResponseDto,
   UnlinkAgentProjectResponseDto,
 } from './dto/link-agent-project.dto';
+import { AgentListItemDto, ListAgentsQueryDto } from './dto/list-agents.dto';
 import { AgentAuthGuard, AgentAuthenticatedRequest } from './guards/agent-auth.guard';
 
 interface JwtRequest {
@@ -88,6 +90,21 @@ export class AgentsController {
    * }
    * ```
    */
+  /**
+   * Lista todos os agents (DEntidade -156) visíveis ao usuário autenticado.
+   * Status calculado em runtime via `dados.lastSeen` (janela 90s para online).
+   * Filtros opcionais: `status` e `search` por nome/hostname.
+   */
+  @Get()
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Listar agents da organizacao' })
+  @ApiResponse({ status: 200, type: [AgentListItemDto] })
+  @ApiResponse({ status: 401, description: 'JWT inválido/ausente' })
+  async listAgents(@Query() query: ListAgentsQueryDto): Promise<AgentListItemDto[]> {
+    return this.agentsService.listAgents({ status: query.status, search: query.search });
+  }
+
   @Post('install-token')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
