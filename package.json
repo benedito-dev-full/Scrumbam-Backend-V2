@@ -5,8 +5,9 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "build": "nest build",
-    "build:seeds": "tsc -p tsconfig.seeds.json",
+    "build": "nest build && npm run copy:dvfs-assets",
+    "build:seeds": "tsc -p tsconfig.seeds.json && npm run copy:dvfs-assets",
+    "copy:dvfs-assets": "mkdir -p dist/src/engine/dvfs && cp src/engine/dvfs/*.js dist/src/engine/dvfs/",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
