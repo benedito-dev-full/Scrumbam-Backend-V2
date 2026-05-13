@@ -10,10 +10,7 @@ import { PrismaService } from '../../prisma.service';
 import { RoleResolverService } from '../../auth/services/role-resolver.service';
 import { AUTOMATION_CLASS_IDS } from '../constants/automation-class-ids';
 import { AgentTunnelService } from '../agents/agent-tunnel.service';
-import {
-  LinkAgentResponseDto,
-  ProjectAgentTipo,
-} from './dto/link-agent.dto';
+import { LinkAgentResponseDto, ProjectAgentTipo } from './dto/link-agent.dto';
 import { ProjectAgentStatusResponseDto } from './dto/agent-status-response.dto';
 
 const EXECUTION_CLASSES = [
@@ -41,6 +38,41 @@ const ACTIVE_EXECUTION_STATUS_VALUES = [
 ];
 
 const PROJECT_AGENT_LOCK_BASE = BigInt(13_185_000_000_000);
+
+const PROJECT_SLUG_MAX_LENGTH = 64;
+const PROJECT_SLUG_REGEX = /^[a-z0-9-]{1,64}$/;
+
+/**
+ * Converte um nome arbitrario de projeto em projectSlug canonico.
+ *
+ * Regras (plan-2026-05-13 §5 + ADR-V2-035):
+ * - Normaliza acentos (NFD + strip diacritics).
+ * - Lowercase.
+ * - Substitui qualquer caractere fora de [a-z0-9] por hifen.
+ * - Colapsa hifens consecutivos.
+ * - Trim de hifens nas pontas.
+ * - Trunca em 64 chars (re-trim apos truncar).
+ *
+ * Fallback: retorna 'project-<chave>' se a slugificacao resultar em string vazia.
+ *
+ * @param nome - Nome bruto do projeto (DProject.nome).
+ * @param fallbackChave - Chave do projeto para o fallback determinístico.
+ * @returns Slug `^[a-z0-9-]{1,64}$`.
+ */
+function slugifyProjectName(nome: string, fallbackChave: bigint): string {
+  const normalized = nome
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, PROJECT_SLUG_MAX_LENGTH)
+    .replace(/^-+|-+$/g, '');
+  if (normalized.length === 0) {
+    return `project-${fallbackChave.toString()}`.slice(0, PROJECT_SLUG_MAX_LENGTH);
+  }
+  return normalized;
+}
 
 type ProjectRecord = { chave: bigint; idEstab: bigint | null };
 
@@ -78,6 +110,14 @@ export class ProjectAgentLinkService {
         throw new NotFoundException(`Agent ${agentId} nao encontrado para o projeto ${projectId}`);
       }
 
+      const project = await tx.dProject.findUnique({
+        where: { chave: projectId },
+        select: { nome: true },
+      });
+      if (!project) {
+        throw new NotFoundException(`Projeto ${projectId} nao encontrado`);
+      }
+
       if (tipo === 'primary') {
         await tx.dVincula.updateMany({
           where: {
@@ -101,6 +141,14 @@ export class ProjectAgentLinkService {
         select: { chave: true, metaDados: true },
       });
 
+      const existingMeta = (existing?.metaDados as Record<string, unknown> | null) ?? null;
+      const existingSlug =
+        typeof existingMeta?.projectSlug === 'string' &&
+        PROJECT_SLUG_REGEX.test(existingMeta.projectSlug)
+          ? (existingMeta.projectSlug as string)
+          : null;
+      const projectSlug = existingSlug ?? slugifyProjectName(project.nome, projectId);
+
       const now = new Date().toISOString();
       if (existing) {
         return tx.dVincula.update({
@@ -108,8 +156,9 @@ export class ProjectAgentLinkService {
           data: {
             tipo,
             metaDados: {
-              ...((existing.metaDados as Record<string, unknown> | null) ?? {}),
+              ...(existingMeta ?? {}),
               tipo,
+              projectSlug,
               updatedAt: now,
               updatedBy: userEntidadeId.toString(),
             } as Prisma.InputJsonValue,
@@ -126,6 +175,7 @@ export class ProjectAgentLinkService {
           tipo,
           metaDados: {
             tipo,
+            projectSlug,
             createdAt: now,
             createdBy: userEntidadeId.toString(),
           } as Prisma.InputJsonValue,
@@ -144,11 +194,7 @@ export class ProjectAgentLinkService {
     };
   }
 
-  async unlinkAgent(
-    projectId: bigint,
-    agentId: bigint,
-    userEntidadeId: bigint,
-  ): Promise<void> {
+  async unlinkAgent(projectId: bigint, agentId: bigint, userEntidadeId: bigint): Promise<void> {
     await this.requireProjectManagerOrOrgAdmin(projectId, userEntidadeId);
 
     await this.prisma.$transaction(async (tx) => {
@@ -212,6 +258,9 @@ export class ProjectAgentLinkService {
         .filter((link) => link.entidade)
         .map(async (link) => {
           const dados = (link.entidade!.dados as Record<string, unknown> | null) ?? {};
+          const meta = (link.metaDados as Record<string, unknown> | null) ?? {};
+          const projectSlug =
+            typeof meta.projectSlug === 'string' ? (meta.projectSlug as string) : null;
           const tunnelPort = this.parseTunnelPort(dados.tunnelPort);
           const probe = await this.agentTunnelService.probe(tunnelPort);
 
@@ -227,6 +276,7 @@ export class ProjectAgentLinkService {
             tunnelPort,
             tunnelOk: probe.tunnelOk,
             tunnelLatencyMs: probe.latencyMs,
+            projectSlug,
             ...(probe.error ? { tunnelError: probe.error } : {}),
           };
         }),

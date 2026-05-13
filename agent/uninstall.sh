@@ -54,7 +54,15 @@ rm -f "${SERVICE_FILE}"
 rm -rf "/etc/systemd/system/${SERVICE_NAME}.service.d"
 systemctl daemon-reload
 
-# 3. Remove diretórios
+# 2b. Remove sudoers entry criada por install.sh §9c (plan-2026-05-13).
+# Idempotente: rm -f não falha se já ausente.
+SUDOERS_FILE="/etc/sudoers.d/${SERVICE_NAME}"
+if [[ -e "${SUDOERS_FILE}" ]]; then
+  log "removendo sudoers entry ${SUDOERS_FILE}..."
+  rm -f "${SUDOERS_FILE}"
+fi
+
+# 3. Remove diretórios (inclui ${CONFIG_DIR}/ssh-keys e ${STATE_DIR}/.gitconfig).
 log "removendo diretórios..."
 rm -rf "${INSTALL_PREFIX}" "${CONFIG_DIR}" "${STATE_DIR}" "${LOG_DIR}"
 
@@ -70,7 +78,7 @@ fi
 # 5. Verificação de resíduos
 log "verificando resíduos..."
 RESIDUE=0
-for path in "${INSTALL_PREFIX}" "${CONFIG_DIR}" "${STATE_DIR}" "${LOG_DIR}" "${SERVICE_FILE}"; do
+for path in "${INSTALL_PREFIX}" "${CONFIG_DIR}" "${STATE_DIR}" "${LOG_DIR}" "${SERVICE_FILE}" "${SUDOERS_FILE}"; do
   if [[ -e "${path}" ]]; then
     warn "RESÍDUO: ${path} ainda existe"
     RESIDUE=1

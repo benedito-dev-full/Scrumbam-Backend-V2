@@ -18,6 +18,9 @@ function buildService(overrides?: {
     dEntidade: {
       findFirst: jest.fn().mockResolvedValue({ chave: BigInt(900) }),
     },
+    dProject: {
+      findUnique: jest.fn().mockResolvedValue({ nome: 'Dinpayz Backend' }),
+    },
     dVincula: {
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       findFirst: jest.fn().mockResolvedValue(null),
@@ -47,12 +50,14 @@ function buildService(overrides?: {
   } as unknown as RoleResolverService;
 
   const agentTunnelService = {
-    probe: overrides?.probe ?? jest.fn().mockResolvedValue({
-      tunnelOk: true,
-      host: '127.0.0.1',
-      port: 20000,
-      latencyMs: 5,
-    }),
+    probe:
+      overrides?.probe ??
+      jest.fn().mockResolvedValue({
+        tunnelOk: true,
+        host: '127.0.0.1',
+        port: 20000,
+        latencyMs: 5,
+      }),
   } as unknown as AgentTunnelService;
 
   return {
@@ -68,12 +73,7 @@ describe('ProjectAgentLinkService', () => {
   it('garante primary unico sob lock transacional ao vincular primary', async () => {
     const { service, tx } = buildService();
 
-    const result = await service.linkAgent(
-      BigInt(20),
-      BigInt(900),
-      'primary',
-      BigInt(42),
-    );
+    const result = await service.linkAgent(BigInt(20), BigInt(900), 'primary', BigInt(42));
 
     expect(result).toEqual({
       projectId: '20',
@@ -81,8 +81,12 @@ describe('ProjectAgentLinkService', () => {
       tipo: 'primary',
       linkId: '1000',
     });
-    expect((tx as any).$executeRaw).toHaveBeenCalled();
-    expect((tx as any).dVincula.updateMany).toHaveBeenCalledWith(
+    const txMocks = tx as unknown as {
+      $executeRaw: jest.Mock;
+      dVincula: { updateMany: jest.Mock; create: jest.Mock };
+    };
+    expect(txMocks.$executeRaw).toHaveBeenCalled();
+    expect(txMocks.dVincula.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           idClasse: AUTOMATION_CLASS_IDS.PROJECT_AGENT,
@@ -101,8 +105,11 @@ describe('ProjectAgentLinkService', () => {
 
     await service.linkAgent(BigInt(20), BigInt(900), 'secondary', BigInt(42));
 
-    expect((tx as any).dVincula.updateMany).not.toHaveBeenCalled();
-    expect((tx as any).dVincula.create).toHaveBeenCalledWith(
+    const txMocks = tx as unknown as {
+      dVincula: { updateMany: jest.Mock; create: jest.Mock };
+    };
+    expect(txMocks.dVincula.updateMany).not.toHaveBeenCalled();
+    expect(txMocks.dVincula.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           tipo: 'secondary',
@@ -124,9 +131,9 @@ describe('ProjectAgentLinkService', () => {
     };
     const { service } = buildService({ tx });
 
-    await expect(
-      service.unlinkAgent(BigInt(20), BigInt(900), BigInt(42)),
-    ).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.unlinkAgent(BigInt(20), BigInt(900), BigInt(42))).rejects.toBeInstanceOf(
+      ConflictException,
+    );
     expect(tx.dVincula.update).not.toHaveBeenCalled();
   });
 
