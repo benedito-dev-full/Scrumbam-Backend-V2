@@ -3,10 +3,24 @@ import { Socket } from 'net';
 
 export interface AgentTunnelProbeResult {
   tunnelOk: boolean;
-  host: '127.0.0.1';
+  host: string;
   port: number | null;
   latencyMs: number | null;
   error?: string;
+}
+
+/**
+ * Host alvo do probe TCP. Identico ao usado no `RemoteExecutionClient`
+ * — backend em Docker (Dokploy) precisa de `172.17.0.1` (Docker bridge da
+ * VPS, onde o tunnel SSH reverso do agent esta bindado). Default `127.0.0.1`
+ * mantem dev local funcional.
+ *
+ * Sem essa variavel, o socket.connect mira o localhost do container e
+ * o probe falha com ECONNREFUSED — bloqueando POST /projects/:id/execute
+ * com 422 "Tunnel do agent indisponivel".
+ */
+function resolveTunnelHost(): string {
+  return process.env.AGENT_TUNNEL_HOST ?? '127.0.0.1';
 }
 
 @Injectable()
@@ -15,10 +29,12 @@ export class AgentTunnelService {
   private readonly timeoutMs = 2000;
 
   async probe(tunnelPort: number | null | undefined): Promise<AgentTunnelProbeResult> {
+    const host = resolveTunnelHost();
+
     if (!Number.isInteger(tunnelPort) || !tunnelPort || tunnelPort <= 0 || tunnelPort > 65535) {
       return {
         tunnelOk: false,
-        host: '127.0.0.1',
+        host,
         port: tunnelPort ?? null,
         latencyMs: null,
         error: 'INVALID_TUNNEL_PORT',
@@ -36,7 +52,7 @@ export class AgentTunnelService {
         settled = true;
         socket.destroy();
         resolve({
-          host: '127.0.0.1',
+          host,
           port: tunnelPort,
           ...result,
         });
@@ -50,12 +66,12 @@ export class AgentTunnelService {
         finish({ tunnelOk: false, latencyMs: Date.now() - startedAt, error: 'TUNNEL_TIMEOUT' });
       });
       socket.once('error', (error) => {
-        this.logger.debug(`Tunnel probe failed port=${tunnelPort}: ${error.message}`);
+        this.logger.debug(`Tunnel probe failed host=${host} port=${tunnelPort}: ${error.message}`);
         const code = (error as NodeJS.ErrnoException).code ?? 'TUNNEL_UNAVAILABLE';
         finish({ tunnelOk: false, latencyMs: Date.now() - startedAt, error: code });
       });
 
-      socket.connect(tunnelPort, '127.0.0.1');
+      socket.connect(tunnelPort, host);
     });
   }
 }
