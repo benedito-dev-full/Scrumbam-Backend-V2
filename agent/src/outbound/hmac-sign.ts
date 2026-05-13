@@ -29,21 +29,29 @@ import { createHash, createHmac, randomUUID } from 'crypto';
 export type SignableMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
 
 /**
- * Headers HMAC padronizados retornados por `signOutboundRequest`. Inclui
- * `content-type` e `accept` por conveniência — o `backend-client` só
- * precisa fazer `fetch(url, { headers: { ...signed } })`.
+ * Headers de autenticação retornados por `signOutboundRequest`. O backend V2
+ * (ver `src/automation/agents/guards/agent-auth.guard.ts`) valida 4 headers:
+ *   - `x-agent-id`        — id do agente (DEntidade idClasse=-156)
+ *   - `x-agent-key`       — apiKey plaintext (comparada com hash via pepper)
+ *   - `x-agent-nonce`     — UUID anti-replay (Redis store no backend)
+ *   - `x-agent-timestamp` — ISO 8601, janela ±5min
+ *
+ * NOTA: o protocolo inicial previa HMAC do body com `agentCommandSecret`
+ * (ver ADR-V2-033). O guard atual NÃO valida HMAC — só compara key plaintext.
+ * Como o canal já é cifrado por SSH (reverse tunnel), mandar key plaintext é
+ * aceitável. Integridade do body via HMAC fica como melhoria futura.
  */
 export interface SignedHeaders {
   'content-type': 'application/json';
   accept: 'application/json';
-  'x-scrumban-agent-id': string;
-  'x-scrumban-timestamp': string;
-  'x-scrumban-nonce': string;
-  'x-scrumban-signature': string;
+  'x-agent-id': string;
+  'x-agent-key': string;
+  'x-agent-nonce': string;
+  'x-agent-timestamp': string;
   /**
    * Index signature para compatibilidade com `HeadersInit` do `fetch()`.
    * Permite que o objeto seja passado diretamente sem cast e que campos
-   * adicionais (ex: tracing) possam coexistir com os headers HMAC.
+   * adicionais (ex: tracing) possam coexistir com os headers de auth.
    */
   [key: string]: string;
 }
@@ -59,8 +67,13 @@ export interface SignOutboundInput {
   path: string;
   /** Body já serializado em string. Para GET sem body, passar `''`. */
   body: string;
-  /** Secret HMAC já em texto plano (vide `AgentConfig.agentCommandSecret`). */
-  agentCommandSecret: string;
+  /** API key plaintext do agente (header `x-agent-key`). */
+  agentApiKey: string;
+  /**
+   * Secret HMAC do agente. Não usado pelo backend atual (guard só valida
+   * apiKey), mas preservado na interface para suportar HMAC de body no futuro.
+   */
+  agentCommandSecret?: string;
   /** Identificador do agente (`DEntidade.chave` idClasse=-156, como string). */
   agentId: string;
   /**
@@ -75,12 +88,10 @@ export interface SignOutboundInput {
   nonceOverride?: string;
 }
 
-const SIGNATURE_PREFIX = 'hmac-sha256=';
-
 /**
- * Assina um request outbound e retorna os headers HMAC prontos para `fetch`.
+ * Constrói os headers de autenticação para um request outbound (agent → backend).
  *
- * @param input Dados do request a assinar.
+ * @param input Dados do request.
  * @returns Objeto com headers HTTP (case-insensitive, lowercase).
  *
  * @example
@@ -89,7 +100,7 @@ const SIGNATURE_PREFIX = 'hmac-sha256=';
  *     method: 'POST',
  *     path: '/agents/42/heartbeat',
  *     body,
- *     agentCommandSecret: config.agentCommandSecret,
+ *     agentApiKey: config.agentApiKey,
  *     agentId: config.agentId,
  *   });
  *   await fetch(`${config.backendBaseUrl}/agents/42/heartbeat`, {
@@ -99,22 +110,19 @@ const SIGNATURE_PREFIX = 'hmac-sha256=';
  *   });
  */
 export function signOutboundRequest(input: SignOutboundInput): SignedHeaders {
+  // `createHash`/`createHmac` ficam importados mas não usados aqui — preservados
+  // como anchor para reintrodução de HMAC do body sem reorganizar imports.
+  void createHash;
+  void createHmac;
   const timestamp = input.timestampOverride ?? new Date().toISOString();
   const nonce = input.nonceOverride ?? randomUUID();
-  const method = input.method.toUpperCase();
-
-  const bodyHash = createHash('sha256').update(input.body, 'utf8').digest('hex');
-  const canonical = [method, input.path, timestamp, nonce, bodyHash].join('\n');
-  const signatureHex = createHmac('sha256', input.agentCommandSecret)
-    .update(canonical, 'utf8')
-    .digest('hex');
 
   return {
     'content-type': 'application/json',
     accept: 'application/json',
-    'x-scrumban-agent-id': input.agentId,
-    'x-scrumban-timestamp': timestamp,
-    'x-scrumban-nonce': nonce,
-    'x-scrumban-signature': `${SIGNATURE_PREFIX}${signatureHex}`,
+    'x-agent-id': input.agentId,
+    'x-agent-key': input.agentApiKey,
+    'x-agent-nonce': nonce,
+    'x-agent-timestamp': timestamp,
   };
 }

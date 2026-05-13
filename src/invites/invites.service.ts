@@ -719,6 +719,197 @@ export class InvitesService {
   }
 
   /**
+   * Cancela (hard delete) convite pendente e emite DEvento `invite.revoked`.
+   *
+   * Workflow:
+   *  1. Parse de orgId/inviteId (BadRequest se nao for BigInt valido).
+   *  2. `Promise.all` carrega org, vinculo ADMIN do caller e o invite — 3 queries
+   *     paralelas (ZERO N+1). Query do invite inclui `idLocEscrituracao=orgIdBigInt`
+   *     (tenant-isolation — cross-tenant attack vira 404 generico).
+   *  3. 404 generico anti-enumeracao para org inexistente, invite inexistente,
+   *     invite de outra org ou ja deletado (mesma mensagem em todos os casos).
+   *  4. 403 se caller nao e ADMIN da org (DVincula -161).
+   *  5. 409 se invite ja foi ACCEPTED (terminal nao-reversivel).
+   *  6. **Emite DEvento `invite.revoked` ANTES do hard delete.**
+   *     Ordem INVERTIDA em relacao a `devari-backend-patterns.md §7` por
+   *     design — ver Risco #1 do plano. Justificativa: hard delete remove
+   *     o registro do DB, e queremos garantir audit antes do delete. Se o
+   *     evento falhar, abortamos antes do delete (sem perda de audit).
+   *     `addInternalEvent` enfileira em BullMQ/Redis — escrita real em
+   *     `DEvento` -502 acontece no consumer assincronamente.
+   *  7. Hard delete em `DTabela`. Erro `P2025` (record not found, ja
+   *     deletado por race concorrente) e tratado como sucesso idempotente.
+   *  8. NUNCA loga `tokenHash` — apenas inviteId/orgId/actor.
+   *
+   * **Idempotente para status `EXPIRED`:** cancela normalmente, com flag
+   * `previousStatus: 'EXPIRED'` no payload do evento para audit (UX: ADM
+   * ve "pendente" mesmo se backend ja virou expirado — cancelar e o
+   * caminho mais curto para limpar).
+   *
+   * Race condition revoke-vs-accept e possivel mas rara em producao
+   * (admin so cancela apos 2+ dias sem aceite) — ver Risco #2 do plano.
+   *
+   * Plano detalhado: workspace/plans/plan-invites-cancel-pending-invite-taskCancelInvite.md
+   *
+   * @param orgId - Chave BigInt da org (string).
+   * @param inviteId - Chave BigInt da DTabela -476 (string).
+   * @param actorUserId - Chave BigInt do USER (DEntidade -150) que esta cancelando.
+   * @returns `{ id, revokedAt }` — id do convite cancelado + timestamp ISO.
+   *
+   * @throws {BadRequestException} orgId ou inviteId invalidos (nao parseaveis como BigInt).
+   * @throws {NotFoundException} Org inexistente, invite inexistente, invite de outra org, ou ja deletado.
+   * @throws {ForbiddenException} Caller nao e ADMIN da org.
+   * @throws {ConflictException} Invite ja foi ACCEPTED.
+   *
+   * @example
+   * ```typescript
+   * const res = await service.cancelInvite('100', '789', BigInt(7));
+   * // → { id: '789', revokedAt: '2026-05-13T18:42:11.345Z' }
+   * ```
+   *
+   * @see ADR-V2-028 — invites por email (lifecycle: PENDING|ACCEPTED|EXPIRED|REVOKED).
+   * @see ADR-V2-008 — DEvento substitui audit tables.
+   * @see ADR-V2-003 — RBAC duplo via DVincula.
+   */
+  async cancelInvite(
+    orgId: string,
+    inviteId: string,
+    actorUserId: bigint,
+  ): Promise<{ id: string; revokedAt: string }> {
+    // 1. Parse defensivo — BigInt() lanca SyntaxError em valores invalidos.
+    let orgIdBigInt: bigint;
+    let inviteIdBigInt: bigint;
+    try {
+      orgIdBigInt = BigInt(orgId);
+      inviteIdBigInt = BigInt(inviteId);
+    } catch {
+      throw new BadRequestException('orgId/inviteId invalidos');
+    }
+
+    // 2. Load paralelo (3 queries — ZERO N+1).
+    const [org, requesterVinculo, invite] = await Promise.all([
+      this.prisma.dEntidade.findFirst({
+        where: { chave: orgIdBigInt, idClasse: BigInt(-152), excluido: false },
+        select: { chave: true, nome: true },
+      }),
+      this.prisma.dVincula.findFirst({
+        where: {
+          idLocEscritu: orgIdBigInt,
+          idEntidade: actorUserId,
+          idClasse: ID_CLASSE_ORG_ADMIN,
+          excluido: false,
+        },
+        select: { chave: true },
+      }),
+      this.prisma.dTabela.findFirst({
+        where: {
+          chave: inviteIdBigInt,
+          idClasse: ID_CLASSE_INVITE_TOKEN,
+          idLocEscrituracao: orgIdBigInt, // tenant-isolation (Risco #4 do plano)
+          excluido: false,
+        },
+        select: { chave: true, nome: true, metaDados: true, criadoEm: true },
+      }),
+    ]);
+
+    // 3. Org inexistente → 404 com mensagem especifica (ja vazaria "org X nao existe"
+    //    apenas para callers autenticados que ja conhecem a org — risco baixo).
+    if (!org) {
+      throw new NotFoundException(`Organizacao ${orgId} nao encontrada`);
+    }
+
+    // 4. RBAC — apenas ADMIN.
+    if (!requesterVinculo) {
+      throw new ForbiddenException('Apenas ADMIN da organizacao pode cancelar convites');
+    }
+
+    // 5. 404 anti-enumeracao — cobre 3 cenarios com mesma mensagem:
+    //    inexistente / outra org / ja deletado por race.
+    if (!invite) {
+      throw new NotFoundException('Convite nao encontrado');
+    }
+
+    const meta = invite.metaDados as unknown as InviteMetaDados | null;
+    if (!meta) {
+      // Defesa em profundidade — DTabela sem metaDados nao deveria existir,
+      // mas se acontecer (corrupcao manual), tratamos como invalido.
+      throw new NotFoundException('Convite nao encontrado');
+    }
+
+    // 6. Estado terminal nao-reversivel.
+    if (meta.status === 'ACCEPTED') {
+      throw new ConflictException('Convite ja foi aceito e nao pode ser cancelado');
+    }
+
+    // 7. REVOKED ja persistido: branch defensivo. Na pratica inalcancavel
+    //    porque hard delete remove o registro, mas mantemos guard idempotente.
+    if (meta.status === 'REVOKED') {
+      return {
+        id: inviteId,
+        revokedAt: meta.usedAt ?? new Date().toISOString(),
+      };
+    }
+
+    // 8. previousStatus serve para audit no payload do evento — distingue
+    //    EXPIRED (idempotente UX) de PENDING (cancelamento real).
+    const previousStatus: 'PENDING' | 'EXPIRED' = meta.status === 'EXPIRED' ? 'EXPIRED' : 'PENDING';
+
+    const revokedAt = new Date().toISOString();
+    const correlationId = this.correlationIdService.getOrGenerate();
+
+    // 9. **EMITIR EVENTO ANTES DO DELETE** (Risco #1 do plano).
+    //    Inversao deliberada em relacao a devari-backend-patterns.md §7:
+    //    hard delete remove o registro, entao queremos garantir audit primeiro.
+    //    Se enqueue falhar (Redis down), throw aborta e o registro nao e deletado.
+    await this.eventProducer.addInternalEvent(
+      'invite.revoked',
+      {
+        inviteId: inviteIdBigInt.toString(),
+        orgId,
+        orgName: org.nome,
+        email: invite.nome, // email convidado (DTabela.nome)
+        role: meta.role,
+        actorUserId: actorUserId.toString(), // quem cancelou
+        originalInviterUserId: meta.invitedByUserId,
+        createdAt: invite.criadoEm.toISOString(),
+        revokedAt,
+        previousStatus,
+      },
+      correlationId,
+      { source: InvitesService.name },
+    );
+
+    // 10. Hard delete — P2025 (record not found, race) e idempotente.
+    try {
+      await this.prisma.dTabela.delete({
+        where: { chave: inviteIdBigInt },
+      });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
+        // Outro request ja deletou (race) — sucesso idempotente.
+        this.logger.warn(
+          `Convite ja havia sido deletado por race inviteId=${inviteId} orgId=${orgId}`,
+        );
+      } else {
+        // Erro inesperado — log estruturado + propaga.
+        // OBS: evento ja foi enfileirado; em audit aparecera como "tentativa
+        //      de revoke" sem o delete correspondente (cross-check com outras
+        //      evidencias se necessario). Risco aceito conforme Risco #1.
+        throw err;
+      }
+    }
+
+    this.logger.log(
+      `Convite cancelado inviteId=${inviteId} orgId=${orgId} actor=${actorUserId} previousStatus=${previousStatus}`,
+    );
+
+    return {
+      id: inviteId,
+      revokedAt,
+    };
+  }
+
+  /**
    * Busca convite pendente por (orgId, email) para deduplicacao.
    */
   private async findPendingInviteByEmail(orgId: bigint, emailLower: string) {

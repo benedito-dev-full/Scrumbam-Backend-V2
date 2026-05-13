@@ -70,7 +70,8 @@ tar czf /tmp/scrumban-agent-bundle.tar.gz \
   install.sh \
   uninstall.sh \
   CLAUDE-md-template.md \
-  package.json
+  package.json \
+  package-lock.json
 ```
 
 ### VPS — extrair e instalar

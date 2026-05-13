@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ThrottlerGuard } from '@nestjs/throttler';
 
 import { InvitesController } from './invites.controller';
 import { InvitesService } from './invites.service';
@@ -17,7 +18,7 @@ import { JwtPayload } from '../auth/decorators/current-user.decorator';
 describe('InvitesController', () => {
   let controller: InvitesController;
   let serviceMock: jest.Mocked<
-    Pick<InvitesService, 'createInvite' | 'getInviteByToken' | 'acceptInvite'>
+    Pick<InvitesService, 'createInvite' | 'getInviteByToken' | 'acceptInvite' | 'cancelInvite'>
   >;
 
   const fakeUser: JwtPayload = {
@@ -32,6 +33,7 @@ describe('InvitesController', () => {
       createInvite: jest.fn(),
       getInviteByToken: jest.fn(),
       acceptInvite: jest.fn(),
+      cancelInvite: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -40,9 +42,42 @@ describe('InvitesController', () => {
     })
       .overrideGuard(AuthCompositeGuard)
       .useValue({ canActivate: () => true })
+      .overrideGuard(ThrottlerGuard)
+      .useValue({ canActivate: () => true })
       .compile();
 
     controller = module.get(InvitesController);
+  });
+
+  describe('DELETE /organizations/:orgId/invites/:inviteId', () => {
+    it('cancela convite via service e retorna 200 com { id, revokedAt }', async () => {
+      const revokedAt = '2026-05-13T18:42:11.345Z';
+      serviceMock.cancelInvite.mockResolvedValue({ id: '789', revokedAt });
+
+      const res = await controller.cancel('100', '789', fakeUser);
+
+      expect(serviceMock.cancelInvite).toHaveBeenCalledWith('100', '789', BigInt(7));
+      expect(res).toEqual({ id: '789', revokedAt });
+    });
+
+    it('propaga ForbiddenException quando caller nao e ADMIN', async () => {
+      serviceMock.cancelInvite.mockRejectedValue(
+        new ForbiddenException('Apenas ADMIN da organizacao pode cancelar convites'),
+      );
+      await expect(controller.cancel('100', '789', fakeUser)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('propaga NotFoundException para invite inexistente / outra org / ja deletado', async () => {
+      serviceMock.cancelInvite.mockRejectedValue(new NotFoundException('Convite nao encontrado'));
+      await expect(controller.cancel('100', '789', fakeUser)).rejects.toThrow(NotFoundException);
+    });
+
+    it('propaga ConflictException quando convite ja foi ACCEPTED', async () => {
+      serviceMock.cancelInvite.mockRejectedValue(
+        new ConflictException('Convite ja foi aceito e nao pode ser cancelado'),
+      );
+      await expect(controller.cancel('100', '789', fakeUser)).rejects.toThrow(ConflictException);
+    });
   });
 
   describe('POST /organizations/:orgId/invites', () => {

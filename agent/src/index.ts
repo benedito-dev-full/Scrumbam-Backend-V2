@@ -84,7 +84,7 @@ async function bootstrap(): Promise<void> {
   // `start()` resolve assim que o spawn é chamado (não espera a conexão SSH
   // efetivamente subir — autossh gerencia reconexão internamente, e o
   // wrapper externamente lida com crashes do próprio autossh).
-  const autossh = createAutosshWrapper(config, logger);
+  const autossh = createAutosshWrapper(config, logger, { bindHost: config.bindHost });
   await autossh.start();
 
   // 2. BackendClient e mutex são criados ANTES do server porque o dispatcher

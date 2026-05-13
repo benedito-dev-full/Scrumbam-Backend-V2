@@ -38,6 +38,14 @@ export const AgentConfigSchema = z.object({
   tunnelPort: z.number().int().positive(),
 
   /**
+   * Interface no host do backend onde o `-R` faz bind. Default `127.0.0.1`.
+   * Use `172.17.0.1` (gateway docker0) quando o backend roda em container
+   * Docker e precisa alcançar o tunnel via a interface bridge do host.
+   * Requer `GatewayPorts clientspecified` (ou `yes`) no sshd do backend.
+   */
+  bindHost: z.string().min(1).default('127.0.0.1'),
+
+  /**
    * Lista de raízes onde projetos podem viver. Toda execução de Claude Code
    * é validada contra esta allowlist após resolução via CLAUDE.md.
    * Defesa contra path injection (ver risco #1 do plano).

@@ -1,4 +1,14 @@
-import { Body, Controller, Get, HttpCode, Logger, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Logger,
+  Param,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 
@@ -87,6 +97,64 @@ export class InvitesController {
   }
 
   /**
+   * Cancela (hard delete) convite pendente.
+   *
+   * Apenas ADMIN da org (validado no service via DVincula -161). Hard delete
+   * em DTabela -476. Emite DEvento `invite.revoked` (idClasse -502) ANTES
+   * do delete para garantir audit trail (ver Risco #1 do plano).
+   *
+   * Idempotente para status EXPIRED (cancela com flag `previousStatus: 'EXPIRED'`
+   * no payload do evento). Rate limit 10/min (mais permissivo que o create de
+   * 3/min — operacao de "limpeza" e menos sensivel a abuso).
+   *
+   * @param orgId - Chave BigInt da org (path param).
+   * @param inviteId - Chave BigInt do convite (DTabela -476, path param).
+   * @param user - JWT payload (extraido do token).
+   * @returns 200 com `{ id, revokedAt }`.
+   *
+   * @throws {UnauthorizedException} Sem auth.
+   * @throws {ForbiddenException} Caller nao e ADMIN da org.
+   * @throws {NotFoundException} Org ou convite inexistente OU invite de outra org.
+   * @throws {ConflictException} Convite ja foi ACCEPTED.
+   *
+   * @example
+   * ```bash
+   * curl -X DELETE https://api.scrumban.com.br/organizations/100/invites/789 \
+   *   -H "Authorization: Bearer <jwt>"
+   * # → 200 { "id": "789", "revokedAt": "2026-05-13T18:42:11.345Z" }
+   * ```
+   */
+  @Delete('organizations/:orgId/invites/:inviteId')
+  @HttpCode(200)
+  @UseGuards(AuthCompositeGuard, ThrottlerGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Cancela convite pendente (hard delete + audit DEvento -502)',
+    description:
+      'Apenas ADMIN da org. Hard delete em DTabela -476. Emite DEvento invite.revoked ANTES do delete para garantir audit trail. Idempotente: cancela mesmo se status era EXPIRED. 409 se ja ACCEPTED.',
+  })
+  @ApiParam({ name: 'orgId', description: 'Chave BigInt da organizacao' })
+  @ApiParam({ name: 'inviteId', description: 'Chave BigInt do convite (DTabela -476)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Convite cancelado',
+    schema: { example: { id: '789', revokedAt: '2026-05-13T18:42:11.345Z' } },
+  })
+  @ApiResponse({ status: 401, description: 'Nao autenticado' })
+  @ApiResponse({ status: 403, description: 'Nao e ADMIN da org' })
+  @ApiResponse({ status: 404, description: 'Org ou convite nao encontrado' })
+  @ApiResponse({ status: 409, description: 'Convite ja foi aceito' })
+  @ApiResponse({ status: 429, description: 'Rate limit atingido' })
+  async cancel(
+    @Param('orgId') orgId: string,
+    @Param('inviteId') inviteId: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<{ id: string; revokedAt: string }> {
+    this.logger.log(`DELETE /organizations/${orgId}/invites/${inviteId} actor=${user.entidadeId}`);
+    return this.invitesService.cancelInvite(orgId, inviteId, BigInt(user.entidadeId));
+  }
+
+  /**
    * Lista convites pendentes da organizacao (ADMIN).
    *
    * Retorna apenas convites em status PENDING e nao expirados, sem dados
@@ -105,7 +173,11 @@ export class InvitesController {
     description: 'Retorna PENDING + nao expirados. NAO expoe tokenHash.',
   })
   @ApiParam({ name: 'orgId', description: 'Chave BigInt da organizacao' })
-  @ApiResponse({ status: 200, description: 'Lista de convites pendentes', type: [PendingInviteDto] })
+  @ApiResponse({
+    status: 200,
+    description: 'Lista de convites pendentes',
+    type: [PendingInviteDto],
+  })
   @ApiResponse({ status: 401, description: 'Nao autenticado' })
   @ApiResponse({ status: 403, description: 'Nao e ADMIN' })
   @ApiResponse({ status: 404, description: 'Org nao encontrada' })

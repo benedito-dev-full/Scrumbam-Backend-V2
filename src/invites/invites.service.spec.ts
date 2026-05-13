@@ -1,7 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
+import { Prisma } from '@prisma/client';
 
 import { InvitesService } from './invites.service';
 import { PrismaService } from '../prisma.service';
@@ -22,7 +28,13 @@ describe('InvitesService', () => {
   let prismaMock: {
     dEntidade: { findFirst: jest.Mock };
     dVincula: { findFirst: jest.Mock; create: jest.Mock };
-    dTabela: { findFirst: jest.Mock; findMany: jest.Mock; create: jest.Mock; update: jest.Mock };
+    dTabela: {
+      findFirst: jest.Mock;
+      findMany: jest.Mock;
+      create: jest.Mock;
+      update: jest.Mock;
+      delete: jest.Mock;
+    };
     dUserGroup: { create: jest.Mock };
     $transaction: jest.Mock;
   };
@@ -39,6 +51,7 @@ describe('InvitesService', () => {
         findMany: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
+        delete: jest.fn(),
       },
       dUserGroup: { create: jest.fn() },
       $transaction: jest.fn(),
@@ -613,6 +626,213 @@ describe('InvitesService', () => {
       await expect(
         service.acceptInvite(raw, { name: 'Maria', password: 'senha123' }),
       ).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('cancelInvite', () => {
+    /**
+     * Helper para montar um DTabela INVITE_TOKEN consistente. Customizavel via
+     * overrides — usado pelos 7 casos abaixo.
+     */
+    const buildInviteRow = (overrides?: {
+      chave?: bigint;
+      orgId?: bigint;
+      email?: string;
+      status?: 'PENDING' | 'ACCEPTED' | 'EXPIRED' | 'REVOKED';
+      role?: 'MEMBER' | 'VIEWER';
+    }) => ({
+      chave: overrides?.chave ?? BigInt(789),
+      idClasse: BigInt(-476),
+      nome: overrides?.email ?? 'pendente@x.com',
+      idLocEscrituracao: overrides?.orgId ?? BigInt(100),
+      criadoEm: new Date('2026-05-10T12:00:00.000Z'),
+      metaDados: {
+        tokenHash: 'hashvalue',
+        role: overrides?.role ?? 'MEMBER',
+        expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+        usedAt: null,
+        status: overrides?.status ?? 'PENDING',
+        invitedByUserId: '7',
+      },
+    });
+
+    /**
+     * Configura o mock do Promise.all([org, requesterVinculo, invite]).
+     * Como cancelInvite usa findFirst (e nao findMany como create), preparamos
+     * dEntidade.findFirst para responder org E dTabela.findFirst para responder invite.
+     */
+    const setupCancelMocks = (overrides?: {
+      org?: object | null;
+      requesterVinculo?: object | null;
+      invite?: object | null;
+    }) => {
+      prismaMock.dEntidade.findFirst.mockImplementation(
+        (args: { where: Record<string, unknown> }) => {
+          if (args.where.idClasse === BigInt(-152)) {
+            return Promise.resolve(
+              overrides?.org === null
+                ? null
+                : (overrides?.org ?? { chave: BigInt(100), nome: 'Acme' }),
+            );
+          }
+          return Promise.resolve(null);
+        },
+      );
+      prismaMock.dVincula.findFirst.mockResolvedValue(
+        overrides?.requesterVinculo === null
+          ? null
+          : (overrides?.requesterVinculo ?? { chave: BigInt(999) }),
+      );
+      prismaMock.dTabela.findFirst.mockResolvedValue(
+        overrides?.invite === null ? null : (overrides?.invite ?? buildInviteRow()),
+      );
+      prismaMock.dTabela.delete.mockReset();
+      prismaMock.dTabela.delete.mockResolvedValue({ chave: BigInt(789) });
+    };
+
+    it('cancela invite PENDING com sucesso, emite evento ANTES do delete e retorna 200', async () => {
+      setupCancelMocks();
+
+      // Captura ordem das chamadas para garantir que evento e emitido ANTES do delete.
+      const callOrder: string[] = [];
+      eventMock.addInternalEvent.mockImplementation(async () => {
+        callOrder.push('event');
+      });
+      prismaMock.dTabela.delete.mockImplementation(async () => {
+        callOrder.push('delete');
+        return { chave: BigInt(789) };
+      });
+
+      const result = await service.cancelInvite('100', '789', BigInt(7));
+
+      expect(result.id).toBe('789');
+      expect(result.revokedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+
+      // Ordem critica: evento emitido ANTES do delete (Risco #1 do plano).
+      expect(callOrder).toEqual(['event', 'delete']);
+
+      expect(eventMock.addInternalEvent).toHaveBeenCalledWith(
+        'invite.revoked',
+        expect.objectContaining({
+          inviteId: '789',
+          orgId: '100',
+          orgName: 'Acme',
+          email: 'pendente@x.com',
+          role: 'MEMBER',
+          actorUserId: '7',
+          originalInviterUserId: '7',
+          previousStatus: 'PENDING',
+        }),
+        'corr-1',
+        expect.anything(),
+      );
+      expect(prismaMock.dTabela.delete).toHaveBeenCalledWith({
+        where: { chave: BigInt(789) },
+      });
+    });
+
+    it('rejeita com ForbiddenException se caller nao e ADMIN', async () => {
+      setupCancelMocks({ requesterVinculo: null });
+
+      await expect(service.cancelInvite('100', '789', BigInt(7))).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(eventMock.addInternalEvent).not.toHaveBeenCalled();
+      expect(prismaMock.dTabela.delete).not.toHaveBeenCalled();
+    });
+
+    it('rejeita com NotFoundException se org nao existe', async () => {
+      setupCancelMocks({ org: null });
+
+      await expect(service.cancelInvite('100', '789', BigInt(7))).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(eventMock.addInternalEvent).not.toHaveBeenCalled();
+    });
+
+    it('rejeita com NotFoundException se invite nao existe (mesma mensagem que outra org)', async () => {
+      setupCancelMocks({ invite: null });
+
+      await expect(service.cancelInvite('100', '789', BigInt(7))).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(eventMock.addInternalEvent).not.toHaveBeenCalled();
+      expect(prismaMock.dTabela.delete).not.toHaveBeenCalled();
+    });
+
+    it('rejeita com NotFoundException se invite pertence a outra org (cross-tenant isolation)', async () => {
+      // Tenant-isolation: a query do invite ja filtra por idLocEscrituracao,
+      // entao um invite de outra org retorna null no findFirst — mesmo caminho
+      // do "inexistente". Aqui validamos que a query inclui o filtro correto.
+      setupCancelMocks({ invite: null });
+
+      await expect(service.cancelInvite('100', '789', BigInt(7))).rejects.toThrow(
+        NotFoundException,
+      );
+      // Garante que tenant-isolation foi aplicado na query do invite.
+      expect(prismaMock.dTabela.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            chave: BigInt(789),
+            idClasse: BigInt(-476),
+            idLocEscrituracao: BigInt(100), // tenant-isolation (Risco #4)
+            excluido: false,
+          }),
+        }),
+      );
+    });
+
+    it('rejeita com ConflictException se invite ja foi ACCEPTED', async () => {
+      setupCancelMocks({ invite: buildInviteRow({ status: 'ACCEPTED' }) });
+
+      await expect(service.cancelInvite('100', '789', BigInt(7))).rejects.toThrow(
+        ConflictException,
+      );
+      expect(eventMock.addInternalEvent).not.toHaveBeenCalled();
+      expect(prismaMock.dTabela.delete).not.toHaveBeenCalled();
+    });
+
+    it('idempotente para status EXPIRED: cancela com previousStatus="EXPIRED"', async () => {
+      setupCancelMocks({ invite: buildInviteRow({ status: 'EXPIRED' }) });
+
+      const result = await service.cancelInvite('100', '789', BigInt(7));
+
+      expect(result.id).toBe('789');
+      expect(eventMock.addInternalEvent).toHaveBeenCalledWith(
+        'invite.revoked',
+        expect.objectContaining({ previousStatus: 'EXPIRED' }),
+        'corr-1',
+        expect.anything(),
+      );
+      expect(prismaMock.dTabela.delete).toHaveBeenCalledWith({
+        where: { chave: BigInt(789) },
+      });
+    });
+
+    it('trata Prisma P2025 (race: ja deletado por outro request) como sucesso idempotente', async () => {
+      setupCancelMocks();
+
+      const p2025 = new Prisma.PrismaClientKnownRequestError('Record not found', {
+        code: 'P2025',
+        clientVersion: 'test',
+      });
+      prismaMock.dTabela.delete.mockReset();
+      prismaMock.dTabela.delete.mockRejectedValue(p2025);
+
+      const result = await service.cancelInvite('100', '789', BigInt(7));
+
+      // Evento foi emitido + delete falhou com P2025 → retorna sucesso.
+      expect(result.id).toBe('789');
+      expect(result.revokedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(eventMock.addInternalEvent).toHaveBeenCalled();
+    });
+
+    it('rejeita com BadRequestException se orgId/inviteId nao sao BigInt validos', async () => {
+      // Nenhum mock de Prisma deve ser chamado — falha no parse.
+      await expect(service.cancelInvite('not-a-bigint', '789', BigInt(7))).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(prismaMock.dEntidade.findFirst).not.toHaveBeenCalled();
     });
   });
 });

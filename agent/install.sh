@@ -268,7 +268,25 @@ if [[ ! -d "${BUNDLE_DIR}/dist" ]]; then
   err "${BUNDLE_DIR}/dist não encontrado. Rode 'npm run build' no dev e re-tarball o agent/."
   exit 1
 fi
+if [[ ! -f "${BUNDLE_DIR}/package.json" ]]; then
+  err "${BUNDLE_DIR}/package.json não encontrado no bundle. Inclua-o no tarball."
+  exit 1
+fi
 run "cp -R ${BUNDLE_DIR}/dist/. ${INSTALL_PREFIX}/dist/"
+run "cp ${BUNDLE_DIR}/package.json ${INSTALL_PREFIX}/package.json"
+if [[ -f "${BUNDLE_DIR}/package-lock.json" ]]; then
+  run "cp ${BUNDLE_DIR}/package-lock.json ${INSTALL_PREFIX}/package-lock.json"
+fi
+
+# Instala dependências de runtime (zod, etc.). Idempotente: npm ci é determinístico
+# quando há package-lock.json; cai pra npm install --omit=dev caso contrário.
+log "instalando dependências de runtime do agente..."
+if [[ -f "${INSTALL_PREFIX}/package-lock.json" ]]; then
+  run "cd ${INSTALL_PREFIX} && npm ci --omit=dev"
+else
+  run "cd ${INSTALL_PREFIX} && npm install --omit=dev --no-package-lock"
+fi
+
 run "chown -R ${SERVICE_USER}:${SERVICE_USER} ${INSTALL_PREFIX}"
 run "chmod -R u+rwX,go+rX,go-w ${INSTALL_PREFIX}"
 
@@ -301,9 +319,9 @@ if [[ "${DRY_RUN}" -eq 0 ]]; then
     --arg hn "${HOSTNAME_LOCAL}" \
     --arg v "${AGENT_VERSION}" \
     --arg t "${INSTALL_TOKEN}" \
-    '{token: $t, hostname: $hn, sshPubKey: $pk, agentVersion: $v}')"
+    '{installToken: $t, hostname: $hn, agentVersion: $v, publicKeyFingerprint: $pk}')"
 
-  HANDSHAKE_RESP="$(curl -fsSL -X POST "${BACKEND_URL}/agents/install-token" \
+  HANDSHAKE_RESP="$(curl -fsSL -X POST "${BACKEND_URL}/api/v1/agents/install" \
     -H "Content-Type: application/json" \
     -d "${HANDSHAKE_PAYLOAD}" 2>&1)" || {
     err "handshake falhou. Resposta do backend: ${HANDSHAKE_RESP}"

@@ -162,7 +162,11 @@ export function createBackendClient(
     fetchImpl: resolvedFetch,
   };
 
-  const baseUrl = stripTrailingSlash(config.backendBaseUrl);
+  // Backend V2 expõe rotas sob `app.setGlobalPrefix('api/v1')` (ver main.ts).
+  // Anexa o prefixo se ainda não estiver presente no `backendBaseUrl` (idempotente
+  // — operador pode fornecer URL com ou sem o prefix).
+  const trimmed = stripTrailingSlash(config.backendBaseUrl);
+  const baseUrl = /\/api\/v\d+$/.test(trimmed) ? trimmed : `${trimmed}/api/v1`;
 
   async function send(
     method: SignableMethod,
@@ -185,6 +189,7 @@ export function createBackendClient(
         method,
         path,
         body: serialized,
+        agentApiKey: config.agentApiKey,
         agentCommandSecret: config.agentCommandSecret,
         agentId: config.agentId,
       });
