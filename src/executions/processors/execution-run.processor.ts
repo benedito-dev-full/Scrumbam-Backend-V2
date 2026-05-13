@@ -313,8 +313,8 @@ export class ExecutionRunProcessor extends WorkerHost {
             true
           ),
           "atualizadoEm" = NOW()
-      WHERE chave = ${BigInt(executionId)}
-        AND idClasse IN (${Prisma.join(EXECUTION_CLASSES)})
+      WHERE "chave" = ${BigInt(executionId)}
+        AND "idClasse" IN (${Prisma.join(EXECUTION_CLASSES)})
         AND (
           dados->>'statusCode' IN (
             ${AUTOMATION_CLASS_IDS.EXEC_STATUS_QUEUED.toString()},

@@ -6,6 +6,11 @@
 // NÃO lança Error — absorve falhas de banco silenciosamente (notificação é best-effort).
 //
 // Executado APÓS INSERT em DPedido (pós-gravação) e APÓS pr-auto-open.
+//
+// Nota: DVFS script é carregado via `new Function(...)` pelo Engine — a
+// declaração de função existe só para nome semântico em stack traces, por
+// isso o ESLint não a "vê" sendo referenciada.
+// eslint-disable-next-line no-unused-vars
 async function notificationDispatcher(op) {
   if (!op || !op._database) {
     return; // Sem banco disponível
@@ -13,41 +18,43 @@ async function notificationDispatcher(op) {
 
   var recipients = new Set();
 
-  // Adicionar owner do projeto como destinatário
-  try {
-    var project = await op._database.dProject.findFirst({
-      where: { chave: op.projectId },
-      select: { idOwner: true, nome: true },
-    });
-
-    if (project && project.idOwner) {
-      recipients.add(project.idOwner);
-    }
-  } catch (err) {
-    // Absorve erro de banco — notificação é best-effort
-  }
-
-  // Adicionar criador da task como destinatário (se execution vinculada a task)
+  // Adicionar criador da task como destinatário (se execution vinculada a task).
+  //
+  // NOTA (fix bug pré-existente): a versão anterior tentava buscar
+  // `DProject.idOwner` e `DTask.criadoPor`, mas nenhum dos dois existe no
+  // schema canônico V2:
+  //   - DProject não tem campo direto de owner (a noção de "dono" vive em
+  //     DVincula via roles MANAGER/ADMIN — buscar isso aqui exigiria query
+  //     extra e foge do escopo "best-effort" deste script).
+  //   - DTask tem `idCreator` (não `criadoPor`).
+  // Pra manter o script enxuto, notificamos apenas o criador da task.
+  // Owner do projeto pode ser adicionado depois via consumer dedicado se
+  // necessário.
   if (op.taskId) {
     try {
       var task = await op._database.dTask.findFirst({
         where: { chave: op.taskId },
-        select: { criadoPor: true },
+        select: { idCreator: true },
       });
 
-      if (task && task.criadoPor) {
-        recipients.add(task.criadoPor);
+      if (task && task.idCreator) {
+        recipients.add(task.idCreator);
       }
     } catch (err) {
-      // Absorve erro de banco
+      // Absorve erro de banco — notificação é best-effort
     }
   }
 
   // Criar DEvento idClasse=-490 NOTIFICATION para cada destinatário
-  var riskLevel = (op.dados && op.dados.risk && op.dados.risk.level) ? op.dados.risk.level : 'LOW';
-  var approvalStatus = (op.dados && op.dados.approval && op.dados.approval.status) ? op.dados.approval.status : 'started';
-  var correlationId = (op.dados && op.dados.audit && op.dados.audit.correlationId) ? op.dados.audit.correlationId : '';
-  var prUrl = (op.dados && op.dados.pullRequest && op.dados.pullRequest.url) ? op.dados.pullRequest.url : null;
+  var riskLevel = op.dados && op.dados.risk && op.dados.risk.level ? op.dados.risk.level : 'LOW';
+  var approvalStatus =
+    op.dados && op.dados.approval && op.dados.approval.status
+      ? op.dados.approval.status
+      : 'started';
+  var correlationId =
+    op.dados && op.dados.audit && op.dados.audit.correlationId ? op.dados.audit.correlationId : '';
+  var prUrl =
+    op.dados && op.dados.pullRequest && op.dados.pullRequest.url ? op.dados.pullRequest.url : null;
 
   for (var recipientId of recipients) {
     try {
