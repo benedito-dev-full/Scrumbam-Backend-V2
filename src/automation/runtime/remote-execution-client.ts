@@ -258,7 +258,11 @@ export class RemoteExecutionClient {
     });
 
     const path = '/v1/execute';
-    const url = `http://127.0.0.1:${ctx.agent.tunnelPort}${path}`;
+    // AGENT_TUNNEL_HOST permite que o backend em Docker (Dokploy) alcance o
+    // tunnel SSH bindado na Docker bridge da VPS (172.17.0.1) em vez de
+    // localhost do container. Default 127.0.0.1 mantem dev local funcional.
+    const tunnelHost = process.env.AGENT_TUNNEL_HOST ?? '127.0.0.1';
+    const url = `http://${tunnelHost}:${ctx.agent.tunnelPort}${path}`;
     const headers = this.buildHeaders('POST', path, body, {
       agentId: ctx.agent.agentId,
       executionId: executionIdHeader,
