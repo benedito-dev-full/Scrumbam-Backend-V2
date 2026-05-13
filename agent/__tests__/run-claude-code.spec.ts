@@ -1,7 +1,7 @@
 /**
  * Specs integration do RUN_CLAUDE_CODE handler (Sub-tarefa 4).
  *
- * Cobre os 14 cenários da Sub-tarefa 4:
+ * Cobre os 14 cenários da Sub-tarefa 4 + 3 cenários de system-prompt (15-17):
  *
  *  1. Payload válido + slug existente → 200 + sendExecutionResult com sessionId correto
  *  2. Slug desconhecido → 422 UNKNOWN_PROJECT_SLUG (runner NÃO chamado)
@@ -17,9 +17,12 @@
  * 12. Mutex: 2ª request mesmo slug enquanto 1ª roda → 409 PROJECT_BUSY
  * 13. Mutex liberado após exception no runner
  * 14. Timeout reportado (timedOut=true → success=false)
+ * 15. readFileImpl retorna conteúdo → runner recebe systemPrompt
+ * 16. readFileImpl lança ENOENT → runner chamado sem systemPrompt, success=true
+ * 17. readFileImpl retorna string vazia → runner chamado sem systemPrompt
  *
  * Estratégia: mockar `runImpl`, `resolveImpl`, `validateImpl`, `snapshotImpl`,
- * `fallbackImpl` no handler — não precisamos de filesystem real.
+ * `fallbackImpl`, `readFileImpl` no handler — não precisamos de filesystem real.
  */
 import express from 'express';
 import pino from 'pino';
@@ -128,6 +131,8 @@ function buildApp(deps: {
   runImpl?: () => Promise<RunnerResult>;
   snapshotImpl?: () => string[];
   fallbackImpl?: () => string | null;
+  /** Default: lê string vazia (nenhum system-prompt injetado). */
+  readFileImpl?: (path: string, enc: BufferEncoding) => Promise<string>;
 }) {
   const app = express();
   app.use(express.json());
@@ -141,6 +146,7 @@ function buildApp(deps: {
     runImpl: deps.runImpl as never,
     snapshotImpl: deps.snapshotImpl as never,
     fallbackImpl: deps.fallbackImpl as never,
+    readFileImpl: deps.readFileImpl ?? (async () => ''),
   });
   app.post('/v1/execute', handler);
   return app;
@@ -546,6 +552,98 @@ describe('RUN_CLAUDE_CODE handler (Sub-tarefa 4)', () => {
     const reported = await backend.waitForFirstCall();
     expect(reported.success).toBe(false);
     expect(reported.exitCode).toBe(-1); // null mapeado para -1
+  });
+
+  it('15) readFileImpl retorna conteúdo → runner recebe systemPrompt', async () => {
+    const backend = mockBackendClient();
+    let capturedSystemPrompt: string | undefined;
+    const CLAUDE_MD_CONTENT = '# Regras\n- Sempre criar branch antes de commitar';
+    const app = buildApp({
+      backendClient: backend.client,
+      resolveImpl: () => '/home/dev/projetos/x',
+      validateImpl: () => '/home/dev/projetos/x',
+      snapshotImpl: () => [],
+      readFileImpl: async () => CLAUDE_MD_CONTENT,
+      runImpl: (async (input: { systemPrompt?: string }): Promise<RunnerResult> => {
+        capturedSystemPrompt = input.systemPrompt;
+        return {
+          stdout: buildClaudeJson(),
+          stderr: '',
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          durationMs: 100,
+        };
+      }) as never,
+    });
+
+    const res = await request(app).post('/v1/execute').send(BASE_PAYLOAD);
+
+    expect(res.status).toBe(200);
+    await backend.waitForFirstCall();
+    expect(capturedSystemPrompt).toBe(CLAUDE_MD_CONTENT);
+  });
+
+  it('16) readFileImpl lança ENOENT → runner chamado sem systemPrompt, success=true', async () => {
+    const backend = mockBackendClient();
+    let capturedSystemPrompt: string | undefined = 'sentinel';
+    const enoent = Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' });
+    const app = buildApp({
+      backendClient: backend.client,
+      resolveImpl: () => '/home/dev/projetos/x',
+      validateImpl: () => '/home/dev/projetos/x',
+      snapshotImpl: () => [],
+      readFileImpl: async () => {
+        throw enoent;
+      },
+      runImpl: (async (input: { systemPrompt?: string }): Promise<RunnerResult> => {
+        capturedSystemPrompt = input.systemPrompt;
+        return {
+          stdout: buildClaudeJson(),
+          stderr: '',
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          durationMs: 100,
+        };
+      }) as never,
+    });
+
+    const res = await request(app).post('/v1/execute').send(BASE_PAYLOAD);
+
+    expect(res.status).toBe(200);
+    const reported = await backend.waitForFirstCall();
+    expect(capturedSystemPrompt).toBeUndefined();
+    expect(reported.success).toBe(true);
+  });
+
+  it('17) readFileImpl retorna string vazia → runner chamado sem systemPrompt', async () => {
+    const backend = mockBackendClient();
+    let capturedSystemPrompt: string | undefined = 'sentinel';
+    const app = buildApp({
+      backendClient: backend.client,
+      resolveImpl: () => '/home/dev/projetos/x',
+      validateImpl: () => '/home/dev/projetos/x',
+      snapshotImpl: () => [],
+      readFileImpl: async () => '   \n   ',
+      runImpl: (async (input: { systemPrompt?: string }): Promise<RunnerResult> => {
+        capturedSystemPrompt = input.systemPrompt;
+        return {
+          stdout: buildClaudeJson(),
+          stderr: '',
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          durationMs: 100,
+        };
+      }) as never,
+    });
+
+    const res = await request(app).post('/v1/execute').send(BASE_PAYLOAD);
+
+    expect(res.status).toBe(200);
+    await backend.waitForFirstCall();
+    expect(capturedSystemPrompt).toBeUndefined();
   });
 
   describe('payload validation', () => {

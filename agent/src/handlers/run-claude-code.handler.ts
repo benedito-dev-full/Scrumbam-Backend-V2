@@ -29,6 +29,7 @@
  *
  * @see ADR-V2-032
  */
+import { readFile } from 'node:fs/promises';
 import type { Request, Response } from 'express';
 import type { Logger } from 'pino';
 import type { AgentConfig } from '../config/schema';
@@ -70,6 +71,11 @@ export interface RunClaudeCodeDeps {
   snapshotImpl?: typeof snapshotSessionDir;
   /** Override do fallback FS (testes). */
   fallbackImpl?: typeof findNewSessionIdFromFilesystem;
+  /**
+   * Override de `fs/promises.readFile` (testes). Default: `readFile` do Node.
+   * Permite simular conteúdo do CLAUDE.md sem tocar filesystem.
+   */
+  readFileImpl?: (path: string, enc: BufferEncoding) => Promise<string>;
 }
 
 interface ValidatedPayload {
@@ -99,6 +105,7 @@ export function createRunClaudeCodeHandler(deps: RunClaudeCodeDeps) {
     validateImpl = validateWorkspace,
     snapshotImpl = snapshotSessionDir,
     fallbackImpl = findNewSessionIdFromFilesystem,
+    readFileImpl = readFile,
   } = deps;
 
   return function handle(req: Request, res: Response): void {
@@ -213,6 +220,8 @@ export function createRunClaudeCodeHandler(deps: RunClaudeCodeDeps) {
       runImpl,
       snapshotImpl,
       fallbackImpl,
+      readFileImpl,
+      claudeMdPath: config.claudeMdPath,
     });
   };
 }
@@ -313,8 +322,21 @@ async function runAndReport(args: {
   runImpl: typeof runClaudeCode;
   snapshotImpl: typeof snapshotSessionDir;
   fallbackImpl: typeof findNewSessionIdFromFilesystem;
+  readFileImpl: (path: string, enc: BufferEncoding) => Promise<string>;
+  claudeMdPath: string;
 }): Promise<void> {
-  const { payload, cwd, logger, backendClient, mutex, runImpl, snapshotImpl, fallbackImpl } = args;
+  const {
+    payload,
+    cwd,
+    logger,
+    backendClient,
+    mutex,
+    runImpl,
+    snapshotImpl,
+    fallbackImpl,
+    readFileImpl,
+    claudeMdPath,
+  } = args;
 
   let claudeSessionId: string | null = null;
   let claudeSessionPath: string | null = null;
@@ -325,12 +347,27 @@ async function runAndReport(args: {
     // Snapshot ANTES — base do diff para o fallback FS.
     const beforeFiles = snapshotImpl(cwd);
 
+    // Lê o CLAUDE.md global para injetar como system-prompt no Claude Code.
+    // Em modo `-p`, o Claude não lê o CLAUDE.md automaticamente — esta leitura
+    // supre essa ausência sem poluir o prompt da tarefa.
+    let systemPrompt: string | undefined;
+    try {
+      const content = await readFileImpl(claudeMdPath, 'utf-8');
+      if (content.trim() !== '') systemPrompt = content;
+    } catch {
+      logger.warn(
+        { path: claudeMdPath },
+        'claudeMdPath nao encontrado ou ilegivel — continuando sem system-prompt',
+      );
+    }
+
     try {
       runResult = await runImpl({
         prompt: payload.prompt,
         cwd,
         resumeSessionId: payload.resumeSessionId,
         timeoutSec: payload.timeoutSec,
+        systemPrompt,
       });
     } catch (err) {
       // runClaudeCode é projetado para nunca lançar, mas defensivo.

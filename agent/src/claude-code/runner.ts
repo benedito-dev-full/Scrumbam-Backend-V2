@@ -36,6 +36,12 @@ export interface RunnerInput {
   resumeSessionId?: string | null;
   /** Timeout em segundos. Default 30min. */
   timeoutSec?: number;
+  /**
+   * Se presente e não-vazio, passa `--system-prompt <conteúdo>` ao CLI.
+   * Usado para injetar regras globais (ex: ~/.claude/CLAUDE.md) sem poluir
+   * o `prompt` da tarefa — o histórico de intenções fica limpo.
+   */
+  systemPrompt?: string;
   /** Override do execFile (testes). Default: `child_process.execFile`. */
   execFileImpl?: typeof execFile;
 }
@@ -90,13 +96,22 @@ export async function runClaudeCode(input: RunnerInput): Promise<RunnerResult> {
   //   "permission denied" e working tree fica limpo (claude apenas planeja
   //   sem aplicar). Container do agent roda como `scrumban-agent` (sem root)
   //   dentro de allowedProjectRoots — blast radius contido.
-  const args: string[] = [
+  const args: string[] = [];
+
+  // `--system-prompt`: injeta regras globais (ex: conteúdo do ~/.claude/CLAUDE.md)
+  // antes do prompt da tarefa. Em modo `-p`, o Claude Code não lê o CLAUDE.md
+  // global — esta flag supre essa ausência sem poluir o histórico da intenção.
+  if (input.systemPrompt && input.systemPrompt.trim() !== '') {
+    args.push('--system-prompt', input.systemPrompt);
+  }
+
+  args.push(
     '-p',
     input.prompt,
     '--output-format',
     'json',
     '--dangerously-skip-permissions',
-  ];
+  );
   if (input.resumeSessionId && input.resumeSessionId.length > 0) {
     args.push('--resume', input.resumeSessionId);
   }
