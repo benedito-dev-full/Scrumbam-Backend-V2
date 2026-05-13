@@ -457,6 +457,13 @@ export class AgentsService {
             ...(dto.agentVersion !== undefined && { agentVersion: dto.agentVersion }),
             ...(dto.claudeVersion !== undefined && { claudeVersion: dto.claudeVersion }),
             ...(dto.os !== undefined && { os: dto.os }),
+            ...(dto.cpu !== undefined && { cpu: dto.cpu }),
+            ...(dto.mem !== undefined && { mem: dto.mem }),
+            ...(dto.uptime !== undefined && { uptime: dto.uptime }),
+            ...(dto.claudeCodeAvailable !== undefined && {
+              claudeCodeAvailable: dto.claudeCodeAvailable,
+            }),
+            ...(dto.tunnelHealthy !== undefined && { tunnelHealthy: dto.tunnelHealthy }),
             statusCode: AUTOMATION_CLASS_IDS.AGENT_STATUS_ONLINE.toString(),
             lastSeen: now.toISOString(),
           } as Prisma.InputJsonValue,
