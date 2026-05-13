@@ -97,17 +97,25 @@ export class ProjectAgentLinkService {
     const link = await this.prisma.$transaction(async (tx) => {
       await this.lockProjectAgentLinks(tx, projectId);
 
+      // NOTA (fix multi-projeto): NAO filtrar por `idLocEscritu: projectId`.
+      // O `idLocEscritu` do DEntidade -156 e' o projeto/usuario de origem
+      // (onde o agent foi criado via install-token). Restringir o vinculo
+      // a esse projeto quebra a feature multi-projeto introduzida em
+      // commit 09eeb61 (`feat(automation): endpoints link/unlink/list
+      // agente-projeto (multi-project)`). A validacao de autorizacao
+      // (`requireProjectManagerOrOrgAdmin`) acima ja garante que o usuario
+      // tem permissao no projeto destino — basta existir um agent ativo
+      // com o id requisitado.
       const agent = await tx.dEntidade.findFirst({
         where: {
           chave: agentId,
           idClasse: AUTOMATION_CLASS_IDS.AGENT,
-          idLocEscritu: projectId,
           excluido: false,
         },
         select: { chave: true },
       });
       if (!agent) {
-        throw new NotFoundException(`Agent ${agentId} nao encontrado para o projeto ${projectId}`);
+        throw new NotFoundException(`Agent ${agentId} nao encontrado (ou ja foi removido)`);
       }
 
       const project = await tx.dProject.findUnique({
