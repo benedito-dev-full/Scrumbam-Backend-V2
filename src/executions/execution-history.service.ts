@@ -1,10 +1,6 @@
-import {
-  ForbiddenException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
+import { EntidadeService } from '../entidades/entidades.service';
 import {
   ExecutionResponseDto,
   serializeExecution,
@@ -13,12 +9,7 @@ import {
 import { ListExecutionsQueryDto } from './dto/list-executions-query.dto';
 
 /** idClasses de membership em projeto (DVincula) */
-const PROJECT_MEMBERSHIP_CLASSES = [
-  BigInt(-170),
-  BigInt(-171),
-  BigInt(-172),
-  BigInt(-173),
-];
+const PROJECT_MEMBERSHIP_CLASSES = [BigInt(-170), BigInt(-171), BigInt(-172), BigInt(-173)];
 
 /** Mapa riskLevel → idClasse para filtro */
 const RISK_LEVEL_TO_CLASSE: Record<string, bigint> = {
@@ -42,7 +33,23 @@ const EXECUTION_CLASSES = [BigInt(-301), BigInt(-302), BigInt(-303)];
 export class ExecutionHistoryService {
   private readonly logger = new Logger(ExecutionHistoryService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly entidadeService: EntidadeService,
+  ) {}
+
+  /**
+   * Converte o `userId` que chega do controller (extraido do JWT — eh o
+   * `DUserGroup.chave`/`sub`, NAO o entidadeId) no `DEntidade.chave`
+   * usado pelos checks de membership/role em `DVincula`.
+   *
+   * Sem essa conversao, qualquer endpoint listava/checava role com a
+   * chave de login, que nao bate com a chave de negocio onde roles vivem
+   * — resultado: 403 mesmo para admins/managers legitimos.
+   */
+  private async resolveEntidadeId(userIdFromJwt: string): Promise<bigint> {
+    return this.entidadeService.getEntidadeIdFromUserGroup(BigInt(userIdFromJwt));
+  }
 
   /**
    * Lista executions de um projeto com cursor pagination e filtros.
@@ -58,25 +65,24 @@ export class ExecutionHistoryService {
    */
   async findMany(
     query: ListExecutionsQueryDto,
-    userEntidadeId: string,
+    userIdFromJwt: string,
   ): Promise<{ items: ExecutionResponseDto[]; nextCursor?: string }> {
     const projectId = BigInt(query.projectId);
     const limit = query.limit ?? 20;
+    const userEntidadeId = await this.resolveEntidadeId(userIdFromJwt);
 
     // Validar membership
     const membership = await this.prisma.dVincula.findFirst({
       where: {
         idClasse: { in: PROJECT_MEMBERSHIP_CLASSES },
         idLocEscritu: projectId,
-        idEntidade: BigInt(userEntidadeId),
+        idEntidade: userEntidadeId,
         excluido: false,
       },
     });
 
     if (!membership) {
-      throw new ForbiddenException(
-        `Usuário não tem acesso ao projeto ${query.projectId}.`,
-      );
+      throw new ForbiddenException(`Usuário não tem acesso ao projeto ${query.projectId}.`);
     }
 
     // Construir filtro de idClasse (riskLevel → idClasse ou todos)
@@ -150,10 +156,7 @@ export class ExecutionHistoryService {
    * @throws {NotFoundException} Se execution não encontrada
    * @throws {ForbiddenException} Se user não tem acesso ao projeto da execution
    */
-  async findOne(
-    executionId: string,
-    userEntidadeId: string,
-  ): Promise<ExecutionResponseDto> {
+  async findOne(executionId: string, userIdFromJwt: string): Promise<ExecutionResponseDto> {
     const pedido = await this.prisma.dPedido.findFirst({
       where: {
         chave: BigInt(executionId),
@@ -179,11 +182,12 @@ export class ExecutionHistoryService {
 
     // Valida acesso cross-project (security: não expor executions de outros projetos)
     if (pedido.idLocEscritu) {
+      const userEntidadeId = await this.resolveEntidadeId(userIdFromJwt);
       const membership = await this.prisma.dVincula.findFirst({
         where: {
           idClasse: { in: PROJECT_MEMBERSHIP_CLASSES },
           idLocEscritu: pedido.idLocEscritu,
-          idEntidade: BigInt(userEntidadeId),
+          idEntidade: userEntidadeId,
           excluido: false,
         },
       });
