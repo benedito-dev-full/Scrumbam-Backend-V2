@@ -224,7 +224,8 @@ export function serializeExecution(pedido: {
       decidedAt: dados?.approval?.decidedAt,
     },
     command: {
-      text: dados?.command?.text ?? '',
+      // fallback para dados.prompt (formato legado pré-V2) quando command.text ausente
+      text: dados?.command?.text ?? dados?.prompt ?? '',
       executable: dados?.command?.executable,
       args: dados?.command?.args,
       cwd: dados?.command?.cwd,
