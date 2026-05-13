@@ -39,6 +39,7 @@ const TEST_CONFIG: AgentConfig = {
   backendTunnelHost: 'tunnel.test.local',
   backendTunnelPort: 22,
   tunnelPort: 39999,
+  bindHost: '127.0.0.1',
   allowedProjectRoots: ['/home/dev/projetos'],
   claudeMdPath: '/home/dev/.claude/CLAUDE.md',
   agentSshKeyPath: '/etc/scrumban-agent/ssh_key',
@@ -186,7 +187,7 @@ describe('BackendClient.sendHeartbeat', () => {
     await client.sendHeartbeat(HEARTBEAT_PAYLOAD);
 
     expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe('https://api.test.local/agents/agent-test-1/heartbeat');
+    expect(calls[0].url).toBe('https://api.test.local/api/v1/agents/agent-test-1/heartbeat');
     expect(calls[0].init.method).toBe('POST');
 
     const headers = calls[0].init.headers as Record<string, string>;
@@ -319,7 +320,7 @@ describe('BackendClient.sendExecutionResult', () => {
 
     await client.sendExecutionResult(EXECUTION_RESULT_PAYLOAD);
 
-    expect(calls[0].url).toBe('https://api.test.local/agents/agent-test-1/execution-result');
+    expect(calls[0].url).toBe('https://api.test.local/api/v1/agents/agent-test-1/execution-result');
     expect(JSON.parse(calls[0].init.body as string)).toEqual(EXECUTION_RESULT_PAYLOAD);
   });
 });

@@ -29,6 +29,7 @@ const BASE_CONFIG: AgentConfig = {
   backendTunnelHost: 'tunnel.test.local',
   backendTunnelPort: 2222,
   tunnelPort: 41123,
+  bindHost: '127.0.0.1',
   allowedProjectRoots: ['/tmp/proj'],
   claudeMdPath: '/tmp/.claude/CLAUDE.md',
   agentSshKeyPath: '/tmp/keys/id_ed25519',

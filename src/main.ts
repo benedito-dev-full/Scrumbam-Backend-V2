@@ -1,18 +1,39 @@
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { json, type Request as ExpressRequest } from 'express';
 import { AppModule } from './app.module';
 import { SanitizingLogger } from './mcp/logging/sanitizing-logger.service';
 import { assertProductionReady } from './common/security/production-readiness';
 
+/** Request com bytes brutos preservados para validacao HMAC inbound (ADR-V2-040). */
+interface RawBodyRequest extends ExpressRequest {
+  rawBody?: Buffer;
+}
+
 async function bootstrap(): Promise<void> {
   assertProductionReady(process.env);
 
-  const app = await NestFactory.create(AppModule, {
+  // ADR-V2-040: preservar rawBody para validacao HMAC inbound (agent -> backend).
+  // O AgentAuthGuard recalcula sha256(body) sobre os bytes exatos enviados pelo
+  // agent; sem rawBody a comparacao falharia em re-serializacoes do Nest. Usamos
+  // bodyParser: false + express.json com verify callback (padrao Express para
+  // webhooks HMAC, ja em uso em outras rotas que dependem de integridade do body).
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: new SanitizingLogger(undefined, {
       logLevels: ['error', 'warn', 'log', 'debug', 'verbose'],
     }),
+    bodyParser: false,
   });
+  app.use(
+    json({
+      limit: '1mb',
+      verify: (req, _res, buf) => {
+        (req as RawBodyRequest).rawBody = Buffer.from(buf);
+      },
+    }),
+  );
 
   const apiPrefix = process.env.API_PREFIX || 'api/v1';
   app.setGlobalPrefix(apiPrefix);

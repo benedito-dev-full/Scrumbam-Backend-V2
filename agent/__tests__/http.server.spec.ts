@@ -35,6 +35,7 @@ const TEST_CONFIG: AgentConfig = {
   backendTunnelHost: 'tunnel.test.local',
   backendTunnelPort: 22,
   tunnelPort: 39999,
+  bindHost: '127.0.0.1',
   allowedProjectRoots: ['/home/dev/projetos'],
   claudeMdPath: '/home/dev/.claude/CLAUDE.md',
   agentSshKeyPath: '/etc/scrumban-agent/ssh_key',

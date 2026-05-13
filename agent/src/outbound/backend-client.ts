@@ -189,7 +189,6 @@ export function createBackendClient(
         method,
         path,
         body: serialized,
-        agentApiKey: config.agentApiKey,
         agentCommandSecret: config.agentCommandSecret,
         agentId: config.agentId,
       });
