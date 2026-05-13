@@ -1,6 +1,44 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-12 (Documenter finalizando Task #4 — COMPLETA)
+**Ultima atualizacao:** 2026-05-13 (Documenter finalizando Task #2 Cancelamento de Convites — COMPLETA)
+
+---
+
+## 🎯 Task #2 — Cancelamento de Convites Pendentes (Pós-F8) — ✅ COMPLETA
+
+Plano `plan-invites-cancel-pending-invite-taskCancelInvite.md`. Refinamento ADR-V2-028.
+
+### ✅ Implementação Completa
+
+**Implementer completou:** 2026-05-13
+**Reviewer aprovou:** 2026-05-13 (Score 8.5/10)
+**Módulo:** `src/invites/`
+**Build:** `make build` PASS
+**Tests:** 32/32 PASS no escopo `src/invites` (8 service + 4 controller novos; 4 colaterais destravados)
+
+**Deliverables:**
+- ✅ `invites.service.ts` — método `cancelInvite(orgId, inviteId, actorUserId)` (~140 linhas com JSDoc)
+- ✅ `invites.controller.ts` — handler `@Delete('organizations/:orgId/invites/:inviteId')` + JSDoc atualizado (M1 corrigido: tabela 5 endpoints)
+- ✅ `invites.service.spec.ts` — 8 specs novos (happy path, RBAC, org 404, invite 404, outra org 404, ACCEPTED 409, EXPIRED idempotente, race P2025)
+- ✅ `invites.controller.spec.ts` — 4 specs novos (200, 403, 404, 409) + `.overrideGuard(ThrottlerGuard)` aplicado
+- ✅ DTOs: Response simples `{ id, revokedAt }` (sem DTO classe separada — response inline)
+
+**Pilares:**
+- Pilar 1 (Engine): N/A (estrutural)
+- Pilar 2 (Endpoints): REUTILIZADO — adiciona ao InvitesController existente (5 endpoints totais, não duplicata)
+- Pilar 3 (Seed): N/A (DClasse -502 INVITE_LIFECYCLE já existe)
+
+**Segurança & Performance:**
+- ZERO N+1 queries (3 paralelas + 1 delete)
+- Hard delete seguro (invite sem FK vivo em DVincula)
+- Anti-enumeração 404 genérico (org/invite/outra-org — mesma msg)
+- RBAC duplo (ADMIN da org via DVincula -161)
+- Rate limit 10/min/ip (idempotência vs abuso)
+- DEvento emitido ANTES do delete (Risco #1 mitigado via EventProducerService.addInternalEvent)
+
+**ADRs vinculados:** ADR-V2-001, ADR-V2-003, ADR-V2-008, ADR-V2-028
+
+**Status:** ✅ COMPLETA — Pronto para go-live (JSDoc ✅, ROADMAP ✅, CHANGELOG ✅, STATUS ✅, commit ✅)
 
 ---
 
