@@ -12,7 +12,39 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Security
+
+- **F13 Task #1 Backend: Alinhamento HMAC bilateral agent ↔ backend (ADR-V2-040)** - 2026-05-13
+  - **Guard reescrito:** `AgentAuthGuard` valida HMAC-SHA256 do body com canonical `method+"\n"+path+"\n"+timestamp+"\n"+nonce+"\n"+sha256(body).hex` idêntico ao que agent assina
+  - **Headers canônicos:** Normalização de `x-scrumban-*` em ambas direções (4 lados do contrato agora simétricos)
+  - **Integridade:** timingSafeEqual protege contra timing attacks
+  - **Path normalização:** Strip `/api/v\d+` para casar com agent que assina path relativo
+  - **rawBody preservado:** `express.json({ verify })` em main.ts expõe bytes brutos pré-parse JSON
+  - **Defesa em profundidade:** HMAC do body protege contra container malicioso intra-host (docker0 bridge)
+  - **Backward-compat:** apiKeyHash em dEntidade.dados preservado como legado
+
 ### Added
+
+- **F13 Task #1 Backend: HeartbeatDto ampliado + persistência de métricas agent** - 2026-05-13
+  - **5 campos opcionais novos:** cpu, mem, uptime, claudeCodeAvailable, tunnelHealthy
+  - **Persistência:** Spread em dEntidade.dados JSON via agents.service.ts (sem schema migration)
+  - **Uso futuro:** Flow Metrics (F8) + dashboards saúde agent (F14)
+
+### Added
+
+- **Transversal: Cancelamento de Convites Pendentes (Task #2, Pós-F8)** - 2026-05-13
+  - **Endpoint novo:** `DELETE /organizations/:orgId/invites/:inviteId` — ADMIN da org, hard delete + audit DEvento -502
+  - **Service:** `InvitesService.cancelInvite(orgId, inviteId, actorUserId)` com validações (403 RBAC, 404 anti-enumeração, 409 ACCEPTED)
+  - **Ordem evento:** DEvento `invite.revoked` emitido ANTES do hard delete (Risco #1 mitigado — order invertida vs padrão #7)
+  - **Idempotência:** EXPIRED retorna 200 com `previousStatus: 'EXPIRED'` no audit
+  - **Rate limit:** 10/min/ip (mais permissivo que create 3/min — operação de "limpeza")
+  - **Segurança:** ZERO FK constraints violados (invite nunca referenciado por DVincula vivo), idempotente vs race revoke-vs-accept
+  - **Testes adicionados:** 8 service specs + 4 controller specs (32/32 PASS); bônus 4 testes preexistentes destravados
+  - **Pilares:** N/A estrutural (Prisma direto), ZERO DClasses novas (-502 reutilizado)
+  - **ADRs:** ADR-V2-001 (zero tabela), ADR-V2-003 (RBAC duplo), ADR-V2-008 (DEvento), ADR-V2-028 (invites)
+  - **Quality Score:** 8.5/10 APPROVED
+
+### Added (anterior)
 
 - **F13 Task #4 Sub-tarefas 4.3+4.4: endpoints link/unlink/list agente-projeto (multi-project)** (V2 F13 Hotfix) - 2026-05-12
   - **3 endpoints novos com RBAC duplo** (MANAGER projeto OU ADMIN org via `requireProjectManagerOrOrgAdmin`):
