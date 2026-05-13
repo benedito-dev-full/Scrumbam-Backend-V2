@@ -21,7 +21,19 @@ StandardOutput=journal
 StandardError=journal
 
 # Hardening (systemd security)
-NoNewPrivileges=true
+#
+# NoNewPrivileges=false é necessário para o handler SET_ENV (Fase 4
+# task plan-2026-05-13) conseguir rodar `sudo systemctl restart
+# scrumban-agent` via sudoers entry de escopo mínimo. Com `true`, o
+# systemd bloqueia QUALQUER escalação — inclusive a do sudoers, que é
+# segura (rule única, sem wildcards). Trade-off:
+#   - Risco: se o processo do agent for comprometido, ele PODE chamar
+#     `sudo` — mas o sudoers só permite EXATAMENTE
+#     `/usr/bin/systemctl restart scrumban-agent`. Blast radius máximo
+#     = DoS por loop de restart no próprio serviço. Sem acesso root.
+#   - Sem isso: SET_ENV nunca aplica novas credenciais sem intervenção
+#     manual (defeito de produto).
+NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=strict
 # /home fica read-only para o agente conseguir LER ~/.claude/CLAUDE.md
