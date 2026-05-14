@@ -2827,6 +2827,102 @@ Ambos registrados no CHANGELOG.md em "Known issues" e rastreados para próximas 
 
 ---
 
+### Task #6: MCP Tool `get_project` — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** mcp
+**Fase V2:** F11 (MCP Expansion — Task #6 de 8)
+**Tempo Real:** ~50min Implementer + ~15min Reviewer + ~25min Documenter
+**Completado em:** 2026-05-14
+**Quality Score:** 9.0/10 APPROVED (novo recorde)
+
+**O Que Foi Feito:**
+
+- **Tool MCP `get_project`** — busca projeto por ID com `include[]` opcional (members | sprints | stats), escopada aos projetos acessíveis ao usuário MCP
+  - Classe `GetProjectTool` em `src/mcp/tools/get-project.tool.ts` (~130 linhas)
+  - Padrão: injeta `ProjectsService` + `ProjectMembersService` + `SprintsService` + `ProjectMetricsService`
+  - Fluxo: resolver `accessibleProjectIds` (ADR-V2-042 defense-in-depth) → validar projeto no scope → condicional `include[]` → chamar services em paralelo via `Promise.all`
+  - **Gate na tool:** `ProjectsService.findAccessibleProjectIds` + `includes()` ANTES do Promise.all (cortocircuito se gate bloqueia — services não são chamados)
+  - Anti-enumeration: NotFoundException com mensagem idêntica em ambos cenários (gate falhar vs projeto fora do scope)
+  - Helper `parseInclude()` inline (YAGNI — refatorar se Task #8 reutilizar)
+  - Paralelização: 3 branches concorrentes (members, sprints, stats) carregam em paralelo; resultado final filtra apenas keys solicitadas
+  - **activity excluído:** conforme plano §4.4 (adiado para Task #7 ou posterior)
+  - JSDoc completo (55L) com descrição detalhada, @example JSON-RPC, fluxo, excepções, paralelização, Pilares e ADRs
+
+- **Schema em `tools.schema.json`**
+  - Entrada `get_project` (9º tool no array) com `inputSchema: { projectId: string required; include: { type: 'array'; items: { enum: ['members', 'sprints', 'stats']; }; uniqueItems: true; } }`
+  - 9º tool confirmado em schema-consistency spec
+
+- **Registração**
+  - `src/mcp/services/mcp-router.service.ts` — 9º param do constructor (ANTES de `configService`)
+  - `src/mcp/mcp.module.ts` — adiciona `GetProjectTool` em providers
+  - `src/mcp/__tests__/mcp-block-d.spec.ts` — atualiza `toHaveLength(8)` → `(9)` + lista de nomes
+
+- **Testes (12 novos specs)**
+  - `mcp-tools.get-project.spec.ts`: 12 casos
+    - (a) happy path — busca projeto sem include
+    - (b) include=['members'] — carrega membros em paralelo
+    - (c) include=['sprints'] — carrega sprints (20 itens preview, sem cursor)
+    - (d) include=['stats'] — carrega stats (metrics do projeto)
+    - (e) include multiplo ['members', 'sprints', 'stats'] — paralelização real verificada via `setImmediate + callOrder` (técnica reutilizável)
+    - (f) projectId missing → INVALID_PARAMS
+    - (g) projectId tipo errado (number) → INVALID_PARAMS
+    - (h) projectId BigInt inválido → INVALID_PARAMS (parseBigIntParam falha)
+    - (i) include item fora do enum → INVALID_REQUEST
+    - (j) include não-array → INVALID_REQUEST
+    - (k) tenant isolation: projeto fora do scope → NotFoundException (services não são chamados via cortocircuito)
+    - (l) ctx.dEntidadeId propagado como bigint para todos os services
+    - (m) tools/list expõe `get_project` com name/description/inputSchema corretos
+  - Atualização `mcp-block-d.spec.ts` (8→9 tools)
+  - Entrada em `schema-consistency.spec.ts` (arrays + enums validados)
+  - **Total suite MCP:** 99/99 PASS (0 regressões)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — leitura em tabelas estruturais (DProject, DTask, etc.)
+- Pilar 2 (Endpoints): MCP é canal alternativo ao REST; tool reutiliza 3 services (ProjectsService, ProjectMembersService, SprintsService)
+- Pilar 3 (Seed): N/A — zero DClasses novas
+
+**ADRs vinculados:** ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation defense-in-depth — padrão uniforme gate na tool + cortocircuito)
+
+**Build & Smoke:**
+- `make build` → PASS (0 warnings)
+- `npx tsc --noEmit` → 7 pre-existing erros (não novos)
+- ESLint → PASS (6 arquivos modificados/criados, 0 warnings)
+- Test suite MCP → 99/99 PASS
+
+**Divergência Positiva do Plano:**
+- Plano §4.4 sugeria `activity: object` no resultado
+- **Implementação adiada:** activity removido desta task (previsto para Task #7 `update_project`)
+  - **Razão:** `activity` é mutable (exige write + journal), mais apropriado em contexto de UPDATE. GET simplificado retorna apenas dados estáticos.
+  - **Padrão:** READ (get_project) entrega snapshot; WRITE (update_project) rastreia mudanças
+
+**Débitos Abertos (rastreados):**
+- **Task #2 continuam abertos:**
+  - MEDIUM: `taskType` omitido do inputSchema (resolução agendada Tasks #3+)
+  - MEDIUM: `priority: null` é no-op silencioso (resolução futura)
+- **Task #5 continuam abertos:**
+  - MEDIUM: ProjectMembersService.getMembers JSDoc afirma lançar NotFoundException, mas service retorna `{ members: [] }` silenciosamente (mitigação: gate na tool)
+- **Task #6 novo (código smell, LOW):**
+  - LOW: `logger.debug?.()` com optional chaining em `get-project.tool.ts` (padronizar para `.debug()` sem `?.` em Task #7+)
+  - LOW: Comentário sobre duplo `findOne` quando `include=['stats']` poderia ser mais explícito (explicação de trade-off defense-in-depth em comment)
+
+**Plan:** [`workspace/plans/plan-mcp-expansion-8tools.md`](../workspace/plans/plan-mcp-expansion-8tools.md) §Task #6 (linhas 486-514)
+**Review:** APPROVED 9.0/10 (novo recorde de expansão MCP)
+**Memory:** [[mcp-expansion-task6-gotchas]] — paralelização via Promise.all + setImmediate, YAGNI parseInclude inline, cortocircuito de gate
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan Task #6 (2h) |
+| Implementer | ~50min | 100% PASS: tool + 12 testes + paralelização confirmada |
+| Reviewer | ~15min | 9.0/10 APPROVED (melhor score da expansão; padrão tenant isolation + Promise.all robusto) |
+| Documenter | ~25min | JSDoc, ROADMAP, CHANGELOG, STATUS, commit Conventional |
+
+**Next:** Task #7 `update_project` (modificar name, description, statusId com activity trail) — reusa padrão com helpers privados (similar a update_task Task #2)
+
+---
+
 ## Proximas fases (preview)
 
 | Fase | Nome | Pilar dominante |

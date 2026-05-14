@@ -189,6 +189,23 @@
           }
         }
       }
+    },
+    {
+      "name": "get_project",
+      "description": "Busca dados de um projeto por ID. Suporta include opcional (members, sprints, stats) para reduzir round-trips do LLM.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["projectId"],
+        "properties": {
+          "projectId": { "type": "string" },
+          "include": {
+            "type": "array",
+            "items": { "type": "string", "enum": ["members", "sprints", "stats"] },
+            "uniqueItems": true,
+            "description": "Campos opcionais a incluir no payload de resposta. Valores: members | sprints | stats."
+          }
+        }
+      }
     }
   ]
 }

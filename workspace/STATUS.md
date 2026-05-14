@@ -2987,6 +2987,64 @@ Plano `workspace/plans/plan-orphan-workspace.md`. Ciclo completo Strategist → 
 
 ---
 
+---
+
+## Task #6 — COMPLETE (V2 Fase F11)
+
+**Module:** mcp
+**Task:** MCP Tool `get_project` com `include[]` opcional
+**Status:** COMPLETA
+**Duration:** ~50min Implementer + ~15min Reviewer + ~25min Documenter
+**Quality Score:** 9.0/10 APPROVED (novo recorde)
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | 2h (plan) | — |
+| Implementer | ~50min | 100% PASS (tool + 12 testes + Promise.all confirmado) |
+| Reviewer | ~15min | 9.0/10 APPROVED (recorde; padrão robusto) |
+| Documenter | ~25min | JSDoc, ROADMAP, CHANGELOG, STATUS, commit |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — leitura em estruturais
+- Pilar 2 (Endpoints): REUTILIZADO (3 services, zero controller novo)
+- Pilar 3 (Seed): RESPEITADO (zero DClasses novas)
+
+**Deliverables:**
+- [x] Tool `GetProjectTool` em `src/mcp/tools/get-project.tool.ts`
+- [x] 12 specs em `mcp-tools.get-project.spec.ts`
+- [x] Schema atualizado (`tools.schema.json`)
+- [x] Registração (McpModule, McpRouterService)
+- [x] Helper `parseInclude()` (YAGNI)
+- [x] JSDoc (55 linhas com @example JSON-RPC)
+
+**Metrics:**
+- Build: PASS
+- TypeScript: 0 novos erros (7 pre-existing)
+- ESLint: 0 warnings
+- MCP Specs: 99/99 PASS (0 regressões)
+- MCP Tools: 8→9 (get_project adicionado)
+- Paralelização: Promise.all verificado via setImmediate+callOrder
+
+**ADRs:** ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation defense-in-depth — gate + cortocircuito)
+
+**Padrão F11 Confirmado:**
+- "gate na tool via `findAccessibleProjectIds + includes()`" é uniforme, robusto
+- Anti-enumeration seguro (NotFoundException 404 em ambos cenários)
+- Cortocircuito antes de Promise.all (services não chamados se gate falha)
+- Paralelização via Promise.all com branches concorrentes (members, sprints, stats)
+
+**Débitos Abertos (rastreados):**
+1. **Task #2 continuam:** taskType omitido, priority:null no-op
+2. **Task #5 continuam:** ProjectMembersService.getMembers JSDoc vs realidade
+3. **Task #6 novo (LOW):**
+   - `logger.debug?.()` optional chaining (code smell, padronizar Task #7+)
+   - Comentário duplo `findOne` com stats poderia ser mais explícito
+
+**Next Task:** #7 `update_project` (name, description, statusId + activity trail)
+
+---
+
 <!-- dedup:implementer:5 -->
 ### Agent Concluído: implementer
 
@@ -3026,5 +3084,38 @@ Plano `workspace/plans/plan-orphan-workspace.md`. Ciclo completo Strategist → 
 **Task:** #5
 **Timestamp:** 14/05/2026 13:41:30
 **Agent:** strategist
+**Status:** Completo
+
+
+---
+
+<!-- dedup:implementer:6 -->
+### Agent Concluído: implementer
+
+**Task:** #6
+**Timestamp:** 14/05/2026 14:45:00
+**Agent:** implementer
+**Status:** Completo
+
+
+---
+
+<!-- dedup:reviewer:6 -->
+### Agent Concluído: reviewer
+
+**Task:** #6
+**Timestamp:** 14/05/2026 15:00:00
+**Agent:** reviewer
+**Status:** Completo
+
+
+---
+
+<!-- dedup:documenter:6 -->
+### Agent Concluído: documenter
+
+**Task:** #6
+**Timestamp:** 14/05/2026 15:25:00
+**Agent:** documenter
 **Status:** Completo
 

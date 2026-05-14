@@ -1,5 +1,6 @@
 import toolsSchema from '../schemas/tools.schema.json';
 import { CreateTaskTool } from '../tools/create-task.tool';
+import { GetProjectTool } from '../tools/get-project.tool';
 import { GetTaskTool } from '../tools/get-task.tool';
 import { ListMembersTool } from '../tools/list-members.tool';
 import { ListProjectsTool } from '../tools/list-projects.tool';
@@ -48,6 +49,7 @@ function buildRegisteredTools(): McpTool[] {
     new GetTaskTool(noop, noop),
     new UpdateTaskTool(noop, noop),
     new ListMembersTool(noop, noop),
+    new GetProjectTool(noop, noop, noop),
   ];
 }
 

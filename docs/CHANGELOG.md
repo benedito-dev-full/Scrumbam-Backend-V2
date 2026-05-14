@@ -51,6 +51,20 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
   - **ADRs:** ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation defense-in-depth — padrão "gate na tool" mais robusto)
   - **Quality Score:** 8.8/10 APPROVED (melhor score até aqui) | Build: PASS, ESLint: PASS, Total suite MCP: 87/87 PASS
 
+- **F11 Task #6: MCP Tool `get_project` com `include[]` Opcional e Paralelização** - 2026-05-14
+  - **Tool MCP `get_project`:** busca projeto por ID com `include[]` opcional (members | sprints | stats), paralelização via Promise.all
+  - **Classe `GetProjectTool`** em `src/mcp/tools/get-project.tool.ts` (~130 linhas) — injeção de `ProjectsService`, `ProjectMembersService`, `SprintsService`, `ProjectMetricsService`
+  - **Padrão paralelização condicional:** resolve `accessibleProjectIds` na tool (gate primário), valida escopo com `includes()` ANTES de Promise.all (cortocircuito de services se gate bloqueia). Branches concorrentes: members, sprints, stats carregam em paralelo. Resultado filtra apenas keys solicitadas.
+  - **Helper `parseInclude()` inline:** decisão YAGNI — refatorar se Task #8 reutilizar. Valida array, filtra enum ['members', 'sprints', 'stats'], detecta duplicatas via `uniqueItems: true` no schema.
+  - **Anti-enumeration uniforme:** NotFoundException com mensagem idêntica em ambos cenários (gate falhar vs projeto fora do scope). Services não são chamados se gate bloqueia (cortocircuito).
+  - **activity excluído (adiado):** conforme plano §4.4 — reservado para Task #7 `update_project` (mutable, requer journal)
+  - **Registração:** 9º param ao constructor `McpRouterService` (ANTES de `configService`), entrada em `tools.schema.json` com schema array + enum
+  - **Testes:** 12 cases em `mcp-tools.get-project.spec.ts` (happy path sem/com include, include multiplo paralelizado, params validation, BigInt parse, tenant isolation cortocircuito, ctx propagation, tools/list) + schema-consistency atualizado → 99/99 PASS MCP total
+  - **Técnica reutilizável:** teste de paralelismo via `setImmediate + callOrder` (pode ser reusada em Task #7+ se Promise.all novamente necessário)
+  - **Pilares:** Pilar 2 RESPEITADO (reutiliza 3 services — zero controller novo); Pilar 3 RESPEITADO (zero DClasses novas)
+  - **ADRs:** ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation defense-in-depth — gate + cortocircuito)
+  - **Quality Score:** 9.0/10 APPROVED (novo recorde) | Build: PASS, ESLint: PASS, Total suite MCP: 99/99 PASS
+
 ### Known issues
 
 - **MCP `update_task`: campo `taskType` não exposto** (plano §4.1, ajuste agendado Task #3+)
@@ -70,7 +84,19 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
   - Impacto: BAIXO — gate na tool garante NotFoundException se projeto não acessível
   - Resolução: Refatorar ProjectMembersService.getMembers em tarefa futura (F16+)
 
-- **Next:** Task #6 `get_project` (com `include[]` para members/sprints/stats) — reusa padrão com Promise.all condicional
+- **MCP `get_project`: `logger.debug?.()` com optional chaining em `get-project.tool.ts`** (code smell, padronizar)
+  - Motivo: Inconsistência com padrão do módulo (outras tools usam `.debug()` sem `?.`)
+  - Status: Débito técnico LOW (não bloqueia funcionalidade)
+  - Impacto: BAIXO — inconsistência visual/padrão
+  - Resolução: Padronizar em Task #7+ ou refactor LOW-priority
+
+- **MCP `get_project`: Comentário sobre duplo `findOne` quando `include=['stats']` poderia ser mais explícito** (clareza de design)
+  - Motivo: Defense-in-depth realiza 2 hits em `findOne` (gate + dentro de Promise.all) — trade-off aceitável documentado no code
+  - Status: Débito técnico LOW (padrão documentado, queries baratas em PK)
+  - Impacto: BAIXO — trade-off explicado via comentário, sem impacto operacional
+  - Resolução: Refinar comentário ou extrair em docstring em Task #8+
+
+- **Next:** Task #7 `update_project` (modificar name, description, statusId com activity trail) — reusa padrão helpers privados de update_task
 
 ### Security
 
