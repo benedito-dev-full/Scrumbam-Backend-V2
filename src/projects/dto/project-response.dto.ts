@@ -14,7 +14,6 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
  *   "description": null,
  *   "orgId": "100",
  *   "memberCount": 1,
- *   "automationEnabled": false,
  *   "gitRepo": null,
  *   "criadoEm": "2026-05-09T00:00:00.000Z",
  *   "atualizadoEm": "2026-05-09T00:00:00.000Z"
@@ -39,9 +38,6 @@ export class ProjectResponseDto {
 
   @ApiProperty({ description: 'Número de membros', example: 1 })
   memberCount!: number;
-
-  @ApiProperty({ description: 'Automação Claude Code habilitada', example: false })
-  automationEnabled!: boolean;
 
   @ApiPropertyOptional({ description: 'URL do repositório git', nullable: true })
   gitRepo!: string | null;

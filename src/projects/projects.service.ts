@@ -1057,7 +1057,6 @@ export class ProjectsService implements OnModuleInit {
       description: (dados?.description as string | null | undefined) ?? project.descricao ?? null,
       orgId: project.idEstab?.toString() ?? null,
       memberCount,
-      automationEnabled: (dados?.automationEnabled as boolean | null) ?? false,
       gitRepo: (dados?.gitRepo as string | null) ?? null,
       teamId,
       criadoEm: project.criadoEm.toISOString(),
