@@ -347,6 +347,9 @@ async function runAndReport(args: {
     // Snapshot ANTES — base do diff para o fallback FS.
     const beforeFiles = snapshotImpl(cwd);
 
+    // git pull --rebase antes de executar — garante repo atualizado.
+    await gitPullRebase(cwd, logger);
+
     // Lê o CLAUDE.md global para injetar como system-prompt no Claude Code.
     // Em modo `-p`, o Claude não lê o CLAUDE.md automaticamente — esta leitura
     // supre essa ausência sem poluir o prompt da tarefa.
@@ -455,6 +458,36 @@ OBRIGATÓRIO após concluir a tarefa:
     });
   } finally {
     mutex.delete(payload.projectSlug);
+  }
+}
+
+/**
+ * Executa `git pull --rebase --autostash` no diretório do projeto.
+ * Falha silenciosa — loga warn mas não interrompe a execução.
+ * Casos tolerados: não é git repo, sem remote, conflito de rebase, timeout.
+ */
+async function gitPullRebase(
+  cwd: string,
+  log: { info: (msg: string) => void; warn: (msg: string) => void },
+): Promise<void> {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const execFileAsync = promisify(execFile);
+
+  try {
+    // Verifica se é um repositório git
+    await execFileAsync('git', ['rev-parse', '--git-dir'], { cwd });
+
+    // Executa git pull --rebase
+    const { stdout, stderr } = await execFileAsync(
+      'git',
+      ['pull', '--rebase', '--autostash'],
+      { cwd, timeout: 60_000 },
+    );
+
+    log.info(`git pull --rebase: ${(stdout || stderr || 'ok').trim()}`);
+  } catch (err) {
+    log.warn(`git pull --rebase falhou (continuando): ${(err as Error).message}`);
   }
 }
 
