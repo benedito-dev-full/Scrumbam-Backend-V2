@@ -36,11 +36,11 @@ StandardError=journal
 NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=strict
-# /home fica read-only para o agente conseguir LER ~/.claude/CLAUDE.md
-# do CEO (claudeMdPath aponta para /root/.claude/CLAUDE.md ou /home/<user>/.claude/CLAUDE.md
-# — depende da decisão de install.sh). Se o claudeMdPath ficar em /root,
-# precisa de ProtectHome=read-only (não 'yes') OU desativar (ver nota abaixo).
-ProtectHome=read-only
+# ProtectHome=no permite que o agente (e o claude filho) escrevam em
+# /home/dev/projetos (workspace dos projetos gerenciados). Com read-only
+# o systemd bloqueia escrita mesmo que ReadWritePaths liste o path.
+# Leitura de ~/.claude/CLAUDE.md continua funcionando normalmente.
+ProtectHome=no
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
@@ -49,7 +49,7 @@ LockPersonality=true
 RestrictRealtime=true
 RestrictNamespaces=true
 # Apenas paths estritamente necessários ficam read-write
-ReadWritePaths=/etc/scrumban-agent /var/lib/scrumban-agent /var/log/scrumban-agent
+ReadWritePaths=/etc/scrumban-agent /var/lib/scrumban-agent /var/log/scrumban-agent /home/dev/projetos
 
 # Limites de recursos
 MemoryMax=512M

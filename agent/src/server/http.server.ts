@@ -176,15 +176,15 @@ export function createServer(
         throw new Error('http server ja foi iniciado');
       }
       await new Promise<void>((resolve, reject) => {
-        const srv = app.listen(config.tunnelPort, '127.0.0.1', () => {
+        const srv = app.listen(config.tunnelPort, config.bindHost, () => {
           logger.info(
             {
               stage: 'http.server',
-              host: '127.0.0.1',
+              host: config.bindHost,
               port: config.tunnelPort,
               version: AGENT_VERSION,
             },
-            'scrumban-agent http server escutando em 127.0.0.1',
+            `scrumban-agent http server escutando em ${config.bindHost}`,
           );
           resolve();
         });

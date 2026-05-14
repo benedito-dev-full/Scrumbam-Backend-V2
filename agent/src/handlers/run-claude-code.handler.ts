@@ -361,9 +361,22 @@ async function runAndReport(args: {
       );
     }
 
+    const promptWithGitRules = `${payload.prompt}
+
+---
+OBRIGATÓRIO após concluir a tarefa:
+1. Se arquivos foram alterados:
+   a. git checkout -b scrumban/auto-<slug-curto-da-tarefa>  (se ainda não estiver numa branch scrumban/)
+   b. git add -A && git commit -m "<tipo>: <descrição curta>"
+   c. git push origin <branch>
+2. Sempre que houver uma branch scrumban/ com commits não mergeados, abra o PR se ainda não existir:
+   gh pr create --title "<tipo>: <descrição curta>" --body "Criado automaticamente pelo agente Scrumban." --base main
+   (Se o PR já existir, apenas informe a URL — não tente criar novamente.)
+3. Se nenhum arquivo foi alterado e não há branch pendente, não crie branch nem commit nem PR.`;
+
     try {
       runResult = await runImpl({
-        prompt: payload.prompt,
+        prompt: promptWithGitRules,
         cwd,
         resumeSessionId: payload.resumeSessionId,
         timeoutSec: payload.timeoutSec,
