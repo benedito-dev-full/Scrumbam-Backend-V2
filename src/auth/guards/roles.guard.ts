@@ -57,8 +57,19 @@ export class RolesGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<{ user?: JwtPayload }>();
     const user = request.user;
 
-    if (!user?.sub || !user?.organizationId) {
-      throw new ForbiddenException('Contexto de usuário ou organização ausente');
+    if (!user?.sub) {
+      throw new ForbiddenException('Contexto de usuário ausente');
+    }
+
+    if (!user?.organizationId) {
+      // ADR-V2-038: JWT órfão. Em teoria o RequireWorkspaceGuard já bloqueou
+      // a rota — mas se chegou aqui é porque ela está marcada @AllowOrphan().
+      // Rotas que requerem @Roles() não fazem sentido para JWT órfão (não há
+      // org em que aplicar o role). Negar com 403 estruturado.
+      throw new ForbiddenException({
+        code: 'NO_WORKSPACE',
+        message: 'Esta rota requer workspace ativa — role-check não é aplicável a JWT órfão.',
+      });
     }
 
     const userId = BigInt(user.sub);

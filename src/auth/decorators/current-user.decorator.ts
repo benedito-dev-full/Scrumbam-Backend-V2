@@ -8,8 +8,20 @@ export interface JwtPayload {
   sub: string;
   /** Chave BigInt da DEntidade (-150 USER). */
   entidadeId: string;
-  /** Chave BigInt da DEntidade (-152 ORGANIZATION) padrão do usuário. */
-  organizationId: string;
+  /**
+   * Chave BigInt da DEntidade (-152 ORGANIZATION) padrão do usuário.
+   *
+   * **OPCIONAL** — quando ausente, o usuário está em **estado órfão**
+   * (sem nenhuma workspace ativa). Rotas tenant-scoped DEVEM rejeitar
+   * JWTs órfãos via `RequireWorkspaceGuard` (a ser introduzido na Etapa 2
+   * do plano de orphan-workspace). Rotas marcadas com `@AllowOrphan()`
+   * aceitam JWT órfão (ex.: `/auth/me`, `POST /organizations`).
+   *
+   * NOTA: até a Etapa 3, o `AuthService.login` ainda bloqueia user órfão
+   * com 401 — então na prática o backend não emite JWT sem `organizationId`
+   * ainda. O campo é opcional no tipo para preparar o terreno.
+   */
+  organizationId?: string;
   /** Email do usuário. */
   email: string;
   /** Tempo de expiração (Unix timestamp). */

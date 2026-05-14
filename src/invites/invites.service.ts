@@ -24,6 +24,7 @@ import { AcceptInviteDto } from './dto/accept-invite.dto';
 import { InviteInfoDto } from './dto/invite-info.dto';
 import { AcceptInviteResponseDto } from './dto/accept-invite-response.dto';
 import { PendingInviteDto } from './dto/pending-invite.dto';
+import { PendingInviteForMeDto } from '../auth/dto/pending-invite-for-me.dto';
 
 /** idClasses canonicos (seed F1 + ADR-V2-028). */
 const ID_CLASSE_USER_GROUP = BigInt(-46);
@@ -715,6 +716,125 @@ export class InvitesService {
         expiresAt: meta.expiresAt,
       });
     }
+    return result;
+  }
+
+  /**
+   * Lista convites pendentes endereçados a um email (independente de org/role).
+   *
+   * Diferente de `listPendingInvites(orgId, requesterUserId)` (visão ADMIN da
+   * org), este método é a versão "pelo próprio convidado": busca pelo email
+   * do user autenticado em QUALQUER organização. NÃO exige role ADMIN.
+   *
+   * Usado por `GET /auth/pending-invites` (Etapa 4 do plano orphan-workspace)
+   * para alimentar o empty state de usuário órfão (sem workspace) — frontend
+   * mostra "Você tem N convites pendentes, aceite ou crie sua workspace".
+   *
+   * Resposta sanitizada via `PendingInviteForMeDto`:
+   *  - NUNCA expõe `tokenHash`, `flow`, `targetUserId`, `invitedByUserId`.
+   *  - Retorna apenas `inviteId`, `orgId`, `orgName`, `role`, `expiresAt`.
+   *
+   * Filtros aplicados (em memória, após query):
+   *  - `metaDados.usedAt` deve ser null/undefined (não aceito).
+   *  - `metaDados.status === 'PENDING'` (não EXPIRED/ACCEPTED/REVOKED).
+   *  - `metaDados.expiresAt` no futuro (ainda válido).
+   *  - Org alvo existe (DEntidade -152) e não está soft-deleted.
+   *
+   * Performance: 2 queries Prisma no total (ZERO N+1):
+   *  1. `dTabela.findMany` carrega até 50 candidatos por email.
+   *  2. `dEntidade.findMany` resolve `orgId → orgName` em batch (`IN (...)`).
+   *
+   * @param email - Email do user autenticado (case-insensitive — normalizado
+   *   para lowercase antes da query, igual ao create/accept).
+   * @returns Lista de convites pendentes válidos (até 50, ordem desc por
+   *   `criadoEm`). Array vazio se nenhum convite ativo.
+   *
+   * @example
+   * ```typescript
+   * const invites = await invitesService.listPendingInvitesForEmail('user@x.com');
+   * // [{ inviteId: '42', orgId: '100', orgName: 'Acme', role: 'MEMBER',
+   * //    expiresAt: '2026-05-21T00:00:00.000Z' }]
+   * ```
+   *
+   * @see PendingInviteForMeDto — estrutura da resposta sanitizada.
+   * @see listPendingInvites — versão ADMIN (escopo único de org, requer role).
+   */
+  async listPendingInvitesForEmail(email: string): Promise<PendingInviteForMeDto[]> {
+    const emailLower = email.toLowerCase();
+
+    // Query 1: candidatos por email (até 50, ordem desc para mostrar os mais
+    // recentes primeiro). Convites já usados/expirados/revogados são filtrados
+    // em memória abaixo — não há índice eficiente em metaDados JSONB para
+    // status/expiresAt, e o volume por email é baixo (<<50).
+    const candidates = await this.prisma.dTabela.findMany({
+      where: {
+        idClasse: ID_CLASSE_INVITE_TOKEN,
+        nome: emailLower,
+        excluido: false,
+      },
+      orderBy: { criadoEm: 'desc' },
+      take: 50,
+    });
+
+    if (candidates.length === 0) {
+      return [];
+    }
+
+    // Query 2 (batch): resolve orgId → orgName para todos os candidatos numa
+    // única query (`IN (...)`). DTabela não tem relation Prisma para
+    // locEscrituracao, então fazemos manualmente. ZERO N+1.
+    const orgIds = Array.from(
+      new Set(
+        candidates.map((inv) => inv.idLocEscrituracao).filter((id): id is bigint => id !== null),
+      ),
+    );
+
+    const orgs =
+      orgIds.length > 0
+        ? await this.prisma.dEntidade.findMany({
+            where: {
+              chave: { in: orgIds },
+              idClasse: BigInt(-152),
+              excluido: false,
+            },
+            select: { chave: true, nome: true },
+          })
+        : [];
+
+    const orgMap = new Map<string, string>();
+    for (const o of orgs) {
+      orgMap.set(o.chave.toString(), o.nome);
+    }
+
+    const now = Date.now();
+    const result: PendingInviteForMeDto[] = [];
+
+    for (const inv of candidates) {
+      const meta = inv.metaDados as unknown as InviteMetaDados | null;
+      if (!meta) continue;
+      if (meta.usedAt) continue;
+      if (meta.status !== 'PENDING') continue;
+      if (!meta.expiresAt) continue;
+      if (new Date(meta.expiresAt).getTime() <= now) continue;
+      if (!inv.idLocEscrituracao) continue;
+
+      const orgIdStr = inv.idLocEscrituracao.toString();
+      const orgName = orgMap.get(orgIdStr);
+      if (!orgName) continue; // org soft-deleted ou inexistente — skip
+
+      result.push({
+        inviteId: inv.chave.toString(),
+        orgId: orgIdStr,
+        orgName,
+        role: meta.role,
+        expiresAt: meta.expiresAt,
+      });
+    }
+
+    this.logger.debug(
+      `listPendingInvitesForEmail(${emailLower}) → ${result.length} convite(s) ativo(s)`,
+    );
+
     return result;
   }
 

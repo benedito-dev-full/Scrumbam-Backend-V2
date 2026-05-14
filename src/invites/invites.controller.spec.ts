@@ -139,6 +139,7 @@ describe('InvitesController', () => {
           entidadeId: '901',
           email: 'novo@x.com',
           name: 'Maria',
+          isOrphan: false,
         },
         redirectTo: '/intentions',
       };

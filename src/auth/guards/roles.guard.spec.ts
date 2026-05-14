@@ -5,13 +5,14 @@ import { RolesGuard } from './roles.guard';
 import { RoleResolverService } from '../services/role-resolver.service';
 import { ROLES_KEY } from '../decorators/roles.decorator';
 
-const makeContext = (user?: object): ExecutionContext => ({
-  getHandler: () => ({}),
-  getClass: () => ({}),
-  switchToHttp: () => ({
-    getRequest: () => ({ user }),
-  }),
-}) as unknown as ExecutionContext;
+const makeContext = (user?: object): ExecutionContext =>
+  ({
+    getHandler: () => ({}),
+    getClass: () => ({}),
+    switchToHttp: () => ({
+      getRequest: () => ({ user }),
+    }),
+  }) as unknown as ExecutionContext;
 
 describe('RolesGuard', () => {
   let guard: RolesGuard;
@@ -65,6 +66,30 @@ describe('RolesGuard', () => {
     const ctx = makeContext({ sub: '3', organizationId: '10' });
 
     await expect(guard.canActivate(ctx)).rejects.toThrow(ForbiddenException);
+  });
+
+  it('deve lançar ForbiddenException NO_WORKSPACE quando JWT órfão atinge rota com @Roles()', async () => {
+    // Cenário: rota com @AllowOrphan() + @Roles() — RequireWorkspaceGuard
+    // liberou pelo @AllowOrphan(), mas RolesGuard precisa proteger contra
+    // BigInt(undefined). Resposta deve carregar code: 'NO_WORKSPACE'.
+    reflector.getAllAndOverride.mockReturnValue(['ADMIN']);
+
+    const ctx = makeContext({ sub: '1', email: 'orfao@x.com' }); // SEM organizationId
+
+    await expect(guard.canActivate(ctx)).rejects.toThrow(ForbiddenException);
+
+    try {
+      await guard.canActivate(ctx);
+    } catch (err) {
+      const response = (err as ForbiddenException).getResponse() as {
+        code: string;
+        message: string;
+      };
+      expect(response.code).toBe('NO_WORKSPACE');
+    }
+
+    // Não deve chamar roleResolver (curto-circuito antes de BigInt conversion)
+    expect(roleResolver.getOrgRole).not.toHaveBeenCalled();
   });
 
   it('deve usar ROLES_KEY correto na consulta ao Reflector', async () => {

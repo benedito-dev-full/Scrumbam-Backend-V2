@@ -64,8 +64,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!payload.sub || !payload.entidadeId) {
       throw new UnauthorizedException('Token JWT inválido: campos obrigatórios ausentes');
     }
+
+    // ÓRFÃO (ADR-V2-038): JWT sem `organizationId` é estado VÁLIDO.
+    // Pula re-validacao de DVincula porque nao ha membership para verificar.
+    // O `RequireWorkspaceGuard` (acionado dentro do `AuthCompositeGuard`)
+    // decide se a rota aceita JWT orfao via `@AllowOrphan()`; caso contrario
+    // responde 403 `{ code: 'NO_WORKSPACE' }`.
     if (!payload.organizationId) {
-      throw new UnauthorizedException('Token JWT inválido: organizationId ausente');
+      this.logger.debug(`JWT validate sub=${payload.sub} (ÓRFÃO) OK`);
+      return payload;
     }
 
     // Re-validar membership a cada request (ADR-V2-030).

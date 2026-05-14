@@ -145,11 +145,15 @@ export class SearchController {
     @Query() query: SearchQueryDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<SearchResponseDto> {
-    this.logger.log(`Search q="${query.q}" org=${user.organizationId} user=${user.sub}`);
+    // OrgTenantGuard garante que organizationId está presente. Assertion
+    // defensiva preserva o contrato após `JwtPayload.organizationId` virar
+    // opcional (ADR-V2-040 — Etapa 1 do plano orphan-workspace).
+    const organizationId = user.organizationId!;
+    this.logger.log(`Search q="${query.q}" org=${organizationId} user=${user.sub}`);
 
     return this.searchService.search({
       q: query.q,
-      organizationId: user.organizationId,
+      organizationId,
       projectIdFilter: query.projectId,
       limit: query.limit ?? 20,
       taskCursor: query.taskCursor,

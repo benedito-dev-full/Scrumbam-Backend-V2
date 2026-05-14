@@ -9,6 +9,10 @@ import { AuthService } from './auth.service';
 // OrganizationsModule importado via forwardRef para evitar circular dependency
 // AuthModule → OrganizationsModule → AuthModule (guards)
 import { OrganizationsModule } from '../organizations/organizations.module';
+// InvitesModule importado via forwardRef para evitar circular dependency
+// AuthModule → InvitesModule → AuthModule (issueSessionForUser p/ auto-login)
+// Necessário para o endpoint GET /auth/pending-invites (Etapa 4 orphan-workspace).
+import { InvitesModule } from '../invites/invites.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { ApiKeyGuard } from './guards/api-key.guard';
@@ -16,6 +20,7 @@ import { McpKeyGuard } from './guards/mcp-key.guard';
 import { AuthCompositeGuard } from './guards/auth-composite.guard';
 import { OrgTenantGuard } from './guards/org-tenant.guard';
 import { ProjectScopeGuard } from './guards/project-scope.guard';
+import { RequireWorkspaceGuard } from './guards/require-workspace.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { TeamRolesGuard } from './guards/team-roles.guard';
 import { ApiKeyService } from './services/api-key.service';
@@ -53,15 +58,13 @@ import { RoleResolverService } from './services/role-resolver.service';
           return secret;
         })(),
         signOptions: {
-          expiresIn: parseInt(
-            configService.get<string>('JWT_EXPIRES_IN', '900'),
-            10,
-          ),
+          expiresIn: parseInt(configService.get<string>('JWT_EXPIRES_IN', '900'), 10),
         },
       }),
     }),
     forwardRef(() => EntidadesModule),
     forwardRef(() => OrganizationsModule),
+    forwardRef(() => InvitesModule),
   ],
   controllers: [AuthController],
   providers: [
@@ -78,6 +81,7 @@ import { RoleResolverService } from './services/role-resolver.service';
     JwtAuthGuard,
     ApiKeyGuard,
     McpKeyGuard,
+    RequireWorkspaceGuard,
     AuthCompositeGuard,
     OrgTenantGuard,
     ProjectScopeGuard,
@@ -89,6 +93,7 @@ import { RoleResolverService } from './services/role-resolver.service';
     JwtAuthGuard,
     ApiKeyGuard,
     McpKeyGuard,
+    RequireWorkspaceGuard,
     AuthCompositeGuard,
     OrgTenantGuard,
     ProjectScopeGuard,

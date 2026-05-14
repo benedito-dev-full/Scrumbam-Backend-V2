@@ -72,13 +72,18 @@ export class OrgTenantGuard implements CanActivate {
       if (request.authMethod === 'mcpkey') {
         return true;
       }
-      throw new ForbiddenException('organizationId ausente no token');
+      // ADR-V2-038: JWT órfão (sem organizationId) é estado válido.
+      // Não bloqueamos aqui — quem decide é o RequireWorkspaceGuard
+      // (invocado pelo AuthCompositeGuard), que consulta o decorator
+      // @AllowOrphan() da rota e responde 403 NO_WORKSPACE quando aplicável.
+      return true;
     }
 
-    const strategy = this.reflector.getAllAndOverride<TenantStrategy>(TENANT_STRATEGY_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]) ?? 'JWT_ONLY';
+    const strategy =
+      this.reflector.getAllAndOverride<TenantStrategy>(TENANT_STRATEGY_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]) ?? 'JWT_ONLY';
 
     const jwtOrgId = user.organizationId;
 
@@ -99,9 +104,7 @@ export class OrgTenantGuard implements CanActivate {
       }
 
       if (resourceOrgId !== jwtOrgId) {
-        this.logger.debug(
-          `Tenant mismatch: jwtOrg=${jwtOrgId} projectOrg=${resourceOrgId}`,
-        );
+        this.logger.debug(`Tenant mismatch: jwtOrg=${jwtOrgId} projectOrg=${resourceOrgId}`);
         throw new ForbiddenException('Acesso negado: projeto pertence a outra organização');
       }
 

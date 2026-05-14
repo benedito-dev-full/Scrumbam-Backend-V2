@@ -835,4 +835,196 @@ describe('InvitesService', () => {
       expect(prismaMock.dEntidade.findFirst).not.toHaveBeenCalled();
     });
   });
+
+  describe('listPendingInvitesForEmail (Etapa 4 orphan-workspace)', () => {
+    /**
+     * Helper que monta um DTabela INVITE_TOKEN com defaults seguros.
+     * Customizavel via overrides — usado pelos cenarios abaixo.
+     */
+    const buildInviteRow = (overrides?: {
+      chave?: bigint;
+      orgId?: bigint;
+      email?: string;
+      status?: 'PENDING' | 'ACCEPTED' | 'EXPIRED' | 'REVOKED';
+      role?: 'MEMBER' | 'VIEWER';
+      usedAt?: string | null;
+      expiresAtOffsetMs?: number; // default: +1 dia
+      flow?: 'new_user' | 'existing_user';
+      targetUserId?: string;
+    }) => ({
+      chave: overrides?.chave ?? BigInt(42),
+      idClasse: BigInt(-476),
+      nome: overrides?.email ?? 'user@x.com',
+      idLocEscrituracao: overrides?.orgId ?? BigInt(100),
+      criadoEm: new Date('2026-05-10T12:00:00.000Z'),
+      metaDados: {
+        tokenHash: 'SUPER-SECRET-HASH-NEVER-EXPOSE',
+        role: overrides?.role ?? 'MEMBER',
+        expiresAt: new Date(
+          Date.now() + (overrides?.expiresAtOffsetMs ?? 86_400_000),
+        ).toISOString(),
+        usedAt: overrides?.usedAt ?? null,
+        status: overrides?.status ?? 'PENDING',
+        invitedByUserId: '7',
+        flow: overrides?.flow ?? 'new_user',
+        targetUserId: overrides?.targetUserId,
+      },
+    });
+
+    /**
+     * Setup dos mocks: dTabela.findMany retorna os candidatos por email;
+     * dEntidade.findMany retorna as orgs ativas (batch lookup do orgName).
+     */
+    const setupMocks = (
+      invites: ReturnType<typeof buildInviteRow>[],
+      orgs?: { chave: bigint; nome: string }[],
+    ) => {
+      prismaMock.dTabela.findMany.mockReset();
+      prismaMock.dTabela.findMany.mockResolvedValue(invites);
+      prismaMock.dEntidade.findFirst.mockReset();
+      // dEntidade.findMany não existia no mock — precisamos adicionar.
+      // Como o service usa findMany para batch lookup das orgs, precisamos
+      // mocká-lo. O mock atual de dEntidade só tem findFirst — adicionamos
+      // findMany on-demand neste describe.
+      (prismaMock.dEntidade as unknown as { findMany?: jest.Mock }).findMany = jest
+        .fn()
+        .mockResolvedValue(orgs ?? [{ chave: BigInt(100), nome: 'Acme Corp' }]);
+    };
+
+    it('retorna apenas convites PENDING + nao-expirados (caminho feliz)', async () => {
+      setupMocks([buildInviteRow()]);
+
+      const result = await service.listPendingInvitesForEmail('user@x.com');
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toEqual({
+        inviteId: '42',
+        orgId: '100',
+        orgName: 'Acme Corp',
+        role: 'MEMBER',
+        expiresAt: expect.any(String),
+      });
+    });
+
+    it('FILTRA convites EXPIRED (status === "EXPIRED")', async () => {
+      setupMocks([buildInviteRow({ status: 'EXPIRED' })]);
+      const result = await service.listPendingInvitesForEmail('user@x.com');
+      expect(result).toEqual([]);
+    });
+
+    it('FILTRA convites com expiresAt no passado (validacao temporal)', async () => {
+      // Mesmo com status PENDING, se a data ja passou, deve ser filtrado.
+      setupMocks([buildInviteRow({ status: 'PENDING', expiresAtOffsetMs: -1000 })]);
+      const result = await service.listPendingInvitesForEmail('user@x.com');
+      expect(result).toEqual([]);
+    });
+
+    it('FILTRA convites ACCEPTED (usedAt preenchido)', async () => {
+      setupMocks([buildInviteRow({ status: 'ACCEPTED', usedAt: '2026-05-12T10:00:00.000Z' })]);
+      const result = await service.listPendingInvitesForEmail('user@x.com');
+      expect(result).toEqual([]);
+    });
+
+    it('FILTRA convites REVOKED', async () => {
+      setupMocks([buildInviteRow({ status: 'REVOKED' })]);
+      const result = await service.listPendingInvitesForEmail('user@x.com');
+      expect(result).toEqual([]);
+    });
+
+    it('FILTRA convites cuja org foi soft-deleted (ou nao existe mais)', async () => {
+      // Invite valido (PENDING + nao-expirado), MAS dEntidade.findMany retorna
+      // [] (org soft-deleted). Service deve skipar — anti-leak (user nao deve
+      // ver convite para org que nao existe mais).
+      setupMocks([buildInviteRow()], []);
+      const result = await service.listPendingInvitesForEmail('user@x.com');
+      expect(result).toEqual([]);
+    });
+
+    it('normaliza email para lowercase antes da query (case-insensitive)', async () => {
+      setupMocks([buildInviteRow()]);
+
+      await service.listPendingInvitesForEmail('USER@X.COM');
+
+      expect(prismaMock.dTabela.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            idClasse: BigInt(-476),
+            nome: 'user@x.com', // <-- lowercase
+            excluido: false,
+          }),
+        }),
+      );
+    });
+
+    it('NAO expoe tokenHash, flow, targetUserId, invitedByUserId, email (resposta sanitizada)', async () => {
+      setupMocks([
+        buildInviteRow({
+          flow: 'existing_user',
+          targetUserId: '999',
+        }),
+      ]);
+
+      const result = await service.listPendingInvitesForEmail('user@x.com');
+
+      expect(result).toHaveLength(1);
+      const invite = result[0] as unknown as Record<string, unknown>;
+
+      // Whitelist: apenas estes 5 campos podem aparecer.
+      expect(Object.keys(invite).sort()).toEqual(
+        ['expiresAt', 'inviteId', 'orgId', 'orgName', 'role'].sort(),
+      );
+
+      // Defesa explicita contra leak de campos sensiveis.
+      expect(invite.tokenHash).toBeUndefined();
+      expect(invite.flow).toBeUndefined();
+      expect(invite.targetUserId).toBeUndefined();
+      expect(invite.invitedByUserId).toBeUndefined();
+      expect(invite.email).toBeUndefined();
+      expect(invite.usedAt).toBeUndefined();
+      expect(invite.status).toBeUndefined();
+    });
+
+    it('retorna [] quando nenhum convite encontrado (early return — nao chama dEntidade.findMany)', async () => {
+      prismaMock.dTabela.findMany.mockReset();
+      prismaMock.dTabela.findMany.mockResolvedValue([]);
+      const findManyOrgs = jest.fn();
+      (prismaMock.dEntidade as unknown as { findMany?: jest.Mock }).findMany = findManyOrgs;
+
+      const result = await service.listPendingInvitesForEmail('vazio@x.com');
+
+      expect(result).toEqual([]);
+      // Early return — nao deve chamar a segunda query.
+      expect(findManyOrgs).not.toHaveBeenCalled();
+    });
+
+    it('batch lookup: 1 query unica de orgs com IN (...) mesmo com varios convites', async () => {
+      setupMocks(
+        [
+          buildInviteRow({ chave: BigInt(1), orgId: BigInt(100) }),
+          buildInviteRow({ chave: BigInt(2), orgId: BigInt(200) }),
+          buildInviteRow({ chave: BigInt(3), orgId: BigInt(100) }), // duplicada — dedupe
+        ],
+        [
+          { chave: BigInt(100), nome: 'Acme' },
+          { chave: BigInt(200), nome: 'Beta' },
+        ],
+      );
+
+      const result = await service.listPendingInvitesForEmail('user@x.com');
+
+      expect(result).toHaveLength(3);
+      // ZERO N+1: apenas 1 chamada a dEntidade.findMany (batch IN).
+      const findManyOrgs = (prismaMock.dEntidade as unknown as { findMany: jest.Mock }).findMany;
+      expect(findManyOrgs).toHaveBeenCalledTimes(1);
+      expect(findManyOrgs).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            chave: { in: expect.arrayContaining([BigInt(100), BigInt(200)]) },
+            idClasse: BigInt(-152),
+            excluido: false,
+          }),
+        }),
+      );
+    });
+  });
 });

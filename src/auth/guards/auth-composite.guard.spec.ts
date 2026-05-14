@@ -5,17 +5,19 @@ import { AuthCompositeGuard } from './auth-composite.guard';
 import { McpKeyGuard } from './mcp-key.guard';
 import { ApiKeyGuard } from './api-key.guard';
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { RequireWorkspaceGuard } from './require-workspace.guard';
 
-const makeContext = (user?: object, headers?: Record<string, string>): ExecutionContext => ({
-  getHandler: () => ({}),
-  getClass: () => ({}),
-  switchToHttp: () => ({
-    getRequest: () => ({
-      headers: headers ?? {},
-      user,
+const makeContext = (user?: object, headers?: Record<string, string>): ExecutionContext =>
+  ({
+    getHandler: () => ({}),
+    getClass: () => ({}),
+    switchToHttp: () => ({
+      getRequest: () => ({
+        headers: headers ?? {},
+        user,
+      }),
     }),
-  }),
-}) as unknown as ExecutionContext;
+  }) as unknown as ExecutionContext;
 
 describe('AuthCompositeGuard', () => {
   let guard: AuthCompositeGuard;
@@ -23,12 +25,15 @@ describe('AuthCompositeGuard', () => {
   let mcpKeyGuard: { canActivate: jest.Mock };
   let apiKeyGuard: { canActivate: jest.Mock };
   let jwtAuthGuard: { canActivate: jest.Mock };
+  let requireWorkspaceGuard: { canActivate: jest.Mock };
 
   beforeEach(async () => {
     reflector = { getAllAndOverride: jest.fn().mockReturnValue(false) }; // não é @Public()
     mcpKeyGuard = { canActivate: jest.fn().mockResolvedValue(false) };
     apiKeyGuard = { canActivate: jest.fn().mockResolvedValue(false) };
     jwtAuthGuard = { canActivate: jest.fn().mockResolvedValue(false) };
+    // Por padrão, RequireWorkspaceGuard libera (mockando comportamento neutro)
+    requireWorkspaceGuard = { canActivate: jest.fn().mockReturnValue(true) };
 
     const module = await Test.createTestingModule({
       providers: [
@@ -37,6 +42,7 @@ describe('AuthCompositeGuard', () => {
         { provide: McpKeyGuard, useValue: mcpKeyGuard },
         { provide: ApiKeyGuard, useValue: apiKeyGuard },
         { provide: JwtAuthGuard, useValue: jwtAuthGuard },
+        { provide: RequireWorkspaceGuard, useValue: requireWorkspaceGuard },
       ],
     }).compile();
 

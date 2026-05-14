@@ -10,13 +10,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import {
-  ApiOperation,
-  ApiParam,
-  ApiQuery,
-  ApiResponse,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { OrganizationsService } from './organizations.service';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
@@ -28,6 +22,7 @@ import {
   ListOrgMembersResponseDto,
 } from './dto/organization-response.dto';
 import { AuthCompositeGuard } from '../auth/guards/auth-composite.guard';
+import { AllowOrphan } from '../auth/decorators/allow-orphan.decorator';
 import { CurrentUser, JwtPayload } from '../auth/decorators/current-user.decorator';
 
 /**
@@ -69,7 +64,14 @@ export class OrganizationsController {
    * ```
    */
   @Post()
-  @ApiOperation({ summary: 'Criar organização', description: 'Cria DEntidade -152 + Default Team + Issue Counter em transaction atômica' })
+  @AllowOrphan()
+  @ApiOperation({
+    summary: 'Criar organização',
+    description:
+      'Cria DEntidade -152 + Default Team + Issue Counter em transaction atômica. ' +
+      'Aceita JWT órfão (sem organizationId) — ADR-V2-038. Permite ao usuário ' +
+      'criar a primeira workspace logo após registro.',
+  })
   @ApiResponse({ status: 201, description: 'Organização criada', type: OrganizationResponseDto })
   @ApiResponse({ status: 401, description: 'Não autenticado' })
   async create(
@@ -99,7 +101,12 @@ export class OrganizationsController {
   @Get()
   @ApiOperation({ summary: 'Listar organizações do usuário' })
   @ApiQuery({ name: 'cursor', required: false, description: 'Cursor de paginação' })
-  @ApiQuery({ name: 'limit', required: false, description: 'Itens por página (max 100)', type: Number })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description: 'Itens por página (max 100)',
+    type: Number,
+  })
   @ApiResponse({ status: 200, description: 'Lista retornada', type: ListOrganizationResponseDto })
   async findMany(
     @CurrentUser() user: JwtPayload,
@@ -132,7 +139,11 @@ export class OrganizationsController {
   @Get(':id')
   @ApiOperation({ summary: 'Buscar organização por ID' })
   @ApiParam({ name: 'id', description: 'ID da organização' })
-  @ApiResponse({ status: 200, description: 'Organização encontrada', type: OrganizationResponseDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Organização encontrada',
+    type: OrganizationResponseDto,
+  })
   @ApiResponse({ status: 404, description: 'Não encontrada' })
   @ApiResponse({ status: 403, description: 'Acesso negado' })
   async findOne(

@@ -14,6 +14,23 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F4 Pós-F3: Estado órfão (usuário sem workspace ativa) — 5 etapas integradas, score 8.6/10 (ADR-V2-038)** - 2026-05-14
+  - **JWT órfão é estado válido:** `organizationId` agora opcional no payload (omitido, não null)
+  - **Decorador `@AllowOrphan()`:** marca rotas que aceitam JWT órfão (`/auth/me`, `/auth/logout`, `/auth/switch-org`, `/auth/pending-invites`, `POST /organizations`)
+  - **Guard `RequireWorkspaceGuard`:** injetado no `AuthCompositeGuard`, bloqueia rotas tenant-scoped com 403 `{ code: 'NO_WORKSPACE' }`
+  - **Novo endpoint:** `GET /auth/pending-invites` — lista convites pendentes pelo email, sem exigir ADMIN, DTO sanitizado (5 campos, zero leak de tokenHash/flow)
+  - **AuthService.login/refresh/issueSessionForUser:** emitem JWT órfão quando user não tem DVincula ativa
+  - **UserProfileDto.isOrphan:** boolean obrigatório sinalizando estado ao frontend
+  - **DEvento -501:** registra `metaDados.orphan: true` para audit trail de login órfão
+  - **Fluxo de saída de estado órfão:** 2 caminhos (criar org via `POST /organizations` + `switch-org`, ou aceitar convite via `POST /invites/:token/accept`)
+  - **Regressão zero:** users com org ativa, fluxos de login/refresh/token normais continuam idênticos
+  - **Tests:** 114/114 PASS, cobertura nova em require-workspace.guard.spec.ts (5 cenários), auth.service.spec.ts (8 órfão), invites.service.spec.ts (8 listagemFunc)
+  - **Smoke E2E:** 2 fluxos manuais em workspace/smoke/smoke-orphan-workspace-etapa5.md (A: criar org, B: aceitar convite)
+  - **Pilares:** Pilar 2 REUTILIZADO (@AllowOrphan() em controllers existentes); Pilar 3 RESPEITADO (ZERO DClasses novas)
+  - **Etapas aprovadas:** 1 (JWT opcional, 8.8/10) | 2 (@AllowOrphan, 8.2/10) | 3 (login órfão, 8.5/10) | 4 (pending-invites, 8.7/10) | 5 (smoke, 8.8/10)
+
+### Added
+
 - **F13 Task #3 Fase 4: Backend Env Management + Deploy Key Automation (ADR-V2-041 + ADR-V2-042)** - 2026-05-13
   - **Env Credentials Management:**
     - `AgentEnvService` com `setEnv()` (githubToken, anthropicApiKey, anthropicAuthToken via outbound `SET_ENV`), `getEnvStatus()` (status booleanos sem plaintext), `setGitBot()` (gitBotName/Email)

@@ -1,9 +1,16 @@
-import { CanActivate, ExecutionContext, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { McpKeyGuard } from './mcp-key.guard';
 import { ApiKeyGuard } from './api-key.guard';
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { RequireWorkspaceGuard } from './require-workspace.guard';
 
 /**
  * Guard de composição OR: tenta 3 mecanismos de autenticação em ordem.
@@ -33,6 +40,7 @@ export class AuthCompositeGuard implements CanActivate {
     private readonly mcpKeyGuard: McpKeyGuard,
     private readonly apiKeyGuard: ApiKeyGuard,
     private readonly jwtAuthGuard: JwtAuthGuard,
+    private readonly requireWorkspaceGuard: RequireWorkspaceGuard,
   ) {}
 
   /**
@@ -40,9 +48,15 @@ export class AuthCompositeGuard implements CanActivate {
    *
    * Lança UnauthorizedException somente se TODOS falharem.
    *
+   * Após autenticar com sucesso, invoca o `RequireWorkspaceGuard` para
+   * bloquear rotas tenant-scoped quando o JWT está órfão (sem
+   * `organizationId`) e a rota não tem `@AllowOrphan()` — ADR-V2-038.
+   *
    * @param context - Contexto de execução NestJS
    * @returns true se qualquer mecanismo autenticou com sucesso
    * @throws {UnauthorizedException} Se nenhum mecanismo passou
+   * @throws {ForbiddenException} `{ code: 'NO_WORKSPACE' }` se JWT órfão
+   *   acessa rota sem `@AllowOrphan()`.
    */
   async canActivate(context: ExecutionContext): Promise<boolean> {
     // Verificar @Public() — bypass completo
@@ -56,46 +70,62 @@ export class AuthCompositeGuard implements CanActivate {
       return true;
     }
 
+    let authenticated = false;
+
     // Tentar MCP Key (1º — mais específico: contexto de ferramenta MCP)
     try {
       const mcpResult = await this.mcpKeyGuard.canActivate(context);
       if (mcpResult) {
         this.logger.debug('Autenticado via MCP Key');
-        return true;
+        authenticated = true;
       }
     } catch {
       // Guard interno falhou — tentar próximo
     }
 
     // Tentar API Key (2º — contexto de automação/integração)
-    try {
-      const apiKeyResult = await this.apiKeyGuard.canActivate(context);
-      if (apiKeyResult) {
-        this.logger.debug('Autenticado via API Key');
-        return true;
+    if (!authenticated) {
+      try {
+        const apiKeyResult = await this.apiKeyGuard.canActivate(context);
+        if (apiKeyResult) {
+          this.logger.debug('Autenticado via API Key');
+          authenticated = true;
+        }
+      } catch {
+        // Guard interno falhou — tentar próximo
       }
-    } catch {
-      // Guard interno falhou — tentar próximo
     }
 
     // Tentar JWT Bearer (3º — sessão de usuário padrão)
-    try {
-      const jwtResult = await this.jwtAuthGuard.canActivate(context);
-      const request = context.switchToHttp().getRequest<Record<string, unknown>>();
+    if (!authenticated) {
+      try {
+        const jwtResult = await this.jwtAuthGuard.canActivate(context);
+        const request = context.switchToHttp().getRequest<Record<string, unknown>>();
 
-      // JwtAuthGuard pode retornar true mas com req.user=null (token inválido)
-      // Verificar se req.user foi populado
-      if (jwtResult && request['user']) {
-        this.logger.debug('Autenticado via JWT');
-        request['authMethod'] = 'jwt';
-        return true;
+        // JwtAuthGuard pode retornar true mas com req.user=null (token inválido)
+        // Verificar se req.user foi populado
+        if (jwtResult && request['user']) {
+          this.logger.debug('Autenticado via JWT');
+          request['authMethod'] = 'jwt';
+          authenticated = true;
+        }
+      } catch {
+        // JWT inválido — cai para o throw abaixo
       }
-    } catch {
-      // JWT inválido — cai para o throw abaixo
     }
 
-    // Todos os mecanismos falharam — AuthCompositeGuard é o ÚNICO que lança
-    this.logger.debug('Todos os mecanismos de auth falharam — 401');
-    throw new UnauthorizedException('Autenticação necessária: forneça JWT Bearer, X-API-Key ou X-MCP-Key');
+    if (!authenticated) {
+      // Todos os mecanismos falharam — AuthCompositeGuard é o ÚNICO que lança 401
+      this.logger.debug('Todos os mecanismos de auth falharam — 401');
+      throw new UnauthorizedException(
+        'Autenticação necessária: forneça JWT Bearer, X-API-Key ou X-MCP-Key',
+      );
+    }
+
+    // ADR-V2-038: bloquear rotas tenant-scoped quando JWT está órfão.
+    // `RequireWorkspaceGuard` decide com base em `@AllowOrphan()` da rota e
+    // lança `ForbiddenException` `{ code: 'NO_WORKSPACE' }` quando aplicável.
+    // Fora do try/catch para garantir que a ForbiddenException propague.
+    return this.requireWorkspaceGuard.canActivate(context);
   }
 }

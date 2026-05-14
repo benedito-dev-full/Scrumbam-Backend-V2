@@ -84,6 +84,26 @@ export class UserProfileDto {
     type: () => [AvailableOrgDto],
   })
   availableOrgs?: AvailableOrgDto[];
+
+  /**
+   * Indica se o usuário está em estado órfão (sem nenhuma workspace ativa).
+   *
+   * `true` quando `availableOrgs.length === 0` — usuário não tem DVincula
+   * -161/-162/-163 ativa em nenhuma org. O frontend renderiza
+   * `<NoWorkspaces />` com CTAs (criar workspace, aceitar convite, logout).
+   *
+   * Rotas tenant-scoped continuam bloqueadas com 403 `NO_WORKSPACE`. Apenas
+   * rotas marcadas com `@AllowOrphan()` aceitam JWT sem `organizationId`.
+   *
+   * @see ADR-V2-038 (em ratificação)
+   */
+  @ApiProperty({
+    description:
+      'Indica se o usuário está sem workspace ativa (estado órfão). ' +
+      'Frontend usa para renderizar empty state com CTAs (criar workspace, aceitar convite, sair).',
+    example: false,
+  })
+  isOrphan!: boolean;
 }
 
 /**

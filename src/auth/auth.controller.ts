@@ -2,10 +2,13 @@ import {
   Body,
   Controller,
   Delete,
+  forwardRef,
   Get,
   GoneException,
   HttpCode,
   HttpStatus,
+  Inject,
+  Logger,
   Patch,
   Post,
   UseGuards,
@@ -15,6 +18,7 @@ import { AuthService } from './auth.service';
 import { ApiKeyService } from './services/api-key.service';
 import { AuthCompositeGuard } from './guards/auth-composite.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { AllowOrphan } from './decorators/allow-orphan.decorator';
 import { Public } from './decorators/public.decorator';
 import { CurrentUser, JwtPayload } from './decorators/current-user.decorator';
 import { LoginDto } from './dto/login.dto';
@@ -24,6 +28,8 @@ import { AuthResponseDto, UserProfileDto } from './dto/auth-response.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { SwitchOrgDto } from './dto/switch-org.dto';
 import { ApiKeyResponseDto } from './dto/api-key-response.dto';
+import { PendingInviteForMeDto } from './dto/pending-invite-for-me.dto';
+import { InvitesService } from '../invites/invites.service';
 
 /**
  * Controller de autenticação e gestão de perfil.
@@ -40,9 +46,15 @@ import { ApiKeyResponseDto } from './dto/api-key-response.dto';
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(
     private readonly authService: AuthService,
     private readonly apiKeyService: ApiKeyService,
+    // forwardRef: InvitesModule também importa AuthModule (issueSessionForUser
+    // para auto-login pós-aceite) — sem forwardRef, NestJS quebra na boot.
+    @Inject(forwardRef(() => InvitesService))
+    private readonly invitesService: InvitesService,
   ) {}
 
   /**
@@ -155,7 +167,8 @@ export class AuthController {
    * ```
    */
   @Post('switch-org')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(AuthCompositeGuard)
+  @AllowOrphan()
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
   @ApiOperation({
@@ -179,6 +192,7 @@ export class AuthController {
    */
   @Post('logout')
   @UseGuards(AuthCompositeGuard)
+  @AllowOrphan()
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Logout — revoga refresh token' })
@@ -196,6 +210,7 @@ export class AuthController {
    */
   @Get('me')
   @UseGuards(AuthCompositeGuard)
+  @AllowOrphan()
   @ApiBearerAuth()
   @ApiHeader({ name: 'X-API-Key', required: false, description: 'API Key (alternativa ao JWT)' })
   @ApiHeader({ name: 'X-MCP-Key', required: false, description: 'MCP Key (alternativa ao JWT)' })
@@ -204,6 +219,66 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Não autenticado' })
   async getMe(@CurrentUser() user: JwtPayload): Promise<UserProfileDto> {
     return this.authService.getMe(BigInt(user.sub));
+  }
+
+  /**
+   * Lista convites pendentes endereçados ao email do user autenticado.
+   *
+   * Endpoint da Etapa 4 do plano `orphan-workspace`: alimenta o empty state
+   * do frontend quando `isOrphan=true` (user sem nenhuma DVincula -161/-162/-163).
+   * Mostra ao user "Você tem N convites pendentes — aceite ou crie sua workspace".
+   *
+   * Usa `@AllowOrphan()` para liberar a rota mesmo SEM `organizationId` no JWT
+   * (o `RequireWorkspaceGuard` ignora rotas marcadas). User normal (com
+   * workspace) TAMBÉM pode chamar — pode ter convites pendentes em outras orgs.
+   *
+   * Resposta sanitizada — NÃO contém `tokenHash`, `flow`, `targetUserId`,
+   * `invitedByUserId` ou `email` do convidado. Apenas: `inviteId`, `orgId`,
+   * `orgName`, `role`, `expiresAt`.
+   *
+   * Filtros aplicados pelo service:
+   *  - `metaDados.status === 'PENDING'` (não ACCEPTED/EXPIRED/REVOKED)
+   *  - `metaDados.usedAt` null
+   *  - `metaDados.expiresAt` no futuro
+   *  - Org alvo existe e não está soft-deleted
+   *
+   * Performance: 2 queries Prisma (ZERO N+1).
+   *
+   * @param user - JWT payload do user autenticado (email usado para a busca,
+   *   normalizado para lowercase no service).
+   * @returns `{ invites: PendingInviteForMeDto[] }` — array vazio se nenhum.
+   *
+   * @example
+   * ```bash
+   * curl http://localhost:3000/api/v1/auth/pending-invites \
+   *   -H "Authorization: Bearer <token>"
+   * # 200 { invites: [{ inviteId, orgId, orgName, role, expiresAt }] }
+   * ```
+   *
+   * @see PendingInviteForMeDto
+   * @see InvitesService.listPendingInvitesForEmail
+   */
+  @Get('pending-invites')
+  @UseGuards(AuthCompositeGuard)
+  @AllowOrphan()
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Lista convites pendentes endereçados ao email do user autenticado',
+    description:
+      'Empty state de usuário sem workspace (isOrphan=true). Busca DTabela -476 onde nome=email do user. NÃO exige ADMIN. Resposta sanitizada (sem tokenHash, flow, targetUserId).',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Lista de convites pendentes',
+    type: [PendingInviteForMeDto],
+  })
+  @ApiResponse({ status: 401, description: 'Não autenticado' })
+  async getPendingInvitesForMe(
+    @CurrentUser() user: JwtPayload,
+  ): Promise<{ invites: PendingInviteForMeDto[] }> {
+    this.logger.debug(`Listando pending invites para email=${user.email}`);
+    const invites = await this.invitesService.listPendingInvitesForEmail(user.email);
+    return { invites };
   }
 
   /**

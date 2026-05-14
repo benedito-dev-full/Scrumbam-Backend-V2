@@ -160,6 +160,85 @@ describe('AuthService', () => {
       expect(result.user.orgRole).toBe('ADMIN');
     });
 
+    it('deve permitir login órfão (sem DVincula) e emitir JWT sem organizationId (ADR-V2-038)', async () => {
+      const senhaHash = await bcrypt.hash('senha123', 12);
+      const mockUserGroup = {
+        chave: BigInt(1),
+        usuario: 'orphan@test.com',
+        senha: senhaHash,
+        excluido: false,
+        ativo: true,
+        entidades: [{ chave: BigInt(2), nome: 'Orphan User' }],
+      };
+
+      prisma.dUserGroup.findFirst.mockResolvedValue(mockUserGroup);
+      // Sem DVincula ativa → estado órfão.
+      prisma.dVincula.findFirst.mockResolvedValue(null);
+      prisma.dVincula.findMany.mockResolvedValue([]); // loadAvailableOrgs
+      prisma.dUserGroup.update.mockResolvedValue(mockUserGroup);
+      prisma.dEvento.create.mockResolvedValue({ chave: BigInt(100) });
+
+      const result = await service.login({ email: 'orphan@test.com', password: 'senha123' });
+
+      // Login sucede (200), tokens emitidos.
+      expect(result.accessToken).toBe('mock.jwt.token');
+      expect(result.refreshToken).toBe('mock-refresh-token');
+      // JWT payload NÃO contém organizationId quando órfão.
+      expect(jwtService.sign).toHaveBeenCalledWith(
+        expect.not.objectContaining({ organizationId: expect.anything() }),
+        expect.anything(),
+      );
+      // user.organizationId/Name/orgRole vêm como undefined.
+      expect(result.user.organizationId).toBeUndefined();
+      expect(result.user.organizationName).toBeUndefined();
+      expect(result.user.orgRole).toBeUndefined();
+      // DEvento -501 marca o login como órfão para audit.
+      expect(prisma.dEvento.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            descricao: 'auth.login',
+            metaDados: expect.objectContaining({
+              action: 'login',
+              email: 'orphan@test.com',
+              orphan: true,
+            }),
+          }),
+        }),
+      );
+    });
+
+    it('NÃO marca orphan=true em DEvento quando user tem org (regressão zero)', async () => {
+      const senhaHash = await bcrypt.hash('senha123', 12);
+      const mockUserGroup = {
+        chave: BigInt(1),
+        usuario: 'joao@test.com',
+        senha: senhaHash,
+        excluido: false,
+        ativo: true,
+        entidades: [{ chave: BigInt(2), nome: 'João' }],
+      };
+
+      prisma.dUserGroup.findFirst.mockResolvedValue(mockUserGroup);
+      prisma.dVincula.findFirst.mockResolvedValue({
+        idClasse: BigInt(-161),
+        idLocEscritu: BigInt(3),
+        locEscritu: { chave: BigInt(3), nome: 'Org' },
+      });
+      prisma.dUserGroup.update.mockResolvedValue(mockUserGroup);
+      prisma.dEvento.create.mockResolvedValue({ chave: BigInt(100) });
+
+      await service.login({ email: 'joao@test.com', password: 'senha123' });
+
+      // metaDados NÃO deve conter o campo `orphan` em login normal.
+      const eventoCall = prisma.dEvento.create.mock.calls.find(
+        (c: unknown[]) => (c[0] as { data: { descricao: string } }).data.descricao === 'auth.login',
+      );
+      expect(eventoCall).toBeDefined();
+      const metaDados = (eventoCall![0] as { data: { metaDados: Record<string, unknown> } }).data
+        .metaDados;
+      expect(metaDados.orphan).toBeUndefined();
+    });
+
     it('deve lançar UnauthorizedException se usuário não encontrado', async () => {
       prisma.dUserGroup.findFirst.mockResolvedValue(null);
       prisma.dEvento.create.mockResolvedValue({ chave: BigInt(100) });
@@ -217,6 +296,33 @@ describe('AuthService', () => {
 
       expect(refreshTokenService.revoke).toHaveBeenCalledWith(BigInt(1));
     });
+
+    it('deve emitir JWT órfão quando user perdeu todos os vínculos (ADR-V2-038)', async () => {
+      refreshTokenService.validate.mockResolvedValue(true);
+
+      const mockUserGroup = {
+        chave: BigInt(1),
+        usuario: 'orphan@test.com',
+        entidades: [{ chave: BigInt(2), nome: 'Orphan' }],
+      };
+      prisma.dUserGroup.findUnique.mockResolvedValue(mockUserGroup);
+      // Sem DVincula ativa → órfão.
+      prisma.dVincula.findFirst.mockResolvedValue(null);
+      prisma.dVincula.findMany.mockResolvedValue([]); // loadAvailableOrgs
+
+      const result = await service.refresh('valid-refresh-token', BigInt(1));
+
+      // Sucede com novo par de tokens — sem UnauthorizedException.
+      expect(refreshTokenService.rotate).toHaveBeenCalledWith(BigInt(1));
+      expect(result.refreshToken).toBe('new-refresh-token');
+      // JWT payload SEM organizationId.
+      expect(jwtService.sign).toHaveBeenCalledWith(
+        expect.not.objectContaining({ organizationId: expect.anything() }),
+        expect.anything(),
+      );
+      expect(result.user.organizationId).toBeUndefined();
+      expect(result.user.orgRole).toBeUndefined();
+    });
   });
 
   describe('logout', () => {
@@ -258,9 +364,36 @@ describe('AuthService', () => {
       // availableOrgs[] inclui todas as orgs com vinculo ativo.
       expect(result.availableOrgs).toHaveLength(1);
       expect(result.availableOrgs?.[0].role).toBe('ADMIN');
+      // ADR-V2-038 Etapa 3: user com org → isOrphan: false (regressão zero).
+      expect(result.isOrphan).toBe(false);
       // Verificar que usou no máximo 2 queries (findUnique + findMany).
       expect(prisma.dUserGroup.findUnique).toHaveBeenCalledTimes(1);
       expect(prisma.dVincula.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('retorna isOrphan=true e availableOrgs=[] para user órfão (ADR-V2-038)', async () => {
+      const mockUserGroup = {
+        chave: BigInt(1),
+        usuario: 'orphan@test.com',
+        entidades: [{ chave: BigInt(2), nome: 'Orphan User' }],
+      };
+      prisma.dUserGroup.findUnique.mockResolvedValue(mockUserGroup);
+      // Sem vínculos ativos.
+      prisma.dVincula.findMany.mockResolvedValue([]);
+
+      const result = await service.getMe(BigInt(1));
+
+      expect(result.id).toBe('1');
+      expect(result.entidadeId).toBe('2');
+      expect(result.email).toBe('orphan@test.com');
+      expect(result.name).toBe('Orphan User');
+      // Sem org → todos os campos de workspace undefined.
+      expect(result.organizationId).toBeUndefined();
+      expect(result.organizationName).toBeUndefined();
+      expect(result.orgRole).toBeUndefined();
+      expect(result.availableOrgs).toHaveLength(0);
+      // FLAG canônica para o frontend.
+      expect(result.isOrphan).toBe(true);
     });
 
     it('lista multiplas orgs em availableOrgs (ADR-V2-030)', async () => {
@@ -298,6 +431,36 @@ describe('AuthService', () => {
       });
       // Org default = primeira (ADMIN antes).
       expect(result.organizationId).toBe('10');
+      // Tem 2 orgs → não é órfão (regressão zero).
+      expect(result.isOrphan).toBe(false);
+    });
+  });
+
+  describe('issueSessionForUser', () => {
+    it('emite JWT órfão quando user não tem vínculos e não há preferredOrgId (ADR-V2-038)', async () => {
+      const mockUserGroup = {
+        chave: BigInt(1),
+        usuario: 'invited@test.com',
+        entidades: [{ chave: BigInt(2), nome: 'Invited' }],
+      };
+      prisma.dUserGroup.findUnique.mockResolvedValue(mockUserGroup);
+      // findFirst chamado pelo branch `preferred ?? ...` quando preferredOrgId
+      // é undefined: o ramo `preferred` curto-circuita para null, e o `??`
+      // dispara a query padrão de DVincula que retorna null.
+      prisma.dVincula.findFirst.mockResolvedValue(null);
+      prisma.dVincula.findMany.mockResolvedValue([]); // loadAvailableOrgs
+
+      const result = await service.issueSessionForUser(BigInt(1));
+
+      // Sucede com par de tokens — NÃO joga UnauthorizedException.
+      expect(result.accessToken).toBe('mock.jwt.token');
+      expect(result.refreshToken).toBe('mock-refresh-token');
+      expect(jwtService.sign).toHaveBeenCalledWith(
+        expect.not.objectContaining({ organizationId: expect.anything() }),
+        expect.anything(),
+      );
+      expect(result.user.organizationId).toBeUndefined();
+      expect(result.user.orgRole).toBeUndefined();
     });
   });
 

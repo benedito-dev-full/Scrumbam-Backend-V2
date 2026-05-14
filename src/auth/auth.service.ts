@@ -219,9 +219,26 @@ export class AuthService {
       orderBy: { idClasse: 'asc' }, // -161 (ADMIN) vem primeiro
     });
 
-    const orgId = orgVinculo?.idLocEscritu ?? entidade.chave;
+    // ADR-V2-038 (proposto) — Etapa 3: login órfão destravado.
+    //
+    // Quando o usuário não tem DVincula -161/-162/-163 ativa (estado órfão —
+    // sem workspace), o login agora SUCEDE com JWT sem `organizationId` no
+    // payload. O frontend usa `user.isOrphan === true` (alimentado por
+    // `/auth/me`) + `availableOrgs: []` para renderizar `<NoWorkspaces />`
+    // com CTAs (criar workspace, aceitar convite, logout).
+    //
+    // Rotas tenant-scoped (`/projects`, `/tasks`, etc.) continuam bloqueadas
+    // pelo `RequireWorkspaceGuard` (Etapa 2) com 403 `NO_WORKSPACE`. Apenas
+    // rotas marcadas com `@AllowOrphan()` aceitam JWT sem `organizationId`.
+    const orgId = orgVinculo?.idLocEscritu;
     const orgNome = orgVinculo?.locEscritu?.nome ?? '';
     const orgRole = this.mapOrgRole(orgVinculo?.idClasse ?? null);
+
+    if (orgId === undefined) {
+      this.logger.log(
+        `Login órfão (sem workspace): email="${dto.email.toLowerCase()}" entidadeId=${entidade.chave}`,
+      );
+    }
 
     // Atualizar ultimoLogin
     await this.prisma.dUserGroup.update({
@@ -229,13 +246,19 @@ export class AuthService {
       data: { ultimoLogin: new Date() },
     });
 
-    // Audit login (APÓS persistência)
+    // Audit login (APÓS persistência). `orphan: true` em metaDados quando
+    // o usuário logou sem nenhuma workspace ativa — facilita diagnóstico
+    // operacional e auditoria de fluxos de onboarding órfão.
     await this.prisma.dEvento.create({
       data: {
         idClasse: ID_CLASSE_USER_LOGIN_EVENT,
         idEntidade: entidade.chave,
         descricao: 'auth.login',
-        metaDados: { action: 'login', email: dto.email.toLowerCase() } as Prisma.InputJsonValue,
+        metaDados: {
+          action: 'login',
+          email: dto.email.toLowerCase(),
+          ...(orgId === undefined && { orphan: true }),
+        } as Prisma.InputJsonValue,
       },
     });
 
@@ -310,8 +333,19 @@ export class AuthService {
       },
     });
 
-    const orgId = orgVinculo?.idLocEscritu ?? entidade.chave;
+    // ADR-V2-038 (proposto) — Etapa 3: refresh órfão destravado.
+    // Quando o usuário perdeu todos os vínculos entre o último access token
+    // e este refresh (admin removeu membership, por ex.), retornamos um JWT
+    // sem `organizationId` em vez de jogar 401. O frontend trata como
+    // estado órfão e mostra `<NoWorkspaces />`.
+    const orgId = orgVinculo?.idLocEscritu;
     const orgRole = this.mapOrgRole(orgVinculo?.idClasse ?? null);
+
+    if (orgId === undefined) {
+      this.logger.log(
+        `Refresh órfão (sem workspace): userGroupId=${userGroupId} entidadeId=${entidade.chave}`,
+      );
+    }
 
     const accessToken = this.generateAccessToken(
       userGroup.chave,
@@ -424,6 +458,10 @@ export class AuthService {
       organizationName: primary?.locEscritu?.nome,
       orgRole: this.mapOrgRole(primary?.idClasse ?? null),
       availableOrgs,
+      // ADR-V2-038 (proposto) — Etapa 3: flag de estado órfão.
+      // `true` quando user não tem nenhuma DVincula -161/-162/-163 ativa.
+      // O frontend usa para renderizar `<NoWorkspaces />` com CTAs.
+      isOrphan: availableOrgs.length === 0,
     };
   }
 
@@ -580,9 +618,21 @@ export class AuthService {
         orderBy: { idClasse: 'asc' },
       }));
 
-    const orgId = orgVinculo?.idLocEscritu ?? entidade.chave;
+    // ADR-V2-038 (proposto) — Etapa 3: sessão órfã destravada.
+    // Quando `preferredOrgId` não é fornecido e o user não tem nenhuma
+    // DVincula ativa (ex: convite cancelado entre invite-flow e accept,
+    // ou flow que cria DUserGroup antes da org), emitimos JWT órfão.
+    // O caller (ex: InvitesService) decide o redirect — fluxo de criar
+    // workspace pode pular o `<NoWorkspaces />` mostrando o wizard direto.
+    const orgId = orgVinculo?.idLocEscritu;
     const orgNome = orgVinculo?.locEscritu?.nome ?? '';
     const orgRole = this.mapOrgRole(orgVinculo?.idClasse ?? null);
+
+    if (orgId === undefined) {
+      this.logger.log(
+        `issueSessionForUser órfão (sem workspace): userGroupId=${userGroupId} entidadeId=${entidade.chave} preferredOrgId=${preferredOrgId ?? 'undefined'}`,
+      );
+    }
 
     const accessToken = this.generateAccessToken(
       userGroup.chave,
@@ -711,23 +761,31 @@ export class AuthService {
    * Gera access token JWT com payload tipado.
    *
    * Campos como string (evita BigInt serialization issues).
+   *
+   * **Estado órfão (ADR-V2-038, proposto):** quando `orgId === undefined`,
+   * o JWT é emitido SEM o campo `organizationId`. Usuário órfão (sem nenhuma
+   * DVincula -161/-162/-163 ativa) pode receber JWT válido para acessar
+   * apenas rotas marcadas com `@AllowOrphan()` — demais rotas rejeitam com
+   * 403 `NO_WORKSPACE` (Etapa 2 do plano orphan-workspace).
+   *
+   * Até a Etapa 3, este caminho não é exercitado em produção: `login`/`refresh`/
+   * `issueSessionForUser` ainda bloqueiam user órfão com 401. O parâmetro
+   * `orgId?: bigint` prepara o terreno sem alterar comportamento externo.
    */
   private generateAccessToken(
     userGroupId: bigint,
     entidadeId: bigint,
-    orgId: bigint,
+    orgId: bigint | undefined,
     email: string,
   ): string {
     const expiresIn = this.configService.get<string>('JWT_EXPIRES_IN', '900');
-    return this.jwtService.sign(
-      {
-        sub: userGroupId.toString(),
-        entidadeId: entidadeId.toString(),
-        organizationId: orgId.toString(),
-        email,
-      },
-      { expiresIn: parseInt(expiresIn, 10) },
-    );
+    const payload: Record<string, unknown> = {
+      sub: userGroupId.toString(),
+      entidadeId: entidadeId.toString(),
+      email,
+      ...(orgId !== undefined && { organizationId: orgId.toString() }),
+    };
+    return this.jwtService.sign(payload, { expiresIn: parseInt(expiresIn, 10) });
   }
 
   /**
@@ -742,7 +800,7 @@ export class AuthService {
     refreshToken: string,
     userGroupId: bigint,
     entidadeId: bigint,
-    orgId: bigint,
+    orgId: bigint | undefined,
     email: string,
     name: string,
     orgNome: string,
@@ -763,10 +821,17 @@ export class AuthService {
         entidadeId: entidadeId.toString(),
         email,
         name,
-        organizationId: orgId.toString(),
-        organizationName: orgNome,
+        // Estado órfão (ADR-V2-038 — Etapa 3): quando user não tem DVincula
+        // ativa, organizationId/organizationName vêm como undefined e
+        // `isOrphan: true` sinaliza ao frontend para renderizar
+        // `<NoWorkspaces />`. Apenas rotas marcadas com `@AllowOrphan()`
+        // aceitam JWT sem `organizationId` — demais retornam 403 NO_WORKSPACE
+        // via RequireWorkspaceGuard.
+        organizationId: orgId?.toString(),
+        organizationName: orgId !== undefined ? orgNome : undefined,
         orgRole: orgRole ?? undefined,
         availableOrgs: orgs,
+        isOrphan: orgs.length === 0,
       },
     };
   }
