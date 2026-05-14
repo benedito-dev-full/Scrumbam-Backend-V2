@@ -127,6 +127,55 @@
           }
         }
       }
+    },
+    {
+      "name": "update_task",
+      "description": "Atualiza qualquer combinacao de campos de uma task (name, description, priority, assigneeId, sprintId, status). Use update_status se for atualizar APENAS o status.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["taskId"],
+        "properties": {
+          "taskId": { "type": "string" },
+          "name": { "type": "string", "maxLength": 512 },
+          "description": { "type": "string", "maxLength": 10000 },
+          "priority": {
+            "type": "string",
+            "enum": ["LOW", "MEDIUM", "HIGH", "URGENT"],
+            "description": "Prioridade (LOW/MEDIUM/HIGH/URGENT)"
+          },
+          "assigneeId": {
+            "type": ["string", "null"],
+            "description": "ID do assignee (DEntidade) ou null para remover"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "INBOX",
+              "READY",
+              "EXECUTING",
+              "DONE",
+              "FAILED",
+              "CANCELLED",
+              "DISCARDED",
+              "VALIDATING",
+              "VALIDATED"
+            ],
+            "description": "Codigo V3: INBOX|READY|EXECUTING|DONE|FAILED|CANCELLED|DISCARDED|VALIDATING|VALIDATED"
+          },
+          "sprintId": {
+            "type": "string",
+            "description": "ID do sprint (DTabela -400) para mover a task"
+          }
+        },
+        "anyOf": [
+          { "required": ["name"] },
+          { "required": ["description"] },
+          { "required": ["priority"] },
+          { "required": ["assigneeId"] },
+          { "required": ["status"] },
+          { "required": ["sprintId"] }
+        ]
+      }
     }
   ]
 }

@@ -25,7 +25,35 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
   - **Pilares:** Pilar 2 RESPEITADO (reutiliza TasksService — zero controller novo); Pilar 3 RESPEITADO (zero DClasses novas)
   - **ADRs:** ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation defense-in-depth)
   - **Quality Score:** 8.7/10 APPROVED | Build: PASS, ESLint: PASS, Total suite MCP: 61/61 PASS
-  - **Next:** Task #2 `update_task` — reusa padrão com payload inbound + tenant scope
+
+- **F11 Task #2: MCP Tool `update_task` com Orquestração Condicional** - 2026-05-14
+  - **Tool MCP `update_task`:** atualização parcial de task (6 campos: name, description, priority, assigneeId, status, sprintId)
+  - **Classe `UpdateTaskTool`** em `src/mcp/tools/update-task.tool.ts` (~283 linhas) — Design: UMA tool com campos todos opcionais (excluindo taskId)
+  - **Orquestração em sequência:** `update(basicos)` → `updateSprint` → `updateStatus` — status por último minimiza side-effects de transição inválida em estado intermediário
+  - **3 Helpers Privados:** `extractOptionalString(field, maxLength)`, `extractOptionalStringOrNull(field)` (semântica: "remover assignee"), `extractOptionalEnum(field, allowed)`
+  - **Tenant Isolation (ADR-V2-042):** resolve `accessibleProjectIds` UMA vez, propaga para cada call; cada método valida escopo
+  - **Backward-Compat:** `update_status` legada PERMANECE (coexistência OK; descriptions distintas evitam confusão)
+  - **Tradução EN→PT:** name→nome, description→descricao (padrão MCP)
+  - **Registração:** 7º param ao constructor `McpRouterService` (ANTES de `configService`), entrada em `tools.schema.json` com `anyOf` (≥1 campo obrigatório)
+  - **Testes:** 17 cases em `mcp-tools.update-task.spec.ts` (12 DoD a-l + 5 extras m-q: assigneeId null semântica, status VALIDATING→DONE, sprint invalid, callOrder array, multi-tenant) + schema-consistency atualizado → 78/78 PASS MCP total
+  - **Pilares:** Pilar 2 RESPEITADO (reutiliza TasksService — zero controller novo); Pilar 3 RESPEITADO (zero DClasses novas)
+  - **ADRs:** ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation defense-in-depth)
+  - **Quality Score:** 8.5/10 APPROVED | Build: PASS, ESLint: PASS, Total suite MCP: 78/78 PASS
+
+### Known issues
+
+- **MCP `update_task`: campo `taskType` não exposto** (plano §4.1, ajuste agendado Task #3+)
+  - Motivo: Task #2 focou em 6 campos críticos; `taskType` é read-only no modelo V3
+  - Status: Débito técnico F11, resolução futura
+  - Impacto: BAIXO — não impede operações
+  
+- **MCP `update_task`: `priority: null` é no-op silencioso** (schema não aceita null para priority)
+  - Motivo: Impossível limpar prioridade via MCP (permanece com valor anterior se enviado null)
+  - Workaround: Usar `PUT /tasks/:id` direto (endpoint REST) para limpar
+  - Status: Débito técnico F11
+  - Impacto: MÉDIO — usuários devem conhecer limitação
+
+- **Next:** Task #3 `create_notification` (3 sub-tools: notify_started, notify_completed, notify_error) — reusa padrão com EventProducerService
 
 ### Security
 

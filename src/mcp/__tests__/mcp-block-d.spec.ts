@@ -57,7 +57,7 @@ describe('MCP Bloco D - compatibilidade, timeout, metricas e doc', () => {
       id: 'tools',
       result: { tools: toolsSchema.tools },
     });
-    expect(toolsSchema.tools).toHaveLength(6);
+    expect(toolsSchema.tools).toHaveLength(7);
     expect(toolsSchema.tools.map((tool) => tool.name)).toEqual([
       'list_tasks',
       'create_task',
@@ -65,6 +65,7 @@ describe('MCP Bloco D - compatibilidade, timeout, metricas e doc', () => {
       'list_projects',
       'list_sprints',
       'get_task',
+      'update_task',
     ]);
     for (const tool of toolsSchema.tools) {
       expect(tool.inputSchema).toEqual(expect.objectContaining({ type: 'object' }));
@@ -80,6 +81,7 @@ describe('MCP Bloco D - compatibilidade, timeout, metricas e doc', () => {
     );
     const router = new McpRouterService(
       slowTool as never,
+      undefined,
       undefined,
       undefined,
       undefined,
@@ -109,6 +111,7 @@ describe('MCP Bloco D - compatibilidade, timeout, metricas e doc', () => {
 
   it('timeout nao se aplica a initialize nem tools/list', async () => {
     const router = new McpRouterService(
+      undefined,
       undefined,
       undefined,
       undefined,

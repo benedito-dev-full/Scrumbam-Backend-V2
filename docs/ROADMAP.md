@@ -2654,7 +2654,92 @@ Ao trocar de workspace via `POST /auth/switch-org`, recursos exibidos (projetos,
 | Reviewer | ~20min | 8.7/10 APPROVED (tool padrão completo, tests adversariais OK) |
 | Documenter | ~30min | JSDoc, ROADMAP, CHANGELOG, STATUS, commit Conventional |
 
-**Next:** Task #2 `update_task` — reusa padrão `get_task` com payload inbound + tenant scope
+### Task #2: MCP Tool `update_task` — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** mcp
+**Fase V2:** F11 (MCP Expansion — Task #2 de 8)
+**Tempo Real:** ~2.5h Implementer + ~30min Reviewer + ~30min Documenter
+**Completado em:** 2026-05-14
+**Quality Score:** 8.5/10 APPROVED
+
+**O Que Foi Feito:**
+
+- **Tool MCP `update_task`** — atualização parcial de task via orquestração condicional de 3 métodos
+  - Classe `UpdateTaskTool` em `src/mcp/tools/update-task.tool.ts` (~283 linhas)
+  - Design: UMA tool com todos os campos opcionais (excluindo `taskId` obrigatório)
+  - Orquestra em sequência: `update(basicos)` → `updateSprint` → `updateStatus`
+  - Campos suportados: `name`, `description`, `priority` (LOW/MEDIUM/HIGH/URGENT), `assigneeId` (string ou null), `status` (V3 9 códigos), `sprintId`
+  - **IMPORTANTE:** `status` processado por ÚLTIMO (minimiza side-effects de transição inválida em estado intermediário)
+  - Tenant isolation (ADR-V2-042): resolve `accessibleProjectIds` UMA vez, propaga para cada call
+  - Backward-compat: `update_status` legada PERMANECE (alguns LLMs a usam diretamente)
+  - JSDoc completo (76L) com descrição detalhada, @example JSON-RPC, @throws, @see referências
+
+- **3 Helpers Privados (bem documentados)**
+  - `extractOptionalString(field, maxLength?)` — valida tipo + comprimento
+  - `extractOptionalStringOrNull(field)` — aceita explicitamente `null` (semântica: "remover assignee")
+  - `extractOptionalEnum(field, allowed)` — validação contra conjunto de valores
+
+- **Schema em `tools.schema.json`**
+  - Entrada `update_task` com `anyOf` forçando ≥1 campo de update (redundância com validação runtime)
+  - Tradução interna EN→PT: `name`→`nome`, `description`→`descricao`
+  - 7º tool no array (confirmado em schema-consistency spec)
+
+- **Registração**
+  - `src/mcp/services/mcp-router.service.ts` — 7º param do constructor (ANTES de `configService`)
+  - `src/mcp/mcp.module.ts` — adiciona `UpdateTaskTool` em providers
+  - `src/mcp/__tests__/mcp-block-d.spec.ts` — atualiza `toHaveLength(6)` → `(7)` + lista de nomes
+
+- **Testes (17 novos specs)**
+  - `mcp-tools.update-task.spec.ts`: 12 casos DoD (a-l) + 5 extras (m-q):
+    - DoD: basic update, update+status, update+sprint, conditional execs, assigneeId null, priority invalid, status invalid, task 404, project 404, tenant isolation, final snapshot, order of calls
+    - Extras: assigneeId null (semântica "remover"), status transition VALIDATING→DONE, sprint invalid, callOrder array validation, encontra task de outro tenant (anti-enumeration)
+  - `mcp-tools.schema-consistency.spec.ts` — atualiza para 7 tools (adicionou `update_task` no array)
+  - **Total suite MCP:** 107 suites PASS, 78/78 specs PASS (0 regressões)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — atualização em DTask (tabela estrutural, sem Engine)
+- Pilar 2 (Endpoints): MCP é canal alternativo ao REST; tool reutiliza TasksService (zero controller novo)
+- Pilar 3 (Seed): N/A — zero DClasses novas
+
+**ADRs vinculados:** ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation defense-in-depth)
+
+**Build & Smoke:**
+- `make build` → PASS (0 warnings)
+- `npx tsc --noEmit` → 7 pre-existing erros (não são novos)
+- ESLint → PASS (9 arquivos modificados/criados, 0 warnings)
+- Test suite MCP → 78/78 PASS
+
+**DÉBITOS TÉCNICOS (não-bloqueantes, Future Tasks):**
+
+1. **`taskType` omitido do inputSchema** (Plano §4.1 menciona — adicionar em Task #3+)
+   - Motivo: Task #2 inicialmente focou em 6 campos críticos
+   - Status: Registrado como débito F11, resolução agendada
+   - Impacto: Baixo — `taskType` é read-only no modelo V3
+
+2. **`priority: null` é no-op silencioso** (esquema não aceita null, só STRING|null para assigneeId)
+   - Motivo: Impossível limpar prioridade via MCP (sempre fica com valor anterior)
+   - Workaround: Usar `PUT /tasks/:id` direto (endpoint REST) para limpar
+   - Status: Registrado como débito F11
+   - Impacto: Médio — usuários devem saber da limitação
+
+Ambos registrados no CHANGELOG.md em "Known issues" e rastreados para próximas tasks.
+
+**Plan:** [`workspace/plans/plan-mcp-expansion-8tools.md`](../workspace/plans/plan-mcp-expansion-8tools.md) §Task #2 (linhas 338-410)
+**Impl Notes:** [`workspace/implementations/impl-mcp-update-task-tool-task2.md`](../workspace/implementations/impl-mcp-update-task-tool-task2.md)
+**Review:** APPROVED 8.5/10
+**Memory:** [[mcp-expansion-task2-gotchas]] — 3 helpers privados, orquestração order crítica, tenant scope pattern confirmado
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan Task #2 §4.1-4.2 |
+| Implementer | ~2.5h | 100% PASS: tool + 17 testes + helpers privados + 6 campos |
+| Reviewer | ~30min | 8.5/10 APPROVED (orquestração OK, 2 débitos MEDIUM não-bloqueantes) |
+| Documenter | ~30min | JSDoc, ROADMAP, CHANGELOG, STATUS, commit Conventional |
+
+**Next:** Task #3 `create_notification` (3 sub-tools: notify_started, notify_completed, notify_error) — reusa padrão com EventProducerService
 
 ---
 

@@ -6,6 +6,7 @@ import { ListSprintsTool } from '../tools/list-sprints.tool';
 import { ListTasksTool } from '../tools/list-tasks.tool';
 import { McpTool } from '../tools/tool.interface';
 import { UpdateStatusTool } from '../tools/update-status.tool';
+import { UpdateTaskTool } from '../tools/update-task.tool';
 
 /**
  * Spec de consistencia generica: garante que toda tool registrada no
@@ -44,6 +45,7 @@ function buildRegisteredTools(): McpTool[] {
     new ListProjectsTool(noop),
     new ListSprintsTool(noop, noop),
     new GetTaskTool(noop, noop),
+    new UpdateTaskTool(noop, noop),
   ];
 }
 

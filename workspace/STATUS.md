@@ -2767,6 +2767,91 @@ Plano `workspace/plans/plan-orphan-workspace.md`. Ciclo completo Strategist → 
 
 ---
 
+### ✅ Task #2: MCP Tool `update_task` — COMPLETA
+
+**Módulo:** mcp  
+**Fase:** F11 (MCP Expansion — Task #2 de 8)  
+**Status:** COMPLETA  
+**Implementer completou:** 2026-05-14  
+**Reviewer aprovou:** 2026-05-14 (Score 8.5/10)  
+**Documenter finalizou:** 2026-05-14  
+
+**Tempo Real:**
+- Implementer: ~2.5h (tool + 17 testes + 3 helpers privados)
+- Reviewer: ~30min (feedback — 2 débitos MEDIUM não-bloqueantes)
+- Documenter: ~30min (ROADMAP + CHANGELOG + STATUS + commit)
+
+**Deliverables:**
+
+| Item | Status | Detalhe |
+|------|--------|---------|
+| `src/mcp/tools/update-task.tool.ts` | ✅ | ~283 linhas, JSDoc 76L, injeta TasksService + ProjectsService |
+| `src/mcp/__tests__/mcp-tools.update-task.spec.ts` | ✅ | 17 cases (12 DoD a-l + 5 extras m-q: assigneeId null, status invalid, sprint invalid, callOrder, multi-tenant) |
+| `src/mcp/__tests__/mcp-tools.schema-consistency.spec.ts` | ✅ | Atualizado — 7 tools agora (adicionou update_task ao array) |
+| Registração em McpRouterService | ✅ | 7º param (ANTES de configService) + import em mcp.module.ts |
+| Entrada em tools.schema.json | ✅ | name + description + inputSchema com anyOf (≥1 campo obrigatório) |
+| mcp-block-d.spec.ts atualizado | ✅ | toHaveLength(6)→(7), lista de nomes atualizada |
+| 3 Helpers Privados | ✅ | extractOptionalString, extractOptionalStringOrNull, extractOptionalEnum com JSDoc |
+
+**Campos Suportados:**
+- `name` (string, max 512) — campos básicos
+- `description` (string, max 10000) — campos básicos
+- `priority` (enum: LOW/MEDIUM/HIGH/URGENT) — campos básicos
+- `assigneeId` (string | null) — permite null para remover assignee
+- `sprintId` (string) — transferência entre sprints
+- `status` (enum: 9 códigos V3) — state machine com telemetria
+
+**Orquestração Condicional:**
+- Executa `update(basicos)` → `updateSprint` → `updateStatus` em sequência
+- Status por ÚLTIMO minimiza side-effects (ex: assignee atualizado antes de transição garante movedBy consistente)
+- Final snapshot via `findOne` para entregar estado consistente
+
+**Tenant Isolation (ADR-V2-042):**
+- Resolve `accessibleProjectIds` UMA vez (linha 177-179)
+- Propaga para cada call de update/updateSprint/updateStatus
+- Cada método valida que `task.idProject` está no scope; caso contrário → 404
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — atualização em DTask (estrutural)
+- Pilar 2 (Endpoints): REUTILIZADO (TasksService, zero controller novo)
+- Pilar 3 (Seed): RESPEITADO (zero DClasses novas)
+
+**Build & Smoke:**
+- `make build` → PASS (TypeScript clean, DVFS assets copiados, 0 warnings)
+- `npx tsc --noEmit` → 7 pre-existing erros (não novos; confirmados via baseline)
+- ESLint → PASS (9 arquivos modificados/criados, 0 warnings)
+- Test suite MCP → 78/78 PASS (0 regressões)
+
+**DÉBITOS TÉCNICOS (não-bloqueantes, registrados para Tasks #3+):**
+
+1. **`taskType` omitido do inputSchema** (Plano §4.1 menciona — adicionar em Task #3+)
+   - Motivo: Task #2 focou em 6 campos críticos; `taskType` é read-only no modelo V3
+   - Status: Débito F11, resolução futura
+   - Impacto: BAIXO — não impede operações principais
+   - Rastreado: CHANGELOG.md "Known issues", memory mcp-expansion-task2-gotchas.md
+
+2. **`priority: null` é no-op silencioso** (schema não aceita null para priority, só para assigneeId)
+   - Motivo: Impossível limpar prioridade via MCP (permanece com valor anterior se enviado null)
+   - Workaround: Usar `PUT /tasks/:id` direto (endpoint REST) para limpar
+   - Status: Débito F11
+   - Impacto: MÉDIO — usuários devem conhecer limitação
+   - Rastreado: CHANGELOG.md "Known issues", memory mcp-expansion-task2-gotchas.md
+
+**ADRs vinculados:** ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation)
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan Task #2 §4.1-4.2 |
+| Implementer | ~2.5h | 100% PASS (tool + 17 specs + 3 helpers + 6 campos + orquestração order) |
+| Reviewer | ~30min | 8.5/10 APPROVED (orquestração OK, 2 débitos MEDIUM não-bloqueantes registrados) |
+| Documenter | ~30min | ROADMAP ✅, CHANGELOG ✅, STATUS ✅, commit Conventional ✅ |
+
+**Next Task:** #3 `create_notification` (3 sub-tools: notify_started, notify_completed, notify_error) — reusa padrão com EventProducerService
+
+---
+
 <!-- dedup:implementer:4 -->
 ### Agent Concluído: implementer
 

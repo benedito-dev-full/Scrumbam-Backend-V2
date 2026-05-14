@@ -21,6 +21,7 @@ import { ListProjectsTool } from './tools/list-projects.tool';
 import { ListSprintsTool } from './tools/list-sprints.tool';
 import { ListTasksTool } from './tools/list-tasks.tool';
 import { UpdateStatusTool } from './tools/update-status.tool';
+import { UpdateTaskTool } from './tools/update-task.tool';
 
 @Module({
   imports: [AuthModule, EntidadesModule, TasksModule, ProjectsModule, TabelasModule],
@@ -39,6 +40,7 @@ import { UpdateStatusTool } from './tools/update-status.tool';
     ListProjectsTool,
     ListSprintsTool,
     GetTaskTool,
+    UpdateTaskTool,
   ],
   exports: [McpKeyService, McpRouterService, McpRateLimitService, McpAuditService],
 })
