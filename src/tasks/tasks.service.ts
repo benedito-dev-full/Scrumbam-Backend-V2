@@ -99,8 +99,21 @@ export class TasksService {
    * // task.status = "INBOX"
    * ```
    */
-  async create(dto: CreateTaskDto, creatorId: bigint): Promise<TaskResponseDto> {
+  async create(
+    dto: CreateTaskDto,
+    creatorId: bigint,
+    accessibleProjectIds?: string[],
+  ): Promise<TaskResponseDto> {
     this.logger.log(`Criando task nome="${dto.nome}" no projeto=${dto.projectId}`);
+
+    // ADR-V2-042: validar que o projectId esta no scope autorizado
+    // ANTES de qualquer query — anti enumeration.
+    if (accessibleProjectIds !== undefined && !accessibleProjectIds.includes(dto.projectId)) {
+      this.logger.warn(
+        `tenant_mismatch_task_create projectId=${dto.projectId} fora do scope do user=${creatorId}`,
+      );
+      throw new NotFoundException(`Projeto ${dto.projectId} não encontrado`);
+    }
 
     const projectId = BigInt(dto.projectId);
 
@@ -202,27 +215,74 @@ export class TasksService {
   /**
    * Lista tasks com filtros e cursor pagination.
    *
+   * **ADR-V2-042 — Tenant isolation defense-in-depth:** este metodo
+   * agora exige `accessibleProjectIds` (lista de `DProject.chave` ja
+   * autorizados pelo caller) E filtra `DTask.idProject IN
+   * (accessibleProjectIds)`. Caller responsavel por resolver projetos
+   * acessiveis usando `ProjectsService.findAccessibleProjectIds(userId, orgId)`.
+   *
+   * Se `accessibleProjectIds` for vazio, retorna lista vazia sem hit no
+   * banco — defesa contra JWT orfao ou user sem projetos na org.
+   *
+   * Quando o caller passa `query.projectId`, ele DEVE estar contido em
+   * `accessibleProjectIds` (caller checa). Caso contrario, retorna vazio
+   * (defense-in-depth).
+   *
    * N+1 ZERO — select seletivo com cursor pagination.
    *
    * @param query - Filtros: projectId, status, assigneeId, sprintId, cursor, limit
+   * @param accessibleProjectIds - Lista de `DProject.chave` (BigInt como string)
+   *   onde o usuario tem acesso E que pertencem a org ativa. Resolva via
+   *   `ProjectsService.findAccessibleProjectIds(userEntidadeId, organizationId)`.
    * @returns Lista paginada de tasks
    *
    * @example
    * ```typescript
-   * const { items } = await service.findMany({ projectId: '1', status: 'INBOX' });
+   * const allowedIds = await projects.findAccessibleProjectIds(uid, orgId);
+   * const { items } = await tasks.findMany({ status: 'INBOX' }, allowedIds);
    * ```
    */
-  async findMany(query: ListTasksQueryDto): Promise<ListTasksResponseDto> {
+  async findMany(
+    query: ListTasksQueryDto,
+    accessibleProjectIds: string[],
+  ): Promise<ListTasksResponseDto> {
     const take = Math.min(query.limit ?? 20, 100);
+
+    // ADR-V2-042: sem projetos autorizados → retorna vazio sem hit no banco.
+    if (!accessibleProjectIds || accessibleProjectIds.length === 0) {
+      return { items: [], pagination: { hasMore: false, nextCursor: null } };
+    }
+
+    // Filtro projectId precisa estar dentro do scope autorizado. Se nao
+    // estiver, retorna vazio (mensagem identica → anti enumeration).
+    if (query.projectId && !accessibleProjectIds.includes(query.projectId)) {
+      this.logger.warn(
+        `tenant_mismatch_tasks_findMany projectId=${query.projectId} nao esta em accessibleProjectIds`,
+      );
+      return { items: [], pagination: { hasMore: false, nextCursor: null } };
+    }
+
+    // Calcular escopo final: se query.projectId esta no scope, restringir a ele.
+    // Caso contrario, se query.projectIds vier do MCP, usa a INTERSECCAO.
+    let scopedProjectIds: bigint[];
+    if (query.projectId) {
+      scopedProjectIds = [BigInt(query.projectId)];
+    } else if (query.projectIds?.length) {
+      const accessibleSet = new Set(accessibleProjectIds);
+      scopedProjectIds = query.projectIds
+        .filter((id) => accessibleSet.has(id))
+        .map((id) => BigInt(id));
+      if (scopedProjectIds.length === 0) {
+        return { items: [], pagination: { hasMore: false, nextCursor: null } };
+      }
+    } else {
+      scopedProjectIds = accessibleProjectIds.map((id) => BigInt(id));
+    }
 
     // Construir filtro where
     const where: Prisma.DTaskWhereInput = {
       excluido: false,
-      ...(query.projectId
-        ? { idProject: BigInt(query.projectId) }
-        : query.projectIds?.length
-          ? { idProject: { in: query.projectIds.map((projectId) => BigInt(projectId)) } }
-          : {}),
+      idProject: { in: scopedProjectIds },
       ...(query.assigneeId ? { idAssignee: BigInt(query.assigneeId) } : {}),
       ...(query.sprintId ? { idSprint: BigInt(query.sprintId) } : {}),
       ...(query.cursor ? { chave: { lt: BigInt(query.cursor) } } : {}),
@@ -282,25 +342,39 @@ export class TasksService {
   }
 
   /**
-   * Busca task por ID.
+   * Busca task por ID, opcionalmente validando que pertence a um projeto
+   * no escopo autorizado do caller (ADR-V2-042).
    *
    * @param id - Chave BigInt da task (string)
+   * @param accessibleProjectIds - Quando informado, valida que
+   *   `DTask.idProject` esta no scope. Caso contrario, 404 (anti enumeration).
    * @returns TaskResponseDto
    *
-   * @throws {NotFoundException} Se task não encontrada ou deletada
+   * @throws {NotFoundException} Se task não encontrada ou fora do scope
    *
    * @example
    * ```typescript
-   * const task = await service.findOne('7');
+   * const task = await service.findOne('7', allowedIds);
    * ```
    */
-  async findOne(id: string): Promise<TaskResponseDto> {
+  async findOne(id: string, accessibleProjectIds?: string[]): Promise<TaskResponseDto> {
     const task = await this.prisma.dTask.findFirst({
       where: { chave: BigInt(id), excluido: false },
     });
 
     if (!task) {
       throw new NotFoundException(`Task ${id} não encontrada`);
+    }
+
+    // ADR-V2-042: tenant check via projectId. Mensagem identica → anti enumeration.
+    if (accessibleProjectIds !== undefined) {
+      const projectIdStr = task.idProject?.toString() ?? null;
+      if (!projectIdStr || !accessibleProjectIds.includes(projectIdStr)) {
+        this.logger.warn(
+          `tenant_mismatch_task_findOne taskId=${id} projectId=${projectIdStr ?? 'null'} fora do scope`,
+        );
+        throw new NotFoundException(`Task ${id} não encontrada`);
+      }
     }
 
     const priorityMap = await this.buildPriorityMap([task.idPriority]);
@@ -323,7 +397,11 @@ export class TasksService {
    * const task = await service.update('7', { nome: 'Novo título' });
    * ```
    */
-  async update(id: string, dto: UpdateTaskDto): Promise<TaskResponseDto> {
+  async update(
+    id: string,
+    dto: UpdateTaskDto,
+    accessibleProjectIds?: string[],
+  ): Promise<TaskResponseDto> {
     const taskId = BigInt(id);
 
     const existing = await this.prisma.dTask.findFirst({
@@ -333,6 +411,14 @@ export class TasksService {
 
     if (!existing) {
       throw new NotFoundException(`Task ${id} não encontrada`);
+    }
+
+    // ADR-V2-042: tenant check via projectId
+    if (accessibleProjectIds !== undefined) {
+      const pid = existing.idProject?.toString() ?? null;
+      if (!pid || !accessibleProjectIds.includes(pid)) {
+        throw new NotFoundException(`Task ${id} não encontrada`);
+      }
     }
 
     // Merge superficial em `dados` quando taskType for atualizado.
@@ -405,6 +491,7 @@ export class TasksService {
     id: string,
     dto: UpdateTaskStatusDto,
     actorId?: bigint,
+    accessibleProjectIds?: string[],
   ): Promise<TaskResponseDto> {
     const taskId = BigInt(id);
 
@@ -418,6 +505,14 @@ export class TasksService {
 
     if (!task) {
       throw new NotFoundException(`Task ${id} não encontrada`);
+    }
+
+    // ADR-V2-042: tenant check via projectId
+    if (accessibleProjectIds !== undefined) {
+      const pid = task.idProject?.toString() ?? null;
+      if (!pid || !accessibleProjectIds.includes(pid)) {
+        throw new NotFoundException(`Task ${id} não encontrada`);
+      }
     }
 
     // Ler estado atual dos dados
@@ -552,16 +647,28 @@ export class TasksService {
    * const task = await service.updateSprint('7', { sprintId: '2' });
    * ```
    */
-  async updateSprint(id: string, dto: UpdateTaskSprintDto): Promise<TaskResponseDto> {
+  async updateSprint(
+    id: string,
+    dto: UpdateTaskSprintDto,
+    accessibleProjectIds?: string[],
+  ): Promise<TaskResponseDto> {
     const taskId = BigInt(id);
 
     const existing = await this.prisma.dTask.findFirst({
       where: { chave: taskId, excluido: false },
-      select: { chave: true },
+      select: { chave: true, idProject: true },
     });
 
     if (!existing) {
       throw new NotFoundException(`Task ${id} não encontrada`);
+    }
+
+    // ADR-V2-042: tenant check via projectId
+    if (accessibleProjectIds !== undefined) {
+      const pid = existing.idProject?.toString() ?? null;
+      if (!pid || !accessibleProjectIds.includes(pid)) {
+        throw new NotFoundException(`Task ${id} não encontrada`);
+      }
     }
 
     const updated = await this.prisma.dTask.update({
@@ -585,16 +692,24 @@ export class TasksService {
    * await service.delete('7');
    * ```
    */
-  async delete(id: string): Promise<void> {
+  async delete(id: string, accessibleProjectIds?: string[]): Promise<void> {
     const taskId = BigInt(id);
 
     const existing = await this.prisma.dTask.findFirst({
       where: { chave: taskId, excluido: false },
-      select: { chave: true },
+      select: { chave: true, idProject: true },
     });
 
     if (!existing) {
       throw new NotFoundException(`Task ${id} não encontrada`);
+    }
+
+    // ADR-V2-042: tenant check via projectId
+    if (accessibleProjectIds !== undefined) {
+      const pid = existing.idProject?.toString() ?? null;
+      if (!pid || !accessibleProjectIds.includes(pid)) {
+        throw new NotFoundException(`Task ${id} não encontrada`);
+      }
     }
 
     await this.prisma.dTask.update({

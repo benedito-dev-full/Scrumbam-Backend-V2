@@ -21,7 +21,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { AuthCompositeGuard } from '../auth/guards/auth-composite.guard';
 import { ProjectsService } from './projects.service';
 import { ProjectActivityService } from './project-activity.service';
 import { CreateProjectDto } from './dto/create-project.dto';
@@ -36,20 +36,32 @@ import { ProjectActivityQueryDto } from './dto/project-activity-query.dto';
 import { ListProjectsQueryDto } from './dto/list-projects-query.dto';
 
 /**
+ * Tipo do payload populado em `req.user` pelo JwtStrategy.
+ * `organizationId` pode ser ausente em JWT órfão (ADR-V2-038).
+ */
+interface JwtRequest {
+  user: { entidadeId: string; organizationId?: string };
+}
+
+/**
  * Controller de projetos (DProject).
  *
  * Expõe CRUD completo de projetos com RBAC via DVincula (-171/-172/-173).
  * Rotas de membros delegam ao ProjectMembersController.
  *
- * Todos os endpoints requerem autenticação JWT.
- * RBAC é verificado nos services (MANAGER para criar/editar/deletar).
+ * Todos os endpoints requerem autenticação. Migrado para `AuthCompositeGuard`
+ * (ADR-V2-042) para herdar defesa em profundidade: orphan workspace
+ * (`RequireWorkspaceGuard`) + tenant isolation (`OrgTenantGuard`). Os
+ * services tambem cruzam `DProject.idEstab` com `JWT.organizationId` para
+ * defesa #2 (filtro no banco).
  *
  * @see ProjectsService — lógica de negócio
  * @see ProjectMembersController — gestão de membros
+ * @see ADR-V2-042 — defesa em profundidade de tenant isolation
  */
 @ApiTags('projects')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(AuthCompositeGuard)
 @Controller('projects')
 export class ProjectsController {
   private readonly logger = new Logger(ProjectsController.name);
@@ -84,14 +96,19 @@ export class ProjectsController {
   @ApiResponse({ status: 401, description: 'Não autenticado' })
   async create(
     @Body() dto: CreateProjectDto,
-    @Request() req: { user: { entidadeId: string } },
+    @Request() req: JwtRequest,
   ): Promise<ProjectResponseDto> {
-    this.logger.log(`POST /projects — user=${req.user.entidadeId}`);
-    return this.projectsService.create(dto, BigInt(req.user.entidadeId));
+    this.logger.log(`POST /projects — user=${req.user.entidadeId} org=${req.user.organizationId}`);
+    // Se o DTO nao traz orgId, herdamos o orgId do JWT (multi-tenant correto).
+    const dtoWithOrg: CreateProjectDto = {
+      ...dto,
+      orgId: dto.orgId ?? req.user.organizationId,
+    };
+    return this.projectsService.create(dtoWithOrg, BigInt(req.user.entidadeId));
   }
 
   /**
-   * Lista projetos onde o usuário é membro (qualquer role).
+   * Lista projetos onde o usuário é membro **dentro da org ativa**.
    *
    * Cursor pagination via query param `cursor`.
    *
@@ -103,9 +120,10 @@ export class ProjectsController {
    */
   @Get()
   @ApiOperation({
-    summary: 'Listar projetos do usuário',
+    summary: 'Listar projetos do usuário (org ativa)',
     description:
-      'Lista projetos onde o usuário é membro. Aceita `teamId` opcional para filtrar por DVincula -182 (ADR-V2-029).',
+      'Lista projetos onde o usuário é membro E que pertencem à org do JWT. ' +
+      'Aceita `teamId` opcional para filtrar por DVincula -182 (ADR-V2-029).',
   })
   @ApiQuery({ name: 'cursor', required: false, description: 'Cursor de paginação' })
   @ApiQuery({
@@ -122,13 +140,14 @@ export class ProjectsController {
   })
   @ApiResponse({ status: 200, description: 'Lista de projetos', type: ListProjectResponseDto })
   async findMany(
-    @Request() req: { user: { entidadeId: string } },
+    @Request() req: JwtRequest,
     @Query() query: ListProjectsQueryDto,
   ): Promise<ListProjectResponseDto> {
     return this.projectsService.findMany(BigInt(req.user.entidadeId), {
       cursor: query.cursor,
       limit: query.limit ?? 20,
       teamId: query.teamId,
+      organizationId: req.user.organizationId,
     });
   }
 
@@ -143,11 +162,8 @@ export class ProjectsController {
   @ApiResponse({ status: 200, description: 'Projeto encontrado', type: ProjectResponseDto })
   @ApiResponse({ status: 404, description: 'Projeto não encontrado' })
   @ApiResponse({ status: 403, description: 'Acesso negado' })
-  async findOne(
-    @Param('id') id: string,
-    @Request() req: { user: { entidadeId: string } },
-  ): Promise<ProjectResponseDto> {
-    return this.projectsService.findOne(id, BigInt(req.user.entidadeId));
+  async findOne(@Param('id') id: string, @Request() req: JwtRequest): Promise<ProjectResponseDto> {
+    return this.projectsService.findOne(id, BigInt(req.user.entidadeId), req.user.organizationId);
   }
 
   /**
@@ -167,9 +183,14 @@ export class ProjectsController {
   async update(
     @Param('id') id: string,
     @Body() dto: UpdateProjectDto,
-    @Request() req: { user: { entidadeId: string } },
+    @Request() req: JwtRequest,
   ): Promise<ProjectResponseDto> {
-    return this.projectsService.update(id, dto, BigInt(req.user.entidadeId));
+    return this.projectsService.update(
+      id,
+      dto,
+      BigInt(req.user.entidadeId),
+      req.user.organizationId,
+    );
   }
 
   /**
@@ -186,11 +207,8 @@ export class ProjectsController {
   @ApiResponse({ status: 204, description: 'Projeto deletado' })
   @ApiResponse({ status: 403, description: 'Requer role MANAGER' })
   @ApiResponse({ status: 404, description: 'Projeto não encontrado' })
-  async delete(
-    @Param('id') id: string,
-    @Request() req: { user: { entidadeId: string } },
-  ): Promise<void> {
-    await this.projectsService.delete(id, BigInt(req.user.entidadeId));
+  async delete(@Param('id') id: string, @Request() req: JwtRequest): Promise<void> {
+    await this.projectsService.delete(id, BigInt(req.user.entidadeId), req.user.organizationId);
   }
 
   /**
@@ -212,7 +230,10 @@ export class ProjectsController {
   async getActivity(
     @Param('id') id: string,
     @Query() query: ProjectActivityQueryDto,
+    @Request() req: JwtRequest,
   ): Promise<ListProjectActivityResponseDto> {
+    // Tenant + membership check antes de qualquer agregacao
+    await this.projectsService.findOne(id, BigInt(req.user.entidadeId), req.user.organizationId);
     return this.activityService.getActivity(id, query);
   }
 
@@ -225,10 +246,7 @@ export class ProjectsController {
   @ApiOperation({ summary: 'Contadores de tasks por status V3' })
   @ApiParam({ name: 'id', description: 'ID do projeto' })
   @ApiResponse({ status: 200, description: 'Estatísticas do projeto', type: ProjectStatsDto })
-  async getStats(
-    @Param('id') id: string,
-    @Request() req: { user: { entidadeId: string } },
-  ): Promise<ProjectStatsDto> {
-    return this.projectsService.getStats(id, BigInt(req.user.entidadeId));
+  async getStats(@Param('id') id: string, @Request() req: JwtRequest): Promise<ProjectStatsDto> {
+    return this.projectsService.getStats(id, BigInt(req.user.entidadeId), req.user.organizationId);
   }
 }

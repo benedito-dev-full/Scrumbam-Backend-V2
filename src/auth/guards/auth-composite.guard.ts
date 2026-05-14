@@ -11,6 +11,7 @@ import { McpKeyGuard } from './mcp-key.guard';
 import { ApiKeyGuard } from './api-key.guard';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { RequireWorkspaceGuard } from './require-workspace.guard';
+import { OrgTenantGuard } from './org-tenant.guard';
 
 /**
  * Guard de composição OR: tenta 3 mecanismos de autenticação em ordem.
@@ -28,8 +29,18 @@ import { RequireWorkspaceGuard } from './require-workspace.guard';
  * REGRA CRÍTICA: Os guards internos (McpKeyGuard, ApiKeyGuard, JwtAuthGuard)
  * NÃO lançam exceções — retornam apenas boolean. Apenas ESTE guard lança.
  *
+ * Após autenticar, este guard invoca em ordem (defense-in-depth, ADR-V2-042):
+ *  1. `RequireWorkspaceGuard` — bloqueia JWT orfao em rota tenant-scoped.
+ *  2. `OrgTenantGuard` — valida isolamento multi-tenant (path param / project).
+ *
+ * Por que invocar internamente em vez de registrar como APP_GUARD?
+ * - NestJS executa APP_GUARDs ANTES dos guards de controller — `req.user`
+ *   ficaria indefinido. Encadear aqui garante ordem correta.
+ *
  * @see McpKeyGuard, ApiKeyGuard, JwtAuthGuard — guards internos (sem lançar)
  * @see IS_PUBLIC_KEY — bypass completo para rotas públicas
+ * @see RequireWorkspaceGuard — defesa #1 (orphan workspace)
+ * @see OrgTenantGuard — defesa #2 (tenant isolation HTTP layer)
  */
 @Injectable()
 export class AuthCompositeGuard implements CanActivate {
@@ -41,6 +52,7 @@ export class AuthCompositeGuard implements CanActivate {
     private readonly apiKeyGuard: ApiKeyGuard,
     private readonly jwtAuthGuard: JwtAuthGuard,
     private readonly requireWorkspaceGuard: RequireWorkspaceGuard,
+    private readonly orgTenantGuard: OrgTenantGuard,
   ) {}
 
   /**
@@ -52,11 +64,16 @@ export class AuthCompositeGuard implements CanActivate {
    * bloquear rotas tenant-scoped quando o JWT está órfão (sem
    * `organizationId`) e a rota não tem `@AllowOrphan()` — ADR-V2-038.
    *
+   * Em seguida invoca `OrgTenantGuard` para validar isolamento multi-tenant
+   * em rotas com path param de projeto (`PROJECT_ESTAB`) ou de org
+   * (`PATH_PARAM`) — ADR-V2-042.
+   *
    * @param context - Contexto de execução NestJS
    * @returns true se qualquer mecanismo autenticou com sucesso
    * @throws {UnauthorizedException} Se nenhum mecanismo passou
    * @throws {ForbiddenException} `{ code: 'NO_WORKSPACE' }` se JWT órfão
    *   acessa rota sem `@AllowOrphan()`.
+   * @throws {ForbiddenException} Se tenant mismatch (PROJECT_ESTAB / PATH_PARAM).
    */
   async canActivate(context: ExecutionContext): Promise<boolean> {
     // Verificar @Public() — bypass completo
@@ -126,6 +143,13 @@ export class AuthCompositeGuard implements CanActivate {
     // `RequireWorkspaceGuard` decide com base em `@AllowOrphan()` da rota e
     // lança `ForbiddenException` `{ code: 'NO_WORKSPACE' }` quando aplicável.
     // Fora do try/catch para garantir que a ForbiddenException propague.
-    return this.requireWorkspaceGuard.canActivate(context);
+    const workspaceOk = this.requireWorkspaceGuard.canActivate(context);
+    if (!workspaceOk) {
+      return false;
+    }
+
+    // ADR-V2-042: defesa #2 — isolamento multi-tenant em rotas com path
+    // param de projeto/org. Lança ForbiddenException se cross-tenant.
+    return this.orgTenantGuard.canActivate(context);
   }
 }

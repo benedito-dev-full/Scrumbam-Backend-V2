@@ -20,6 +20,7 @@ import { AuthCompositeGuard } from './guards/auth-composite.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { AllowOrphan } from './decorators/allow-orphan.decorator';
 import { Public } from './decorators/public.decorator';
+import { SkipTenantCheck } from './decorators/skip-tenant-check.decorator';
 import { CurrentUser, JwtPayload } from './decorators/current-user.decorator';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -45,6 +46,7 @@ import { InvitesService } from '../invites/invites.service';
  */
 @ApiTags('auth')
 @Controller('auth')
+@SkipTenantCheck() // ADR-V2-042: /auth/* sao operacoes sobre o user (login/logout/perfil/keys), nao sobre recursos tenant-scoped. JWT orfao tambem trafega aqui via @AllowOrphan.
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
 

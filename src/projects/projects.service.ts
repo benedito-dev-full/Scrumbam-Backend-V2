@@ -47,12 +47,24 @@ const ID_CLASSE_ORG_ADMIN = BigInt(-161);
  * Opções para `findMany()`.
  *
  * @see ADR-V2-029 (teamId filter)
+ * @see ADR-V2-042 (organizationId obrigatorio para isolamento multi-tenant)
  */
 export interface FindManyProjectsOptions {
   cursor?: string;
   limit?: number;
   /** Filtra por DVincula -182 (PROJECT_TEAM_LINK). Ausente = todos. */
   teamId?: string;
+  /**
+   * `DEntidade.chave` da org ativa do JWT (`organizationId` do payload).
+   * Quando informado, filtra para projetos com `DProject.idEstab === organizationId`.
+   * Quando ausente (caso: MCP keys ou callers internos), retorna todos os
+   * projetos onde o user e membro (sem cruzamento de org).
+   *
+   * **ADR-V2-042**: callers que servem JWT-authenticated requests DEVEM
+   * passar `organizationId`. Caller responsavel decidir; service nao chama
+   * `throw` quando ausente (mantem compat com MCP que e cross-org by design).
+   */
+  organizationId?: string;
 }
 
 /**
@@ -278,8 +290,20 @@ export class ProjectsService implements OnModuleInit {
     userEntidadeId: bigint,
     opts: FindManyProjectsOptions = {},
   ): Promise<ListProjectResponseDto> {
-    const { cursor, teamId } = opts;
+    const { cursor, teamId, organizationId } = opts;
     const take = Math.min(opts.limit ?? 20, 100);
+
+    // ADR-V2-042: organizationId vira filtro de tenant via DProject.idEstab.
+    // Convertendo aqui para BigInt — strings invalidas (raras: JWT corrompido)
+    // resultam em lista vazia em vez de quebrar.
+    let orgIdBig: bigint | undefined;
+    if (organizationId !== undefined) {
+      if (!/^-?\d+$/.test(organizationId)) {
+        this.logger.warn(`findMany: organizationId invalido="${organizationId}" — retorna vazio`);
+        return { items: [], pagination: { hasMore: false, nextCursor: null } };
+      }
+      orgIdBig = BigInt(organizationId);
+    }
 
     // 1) Se filtrado por team, pré-resolver os projectIds do time.
     let teamProjectIds: bigint[] | undefined;
@@ -333,9 +357,16 @@ export class ProjectsService implements OnModuleInit {
     }
 
     // 3) Batch: DProjects + contagem de membros + vínculos de team (N+1 ZERO).
+    //    ADR-V2-042: aplicar filtro de org em DProject.findMany. Projetos
+    //    listados em memberships mas pertencentes a outra org NAO entram
+    //    no resultado.
     const [projects, memberCounts, teamLinks] = await Promise.all([
       this.prisma.dProject.findMany({
-        where: { chave: { in: projectIds }, excluido: false },
+        where: {
+          chave: { in: projectIds },
+          excluido: false,
+          ...(orgIdBig !== undefined ? { idEstab: orgIdBig } : {}),
+        },
         orderBy: { chave: 'desc' },
       }),
       this.prisma.dVincula.groupBy({
@@ -374,6 +405,9 @@ export class ProjectsService implements OnModuleInit {
       ),
     );
 
+    // nextCursor segue o ultimo membership da pagina (nao o ultimo project),
+    // pois o cursor controla iteracao em DVincula. Se org filtrou tudo desta
+    // pagina, hasMore continua valido para que o client peca a proxima pagina.
     const nextCursor = hasMore
       ? pageVinculos[pageVinculos.length - 1].idLocEscritu.toString()
       : null;
@@ -382,15 +416,24 @@ export class ProjectsService implements OnModuleInit {
   }
 
   /**
-   * Lista todos os IDs de projetos acessiveis ao usuario.
+   * Lista todos os IDs de projetos acessiveis ao usuario, opcionalmente
+   * filtrados por organizacao (ADR-V2-042).
    *
    * Uso interno para callers que precisam aplicar escopo de projeto antes de
    * consultar outro agregado canonico, como tools MCP de tasks.
    *
+   * Quando `organizationId` informado, retorna apenas projetos cujo
+   * `DProject.idEstab === organizationId`. Quando omitido, retorna todos os
+   * projetos onde o usuario e membro (modo MCP / cross-org by design).
+   *
    * @param userEntidadeId - Chave BigInt da DEntidade do usuario
+   * @param organizationId - `DEntidade.chave` da org ativa (string com BigInt). Opcional.
    * @returns IDs de projetos acessiveis, serializados como string
    */
-  async findAccessibleProjectIds(userEntidadeId: bigint): Promise<string[]> {
+  async findAccessibleProjectIds(
+    userEntidadeId: bigint,
+    organizationId?: string,
+  ): Promise<string[]> {
     const vinculos = await this.prisma.dVincula.findMany({
       where: {
         idEntidade: userEntidadeId,
@@ -401,25 +444,64 @@ export class ProjectsService implements OnModuleInit {
       orderBy: { idLocEscritu: 'desc' },
     });
 
-    return [...new Set(vinculos.map((vinculo) => vinculo.idLocEscritu.toString()))];
+    const candidateIds = Array.from(new Set(vinculos.map((v) => v.idLocEscritu.toString())));
+
+    // Sem org → comportamento legado (MCP keys, callers internos).
+    if (!organizationId) {
+      return candidateIds;
+    }
+
+    if (!/^-?\d+$/.test(organizationId)) {
+      this.logger.warn(
+        `findAccessibleProjectIds: organizationId invalido="${organizationId}" — retorna vazio`,
+      );
+      return [];
+    }
+
+    if (candidateIds.length === 0) {
+      return [];
+    }
+
+    // Cruza com DProject.idEstab — UMA query batch, ZERO N+1.
+    const orgIdBig = BigInt(organizationId);
+    const scoped = await this.prisma.dProject.findMany({
+      where: {
+        chave: { in: candidateIds.map((s) => BigInt(s)) },
+        idEstab: orgIdBig,
+        excluido: false,
+      },
+      select: { chave: true },
+    });
+
+    return scoped.map((p) => p.chave.toString());
   }
 
   /**
-   * Busca projeto por ID, verificando membership do usuário.
+   * Busca projeto por ID, verificando membership do usuário e (opcionalmente)
+   * tenant do projeto.
+   *
+   * ADR-V2-042: quando `organizationId` informado, projetos de outras orgs
+   * retornam 404 (mensagem identica a "nao encontrado" — anti enumeration
+   * attack).
    *
    * @param id - Chave BigInt do projeto (string)
    * @param userEntidadeId - Chave BigInt do usuário (deve ser membro)
+   * @param organizationId - `DEntidade.chave` da org ativa (string). Opcional.
    * @returns ProjectResponseDto (`teamId` resolvido)
    *
-   * @throws {NotFoundException} Se projeto não encontrado
+   * @throws {NotFoundException} Se projeto não encontrado OU em outra org
    * @throws {ForbiddenException} Se usuário não é membro
    *
    * @example
    * ```typescript
-   * const project = await service.findOne('1', BigInt(userId));
+   * const project = await service.findOne('1', BigInt(userId), '50');
    * ```
    */
-  async findOne(id: string, userEntidadeId: bigint): Promise<ProjectResponseDto> {
+  async findOne(
+    id: string,
+    userEntidadeId: bigint,
+    organizationId?: string,
+  ): Promise<ProjectResponseDto> {
     const projectId = BigInt(id);
 
     const [project, vinculo, teamLink] = await Promise.all([
@@ -447,6 +529,19 @@ export class ProjectsService implements OnModuleInit {
 
     if (!project) {
       throw new NotFoundException(`Projeto ${id} não encontrado`);
+    }
+    // ADR-V2-042: cross-tenant via path param. Resposta 404 (nao 403) para
+    // evitar enumeration ("este projeto existe mas nao e seu").
+    if (organizationId && /^-?\d+$/.test(organizationId)) {
+      const orgIdBig = BigInt(organizationId);
+      if (project.idEstab === null || project.idEstab !== orgIdBig) {
+        this.logger.warn(
+          `tenant_mismatch_project_findOne projectId=${id} jwtOrg=${organizationId} projectOrg=${
+            project.idEstab?.toString() ?? 'null'
+          }`,
+        );
+        throw new NotFoundException(`Projeto ${id} não encontrado`);
+      }
     }
     if (!vinculo) {
       throw new ForbiddenException('Acesso negado: você não é membro deste projeto');
@@ -494,8 +589,23 @@ export class ProjectsService implements OnModuleInit {
     id: string,
     dto: UpdateProjectDto,
     userEntidadeId: bigint,
+    organizationId?: string,
   ): Promise<ProjectResponseDto> {
     const projectId = BigInt(id);
+
+    // ADR-V2-042: tenant check ANTES de qualquer query/RBAC para evitar
+    // enumeration de projetos via mensagem de erro RBAC.
+    if (organizationId && /^-?\d+$/.test(organizationId)) {
+      const orgIdBig = BigInt(organizationId);
+      const peek = await this.prisma.dProject.findFirst({
+        where: { chave: projectId, excluido: false },
+        select: { idEstab: true },
+      });
+      if (!peek || peek.idEstab === null || peek.idEstab !== orgIdBig) {
+        throw new NotFoundException(`Projeto ${id} não encontrado`);
+      }
+    }
+
     await this.requireManagerRole(projectId, userEntidadeId);
 
     const project = await this.prisma.dProject.findFirst({
@@ -655,8 +765,21 @@ export class ProjectsService implements OnModuleInit {
    * await service.delete('1', BigInt(managerId));
    * ```
    */
-  async delete(id: string, userEntidadeId: bigint): Promise<void> {
+  async delete(id: string, userEntidadeId: bigint, organizationId?: string): Promise<void> {
     const projectId = BigInt(id);
+
+    // ADR-V2-042: tenant check ANTES de qualquer query/RBAC.
+    if (organizationId && /^-?\d+$/.test(organizationId)) {
+      const orgIdBig = BigInt(organizationId);
+      const peek = await this.prisma.dProject.findFirst({
+        where: { chave: projectId, excluido: false },
+        select: { idEstab: true },
+      });
+      if (!peek || peek.idEstab === null || peek.idEstab !== orgIdBig) {
+        throw new NotFoundException(`Projeto ${id} não encontrado`);
+      }
+    }
+
     await this.requireManagerRole(projectId, userEntidadeId);
 
     const project = await this.prisma.dProject.findFirst({
@@ -728,9 +851,13 @@ export class ProjectsService implements OnModuleInit {
    * const stats = await service.getStats('1', BigInt(userId));
    * ```
    */
-  async getStats(id: string, userEntidadeId: bigint): Promise<ProjectStatsDto> {
-    // Verificar acesso
-    await this.findOne(id, userEntidadeId);
+  async getStats(
+    id: string,
+    userEntidadeId: bigint,
+    organizationId?: string,
+  ): Promise<ProjectStatsDto> {
+    // Verificar acesso (findOne ja inclui tenant check)
+    await this.findOne(id, userEntidadeId, organizationId);
 
     const projectId = BigInt(id);
 

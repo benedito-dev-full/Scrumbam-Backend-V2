@@ -1,4 +1,5 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module';
 import { ProjectsController } from './projects.controller';
 import { ProjectMembersController } from './project-members.controller';
 import { ProjectsService } from './projects.service';
@@ -9,6 +10,10 @@ import { UserProjectService } from './user-project.service';
 
 /**
  * ProjectsModule — Domínio de projetos (DProject) V2.
+ *
+ * Importa `AuthModule` (via forwardRef p/ evitar circular dep) para usar
+ * `AuthCompositeGuard` no controller — ADR-V2-042 defesa em profundidade
+ * de tenant isolation.
  *
  * Exporta ProjectsService para uso em outros módulos (ex: TasksModule
  * pode verificar membership em project).
@@ -26,6 +31,7 @@ import { UserProjectService } from './user-project.service';
  * NÃO importa CommonModule nem EventosModule explicitamente — ambos `@Global()`.
  */
 @Module({
+  imports: [forwardRef(() => AuthModule)],
   controllers: [ProjectsController, ProjectMembersController],
   providers: [
     ProjectsService,

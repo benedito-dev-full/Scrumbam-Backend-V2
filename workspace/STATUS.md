@@ -1,6 +1,51 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-13 (Documenter finalizando Task #3 Fase 4 VPS Config Backend — COMPLETA)
+**Ultima atualizacao:** 2026-05-14 (Documenter finalizando F14 Tenant Isolation Defense-in-Depth — COMPLETA)
+
+---
+
+## 🎯 F14 Hardening — Tenant Isolation Fix (ADR-V2-042) — ✅ COMPLETA
+
+**Plano:** `plan-tenant-isolation-fix.md`
+
+### ✅ Implementação Completa
+
+**Implementer completou:** 2026-05-14
+**Reviewer aprovou:** 2026-05-14 (Score 8.2/10)
+**Módulo:** core/auth/common (`src/auth/`, `src/common/`, `src/projects/`, `src/tasks/`, `src/automation/`, `src/mcp/`, `src/channels/`, `src/webhooks/`)
+**Build:** `make build` PASS
+**Tests:** 35/35 PASS (21 unit TenantScopeService + 14 adversariais multi-tenant)
+
+**Deliverables:**
+- ✅ `src/common/services/tenant-scope.service.ts` — helper central isolamento multi-tenant (4 métodos: scopeProjectIdsToOrg, assertProjectInOrg, assertTaskInOrg, assertAgentInOrg) + 21 unit tests
+- ✅ `src/auth/decorators/skip-tenant-check.decorator.ts` — opt-out explícito para rotas cross-org by design
+- ✅ `src/__tests__/tenant-isolation.adversarial.spec.ts` — 14 cenários adversariais (listagem cross-tenant, path param cross-org, JWT órfão, agente standalone, etc.)
+- ✅ `src/auth/guards/org-tenant.guard.ts` — JSDoc corrigido (invocado via AuthCompositeGuard, não APP_GUARD global)
+- ✅ Services refatorados (20 arquivos): ProjectsService, TasksService, AgentsService, etc. recebem organizationId/accessibleProjectIds
+- ✅ ADR-V2-042 redigido e aceito (Tenant Isolation Defense-in-Depth)
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — isolamento é estrutural
+- Pilar 2 (Endpoints): ZERO controllers novos — reutilizados existentes com scope defensivo
+- Pilar 3 (Seed): ZERO DClasses novas
+
+**Defesa em Profundidade (3 camadas):**
+1. **HTTP Guard:** OrgTenantGuard invocado via AuthCompositeGuard, valida JWT.organizationId vs recurso
+2. **Service Helper:** TenantScopeService centraliza lógica de cruzamento membership + idEstab
+3. **Service Filter:** ProjectsService, TasksService, AgentsService filtram por organizationId
+
+**Politica de Erros:**
+- Listagem cross-tenant → 200 vazio (sem leak)
+- GET/POST cross-tenant via path → 404 anti-enumeration
+- JWT órfão em rota tenant-scoped → 403 NO_WORKSPACE
+
+**ADRs vinculados:** **ADR-V2-042 (novo)**, ADR-V2-001, ADR-V2-003, ADR-V2-038, ADR-V2-040
+
+**Issues Residuais (Reviewer m1-m3 — próximos PRs):**
+- m1 (MEDIUM): 3 endpoints `/agents/:id/projects` migrar para AuthCompositeGuard
+- m3 (MINOR): Testes adversariais regression para flow-metrics/search/Telegram/webhook + corrigir 24 falhas pré-existentes
+
+**Status:** ✅ COMPLETA — Pronto para merge (JSDoc ✅, ROADMAP ✅, CHANGELOG ✅, STATUS ✅, ADR-V2-042 ✅, commit ✅)
 
 ---
 
@@ -2719,5 +2764,27 @@ Plano `workspace/plans/plan-orphan-workspace.md`. Ciclo completo Strategist → 
 **Task:** #5
 **Timestamp:** 14/05/2026 11:08:09
 **Agent:** reviewer
+**Status:** Completo
+
+
+---
+
+<!-- dedup:documenter:5 -->
+### Agent Concluído: documenter
+
+**Task:** #5
+**Timestamp:** 14/05/2026 11:12:19
+**Agent:** documenter
+**Status:** Completo
+
+
+---
+
+<!-- dedup:strategist:5 -->
+### Agent Concluído: strategist
+
+**Task:** #5
+**Timestamp:** 14/05/2026 13:41:30
+**Agent:** strategist
 **Status:** Completo
 

@@ -17,7 +17,8 @@ import {
 @Injectable()
 export class ListTasksTool implements McpTool {
   readonly name = 'list_tasks';
-  readonly description = 'Lista tasks do usuario com filtros opcionais de projeto, status e assignee.';
+  readonly description =
+    'Lista tasks do usuario com filtros opcionais de projeto, status e assignee.';
   readonly inputSchema = {
     type: 'object',
     properties: {
@@ -59,14 +60,19 @@ export class ListTasksTool implements McpTool {
       return textResult({ items: [], pagination: { hasMore: false, nextCursor: null } });
     }
 
-    const result = await this.tasksService.findMany({
-      ...(projectId ? { projectId } : {}),
-      ...(!projectId ? { projectIds: scopedProjectIds } : {}),
-      ...(status ? { status } : {}),
-      ...(assigneeId ? { assigneeId } : {}),
-      ...(cursor ? { cursor } : {}),
-      limit: optionalLimit(input),
-    });
+    // ADR-V2-042: passar `scopedProjectIds` como o conjunto autorizado
+    // p/ TasksService.findMany — defesa-em-profundidade.
+    const result = await this.tasksService.findMany(
+      {
+        ...(projectId ? { projectId } : {}),
+        ...(!projectId ? { projectIds: scopedProjectIds } : {}),
+        ...(status ? { status } : {}),
+        ...(assigneeId ? { assigneeId } : {}),
+        ...(cursor ? { cursor } : {}),
+        limit: optionalLimit(input),
+      },
+      scopedProjectIds,
+    );
 
     return textResult(result);
   }

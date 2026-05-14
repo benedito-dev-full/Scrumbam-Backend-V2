@@ -13,6 +13,8 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { AuthCompositeGuard } from '../../auth/guards/auth-composite.guard';
+import { SkipTenantCheck } from '../../auth/decorators/skip-tenant-check.decorator';
 import { AgentInstallTokenService } from './agent-install-token.service';
 import { AgentsService } from './agents.service';
 import {
@@ -32,7 +34,7 @@ import { AgentListItemDto, ListAgentsQueryDto } from './dto/list-agents.dto';
 import { AgentAuthGuard, AgentAuthenticatedRequest } from './guards/agent-auth.guard';
 
 interface JwtRequest {
-  user: { entidadeId: string };
+  user: { entidadeId: string; organizationId?: string };
 }
 
 @ApiTags('automation-agents')
@@ -44,69 +46,36 @@ export class AgentsController {
   ) {}
 
   /**
+   * Lista todos os agents (DEntidade -156) da organizacao ativa do usuario
+   * autenticado (ADR-V2-042). Status calculado em runtime via `dados.lastSeen`
+   * (janela 90s para online). Filtros opcionais: `status` e `search` por
+   * nome/hostname.
+   */
+  @Get()
+  @UseGuards(AuthCompositeGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Listar agents da organizacao (scopado por idEstab)' })
+  @ApiResponse({ status: 200, type: [AgentListItemDto] })
+  @ApiResponse({ status: 401, description: 'JWT inválido/ausente' })
+  async listAgents(
+    @Query() query: ListAgentsQueryDto,
+    @Request() req: JwtRequest,
+  ): Promise<AgentListItemDto[]> {
+    return this.agentsService.listAgents(
+      { status: query.status, search: query.search },
+      req.user.organizationId,
+    );
+  }
+
+  /**
    * Gera token one-shot para instalacao de agente (com ou sem projeto vinculado).
-   *
-   * Endpoint protegido via JWT. Permite criar um token para instalar um agente standalone
-   * (sem projeto) ou vinculado a um projeto específico.
    *
    * Comportamentos:
    * - Com `projectId`: validação RBAC (usuário MANAGER do projeto OU ADMIN da org)
    * - Sem `projectId` (standalone): qualquer usuário autenticado JWT pode gerar
-   *   (agente fica órfão, link para projetos criado depois via POST /agents/:id/projects)
-   *
-   * @param dto - DTO com `projectId` opcional (string contendo BigInt)
-   * @param req - Request autenticado com JWT (extrai `entidadeId` do user)
-   * @returns Token one-shot com TTL 15min
-   *
-   * @throws {UnauthorizedException} Quando JWT ausente ou inválido
-   * @throws {ForbiddenException} Quando `projectId` fornecido e usuário sem role de MANAGER/ADMIN
-   * @throws {NotFoundException} Quando `projectId` fornecido mas projeto não existe
-   *
-   * @example
-   * ```bash
-   * # Gerar token com projeto vinculado (RBAC validado)
-   * curl -X POST http://localhost:3000/api/v1/agents/install-token \
-   *   -H "Authorization: Bearer $TOKEN" \
-   *   -H "Content-Type: application/json" \
-   *   -d '{"projectId":"123"}'
-   * ```
-   *
-   * @example
-   * ```bash
-   * # Gerar token standalone (nenhuma validação RBAC além de autenticação)
-   * curl -X POST http://localhost:3000/api/v1/agents/install-token \
-   *   -H "Authorization: Bearer $TOKEN" \
-   *   -H "Content-Type: application/json" \
-   *   -d '{}'
-   * ```
-   *
-   * @example
-   * ```json
-   * // Response (201 Created)
-   * {
-   *   "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-   *   "installTokenId": "789",
-   *   "expiresAt": "2026-05-12T15:30:00Z"
-   * }
-   * ```
    */
-  /**
-   * Lista todos os agents (DEntidade -156) visíveis ao usuário autenticado.
-   * Status calculado em runtime via `dados.lastSeen` (janela 90s para online).
-   * Filtros opcionais: `status` e `search` por nome/hostname.
-   */
-  @Get()
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Listar agents da organizacao' })
-  @ApiResponse({ status: 200, type: [AgentListItemDto] })
-  @ApiResponse({ status: 401, description: 'JWT inválido/ausente' })
-  async listAgents(@Query() query: ListAgentsQueryDto): Promise<AgentListItemDto[]> {
-    return this.agentsService.listAgents({ status: query.status, search: query.search });
-  }
-
   @Post('install-token')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(AuthCompositeGuard)
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Gerar token one-shot de instalacao de agent',
@@ -119,7 +88,7 @@ export class AgentsController {
   @ApiResponse({ status: 404, description: 'Projeto não encontrado' })
   async generateInstallToken(
     @Body() dto: GenerateInstallTokenDto,
-    @Request() req: { user: { entidadeId: string } },
+    @Request() req: JwtRequest,
   ): Promise<GenerateInstallTokenResponseDto> {
     const result = await this.installTokenService.createInstallToken(
       dto.projectId !== undefined && dto.projectId !== null && dto.projectId !== ''
@@ -134,7 +103,15 @@ export class AgentsController {
     };
   }
 
+  /**
+   * Instala agente usando token one-shot. Endpoint chamado pelo agente na VPS
+   * apos o operador executar `install.sh` — autenticacao via install-token,
+   * NAO via JWT/sessao do usuario. Cross-org by design (motivo: token
+   * carrega o `createdBy` e projectId opcional; o agente cria DEntidade com
+   * `idEstab` herdado do projeto, se vinculado).
+   */
   @Post('install')
+  @SkipTenantCheck() // Motivo: install-token e o vetor de auth, nao JWT.
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Instalar agent usando token one-shot' })
   @ApiResponse({ status: 201, type: InstallAgentResponseDto })
@@ -142,7 +119,13 @@ export class AgentsController {
     return this.agentsService.install(dto);
   }
 
+  /**
+   * Heartbeat do agente — autenticado por HMAC + nonce via `AgentAuthGuard`.
+   * Cross-org by design (motivo: agentes nao tem JWT; o guard valida o vinculo
+   * agente↔chave e o handler garante isolation por agentId).
+   */
   @Post(':id/heartbeat')
+  @SkipTenantCheck() // Motivo: AgentAuthGuard isola por agentId via HMAC.
   @HttpCode(HttpStatus.OK)
   @UseGuards(AgentAuthGuard)
   @ApiOperation({ summary: 'Registrar heartbeat autenticado do agent' })
@@ -158,37 +141,11 @@ export class AgentsController {
 
   /**
    * Callback inbound: agente V2 reporta outcome de execução Claude Code.
-   *
-   * Disparado pelo agente após `POST /v1/execute` retornar e a execução terminar.
-   * Payload contém claudeSessionId, exitCode, stdout/stderr truncados e (opcionalmente)
-   * o caminho INTERNAL do .jsonl da sessão (para audit no backend, não exposto ao frontend).
-   *
-   * Segurança:
-   *   - HMAC + nonce + rate limit via AgentAuthGuard (mesmo guard de /heartbeat)
-   *   - Isolation: o handler valida que o agente autenticado === agente registrado
-   *     na execução (DPedido.dados.audit.agentId) — previne forja cross-projeto
-   *   - Idempotência: mesmo executionId em 2 chamadas retorna alreadyPersisted=true
-   *
-   * Pilar 1 (Engine): a persistência usa OperacaoExecucaoClaude.registrarOutcome();
-   * ZERO `prisma.dPedido.update` direto neste handler/service.
-   *
-   * @see ADR-V2-033
-   * @see ADR-V2-005 (Engine para DPedido transacional)
-   * @see ADR-V2-032 (claudeSessionId em DPedido.dados.claude)
-   *
-   * @example
-   * ```bash
-   * curl -X POST "https://api/agents/100/execution-result" \
-   *   -H "Content-Type: application/json" \
-   *   -H "x-agent-id: 100" -H "x-agent-key: <secret>" \
-   *   -H "x-agent-nonce: <uuid>" -H "x-agent-timestamp: <iso8601>" \
-   *   -d '{"executionId":"4815","exitCode":0,"success":true,"durationMs":12450,
-   *        "claudeSessionId":"a1b2c3d4-5678-4abc-9def-0123456789ab",
-   *        "claudeSessionPath":"/home/agent/.claude/projects/x/sess.jsonl",
-   *        "resumedFrom":null,"stdoutTruncated":"...","stderrTruncated":""}'
-   * ```
+   * Cross-org by design — autenticado por HMAC, isolation interna no handler
+   * via agentId/DPedido.dados.audit.
    */
   @Post(':id/execution-result')
+  @SkipTenantCheck() // Motivo: AgentAuthGuard + isolation por agentId.
   @HttpCode(HttpStatus.OK)
   @UseGuards(AgentAuthGuard)
   @ApiOperation({
@@ -227,39 +184,7 @@ export class AgentsController {
 
   /**
    * Vincula um agente existente a um projeto (multi-project linking).
-   *
-   * Endpoint protegido via JWT. Idempotente: se vinculo ja existe ativo,
-   * retorna `alreadyLinked: true` sem criar duplicata. Permite vincular
-   * o MESMO agente a varios projetos via N chamadas — o modelo de dados
-   * (DVincula -185) e N:N por design.
-   *
-   * RBAC: usuario deve ser MANAGER do projeto OU ADMIN da org dona.
-   *
-   * @param id - ID do agente no path param (string com BigInt)
-   * @param dto - Body com `projectId` (string com BigInt)
-   * @param req - JWT authenticated request (entidadeId do usuario)
-   * @returns LinkAgentProjectResponseDto com `{ agentId, projectId, linked, alreadyLinked? }`
-   *
-   * @throws {NotFoundException} Agente ou projeto nao existe
-   * @throws {ForbiddenException} Usuario sem permissao (nao MANAGER projeto, nao ADMIN org)
-   * @throws {UnauthorizedException} JWT invalido/ausente
-   *
-   * @example
-   * ```bash
-   * curl -X POST http://localhost:3000/api/v1/agents/100/projects \
-   *   -H "Authorization: Bearer $TOKEN" \
-   *   -H "Content-Type: application/json" \
-   *   -d '{"projectId":"123"}'
-   * ```
-   *
-   * @example
-   * ```json
-   * // Response 200 (vinculo criado)
-   * { "agentId": "100", "projectId": "123", "linked": true }
-   *
-   * // Response 200 (vinculo ja existia — idempotente)
-   * { "agentId": "100", "projectId": "123", "linked": true, "alreadyLinked": true }
-   * ```
+   * Idempotente. RBAC: MANAGER do projeto OU ADMIN da org dona (validado no service).
    */
   @Post(':id/projects')
   @HttpCode(HttpStatus.OK)
@@ -297,32 +222,6 @@ export class AgentsController {
 
   /**
    * Remove (soft-delete) o vinculo entre um agente e um projeto.
-   *
-   * Endpoint protegido via JWT. Soft-delete (`excluido=true`) — preserva
-   * audit trail. Hard-delete NAO suportado.
-   *
-   * RBAC: usuario deve ser MANAGER do projeto OU ADMIN da org dona.
-   *
-   * @param id - ID do agente no path param
-   * @param projectId - ID do projeto no path param
-   * @param req - JWT authenticated request
-   * @returns UnlinkAgentProjectResponseDto com `{ agentId, projectId, unlinked: true }`
-   *
-   * @throws {NotFoundException} Agente, projeto ou vinculo nao existe
-   * @throws {ForbiddenException} Usuario sem permissao
-   * @throws {UnauthorizedException} JWT invalido/ausente
-   *
-   * @example
-   * ```bash
-   * curl -X DELETE http://localhost:3000/api/v1/agents/100/projects/123 \
-   *   -H "Authorization: Bearer $TOKEN"
-   * ```
-   *
-   * @example
-   * ```json
-   * // Response 200
-   * { "agentId": "100", "projectId": "123", "unlinked": true }
-   * ```
    */
   @Delete(':id/projects/:projectId')
   @HttpCode(HttpStatus.OK)
@@ -352,37 +251,6 @@ export class AgentsController {
 
   /**
    * Lista todos os projetos vinculados ativos a um agente.
-   *
-   * Endpoint protegido via JWT. Retorna lista (pode ser vazia para
-   * agente standalone sem vinculos). Performance: 2 queries fixas
-   * (DVincula + batch DProject IN) — ZERO N+1 independente da cardinalidade.
-   *
-   * Permissao: qualquer usuario autenticado JWT pode listar (decisao
-   * pragmatica MVP — revisitar em F14 se necessario).
-   *
-   * @param id - ID do agente no path param
-   * @param req - JWT authenticated request
-   * @returns AgentProjectsResponseDto com `{ agentId, projects: [...] }`
-   *
-   * @throws {NotFoundException} Agente nao existe
-   * @throws {UnauthorizedException} JWT invalido/ausente
-   *
-   * @example
-   * ```bash
-   * curl -X GET http://localhost:3000/api/v1/agents/100/projects \
-   *   -H "Authorization: Bearer $TOKEN"
-   * ```
-   *
-   * @example
-   * ```json
-   * {
-   *   "agentId": "100",
-   *   "projects": [
-   *     { "projectId": "123", "nome": "Backend", "idEstab": "50" },
-   *     { "projectId": "124", "nome": "Frontend", "idEstab": "50" }
-   *   ]
-   * }
-   * ```
    */
   @Get(':id/projects')
   @UseGuards(JwtAuthGuard)

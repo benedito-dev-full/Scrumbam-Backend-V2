@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { TasksHandler } from '../tasks.handler';
 import { CommandRegistryService } from '../../../core/command-registry.service';
 import { TasksService } from '../../../../tasks/tasks.service';
+import { ProjectsService } from '../../../../projects/projects.service';
 import { TimezoneService } from '../../../../common/services/timezone.service';
 
 const makeTask = (
@@ -59,6 +60,10 @@ describe('TasksHandler', () => {
           provide: TasksService,
           useValue: { findMany: jest.fn() },
         },
+        {
+          provide: ProjectsService,
+          useValue: { findAccessibleProjectIds: jest.fn().mockResolvedValue([]) },
+        },
         TimezoneService,
       ],
     }).compile();
@@ -89,6 +94,7 @@ describe('TasksHandler', () => {
 
       expect(tasksService.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ assigneeId: USER_ID.toString(), statuses: ['INBOX', 'READY'] }),
+        expect.any(Array),
       );
       expect(reply).toContain('backlog');
       expect(reply).toContain('DEV-1');
@@ -114,6 +120,7 @@ describe('TasksHandler', () => {
 
       expect(tasksService.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ assigneeId: USER_ID.toString() }),
+        expect.any(Array),
       );
       expect(reply).toContain('hoje');
     });

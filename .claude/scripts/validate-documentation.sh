@@ -137,7 +137,8 @@ fi
 # 6. ADR-V2-XXX (se mencionado em commit)
 if echo "$LAST_COMMIT" | grep -qiE "ADR-V2-[0-9]+"; then
   ADR_REF=$(echo "$LAST_COMMIT" | grep -oE 'ADR-V2-[0-9]+' | head -1)
-  ADR_FILE=$(find docs/decisions -iname "${ADR_REF,,}*.md" 2>/dev/null | head -1)
+  ADR_REF_LOWER=$(echo "$ADR_REF" | tr '[:upper:]' '[:lower:]')
+  ADR_FILE=$(find docs/decisions -iname "${ADR_REF_LOWER}*.md" 2>/dev/null | head -1)
   if [ -z "$ADR_FILE" ]; then
     echo -e "${YELLOW}WARNING: Commit cita $ADR_REF mas arquivo não existe em docs/decisions/${NC}" >&2
   else

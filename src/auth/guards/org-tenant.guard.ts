@@ -9,6 +9,8 @@ import { Reflector } from '@nestjs/core';
 import { PrismaService } from '../../prisma.service';
 import { LRUCache } from '../../common/helpers/lru-cache';
 import { TENANT_STRATEGY_KEY, TenantStrategy } from '../decorators/tenant-config.decorator';
+import { SKIP_TENANT_CHECK_KEY } from '../decorators/skip-tenant-check.decorator';
+import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { JwtPayload } from '../decorators/current-user.decorator';
 
 /**
@@ -20,20 +22,32 @@ const projectOrgCache = new LRUCache<string, string>(1000, 300_000);
 /**
  * Guard de isolamento multi-tenant por organização.
  *
- * Implementa a decisão Q1 do CEO (F3):
- * - Isolamento via DProject.idEstab + LRU cache (5min)
- * - NÃO enriquece JWT com projectIds[]
- * - 1 query ao banco por projectId não cacheado
+ * Invocado internamente pelo `AuthCompositeGuard` em F14 (ADR-V2-042 —
+ * defense-in-depth), validando que o JWT.organizationId corresponde ao
+ * organizationId do recurso acessado. Rotas cross-org legitimas opt-out
+ * via `@SkipTenantCheck()` (sempre com comentário do motivo). Rotas
+ * públicas (`@Public()`) também são puladas.
+ *
+ * Nota: Não registrado como `APP_GUARD` global (incompatibilidade com
+ * ordem de execução Nest — `req.user` ficaria indefinido). Invocado
+ * explicitamente pelo `AuthCompositeGuard` após `JwtAuthGuard` garantir
+ * que `req.user` está populado.
  *
  * Estratégias (@TenantConfig):
  * - JWT_ONLY (default): compara organizationId do JWT com orgId do recurso
  * - PROJECT_ESTAB: busca DProject.idEstab e compara com JWT.organizationId
  * - PATH_PARAM: extrai orgId do path param :orgId
  *
- * Bypass automático para API Key auth (projeto já valida isolamento).
+ * Bypass automático para:
+ *  - API Key auth (projeto já valida isolamento via dEntidadeId).
+ *  - MCP Key auth (MCP keys nao tem organizationId — sao cross-org by design).
+ *  - JWT orfao (`organizationId` ausente) — quem decide e o `RequireWorkspaceGuard`.
+ *  - Rotas `@Public()` e `@SkipTenantCheck()`.
  *
- * @see TenantConfig — decorator para configurar estratégia
- * @see AuthCompositeGuard — deve ser aplicado antes deste
+ * @see TenantConfig — decorator para configurar estratégia.
+ * @see SkipTenantCheck — opt-out explicito para rotas cross-org.
+ * @see TenantScopeService — helper para isolamento em services (defesa #2).
+ * @see AuthCompositeGuard — deve ser aplicado antes deste.
  */
 @Injectable()
 export class OrgTenantGuard implements CanActivate {
@@ -52,6 +66,28 @@ export class OrgTenantGuard implements CanActivate {
    * @throws {ForbiddenException} Se tenant mismatch
    */
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    // Bypass rotas publicas — `@Public()` desabilita autenticacao por
+    // completo, entao nao faz sentido validar tenant aqui.
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (isPublic) {
+      return true;
+    }
+
+    // Bypass explicito por decorator `@SkipTenantCheck()` — rotas cross-org
+    // por design (auth, invites publicos, orphan, teams/mine, health,
+    // callbacks de agente HMAC-autenticados, etc.). Cada uso revisado pelo
+    // Reviewer (ADR-V2-042).
+    const skip = this.reflector.getAllAndOverride<boolean>(SKIP_TENANT_CHECK_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (skip) {
+      return true;
+    }
+
     const request = context.switchToHttp().getRequest<{
       user?: JwtPayload;
       authMethod?: string;
@@ -141,6 +177,12 @@ export class OrgTenantGuard implements CanActivate {
     }
 
     this.logger.debug(`Resolvendo orgId para projeto=${projectId}`);
+
+    // Validar formato BigInt antes de consultar — strings invalidas (ex:
+    // 'pending-invites') causariam SyntaxError. Tratamos como nao-encontrado.
+    if (!/^-?\d+$/.test(projectId)) {
+      return null;
+    }
 
     const project = await this.prisma.dProject.findFirst({
       where: { chave: BigInt(projectId), excluido: false },

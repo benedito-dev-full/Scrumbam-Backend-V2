@@ -2481,6 +2481,105 @@ SMTP_PASS=...
 
 ---
 
+## F14 — Hardening: Tenant Isolation Defense-in-Depth — ✅ COMPLETA
+
+### Task #1: Fix Vazamento de Dados Entre Workspaces (ADR-V2-042) — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA
+**Módulo V2:** core/auth/common (`src/auth/`, `src/common/`, `src/projects/`, `src/tasks/`, `src/automation/`, `src/mcp/`, `src/channels/`, `src/webhooks/`)
+**Fase V2:** F14 (Hardening — bug P0 production)
+**Severidade do bug original:** P0 — vazamento de dados entre workspaces em produção
+**Data Conclusão:** 2026-05-14
+**Quality Score:** 8.2/10 APPROVED
+
+**Problema Raiz:**
+Ao trocar de workspace via `POST /auth/switch-org`, recursos exibidos (projetos, tasks, agentes) permaneciam iguais entre orgs. JWT trocava `organizationId` corretamente, mas multiplos services ignoravam `organizationId` e filtravam apenas por `userEntidadeId` (membership via DVincula). Como um user pode ter vinculos em multiplas orgs, DVincula retornava tudo — independente da org ativa.
+
+**Solução — Defesa em Profundidade (3 camadas, ADR-V2-042):**
+
+1. **Guard `OrgTenantGuard` (HTTP):**
+   - Invocado internamente pelo `AuthCompositeGuard` (não registrado como APP_GUARD por incompatibilidade com ordem de execução Nest)
+   - Estratégias: JWT_ONLY (default), PROJECT_ESTAB (busca DProject.idEstab), PATH_PARAM (compara :orgId)
+   - Cache LRU projectId → orgId (5min TTL, 1000 entradas)
+   - Bypass automático: API Key, MCP Key (cross-org by design), JWT órfão, @Public(), @SkipTenantCheck()
+
+2. **Helper `TenantScopeService` (Serviço centralizado):**
+   - `scopeProjectIdsToOrg(userEntidadeId, orgId)` — batch 2 queries (DVincula → projectIds candidatos; DProject filtrado por idEstab)
+   - `assertProjectInOrg(projectId, orgId)` — 404 anti-enumeration se mismatch
+   - `assertTaskInOrg(taskId, orgId)` — resolve via DTask.idProject → DProject.idEstab
+   - `assertAgentInOrg(agentId, orgId)` — valida DEntidade.idEstab
+   - `assertWorkspace(organizationId)` — 403 NO_WORKSPACE defensivo (redundante com RequireWorkspaceGuard)
+   - 21 unit tests + 14 testes adversariais multi-tenant
+
+3. **Filtro em Services tenant-scoped (Service layer):**
+   - ProjectsService: `findMany(idEstab)`, `findAccessibleProjectIds(uid, orgId?)`, `findOne/update/delete/getStats` validam tenant antes de RBAC
+   - TasksService: `findMany/create/findOne/update/updateStatus/delete` recebem `accessibleProjectIds` ou `organizationId`
+   - AgentsService: `listAgents` filtra por `idEstab`
+   - MCP Tools (list-tasks): reutilizam findAccessibleProjectIds
+   - Channels (Telegram tasks/status handlers): reutilizam scope
+
+**Arquivos Criados/Modificados (26 total):**
+
+*Criados:*
+- `src/common/services/tenant-scope.service.ts` + spec (21 unit + 14 adversariais)
+- `src/auth/decorators/skip-tenant-check.decorator.ts`
+- `src/__tests__/tenant-isolation.adversarial.spec.ts` (14 cenários multi-tenant)
+- `docs/decisions/ADR-V2-042-tenant-isolation-defense-in-depth.md`
+
+*Modificados (20):*
+- Guards: `org-tenant.guard.ts` (JSDoc corrigido — invocado via AuthCompositeGuard, não APP_GUARD), `auth-composite.guard.spec.ts`
+- Services: `projects.service.ts`, `tasks.service.ts`, `agents.service.ts` (assinaturas com organizationId ou accessibleProjectIds)
+- Controllers: `projects.controller.ts`, `tasks.controller.ts`, `agents.controller.ts` (passam orgId/accessibleProjectIds)
+- Modules: `projects.module.ts`, `tasks.module.ts`, `common.module.ts` (exports TenantScopeService)
+- Tools: `mcp/tools/list-tasks.tool.ts` + spec (usa findAccessibleProjectIds)
+- Channels: `channels/telegram/commands/tasks.handler.ts`, `status.handler.ts` + 2 specs (reutilizam scope)
+- Webhooks: `webhooks/guards/webhook-owner.guard.ts` (cruza idEstab)
+
+**Politica de Erros (ADR-V2-042):**
+- Listagem (findMany) cross-tenant → 200 com lista vazia (sem leak)
+- GET single cross-tenant via path → 404 "X não encontrado" (anti-enumeration)
+- POST/PATCH cross-tenant via path → 404 (mesmo)
+- JWT órfão em rota tenant-scoped → 403 NO_WORKSPACE
+- Agente standalone (idEstab=null) → não listado
+- Projeto sem idEstab (legado) → não listado (operador roda backfill)
+
+**Testes (35 novos):**
+- 21 unit tests TenantScopeService (scopeProjectIdsToOrg, assertProjectInOrg, assertTaskInOrg, assertAgentInOrg, assertWorkspace)
+- 14 testes adversariais `tenant-isolation.adversarial.spec.ts` (cross-org listings, path param cross-org, JWT orfão, agente standalone, etc.)
+- 35/35 PASS — Build: PASS, Lint: 0 errors
+
+**Pilares Aplicados:**
+- Pilar 1 (Engine): N/A — isolamento é estrutural
+- Pilar 2 (Endpoints): ZERO controllers novos — reutilizados existentes com scope defensivo
+- Pilar 3 (Seed): ZERO DClasses novas
+
+**ADRs Vinculados:**
+- **ADR-V2-042 (novo):** Tenant Isolation Defense-in-Depth — Status: ACCEPTED
+- ADR-V2-001 (zero tabela nova)
+- ADR-V2-003 (RBAC duplo via DVincula)
+- ADR-V2-038 (JWT órfão — pré-requisito F4)
+- ADR-V2-040 (HMAC validation — pré-requisito F13)
+
+**Issues Residuais para Próximos PRs (Reviewer m1-m3):**
+- **m1 (MEDIUM):** 3 endpoints `/agents/:id/projects` migrar de JwtAuthGuard para AuthCompositeGuard (ordem: 1 pq é novo, 2 pq falta scope, 3 pq requer tenant validation)
+- **m3 (MINOR):** Testes adversariais regression para flow-metrics/search/Telegram/webhook + corrigir 24 falhas pré-existentes em `tasks.service.spec.ts`
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan (1 arquivo) |
+| Implementer | ~4h | 100% PASS: 26 arquivos modificados/criados, 35 testes novos |
+| Reviewer | ~1h | 8.2/10 APPROVED |
+| Documenter | ~2h | JSDoc 100%, ROADMAP, CHANGELOG, STATUS, ADR-V2-042, commit |
+
+**Plan:** [`workspace/plans/plan-tenant-isolation-fix.md`](../workspace/plans/plan-tenant-isolation-fix.md)
+**Impl Notes:** [`workspace/implementations/impl-core-tenant-isolation-defense-in-depth.md`](../workspace/implementations/impl-core-tenant-isolation-defense-in-depth.md)
+**Review:** APPROVED 8.2/10
+**ADR Proposto:** ADR-V2-042 — Tenant Isolation Defense-in-Depth (ACCEPTED)
+
+---
+
 ## Proximas fases (preview)
 
 | Fase | Nome | Pilar dominante |

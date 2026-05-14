@@ -1,4 +1,4 @@
-import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import { ExecutionContext, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { AuthCompositeGuard } from './auth-composite.guard';
@@ -6,6 +6,7 @@ import { McpKeyGuard } from './mcp-key.guard';
 import { ApiKeyGuard } from './api-key.guard';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { RequireWorkspaceGuard } from './require-workspace.guard';
+import { OrgTenantGuard } from './org-tenant.guard';
 
 const makeContext = (user?: object, headers?: Record<string, string>): ExecutionContext =>
   ({
@@ -26,6 +27,7 @@ describe('AuthCompositeGuard', () => {
   let apiKeyGuard: { canActivate: jest.Mock };
   let jwtAuthGuard: { canActivate: jest.Mock };
   let requireWorkspaceGuard: { canActivate: jest.Mock };
+  let orgTenantGuard: { canActivate: jest.Mock };
 
   beforeEach(async () => {
     reflector = { getAllAndOverride: jest.fn().mockReturnValue(false) }; // não é @Public()
@@ -34,6 +36,8 @@ describe('AuthCompositeGuard', () => {
     jwtAuthGuard = { canActivate: jest.fn().mockResolvedValue(false) };
     // Por padrão, RequireWorkspaceGuard libera (mockando comportamento neutro)
     requireWorkspaceGuard = { canActivate: jest.fn().mockReturnValue(true) };
+    // Por padrão, OrgTenantGuard libera (mockando comportamento neutro)
+    orgTenantGuard = { canActivate: jest.fn().mockResolvedValue(true) };
 
     const module = await Test.createTestingModule({
       providers: [
@@ -43,6 +47,7 @@ describe('AuthCompositeGuard', () => {
         { provide: ApiKeyGuard, useValue: apiKeyGuard },
         { provide: JwtAuthGuard, useValue: jwtAuthGuard },
         { provide: RequireWorkspaceGuard, useValue: requireWorkspaceGuard },
+        { provide: OrgTenantGuard, useValue: orgTenantGuard },
       ],
     }).compile();
 
@@ -107,5 +112,28 @@ describe('AuthCompositeGuard', () => {
     const ctx = makeContext(undefined); // sem user
 
     await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('deve propagar ForbiddenException do OrgTenantGuard (tenant mismatch)', async () => {
+    mcpKeyGuard.canActivate.mockResolvedValue(false);
+    apiKeyGuard.canActivate.mockResolvedValue(false);
+    jwtAuthGuard.canActivate.mockResolvedValue(true);
+    orgTenantGuard.canActivate.mockRejectedValue(
+      new ForbiddenException('Acesso negado: projeto pertence a outra organização'),
+    );
+
+    const ctx: ExecutionContext = {
+      getHandler: () => ({}),
+      getClass: () => ({}),
+      switchToHttp: () => ({
+        getRequest: () => ({
+          headers: {},
+          user: { sub: '1', entidadeId: '2', organizationId: '3', email: 'x@x.com' },
+        }),
+      }),
+    } as unknown as ExecutionContext;
+
+    await expect(guard.canActivate(ctx)).rejects.toThrow(ForbiddenException);
+    expect(orgTenantGuard.canActivate).toHaveBeenCalledTimes(1);
   });
 });

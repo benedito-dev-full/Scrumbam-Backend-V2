@@ -12,6 +12,21 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Security
+
+- **F14 Hardening: Tenant Isolation Defense-in-Depth (ADR-V2-042)** - 2026-05-14
+  - **Corrigido vazamento de dados entre workspaces:** ao trocar de organização ativa, recursos permaneciam iguais entre orgs (P0 bug em produção). Implementado helper `TenantScopeService` + decorator `@SkipTenantCheck()` + refactor de services tenant-scoped.
+  - **Defesa em profundidade (3 camadas):**
+    1. **HTTP Guard (`OrgTenantGuard`):** invocado via `AuthCompositeGuard`, valida JWT.organizationId vs recurso.organizationId (estratégias: JWT_ONLY, PROJECT_ESTAB, PATH_PARAM). Cache LRU projectId→orgId (5min TTL).
+    2. **Service Layer (`TenantScopeService`):** helper centralizado com `scopeProjectIdsToOrg()`, `assertProjectInOrg()`, `assertTaskInOrg()`, `assertAgentInOrg()`, `assertWorkspace()`.
+    3. **Filtro em Services:** ProjectsService, TasksService, AgentsService recebem `organizationId` ou `accessibleProjectIds` (resolvidos via TenantScopeService).
+  - **Política de Erros:** listagem cross-tenant → 200 vazio (sem leak); GET/POST cross-tenant via path → 404 anti-enumeration; JWT órfão em rota tenant-scoped → 403 NO_WORKSPACE.
+  - **Arquivos:** 4 criados (TenantScopeService + spec, @SkipTenantCheck, adversarial tests, ADR-V2-042) + 20 modificados (guards, services, controllers, modules, tools, channels, webhooks).
+  - **Testes:** 35 novos (21 unit TenantScopeService + 14 adversariais multi-tenant) — 35/35 PASS. Build: PASS, Lint: 0 errors.
+  - **Pilares:** Pilar 2 ZERO controllers novos; Pilar 3 ZERO DClasses novas.
+  - **ADRs:** **ADR-V2-042 (novo - Tenant Isolation Defense-in-Depth)**, ADR-V2-001, ADR-V2-003, ADR-V2-038, ADR-V2-040.
+  - **Quality Score:** 8.2/10 APPROVED | Reviewer m1-m3 issues residuais para próximos PRs.
+
 ### Added
 
 - **F4 Pós-F3: Estado órfão (usuário sem workspace ativa) — 5 etapas integradas, score 8.6/10 (ADR-V2-038)** - 2026-05-14

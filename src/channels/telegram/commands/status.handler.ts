@@ -1,10 +1,8 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../../prisma.service';
-import {
-  CommandHandler,
-  CommandRegistryService,
-} from '../../core/command-registry.service';
+import { CommandHandler, CommandRegistryService } from '../../core/command-registry.service';
 import { TasksService } from '../../../tasks/tasks.service';
+import { ProjectsService } from '../../../projects/projects.service';
 
 /**
  * Handler do comando `/status` do Telegram.
@@ -15,6 +13,9 @@ import { TasksService } from '../../../tasks/tasks.service';
  * - Confirmação de que o canal está pareado (se chegou aqui, está)
  * - Contagem de tarefas ativas (INBOX + READY) do usuário
  * - Contagem de tarefas em execução (EXECUTING)
+ *
+ * **ADR-V2-042**: cross-org by design — resolve `accessibleProjectIds` SEM
+ * `organizationId` (Telegram nao tem orgId ativo).
  *
  * `userId` é `DEntidade.chave` — garantido pelo router antes de chegar aqui.
  *
@@ -34,6 +35,7 @@ export class StatusHandler implements OnModuleInit, CommandHandler {
   constructor(
     private readonly commandRegistry: CommandRegistryService,
     private readonly tasksService: TasksService,
+    private readonly projectsService: ProjectsService,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -46,9 +48,7 @@ export class StatusHandler implements OnModuleInit, CommandHandler {
   /**
    * Retorna status de saúde do pareamento e contagem de tarefas.
    *
-   * Executa 2 queries em paralelo (Promise.all) — sem N+1:
-   * 1. Buscar vínculo ativo em DVincula -483
-   * 2. Buscar contagens de tasks (INBOX e EXECUTING)
+   * Executa queries em paralelo (Promise.all) — sem N+1.
    *
    * @param chatId - ID do chat Telegram (BigInt)
    * @param userId - DEntidade.chave do usuário (BigInt) — já resolvido pelo router
@@ -59,18 +59,27 @@ export class StatusHandler implements OnModuleInit, CommandHandler {
     this.logger.debug(`/status recebido de chatId=${chatId} userId=${userId}`);
 
     try {
+      // ADR-V2-042: Telegram cross-org — sem orgId, retorna todos os projetos.
+      const accessibleProjectIds = await this.projectsService.findAccessibleProjectIds(userId);
+
       // 2 queries em paralelo — sem N+1
       const [inboxResult, executingResult] = await Promise.all([
-        this.tasksService.findMany({
-          assigneeId: userId.toString(),
-          status: 'INBOX',
-          limit: 1,
-        }),
-        this.tasksService.findMany({
-          assigneeId: userId.toString(),
-          status: 'EXECUTING',
-          limit: 1,
-        }),
+        this.tasksService.findMany(
+          {
+            assigneeId: userId.toString(),
+            status: 'INBOX',
+            limit: 1,
+          },
+          accessibleProjectIds,
+        ),
+        this.tasksService.findMany(
+          {
+            assigneeId: userId.toString(),
+            status: 'EXECUTING',
+            limit: 1,
+          },
+          accessibleProjectIds,
+        ),
       ]);
 
       // Buscar vínculo de canal para mostrar data de vinculação
@@ -90,7 +99,9 @@ export class StatusHandler implements OnModuleInit, CommandHandler {
         : 'data desconhecida';
 
       const inboxCount = inboxResult.pagination.hasMore ? '100+' : String(inboxResult.items.length);
-      const executingCount = executingResult.pagination.hasMore ? '100+' : String(executingResult.items.length);
+      const executingCount = executingResult.pagination.hasMore
+        ? '100+'
+        : String(executingResult.items.length);
 
       return (
         `✅ *Canal Telegram pareado*\n` +

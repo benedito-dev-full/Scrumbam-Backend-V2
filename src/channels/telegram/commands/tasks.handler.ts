@@ -1,9 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import {
-  CommandHandler,
-  CommandRegistryService,
-} from '../../core/command-registry.service';
+import { CommandHandler, CommandRegistryService } from '../../core/command-registry.service';
 import { TasksService } from '../../../tasks/tasks.service';
+import { ProjectsService } from '../../../projects/projects.service';
 import { TimezoneService } from '../../../common/services/timezone.service';
 
 /** Períodos suportados pelo comando /tasks. */
@@ -15,18 +13,10 @@ type TaskPeriod = 'today' | 'week' | 'backlog';
  * Lista as tarefas do usuário filtradas por período e estado.
  * Reutiliza `TasksService.findMany` — sem duplicar lógica de negócio.
  *
- * Mapeamento de períodos:
- * - `today` — tarefas criadas hoje (filtro via `criadoEm` no timezone Brasil)
- * - `week` — tarefas criadas esta semana (segunda a domingo, Brasil)
- * - `backlog` (default) — tarefas em INBOX/READY (sem filtro de data)
- *
- * IMPORTANTE: `userId` aqui é `DEntidade.chave` (não `DUserGroup.chave`).
- * O router já resolveu a conversão antes de chamar este handler.
- *
- * DECISÃO DE IMPLEMENTAÇÃO: `TasksService.findMany` não tem filtro de data.
- * Para `today` e `week`, buscamos tarefas do assignee e filtramos em memória
- * por `criadoEm` usando `TimezoneService`. Limite máximo: 100 tarefas
- * (cursor pagination existente já garante volume gerenciável).
+ * **ADR-V2-042**: o handler resolve `accessibleProjectIds` via
+ * `ProjectsService.findAccessibleProjectIds(userId)` SEM `organizationId`
+ * (Telegram e cross-org by design — usuario nao tem JWT/orgId ativo).
+ * Limita o resultado aos projetos onde o usuario e membro em qualquer org.
  *
  * @see TasksService — service reutilizado sem duplicação
  * @see TimezoneService — filtros de data no timezone Brasil
@@ -41,6 +31,7 @@ export class TasksHandler implements OnModuleInit, CommandHandler {
   constructor(
     private readonly commandRegistry: CommandRegistryService,
     private readonly tasksService: TasksService,
+    private readonly projectsService: ProjectsService,
     private readonly timezoneService: TimezoneService,
   ) {}
 
@@ -65,13 +56,20 @@ export class TasksHandler implements OnModuleInit, CommandHandler {
     this.logger.debug(`/tasks recebido de chatId=${chatId} userId=${userId} period=${period}`);
 
     try {
-      const result = await this.tasksService.findMany({
-        assigneeId: userId.toString(),
-        // Para backlog: filtrar apenas estados ativos (INBOX + READY)
-        // Para today/week: sem filtro de status — filtro de data é feito em memória abaixo
-        ...(period === 'backlog' ? { statuses: ['INBOX', 'READY'] } : {}),
-        limit: 100,
-      });
+      // ADR-V2-042: Telegram cross-org — sem orgId, retorna todos os projetos
+      // onde o user e membro (qualquer org).
+      const accessibleProjectIds = await this.projectsService.findAccessibleProjectIds(userId);
+
+      const result = await this.tasksService.findMany(
+        {
+          assigneeId: userId.toString(),
+          // Para backlog: filtrar apenas estados ativos (INBOX + READY)
+          // Para today/week: sem filtro de status — filtro de data é feito em memória abaixo
+          ...(period === 'backlog' ? { statuses: ['INBOX', 'READY'] } : {}),
+          limit: 100,
+        },
+        accessibleProjectIds,
+      );
 
       let items = result.items;
 
@@ -114,8 +112,7 @@ export class TasksHandler implements OnModuleInit, CommandHandler {
         return `📋 Nenhuma tarefa atribuída a você *esta semana*.`;
       default:
         return (
-          `📋 Seu backlog está vazio.\n\n` +
-          `Use \`/create <título>\` para criar uma nova tarefa.`
+          `📋 Seu backlog está vazio.\n\n` + `Use \`/create <título>\` para criar uma nova tarefa.`
         );
     }
   }
@@ -143,16 +140,26 @@ export class TasksHandler implements OnModuleInit, CommandHandler {
 
   private statusEmoji(status: string): string {
     switch (status) {
-      case 'INBOX': return '📥';
-      case 'READY': return '🟢';
-      case 'EXECUTING': return '⚡';
-      case 'DONE': return '✅';
-      case 'FAILED': return '❌';
-      case 'CANCELLED': return '🚫';
-      case 'DISCARDED': return '🗑️';
-      case 'VALIDATING': return '🔍';
-      case 'VALIDATED': return '✔️';
-      default: return '📌';
+      case 'INBOX':
+        return '📥';
+      case 'READY':
+        return '🟢';
+      case 'EXECUTING':
+        return '⚡';
+      case 'DONE':
+        return '✅';
+      case 'FAILED':
+        return '❌';
+      case 'CANCELLED':
+        return '🚫';
+      case 'DISCARDED':
+        return '🗑️';
+      case 'VALIDATING':
+        return '🔍';
+      case 'VALIDATED':
+        return '✔️';
+      default:
+        return '📌';
     }
   }
 }

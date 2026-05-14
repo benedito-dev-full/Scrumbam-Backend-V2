@@ -38,13 +38,11 @@ describe('MCP Bloco B tools', () => {
         .fn()
         .mockResolvedValue({ id: '1', nome: 'Task', status: 'INBOX', projectId: unsafeId }),
       findOne: jest.fn().mockResolvedValue({ id: unsafeId, projectId: unsafeId, status: 'INBOX' }),
-      updateStatus: jest
-        .fn()
-        .mockResolvedValue({
-          id: unsafeId,
-          status: 'READY',
-          atualizadoEm: '2026-05-10T00:00:00.000Z',
-        }),
+      updateStatus: jest.fn().mockResolvedValue({
+        id: unsafeId,
+        status: 'READY',
+        atualizadoEm: '2026-05-10T00:00:00.000Z',
+      }),
     };
     projectsService = {
       findMany: jest.fn().mockResolvedValue({
@@ -99,13 +97,16 @@ describe('MCP Bloco B tools', () => {
       userCtx,
     );
 
-    expect(tasksService.findMany).toHaveBeenCalledWith({
-      projectId: unsafeId,
-      assigneeId: '9007199254740997',
-      status: 'INBOX',
-      cursor: '9007199254740999',
-      limit: 50,
-    });
+    expect(tasksService.findMany).toHaveBeenCalledWith(
+      {
+        projectId: unsafeId,
+        assigneeId: '9007199254740997',
+        status: 'INBOX',
+        cursor: '9007199254740999',
+        limit: 50,
+      },
+      expect.any(Array),
+    );
     expect(projectsService.findOne).toHaveBeenCalledWith(unsafeId, userCtx.dEntidadeId);
   });
 
@@ -113,10 +114,13 @@ describe('MCP Bloco B tools', () => {
     await router.dispatch('tools/call', { name: 'list_tasks', arguments: { limit: 10 } }, userCtx);
 
     expect(projectsService.findAccessibleProjectIds).toHaveBeenCalledWith(userCtx.dEntidadeId);
-    expect(tasksService.findMany).toHaveBeenCalledWith({
-      projectIds: [unsafeId],
-      limit: 10,
-    });
+    expect(tasksService.findMany).toHaveBeenCalledWith(
+      {
+        projectIds: [unsafeId],
+        limit: 10,
+      },
+      [unsafeId],
+    );
   });
 
   it('list_tasks sem projectId nao limita a resolucao de projetos acessiveis a 100 itens', async () => {
@@ -127,10 +131,13 @@ describe('MCP Bloco B tools', () => {
 
     await router.dispatch('tools/call', { name: 'list_tasks', arguments: { limit: 10 } }, userCtx);
 
-    expect(tasksService.findMany).toHaveBeenCalledWith({
+    expect(tasksService.findMany).toHaveBeenCalledWith(
+      {
+        projectIds,
+        limit: 10,
+      },
       projectIds,
-      limit: 10,
-    });
+    );
   });
 
   it('create_task ignora createdBy externo e usa userCtx.dEntidadeId no service canonico', async () => {

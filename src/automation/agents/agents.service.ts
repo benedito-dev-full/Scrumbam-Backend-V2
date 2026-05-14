@@ -504,18 +504,42 @@ export class AgentsService {
   }
 
   /**
-   * Lista agents (DEntidade -156) visíveis ao usuário autenticado, com status
-   * calculado em runtime a partir de `dados.lastSeen` (janela de 90s).
+   * Lista agents (DEntidade -156) da organizacao do usuario autenticado,
+   * com status calculado em runtime a partir de `dados.lastSeen` (janela de 90s).
    *
-   * Filtragem por organização fica como TODO — por ora retorna todos os agents
-   * não excluídos. Justificativa: enquanto a UI `/vps` é apenas leitura admin,
-   * o gating fino fica para refinement em ADR posterior (org_role + DVincula).
+   * **ADR-V2-042 (Tenant Isolation Defense-in-Depth):** filtra
+   * `DEntidade.idEstab === organizationId`. Agentes legados sem `idEstab`
+   * (standalone) NAO sao listados por JWT com `organizationId` — operador
+   * deve fazer link via `POST /agents/:id/projects` ou backfill manual.
+   *
+   * Quando `organizationId` for omitido (caller cross-org by design — ex:
+   * MCP keys ou jobs internos), mantem o comportamento legado (TODOS os
+   * agents nao excluidos). Caller responsavel.
+   *
+   * @param query - Filtros (status, search).
+   * @param organizationId - `DEntidade.chave` da org ativa do JWT.
+   *   Opcional (callers cross-org bypassam).
    */
-  async listAgents(query: ListAgentsQueryDto): Promise<AgentListItemDto[]> {
+  async listAgents(
+    query: ListAgentsQueryDto,
+    organizationId?: string,
+  ): Promise<AgentListItemDto[]> {
     const where: Prisma.DEntidadeWhereInput = {
       idClasse: AUTOMATION_CLASS_IDS.AGENT,
       excluido: false,
     };
+
+    // ADR-V2-042: cruza org. Sem org → retorna vazio (em vez de TODOS),
+    // pois JWT que chegou aqui ja foi validado pelo guard — e bug
+    // do caller passar undefined.
+    if (organizationId !== undefined) {
+      if (!/^-?\d+$/.test(organizationId)) {
+        this.logger.warn(`listAgents: organizationId invalido="${organizationId}" — vazio`);
+        return [];
+      }
+      where.idEstab = BigInt(organizationId);
+    }
+
     if (query.search) {
       where.nome = { contains: query.search, mode: 'insensitive' };
     }
@@ -714,16 +738,17 @@ export class AgentsService {
     });
 
     // Transição automática da task vinculada (EXECUTING → DONE | FAILED)
-    const linkedTaskId = (dadosExecucao as any)?.task?.id;
+    const linkedTaskId = (dadosExecucao as unknown as { task?: { id?: string } })?.task?.id;
     if (linkedTaskId) {
       try {
-        await this.tasksService.updateStatus(
-          linkedTaskId,
-          { status: dto.success ? 'DONE' : 'FAILED' },
-        );
+        await this.tasksService.updateStatus(linkedTaskId, {
+          status: dto.success ? 'DONE' : 'FAILED',
+        });
         this.logger.log(`Task ${linkedTaskId} movida para ${dto.success ? 'DONE' : 'FAILED'}`);
       } catch (taskErr) {
-        this.logger.warn(`Não foi possível mover task ${linkedTaskId}: ${(taskErr as Error).message}`);
+        this.logger.warn(
+          `Não foi possível mover task ${linkedTaskId}: ${(taskErr as Error).message}`,
+        );
       }
     }
 

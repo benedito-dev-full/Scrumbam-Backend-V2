@@ -4,6 +4,7 @@ import {
   ExecutionContext,
   ForbiddenException,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { JwtPayload } from '../../auth/decorators/current-user.decorator';
@@ -35,6 +36,19 @@ export class WebhookOwnerGuard implements CanActivate {
     const projectId = await this.resolveProjectId(request);
     if (!projectId) {
       throw new ForbiddenException('Projeto do webhook nao informado');
+    }
+
+    // ADR-V2-042: tenant isolation — projeto DEVE pertencer a org do JWT.
+    // Mensagem 404 (anti enumeration) quando mismatch.
+    const jwtOrgId = request.user?.organizationId;
+    if (jwtOrgId) {
+      const project = await this.prisma.dProject.findFirst({
+        where: { chave: projectId, excluido: false },
+        select: { idEstab: true },
+      });
+      if (!project || project.idEstab === null || project.idEstab.toString() !== jwtOrgId) {
+        throw new NotFoundException('Webhook nao encontrado');
+      }
     }
 
     const userEntidadeId = await this.entidadeService.getEntidadeIdFromUserGroup(

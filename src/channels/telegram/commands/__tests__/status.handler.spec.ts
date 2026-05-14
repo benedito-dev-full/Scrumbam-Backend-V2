@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { StatusHandler } from '../status.handler';
 import { CommandRegistryService } from '../../../core/command-registry.service';
 import { TasksService } from '../../../../tasks/tasks.service';
+import { ProjectsService } from '../../../../projects/projects.service';
 import { PrismaService } from '../../../../prisma.service';
 
 const makeEmptyResult = () => ({
@@ -52,6 +53,10 @@ describe('StatusHandler', () => {
         {
           provide: TasksService,
           useValue: { findMany: jest.fn() },
+        },
+        {
+          provide: ProjectsService,
+          useValue: { findAccessibleProjectIds: jest.fn().mockResolvedValue([]) },
         },
         {
           provide: PrismaService,

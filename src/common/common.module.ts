@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { CorrelationIdService } from './services/correlation-id.service';
 import { TimezoneService } from './services/timezone.service';
+import { TenantScopeService } from './services/tenant-scope.service';
 import { SensitiveDataSanitizerService } from './security/sensitive-data-sanitizer.service';
 
 /**
@@ -15,6 +16,8 @@ import { SensitiveDataSanitizerService } from './security/sensitive-data-sanitiz
  *  - `PrismaService` — acesso ao banco (singleton).
  *  - `CorrelationIdService` — AsyncLocalStorage por request (X-Correlation-Id).
  *  - `TimezoneService` — manipulação de datas em America/Sao_Paulo.
+ *  - `TenantScopeService` — isolamento multi-tenant (ADR-V2-042).
+ *  - `SensitiveDataSanitizerService` — sanitizacao de PII em logs.
  *
  * Reduz boilerplate em modules que precisam dos services comuns e garante
  * **uma única instância** de `CorrelationIdService` em toda a aplicação
@@ -30,12 +33,14 @@ import { SensitiveDataSanitizerService } from './security/sensitive-data-sanitiz
     PrismaService,
     CorrelationIdService,
     TimezoneService,
+    TenantScopeService,
     SensitiveDataSanitizerService,
   ],
   exports: [
     PrismaService,
     CorrelationIdService,
     TimezoneService,
+    TenantScopeService,
     SensitiveDataSanitizerService,
   ],
 })
