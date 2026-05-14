@@ -176,7 +176,7 @@ export function createServer(
         throw new Error('http server ja foi iniciado');
       }
       await new Promise<void>((resolve, reject) => {
-        const srv = app.listen(config.tunnelPort, config.bindHost, () => {
+        const srv = app.listen(config.tunnelPort, '127.0.0.1', () => {
           logger.info(
             {
               stage: 'http.server',
