@@ -483,8 +483,9 @@ OBRIGATÓRIO após concluir a tarefa:
 }
 
 /**
- * Executa `git pull --rebase --autostash` no diretório do projeto.
- * Lança erro se o pull falhar — execução é abortada com errorCode GIT_PULL_FAILED.
+ * Volta para main e atualiza via pull --rebase antes de cada execução.
+ * Garante que o Claude nunca roda em cima de uma branch de task anterior.
+ * Lança erro se qualquer etapa falhar — execução é abortada com GIT_PULL_FAILED.
  * Não lança se o diretório não for um repo git (ex: projeto sem versionamento).
  */
 async function gitPullRebase(
@@ -503,13 +504,20 @@ async function gitPullRebase(
     return;
   }
 
-  // É um repo git — pull obrigatório. Falha aborta a execução.
+  // Volta para main antes de qualquer coisa — evita acumular branches de tasks anteriores.
+  const { stdout: checkoutOut, stderr: checkoutErr } = await execFileAsync(
+    'git',
+    ['checkout', 'main'],
+    { cwd, timeout: 30_000 },
+  );
+  log.info(`git checkout main: ${(checkoutOut || checkoutErr || 'ok').trim()}`);
+
+  // Atualiza main com o remoto.
   const { stdout, stderr } = await execFileAsync(
     'git',
     ['pull', '--rebase', '--autostash'],
     { cwd, timeout: 60_000 },
   );
-
   log.info(`git pull --rebase: ${(stdout || stderr || 'ok').trim()}`);
 }
 
