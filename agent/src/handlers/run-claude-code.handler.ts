@@ -348,7 +348,28 @@ async function runAndReport(args: {
     const beforeFiles = snapshotImpl(cwd);
 
     // git pull --rebase antes de executar — garante repo atualizado.
-    await gitPullRebase(cwd, logger);
+    // Se falhar, aborta a execução com GIT_PULL_FAILED (não executa Claude em cima de código desatualizado).
+    try {
+      await gitPullRebase(cwd, logger);
+    } catch (pullErr) {
+      const msg = pullErr instanceof Error ? pullErr.message : String(pullErr);
+      logger.error({ err: msg }, 'git pull --rebase falhou — execucao abortada');
+      errorCode = 'GIT_PULL_FAILED';
+      const resultPayload: ExecutionResultPayload = {
+        executionId: payload.executionId,
+        exitCode: -1,
+        success: false,
+        durationMs: 0,
+        claudeSessionId: null,
+        claudeSessionPath: null,
+        resumedFrom: payload.resumeSessionId,
+        stdoutTruncated: '',
+        stderrTruncated: msg,
+        errorCode,
+      };
+      await backendClient.sendExecutionResult(resultPayload);
+      return;
+    }
 
     // Lê o CLAUDE.md global para injetar como system-prompt no Claude Code.
     // Em modo `-p`, o Claude não lê o CLAUDE.md automaticamente — esta leitura
@@ -463,8 +484,8 @@ OBRIGATÓRIO após concluir a tarefa:
 
 /**
  * Executa `git pull --rebase --autostash` no diretório do projeto.
- * Falha silenciosa — loga warn mas não interrompe a execução.
- * Casos tolerados: não é git repo, sem remote, conflito de rebase, timeout.
+ * Lança erro se o pull falhar — execução é abortada com errorCode GIT_PULL_FAILED.
+ * Não lança se o diretório não for um repo git (ex: projeto sem versionamento).
  */
 async function gitPullRebase(
   cwd: string,
@@ -474,21 +495,22 @@ async function gitPullRebase(
   const { promisify } = await import('node:util');
   const execFileAsync = promisify(execFile);
 
+  // Se não for repo git, ignora silenciosamente.
   try {
-    // Verifica se é um repositório git
     await execFileAsync('git', ['rev-parse', '--git-dir'], { cwd });
-
-    // Executa git pull --rebase
-    const { stdout, stderr } = await execFileAsync(
-      'git',
-      ['pull', '--rebase', '--autostash'],
-      { cwd, timeout: 60_000 },
-    );
-
-    log.info(`git pull --rebase: ${(stdout || stderr || 'ok').trim()}`);
-  } catch (err) {
-    log.warn(`git pull --rebase falhou (continuando): ${(err as Error).message}`);
+  } catch {
+    log.warn('diretorio nao e um repositorio git — pulando git pull');
+    return;
   }
+
+  // É um repo git — pull obrigatório. Falha aborta a execução.
+  const { stdout, stderr } = await execFileAsync(
+    'git',
+    ['pull', '--rebase', '--autostash'],
+    { cwd, timeout: 60_000 },
+  );
+
+  log.info(`git pull --rebase: ${(stdout || stderr || 'ok').trim()}`);
 }
 
 /** Trunca string respeitando bytes UTF-8 (aproximação por chars; OK pra logs). */
