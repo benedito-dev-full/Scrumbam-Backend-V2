@@ -28,6 +28,7 @@ export type ExecutionResultErrorCode =
   | 'RESUME_SESSION_NOT_FOUND'
   | 'TIMEOUT'
   | 'CLAUDE_CLI_MISSING'
+  | 'GIT_PULL_FAILED'
   | 'UNKNOWN';
 
 const EXECUTION_RESULT_ERROR_CODES: ExecutionResultErrorCode[] = [
@@ -35,6 +36,7 @@ const EXECUTION_RESULT_ERROR_CODES: ExecutionResultErrorCode[] = [
   'RESUME_SESSION_NOT_FOUND',
   'TIMEOUT',
   'CLAUDE_CLI_MISSING',
+  'GIT_PULL_FAILED',
   'UNKNOWN',
 ];
 
