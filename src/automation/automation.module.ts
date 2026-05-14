@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
+import { TasksModule } from '../tasks/tasks.module';
 import { AgentsController } from './agents/agents.controller';
 import { AgentEnvController } from './agents/agent-env.controller';
 import { AgentEnvService } from './agents/agent-env.service';
@@ -24,7 +25,7 @@ import { AutomationMetricsController } from './metrics/automation-metrics.contro
 import { AutomationMetricsService } from './metrics/automation-metrics.service';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, TasksModule],
   controllers: [
     AgentsController,
     AgentEnvController,

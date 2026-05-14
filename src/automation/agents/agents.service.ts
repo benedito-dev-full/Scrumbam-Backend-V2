@@ -25,6 +25,7 @@ import {
 import { AgentInstallTokenService } from './agent-install-token.service';
 import { AgentKeyService } from './agent-key.service';
 import { AgentPortAllocatorService } from './agent-port-allocator.service';
+import { TasksService } from '../../tasks/tasks.service';
 
 /**
  * Conjunto de idClasse válidas para DPedido de execução Claude Code.
@@ -53,6 +54,7 @@ export class AgentsService {
     private readonly eventProducer: EventProducerService,
     private readonly correlationIdService: CorrelationIdService,
     private readonly roleResolver: RoleResolverService,
+    private readonly tasksService: TasksService,
   ) {}
 
   /**
@@ -710,6 +712,20 @@ export class AgentsService {
       stderrTruncated: dto.stderrTruncated,
       errorCode: dto.errorCode,
     });
+
+    // Transição automática da task vinculada (EXECUTING → DONE | FAILED)
+    const linkedTaskId = (dadosExecucao as any)?.task?.id;
+    if (linkedTaskId) {
+      try {
+        await this.tasksService.updateStatus(
+          linkedTaskId,
+          { status: dto.success ? 'DONE' : 'FAILED' },
+        );
+        this.logger.log(`Task ${linkedTaskId} movida para ${dto.success ? 'DONE' : 'FAILED'}`);
+      } catch (taskErr) {
+        this.logger.warn(`Não foi possível mover task ${linkedTaskId}: ${(taskErr as Error).message}`);
+      }
+    }
 
     const persistedAt = new Date().toISOString();
 
