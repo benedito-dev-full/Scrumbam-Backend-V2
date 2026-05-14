@@ -116,6 +116,14 @@ export const EVENT_TYPES = {
   // ============== INVITES (lifecycle — ADR-V2-028) ==============
   INVITE_SENT: 'invite.sent',
   INVITE_ACCEPTED: 'invite.accepted',
+  /**
+   * Emitido pelo `InvitesService.acceptInvite` no flow `existing_user`
+   * (ADR-V2-030 — merge multi-tenant). Distinto do `invite.accepted` que
+   * representa criação de conta nova. Permite ao audit log diferenciar
+   * "novo usuário entrou via convite" de "usuário existente foi adicionado
+   * a uma org adicional".
+   */
+  INVITE_ACCEPTED_MERGE: 'invite.accepted.merge',
   INVITE_EXPIRED: 'invite.expired',
   INVITE_REVOKED: 'invite.revoked',
 } as const;
