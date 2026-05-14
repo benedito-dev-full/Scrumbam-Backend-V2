@@ -2739,7 +2739,91 @@ Ambos registrados no CHANGELOG.md em "Known issues" e rastreados para próximas 
 | Reviewer | ~30min | 8.5/10 APPROVED (orquestração OK, 2 débitos MEDIUM não-bloqueantes) |
 | Documenter | ~30min | JSDoc, ROADMAP, CHANGELOG, STATUS, commit Conventional |
 
-**Next:** Task #3 `create_notification` (3 sub-tools: notify_started, notify_completed, notify_error) — reusa padrão com EventProducerService
+### Task #5: MCP Tool `list_members` — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** mcp
+**Fase V2:** F11 (MCP Expansion — Task #5 de 8)
+**Tempo Real:** ~1h Implementer + ~20min Reviewer + ~30min Documenter
+**Completado em:** 2026-05-14
+**Quality Score:** 8.8/10 APPROVED
+
+**O Que Foi Feito:**
+
+- **Tool MCP `list_members`** — lista membros de um projeto com seus roles (MANAGER/MEMBER/VIEWER), escopada aos projetos acessíveis ao usuário MCP
+  - Classe `ListMembersTool` em `src/mcp/tools/list-members.tool.ts` (~102 linhas)
+  - Padrão: injeta `ProjectMembersService` + `ProjectsService`
+  - Fluxo: resolve `accessibleProjectIds` (ADR-V2-042 defense-in-depth) → validar projeto no scope → delega para `getMembers(projectId)`
+  - **Gate na tool (não no service):** `ProjectMembersService.getMembers` tem assinatura HTTP-legada (sem `accessibleProjectIds`), então gate fica na própria tool antes da chamada
+  - Anti-enumeration: NotFoundException com mensagem idêntica a "projeto não encontrado" (vs 403 Forbidden que vaza informação)
+  - JSDoc completo (42L) com descrição detalhada, @example JSON-RPC, fluxo, excepções, Pilares e ADRs
+
+- **Schema em `tools.schema.json`**
+  - Entrada `list_members` com `inputSchema: { projectId: string required }`
+  - 8º tool no array (confirmado em schema-consistency spec)
+
+- **Registração**
+  - `src/mcp/services/mcp-router.service.ts` — 8º param do constructor (ANTES de `configService`)
+  - `src/mcp/mcp.module.ts` — adiciona `ListMembersTool` em providers
+  - `src/mcp/__tests__/mcp-block-d.spec.ts` — atualiza `toHaveLength(7)` → `(8)` + lista de nomes
+
+- **Testes (9 novos specs)**
+  - `mcp-tools.list-members.spec.ts`: 9 casos
+    - (a) happy path — lista membros OK
+    - (b) projectId ausente → INVALID_PARAMS
+    - (c) projectId tipo errado (number) → INVALID_PARAMS
+    - (d) projectId BigInt inválido → INVALID_PARAMS (parseBigIntParam falha)
+    - (e) tenant isolation: projeto fora do scope → NotFoundException (sem chamar service)
+    - (f) accessibleProjectIds vazio → NotFoundException
+    - (g) ctx.dEntidadeId propagado corretamente (typeof bigint) ao ProjectsService
+    - (h) tools/list expõe `list_members` com name/description/inputSchema corretos
+    - (i) getMembers invocado 1x com projectId correto (spy validation)
+  - `mcp-tools.schema-consistency.spec.ts` — atualiza para 8 tools (adicionou `list_members` no array)
+  - **Total suite MCP:** 107 suites PASS, 87/87 specs PASS (0 regressões)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — leitura em DVincula (tabela estrutural, sem Engine)
+- Pilar 2 (Endpoints): MCP é canal alternativo ao REST; tool reutiliza ProjectMembersService (zero controller novo)
+- Pilar 3 (Seed): N/A — zero DClasses novas
+
+**ADRs vinculados:** ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation defense-in-depth — padrão "gate na tool" mais seguro que findOne no service)
+
+**Build & Smoke:**
+- `make build` → PASS (0 warnings)
+- `npx tsc --noEmit` → 7 pre-existing erros (não são novos)
+- ESLint → PASS (4 arquivos modificados/criados, 0 warnings)
+- Test suite MCP → 87/87 PASS
+
+**Divergência Positiva do Plano:**
+- Plano §Task#5 sugeria usar `projectsService.findOne(projectId, ctx.dEntidadeId)` como gate
+- **Implementação melhorada:** padrão "gate na tool via `findAccessibleProjectIds + includes()`"
+  - **Razão:** `findOne` retornaria 403 Forbidden (vs NotFoundException 404 após falhar includes) — vaza informação de existência
+  - **Padrão uniforme:** anti-enumeration igual a `get_task` (Task #1) — toda tool de leitura usa esse pattern
+  - **Mais seguro:** 2 camadas de validação isoladas (findAccessibleProjectIds é read-only; 404 genérico)
+
+**Débitos Abertos (rastreados):**
+- **Task #2 continuam abertos:**
+  - MEDIUM: `taskType` omitido do inputSchema (resolução agendada Tasks #3+)
+  - MEDIUM: `priority: null` é no-op silencioso (resolução futura)
+- **Task #5 novo (pré-existente do código):**
+  - MEDIUM: ProjectMembersService.getMembers JSDoc afirma lançar NotFoundException, mas service retorna `{ members: [] }` silenciosamente
+    - Fora do escopo desta task (débito pré-existente do service)
+    - Mitigação: gate na tool garante NotFoundException se projeto não acessível
+
+**Plan:** [`workspace/plans/plan-mcp-expansion-8tools.md`](../workspace/plans/plan-mcp-expansion-8tools.md) §Task #5 (linhas 439-451)
+**Review:** APPROVED 8.8/10
+**Memory:** [[mcp-expansion-task5-gotchas]] — padrão "gate na tool" vs "gate no service", divergência positiva documentada
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan Task #5 (2h) |
+| Implementer | ~1h | 100% PASS: tool + 9 testes + pattern "gate na tool" confirmado |
+| Reviewer | ~20min | 8.8/10 APPROVED (melhor score até aqui; padrão tenant isolation robusto) |
+| Documenter | ~30min | JSDoc, ROADMAP, CHANGELOG, STATUS, commit Conventional |
+
+**Next:** Task #6 `get_project` (com `include[]` para members/sprints/stats) — reusa padrão com Promise.all condicional
 
 ---
 

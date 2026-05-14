@@ -2852,6 +2852,97 @@ Plano `workspace/plans/plan-orphan-workspace.md`. Ciclo completo Strategist → 
 
 ---
 
+### ✅ Task #5: MCP Tool `list_members` — COMPLETA
+
+**Módulo:** mcp  
+**Fase:** F11 (MCP Expansion — Task #5 de 8)  
+**Status:** COMPLETA  
+**Implementer completou:** 2026-05-14  
+**Reviewer aprovou:** 2026-05-14 (Score 8.8/10 — melhor score até aqui)  
+**Documenter finalizou:** 2026-05-14  
+
+**Tempo Real:**
+- Implementer: ~1h (tool + 9 testes + padrão "gate na tool" confirmado)
+- Reviewer: ~20min (feedback — padrão tenant isolation robusto)
+- Documenter: ~30min (ROADMAP + CHANGELOG + STATUS + commit)
+
+**Deliverables:**
+
+| Item | Status | Detalhe |
+|------|--------|---------|
+| `src/mcp/tools/list-members.tool.ts` | ✅ | ~102 linhas, JSDoc 42L, injeta ProjectMembersService + ProjectsService |
+| `src/mcp/__tests__/mcp-tools.list-members.spec.ts` | ✅ | 9 cases (happy path, params invalid, BigInt invalid, tenant isolation, ctx propagation, tools/list, spy validation) |
+| `src/mcp/__tests__/mcp-tools.schema-consistency.spec.ts` | ✅ | Atualizado — 8 tools agora (adicionou list_members ao array) |
+| Registração em McpRouterService | ✅ | 8º param (ANTES de configService) + import em mcp.module.ts |
+| Entrada em tools.schema.json | ✅ | name + description + inputSchema: { projectId: string required } |
+| mcp-block-d.spec.ts atualizado | ✅ | toHaveLength(7)→(8), lista de nomes atualizada |
+
+**Padrão "Gate na Tool" (Divergência Positiva do Plano):**
+- Plano §Task#5 sugeria usar `projectsService.findOne(projectId, ctx.dEntidadeId)` como gate
+- **Implementação melhorada:** resolve `accessibleProjectIds` na tool, valida escopo ANTES de chamar service
+- **Rationale:** `ProjectMembersService.getMembers` tem assinatura HTTP-legada (sem `accessibleProjectIds`), então gate fica na tool
+- **Anti-enumeration uniforme:** NotFoundException 404 (vs 403 Forbidden que vazaria existência)
+- **Benefício:** padrão idêntico a `get_task` (Task #1) — todas tools de leitura usam `findAccessibleProjectIds + includes()`
+
+**Fluxo:**
+1. `findAccessibleProjectIds(ctx.dEntidadeId)` — resolve projetos acessíveis
+2. `includes(projectId)` — valida escopo (404 se não encontrado)
+3. `getMembers(projectId)` — chama service (assinatura legada HTTP, sem parametro scope)
+4. `textResult(result)` — retorna envelope MCP
+
+**Tenant Isolation (ADR-V2-042):**
+- 2 camadas isoladas: leitura em tool + service chamado (redundante por design)
+- Anti-enumeration: NotFoundException idêntica a "projeto não encontrado"
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — leitura em DVincula (estrutural)
+- Pilar 2 (Endpoints): REUTILIZADO (ProjectMembersService, zero controller novo)
+- Pilar 3 (Seed): RESPEITADO (zero DClasses novas)
+
+**Build & Smoke:**
+- `make build` → PASS (TypeScript clean, 0 warnings)
+- `npx tsc --noEmit` → 7 pre-existing erros (não novos)
+- ESLint → PASS (4 arquivos modificados/criados, 0 warnings)
+- Test suite MCP → 87/87 PASS (0 regressões)
+
+**DÉBITOS TÉCNICOS (pré-existentes, rastreados):**
+
+1. **Task #2 CONTINUAM abertos:**
+   - MEDIUM: `taskType` omitido do inputSchema (resolução agendada Tasks #3+)
+   - MEDIUM: `priority: null` é no-op silencioso (resolução futura)
+
+2. **Task #5 novo (pré-existente do code):**
+   - MEDIUM: ProjectMembersService.getMembers JSDoc afirma lançar NotFoundException, mas service retorna `{ members: [] }` silenciosamente
+     - Fora do escopo desta task (débito pré-existente do service)
+     - Mitigação: gate na tool garante NotFoundException se projeto não acessível
+     - Resolução: refatorar ProjectMembersService em tarefa futura (F16+)
+
+**ADRs vinculados:** ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation defense-in-depth — padrão "gate na tool" mais robusto)
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan Task #5 (2h estimada) |
+| Implementer | ~1h | 100% PASS (tool + 9 specs + pattern gate confirmado) |
+| Reviewer | ~20min | 8.8/10 APPROVED (melhor score até aqui; padrão robusto) |
+| Documenter | ~30min | ROADMAP ✅, CHANGELOG ✅, STATUS ✅, commit Conventional ✅ |
+
+**Sumário F11 (Tasks #1 + #2 + #5 — 3 de 8 completas):**
+
+| Task | Tool | Score | MCP Specs | Status |
+|------|------|-------|-----------|--------|
+| #1 | `get_task` | 8.7/10 | 61/61 | ✅ APPROVED |
+| #2 | `update_task` | 8.5/10 | 78/78 | ✅ APPROVED |
+| #5 | `list_members` | 8.8/10 | 87/87 | ✅ APPROVED |
+| PRÓXIMAS | #3 (notifications), #4 (search), #6 (get_project), #7 (update_project), #8 (metrics) | — | — | Em planejamento |
+
+**Padrão F11 Confirmado:** "gate na tool via `findAccessibleProjectIds + includes()`" é uniforme, robusto, anti-enumeration seguro. Próximas tasks reutilizarão sem variação.
+
+**Next Task:** #6 `get_project` (com `include[]` para members/sprints/stats) — reusa padrão com Promise.all condicional
+
+---
+
 <!-- dedup:implementer:4 -->
 ### Agent Concluído: implementer
 

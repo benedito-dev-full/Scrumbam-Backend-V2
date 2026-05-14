@@ -176,6 +176,19 @@
           { "required": ["sprintId"] }
         ]
       }
+    },
+    {
+      "name": "list_members",
+      "description": "Lista os membros de um projeto (com seus roles), escopada aos projetos acessiveis ao usuario MCP.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["projectId"],
+        "properties": {
+          "projectId": {
+            "type": "string"
+          }
+        }
+      }
     }
   ]
 }

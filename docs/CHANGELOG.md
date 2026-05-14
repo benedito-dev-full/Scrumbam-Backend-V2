@@ -40,6 +40,17 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
   - **ADRs:** ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation defense-in-depth)
   - **Quality Score:** 8.5/10 APPROVED | Build: PASS, ESLint: PASS, Total suite MCP: 78/78 PASS
 
+- **F11 Task #5: MCP Tool `list_members` com Gate de Tenant Isolation** - 2026-05-14
+  - **Tool MCP `list_members`:** lista membros de um projeto com seus roles (MANAGER/MEMBER/VIEWER), escopada aos projetos acessíveis ao usuário MCP
+  - **Classe `ListMembersTool`** em `src/mcp/tools/list-members.tool.ts` (~102 linhas) — injeção de `ProjectMembersService` + `ProjectsService`
+  - **Padrão "gate na tool" (divergência positiva do plano):** resolve `accessibleProjectIds` na tool, valida projeto no scope ANTES de chamar service. Rationale: `ProjectMembersService.getMembers` tem assinatura HTTP-legada sem `accessibleProjectIds`, então gate fica na tool. Anti-enumeration uniforme com `get_task`: NotFoundException 404 vs 403 Forbidden (que vazaria existência).
+  - **Fluxo:** `findAccessibleProjectIds(ctx.dEntidadeId)` → validar escopo com `includes(projectId)` → delegar para `getMembers(projectId)` → retornar envelope MCP
+  - **Registração:** 8º param ao constructor `McpRouterService` (ANTES de `configService`), entrada em `tools.schema.json` com `inputSchema: { projectId: string required }`
+  - **Testes:** 9 cases em `mcp-tools.list-members.spec.ts` (happy path, params validation, BigInt parse, tenant isolation, ctx propagation, tools/list, spy validation) + schema-consistency atualizado → 87/87 PASS MCP total
+  - **Pilares:** Pilar 2 RESPEITADO (reutiliza ProjectMembersService — zero controller novo); Pilar 3 RESPEITADO (zero DClasses novas)
+  - **ADRs:** ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation defense-in-depth — padrão "gate na tool" mais robusto)
+  - **Quality Score:** 8.8/10 APPROVED (melhor score até aqui) | Build: PASS, ESLint: PASS, Total suite MCP: 87/87 PASS
+
 ### Known issues
 
 - **MCP `update_task`: campo `taskType` não exposto** (plano §4.1, ajuste agendado Task #3+)
@@ -53,7 +64,13 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
   - Status: Débito técnico F11
   - Impacto: MÉDIO — usuários devem conhecer limitação
 
-- **Next:** Task #3 `create_notification` (3 sub-tools: notify_started, notify_completed, notify_error) — reusa padrão com EventProducerService
+- **MCP `list_members`: JSDoc do ProjectMembersService.getMembers afirma lançar NotFoundException, mas service retorna `{ members: [] }` silenciosamente** (débito pré-existente do service)
+  - Motivo: Assinatura do service foi pré-existente (lê do banco sem validação); tool adiciona gate para compensar
+  - Status: Débito pré-existente (Task #5 não introduz), mitigação ativa (gate na tool)
+  - Impacto: BAIXO — gate na tool garante NotFoundException se projeto não acessível
+  - Resolução: Refatorar ProjectMembersService.getMembers em tarefa futura (F16+)
+
+- **Next:** Task #6 `get_project` (com `include[]` para members/sprints/stats) — reusa padrão com Promise.all condicional
 
 ### Security
 
