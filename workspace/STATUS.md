@@ -2703,6 +2703,70 @@ Plano `workspace/plans/plan-orphan-workspace.md`. Ciclo completo Strategist → 
 
 ---
 
+## 🎯 F11 — MCP Expansion (5→13 tools) — EM PROGRESSO
+
+### ✅ Task #1: MCP Tool `get_task` — COMPLETA
+
+**Módulo:** mcp  
+**Fase:** F11 (MCP Expansion — Task #1 de 8)  
+**Status:** COMPLETA  
+**Implementer completou:** 2026-05-14  
+**Reviewer aprovou:** 2026-05-14 (Score 8.7/10)  
+**Documenter finalizou:** 2026-05-14  
+
+**Tempo Real:**
+- Implementer: ~1h (tool + 17 testes)
+- Reviewer: ~20min (feedback positivo)
+- Documenter: ~30min (ROADMAP + CHANGELOG + STATUS + commit)
+
+**Deliverables:**
+
+| Item | Status | Detalhe |
+|------|--------|---------|
+| `src/mcp/tools/get-task.tool.ts` | ✅ | ~90 linhas, JSDoc completo, injeta TasksService + ProjectsService |
+| `src/mcp/__tests__/mcp-tools.get-task.spec.ts` | ✅ | 9 cases (happy, params, BigInt, NotFound, tenant, ctx, tools/list) |
+| `src/mcp/__tests__/mcp-tools.schema-consistency.spec.ts` | ✅ | 8 cases genéricos (paridade classe ↔ JSON) — reutilizável Tasks #2-#8 |
+| Registração em McpRouterService | ✅ | 6º param (ANTES de configService) + import em mcp.module.ts |
+| Entrada em tools.schema.json | ✅ | name + description + inputSchema idênticas à classe |
+| mcp-block-d.spec.ts atualizado | ✅ | toHaveLength(5)→(6), lista de nomes atualizada |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — leitura em DTask (estrutural)
+- Pilar 2 (Endpoints): REUTILIZADO (TasksService, zero controller novo)
+- Pilar 3 (Seed): RESPEITADO (zero DClasses novas)
+
+**Tenant Isolation (ADR-V2-042):**
+- Fluxo: `projectsService.findAccessibleProjectIds(ctx.dEntidadeId)` → `tasksService.findOne(taskId, accessibleProjectIds)`
+- Service valida que `DTask.idProject` está no scope; caso contrário lança `NotFoundException` (anti-enumeration)
+- Spec caso (g) testa EXPLICITAMENTE: task de OUTRO tenant → 404
+
+**Build & Smoke:**
+- `make build` → PASS (TypeScript clean, DVFS assets copiados, 0 warnings)
+- `npx tsc --noEmit` → 7 pre-existing erros (não novos; confirmados via baseline)
+- ESLint → PASS (7 arquivos, 0 warnings)
+- Test suite MCP → 61/61 PASS (0 regressões)
+
+**Gotchas para Tasks #2-#8 (documentados em memory):**
+- Append-only ao array `tools[]` — NUNCA inserir no meio
+- Cada nova tool empurra `configService` 1 posição no constructor
+- Hardcoded `toHaveLength(N)` em `mcp-block-d.spec.ts:64` precisa incrementar junto com lista de nomes
+- Spec `schema-consistency.spec.ts` é salvaguarda contra drift — reutilizar!
+
+**ADRs vinculados:** ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation)
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan MCP Expansion (8 tasks) |
+| Implementer | ~1h | 100% PASS (tool + 17 specs + pattern DRY) |
+| Reviewer | ~20min | 8.7/10 APPROVED (completo, adversariais OK) |
+| Documenter | ~30min | ROADMAP ✅, CHANGELOG ✅, STATUS ✅, commit Conventional ✅ |
+
+**Next Task:** #2 `update_task` — reusa padrão `get_task` com payload inbound + tenant scope
+
+---
+
 <!-- dedup:implementer:4 -->
 ### Agent Concluído: implementer
 

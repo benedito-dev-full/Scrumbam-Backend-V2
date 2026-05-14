@@ -33,10 +33,7 @@ describe('MCP Bloco D - compatibilidade, timeout, metricas e doc', () => {
     const controller = new McpController(new McpJsonRpcService(), new McpRouterService());
 
     await expect(
-      controller.handle(
-        { jsonrpc: '2.0', method: 'initialize', id: 'init' },
-        { userCtx } as never,
-      ),
+      controller.handle({ jsonrpc: '2.0', method: 'initialize', id: 'init' }, { userCtx } as never),
     ).resolves.toEqual({
       jsonrpc: '2.0',
       id: 'init',
@@ -51,23 +48,23 @@ describe('MCP Bloco D - compatibilidade, timeout, metricas e doc', () => {
   it('tools/list retorna 5 tools com schemas completos do schema estatico cacheado', async () => {
     const controller = new McpController(new McpJsonRpcService(), new McpRouterService());
 
-    const result = await controller.handle(
-      { jsonrpc: '2.0', method: 'tools/list', id: 'tools' },
-      { userCtx } as never,
-    );
+    const result = await controller.handle({ jsonrpc: '2.0', method: 'tools/list', id: 'tools' }, {
+      userCtx,
+    } as never);
 
     expect(result).toEqual({
       jsonrpc: '2.0',
       id: 'tools',
       result: { tools: toolsSchema.tools },
     });
-    expect(toolsSchema.tools).toHaveLength(5);
+    expect(toolsSchema.tools).toHaveLength(6);
     expect(toolsSchema.tools.map((tool) => tool.name)).toEqual([
       'list_tasks',
       'create_task',
       'update_status',
       'list_projects',
       'list_sprints',
+      'get_task',
     ]);
     for (const tool of toolsSchema.tools) {
       expect(tool.inputSchema).toEqual(expect.objectContaining({ type: 'object' }));
@@ -87,14 +84,11 @@ describe('MCP Bloco D - compatibilidade, timeout, metricas e doc', () => {
       undefined,
       undefined,
       undefined,
+      undefined,
       { get: jest.fn().mockReturnValue('5') } as never,
     );
 
-    const promise = router.dispatch(
-      'tools/call',
-      { name: 'list_tasks', arguments: {} },
-      userCtx,
-    );
+    const promise = router.dispatch('tools/call', { name: 'list_tasks', arguments: {} }, userCtx);
 
     jest.advanceTimersByTime(5);
     await expect(promise).resolves.toEqual({
@@ -120,11 +114,16 @@ describe('MCP Bloco D - compatibilidade, timeout, metricas e doc', () => {
       undefined,
       undefined,
       undefined,
-      { get: jest.fn().mockReturnValue('1') } as never,
+      undefined,
+      {
+        get: jest.fn().mockReturnValue('1'),
+      } as never,
     );
 
     await expect(router.dispatch('initialize', undefined, userCtx)).resolves.toEqual(
-      expect.objectContaining({ result: expect.objectContaining({ protocolVersion: '2024-11-05' }) }),
+      expect.objectContaining({
+        result: expect.objectContaining({ protocolVersion: '2024-11-05' }),
+      }),
     );
     await expect(router.dispatch('tools/list', undefined, userCtx)).resolves.toEqual(
       expect.objectContaining({ result: { tools: toolsSchema.tools } }),
@@ -159,9 +158,17 @@ describe('MCP Bloco D - compatibilidade, timeout, metricas e doc', () => {
     });
     const router = new McpRouterService(successTool as never, errorTool as never);
 
-    await router.dispatch('tools/call', { name: 'list_tasks', arguments: { secret: 'value' } }, userCtx);
+    await router.dispatch(
+      'tools/call',
+      { name: 'list_tasks', arguments: { secret: 'value' } },
+      userCtx,
+    );
     await expect(
-      router.dispatch('tools/call', { name: 'create_task', arguments: { secret: 'value' } }, userCtx),
+      router.dispatch(
+        'tools/call',
+        { name: 'create_task', arguments: { secret: 'value' } },
+        userCtx,
+      ),
     ).rejects.toThrow('boom');
 
     const snapshot = router.getMetricsSnapshotForTesting();

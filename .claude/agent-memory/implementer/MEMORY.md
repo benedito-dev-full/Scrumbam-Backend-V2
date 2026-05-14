@@ -4,6 +4,7 @@
 **Última atualização:** 2026-05-12
 
 **Notas por fase:**
+- F11 MCP Expansion Task #1 (`get_task`): ver `mcp-expansion-task1-gotchas.md` — append-only no construtor do router (configService SEMPRE último), 2 testes em `mcp-block-d.spec.ts` ganham 1 `undefined` a cada nova tool, `schema-consistency.spec.ts` salvaguarda drift JSON↔classe; `McpUserContext` NÃO tem organizationId; NotFoundException/ForbiddenException propagam como exception (use `rejects.toThrow` em specs, não `result.error`).
 - F7 Eventos Canônicos: ver `f7-eventos-canonicos.md` (CommonModule Global, EventProducer pattern, Engine isolation via type-only import).
 - F8 Flow Metrics + Forecast: ver gotchas abaixo (ThroughputService $queryRaw, CFD sem idProject, WipAgeService OnModuleInit).
 - F8 Task#2 Search: queryPeople via DVincula (NÃO idEstab). Ver gotchas abaixo.

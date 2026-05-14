@@ -114,6 +114,19 @@
           }
         }
       }
+    },
+    {
+      "name": "get_task",
+      "description": "Busca uma task por ID, escopada aos projetos acessiveis ao usuario MCP.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["taskId"],
+        "properties": {
+          "taskId": {
+            "type": "string"
+          }
+        }
+      }
     }
   ]
 }

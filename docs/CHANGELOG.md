@@ -12,6 +12,21 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Added
+
+- **F11 Task #1: MCP Tool `get_task` com Tenant Isolation (ADR-V2-042)** - 2026-05-14
+  - **Tool MCP `get_task`:** busca task por ID, escopada aos projetos acessíveis ao usuário via `findAccessibleProjectIds` (defense-in-depth ADR-V2-042)
+  - **Classe `GetTaskTool`** em `src/mcp/tools/get-task.tool.ts` (~90 linhas) — injeção de `TasksService` + `ProjectsService`
+  - **Fluxo:** resolver `accessibleProjectIds` via `ProjectsService` → delegar para `TasksService.findOne(taskId, accessibleProjectIds)` → validação de tenant em service (anti-enumeration: 404 se fora do scope)
+  - **Spec de Consistência Reutilizável:** `mcp-tools.schema-consistency.spec.ts` valida paridade bidirecional classe ↔ `tools.schema.json` (mitigação R-3 do plano MCP expansion). Padrão DRY para Tasks #2-#8: só 1 linha nova por tool.
+  - **Registração:** importar em `mcp.module.ts` + adicionar 6º param ao constructor `McpRouterService` (ANTES de `configService`) + entrada em `tools.schema.json`
+  - **Testes:** 9 cases em `mcp-tools.get-task.spec.ts` (happy path, params validation, BigInt parse, NotFound propagation, tenant isolation, ctx propagation, tools/list) + 8 cases schema-consistency → 17/17 PASS
+  - **Gotchas para próximas tasks:** append-only ao array `tools[]` (nunca inserir no meio), `configService` empurra posição a cada nova tool, `McpUserContext` sem `organizationId` (cross-org by design)
+  - **Pilares:** Pilar 2 RESPEITADO (reutiliza TasksService — zero controller novo); Pilar 3 RESPEITADO (zero DClasses novas)
+  - **ADRs:** ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation defense-in-depth)
+  - **Quality Score:** 8.7/10 APPROVED | Build: PASS, ESLint: PASS, Total suite MCP: 61/61 PASS
+  - **Next:** Task #2 `update_task` — reusa padrão com payload inbound + tenant scope
+
 ### Security
 
 - **F14 Hardening: Tenant Isolation Defense-in-Depth (ADR-V2-042)** - 2026-05-14

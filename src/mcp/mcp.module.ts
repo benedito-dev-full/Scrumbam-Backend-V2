@@ -16,6 +16,7 @@ import { McpKeyService } from './services/mcp-key.service';
 import { McpRateLimitService } from './services/mcp-rate-limit.service';
 import { McpRouterService } from './services/mcp-router.service';
 import { CreateTaskTool } from './tools/create-task.tool';
+import { GetTaskTool } from './tools/get-task.tool';
 import { ListProjectsTool } from './tools/list-projects.tool';
 import { ListSprintsTool } from './tools/list-sprints.tool';
 import { ListTasksTool } from './tools/list-tasks.tool';
@@ -37,6 +38,7 @@ import { UpdateStatusTool } from './tools/update-status.tool';
     UpdateStatusTool,
     ListProjectsTool,
     ListSprintsTool,
+    GetTaskTool,
   ],
   exports: [McpKeyService, McpRouterService, McpRateLimitService, McpAuditService],
 })

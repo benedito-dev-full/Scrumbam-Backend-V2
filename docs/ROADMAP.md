@@ -2580,11 +2580,89 @@ Ao trocar de workspace via `POST /auth/switch-org`, recursos exibidos (projetos,
 
 ---
 
+## F11 — MCP Server Expansion (5→13 tools) — EM PROGRESSO
+
+### Task #1: MCP Tool `get_task` — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** mcp
+**Fase V2:** F11 (MCP Expansion — Task #1 de 8)
+**Tempo Real:** ~1h Implementer + ~20min Reviewer + ~30min Documenter
+**Completado em:** 2026-05-14
+**Quality Score:** 8.7/10 APPROVED
+
+**O Que Foi Feito:**
+
+- **Tool MCP `get_task`** — busca task por ID, escopada aos projetos acessíveis ao usuário (tenant isolation ADR-V2-042)
+  - Classe `GetTaskTool` em `src/mcp/tools/get-task.tool.ts` (~90 linhas)
+  - Padrão: injeta `TasksService` + `ProjectsService`
+  - Fluxo: `findAccessibleProjectIds` (via ADR-V2-042 defense-in-depth) → delegação para `findOne(taskId, accessibleProjectIds)`
+  - JSDoc completo com exemplos JSON-RPC
+
+- **Schema consistency spec (reutilizável para Tasks #2-#8)**
+  - Arquivo `src/mcp/__tests__/mcp-tools.schema-consistency.spec.ts` (~95 linhas)
+  - Valida paridade bidirecional classe ↔ `tools.schema.json` (mitigação R-3 do plano)
+  - 8 casos: nome, description, inputSchema, cardinalidade, sem duplicatas
+  - Padrão DRY: próximas tools só adicionam 1 linha no array `buildRegisteredTools()`
+
+- **Registração no Router e Schema**
+  - `src/mcp/services/mcp-router.service.ts` — 6º param do constructor (ANTES de `configService`)
+  - `src/mcp/mcp.module.ts` — adiciona `GetTaskTool` em providers
+  - `src/mcp/schemas/tools.schema.json` — entrada `get_task` com description + inputSchema idênticas à classe
+  - `src/mcp/__tests__/mcp-block-d.spec.ts` — atualiza `toHaveLength(5)` → `(6)` + lista de nomes
+
+- **Testes (17 novos specs)**
+  - `mcp-tools.get-task.spec.ts`: 9 casos (happy path, params validation, BigInt parse, NotFound propagation, tenant isolation, ctx propagation, tools/list)
+  - `mcp-tools.schema-consistency.spec.ts`: 8 casos (paridade classe ↔ JSON)
+  - **Total suite MCP:** 107 suites PASS, 61 specs PASS (0 regressões, 7 pre-existing fail no baseline confirmados)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — leitura em DTask (tabela estrutural)
+- Pilar 2 (Endpoints): MCP é canal alternativo ao REST; tool reutiliza TasksService (zero controller novo)
+- Pilar 3 (Seed): N/A — zero DClasses novas
+
+**ADRs vinculados:** ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation defense-in-depth)
+
+**Build & Smoke:**
+- `make build` → PASS (0 warnings, DVFS assets copiados)
+- `npx tsc --noEmit` → 7 pre-existing erros em `automation/`, `common/cache/`, `executions/` (não são novos; confirmados via git stash)
+- ESLint → PASS (7 arquivos modificados/criados, 0 warnings)
+- Test suite MCP → 61/61 PASS
+
+**Testes Adversariais (caso g — tenant isolation):**
+- Task de OUTRO tenant — `accessibleProjectIds` não inclui projeto da task
+- Service retorna `NotFoundException` ("task not found" — anti-enumeration)
+- Tool propaga corretamente (rejeição async)
+
+**Gotchas para Tasks #2-#8 (documentados em memory):**
+- Append-only ao array `tools[]` — NUNCA inserir no meio (quebra posições hardcoded em `mcp-block-d.spec.ts`)
+- Cada nova tool empurra `configService` 1 posição no constructor
+- Spec `schema-consistency.spec.ts` é salvaguarda contra drift — reutilizar!
+- `McpUserContext` NÃO tem `organizationId` — MCP é cross-org by design
+
+**Plan:** [`workspace/plans/plan-mcp-expansion-8tools.md`](../workspace/plans/plan-mcp-expansion-8tools.md) §Task #1 (linhas 307-335)
+**Impl Notes:** [`workspace/implementations/impl-mcp-get-task-tool-task1.md`](../workspace/implementations/impl-mcp-get-task-tool-task1.md)
+**Review:** APPROVED 8.7/10
+**Memory:** [[mcp-expansion-task1-gotchas]] — padrões confirmados para próximas tasks
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan MCP Expansion (8 tasks) |
+| Implementer | ~1h | 100% PASS: tool + 17 testes + schema-consistency pattern |
+| Reviewer | ~20min | 8.7/10 APPROVED (tool padrão completo, tests adversariais OK) |
+| Documenter | ~30min | JSDoc, ROADMAP, CHANGELOG, STATUS, commit Conventional |
+
+**Next:** Task #2 `update_task` — reusa padrão `get_task` com payload inbound + tenant scope
+
+---
+
 ## Proximas fases (preview)
 
 | Fase | Nome | Pilar dominante |
 |------|------|-----------------|
-| F11 | MCP Server (5 tools) | — |
+| F11 | MCP Server (5→13 tools) | — |
 | F13 | **Automation Claude Code (Agent + Engine)** | Pilares 1+2 |
 | F14 | Hardening | — |
 | F15 | **Migration de dados do legado** | — |
