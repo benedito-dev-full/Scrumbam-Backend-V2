@@ -13,6 +13,7 @@ import {
 } from '../../automation/runtime/remote-execution-client';
 import { EXECUTION_QUEUE_NAME } from '../queues/execution-queue.constants';
 import { ExecutionRunJobData } from '../queues/execution-queue.service';
+import { TasksService } from '../../tasks/tasks.service';
 
 const EXECUTION_CLASSES = [
   AUTOMATION_CLASS_IDS.EXEC_LOW,
@@ -86,6 +87,7 @@ export class ExecutionRunProcessor extends WorkerHost {
     private readonly agentTunnel: AgentTunnelService,
     private readonly remoteClient: RemoteExecutionClient,
     private readonly logService: ExecutionRuntimeLogService,
+    private readonly tasksService: TasksService,
   ) {
     super();
   }
@@ -123,6 +125,9 @@ export class ExecutionRunProcessor extends WorkerHost {
         this.logger.warn(`execution_run_skip_stale executionId=${executionId}`);
         return;
       }
+
+      // Move a task vinculada para EXECUTING assim que o dispatch for confirmado
+      await this.moveLinkedTaskToExecuting(pedido.dados);
 
       await this.safeEmit('execution.started', { executionId, projectId, agentId }, correlationId);
 
@@ -321,6 +326,17 @@ export class ExecutionRunProcessor extends WorkerHost {
       tunnelPort,
       agentCommandSecretEncrypted,
     };
+  }
+
+  private async moveLinkedTaskToExecuting(dados: Record<string, unknown>): Promise<void> {
+    const taskId = this.asString(this.asRecord(dados.task)?.id);
+    if (!taskId) return;
+    try {
+      await this.tasksService.updateStatus(taskId, { status: 'EXECUTING' });
+      this.logger.log(`task_moved_to_executing taskId=${taskId}`);
+    } catch (err) {
+      this.logger.warn(`task_move_executing_failed taskId=${taskId} err=${(err as Error).message}`);
+    }
   }
 
   private async markRunning(executionId: string): Promise<boolean> {

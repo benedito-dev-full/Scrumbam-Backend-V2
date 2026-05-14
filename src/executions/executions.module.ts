@@ -6,6 +6,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 
 import { EntidadesModule } from '../entidades/entidades.module';
 import { AutomationModule } from '../automation/automation.module';
+import { TasksModule } from '../tasks/tasks.module';
 
 import { ExecutionsController } from './executions.controller';
 import { ExecutionsService } from './executions.service';
@@ -53,6 +54,7 @@ export class ExecutionsModule {
       ThrottlerModule.forRoot([{ ttl: 60000, limit: 30 }]),
       EntidadesModule,
       AutomationModule,
+      TasksModule,
     ];
 
     const redisImports = redisEnabled
