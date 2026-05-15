@@ -2,11 +2,14 @@ import toolsSchema from '../schemas/tools.schema.json';
 import { CreateTaskTool } from '../tools/create-task.tool';
 import { GetProjectTool } from '../tools/get-project.tool';
 import { GetTaskTool } from '../tools/get-task.tool';
+import { GetUnreadCountTool } from '../tools/get-unread-count.tool';
 import { ListMembersTool } from '../tools/list-members.tool';
+import { ListNotificationsTool } from '../tools/list-notifications.tool';
 import { ListProjectsTool } from '../tools/list-projects.tool';
 import { ListSprintsTool } from '../tools/list-sprints.tool';
 import { ListTasksTool } from '../tools/list-tasks.tool';
 import { McpTool } from '../tools/tool.interface';
+import { UpdateNotificationTool } from '../tools/update-notification.tool';
 import { UpdateProjectTool } from '../tools/update-project.tool';
 import { UpdateStatusTool } from '../tools/update-status.tool';
 import { UpdateTaskTool } from '../tools/update-task.tool';
@@ -52,6 +55,9 @@ function buildRegisteredTools(): McpTool[] {
     new ListMembersTool(noop, noop),
     new GetProjectTool(noop, noop, noop),
     new UpdateProjectTool(noop),
+    new ListNotificationsTool(noop),
+    new UpdateNotificationTool(noop),
+    new GetUnreadCountTool(noop),
   ];
 }
 

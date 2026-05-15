@@ -14,6 +14,18 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F11 Task #3: MCP Tools Notificações — `list_notifications`, `update_notification`, `get_unread_count` (ADR-V2-042)** - 2026-05-15
+  - **Tools MCP:** 3 novas tools expõem sistema de notificações (DEvento -490) via MCP
+  - **`ListNotificationsTool`** em `src/mcp/tools/list-notifications.tool.ts` (~101 linhas) — lista com cursor pagination + filtro `unreadOnly` (boolean → BooleanString para compatibilidade com NotificationsService)
+  - **`UpdateNotificationTool`** em `src/mcp/tools/update-notification.tool.ts` (~117 linhas) — ação discriminante (mark_read, mark_all_read, delete); notificationId obrigatório para mark_read/delete
+  - **`GetUnreadCountTool`** em `src/mcp/tools/get-unread-count.tool.ts` (~66 linhas) — thin wrapper para contagem de não-lidas
+  - **Registração:** 3 providers em `src/mcp/mcp.module.ts` + 3 tools em `src/mcp/services/mcp-router.service.ts` (posições 8,9,10 do array tools) + schema em `tools.schema.json` (10→13 tools)
+  - **Testes:** `mcp-tools.notifications.spec.ts` (12 cases: list happy path + limit clamping + cursor, update 3 actions + RBAC, count) + `mcp-tools.schema-consistency.spec.ts` (verificação bidirecional classes ↔ schema) + `mcp-block-d.spec.ts` (count 10→13) — **100% PASS MCP suite 96/96**
+  - **Tenant Isolation (ADR-V2-042):** `ctx.dEntidadeId` (bigint) propagado; SEM `organizationId` (cross-org by design); NotificationsService valida proprietário da notificação
+  - **Pilares:** Pilar 2 RESPEITADO (reutiliza NotificationsService — zero controller novo); Pilar 3 RESPEITADO (zero DClasses novas — DEvento -490 já existe)
+  - **ADRs:** ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation defense-in-depth)
+  - **Quality Score:** 8.8/10 APPROVED | Build: PASS, TypeScript: 0 errors | Reviewer: Sonnet (score exato do MCP expansion)
+
 - **F11 Task #7: MCP Tool `update_project` com Semântica Ternária para teamId (ADR-V2-042)** - 2026-05-15
   - **Tool MCP `update_project`:** atualiza propriedades de um projeto existente (nome, description, prefix, automationEnabled, gitRepo, teamId)
   - **Classe `UpdateProjectTool`** em `src/mcp/tools/update-project.tool.ts` (~209 linhas) — validação de ao menos 1 campo além de projectId

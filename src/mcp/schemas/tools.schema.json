@@ -223,6 +223,38 @@
           "teamId": { "type": ["string", "null"] }
         }
       }
+    },
+    {
+      "name": "list_notifications",
+      "description": "Lista notificações do usuário autenticado. Use unreadOnly para filtrar apenas não-lidas.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 20 },
+          "cursor": { "type": "string" },
+          "unreadOnly": { "type": "boolean" }
+        }
+      }
+    },
+    {
+      "name": "update_notification",
+      "description": "Marca notificação como lida, marca todas como lidas, ou deleta uma notificação. Para mark_read e delete, notificationId é obrigatório.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["action"],
+        "properties": {
+          "action": { "type": "string", "enum": ["mark_read", "mark_all_read", "delete"] },
+          "notificationId": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "get_unread_count",
+      "description": "Retorna a contagem de notificações não-lidas do usuário autenticado.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
     }
   ]
 }

@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 
 import { AuthModule } from '../auth/auth.module';
 import { EntidadesModule } from '../entidades/entidades.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { TabelasModule } from '../tabelas/tabelas.module';
 import { TasksModule } from '../tasks/tasks.module';
@@ -18,16 +19,19 @@ import { McpRouterService } from './services/mcp-router.service';
 import { CreateTaskTool } from './tools/create-task.tool';
 import { GetProjectTool } from './tools/get-project.tool';
 import { GetTaskTool } from './tools/get-task.tool';
+import { GetUnreadCountTool } from './tools/get-unread-count.tool';
 import { ListMembersTool } from './tools/list-members.tool';
+import { ListNotificationsTool } from './tools/list-notifications.tool';
 import { ListProjectsTool } from './tools/list-projects.tool';
 import { ListSprintsTool } from './tools/list-sprints.tool';
 import { ListTasksTool } from './tools/list-tasks.tool';
+import { UpdateNotificationTool } from './tools/update-notification.tool';
 import { UpdateProjectTool } from './tools/update-project.tool';
 import { UpdateStatusTool } from './tools/update-status.tool';
 import { UpdateTaskTool } from './tools/update-task.tool';
 
 @Module({
-  imports: [AuthModule, EntidadesModule, TasksModule, ProjectsModule, TabelasModule],
+  imports: [AuthModule, EntidadesModule, TasksModule, ProjectsModule, TabelasModule, NotificationsModule],
   controllers: [McpController, McpKeysController],
   providers: [
     McpJsonRpcService,
@@ -47,6 +51,9 @@ import { UpdateTaskTool } from './tools/update-task.tool';
     ListMembersTool,
     GetProjectTool,
     UpdateProjectTool,
+    ListNotificationsTool,
+    UpdateNotificationTool,
+    GetUnreadCountTool,
   ],
   exports: [McpKeyService, McpRouterService, McpRateLimitService, McpAuditService],
 })

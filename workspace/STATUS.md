@@ -1,6 +1,44 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-14 (Documenter finalizando F14 Tenant Isolation Defense-in-Depth — COMPLETA)
+**Ultima atualizacao:** 2026-05-15 (Documenter finalizando F11 Task #3 MCP Notifications — COMPLETA)
+
+---
+
+## 🎯 F11 — MCP Expansion — ✅ TASKS 1,2,3,7 COMPLETAS (8/10 Tools Entregues)
+
+**Status Consolidado:**
+- Task #1 (`get_task`) — ✅ COMPLETA (8.7/10)
+- Task #2 (`update_task`) — ✅ COMPLETA (8.5/10)  
+- Task #3 (`list_notifications`, `update_notification`, `get_unread_count`) — ✅ COMPLETA (8.8/10)
+- Task #7 (`update_project`) — ✅ COMPLETA (9.0/10)
+- **Total Tools MCP entregues:** 8 de 10 (80% do plano F11)
+- **Build:** PASS | **Tests:** 96/96 PASS (100%)
+
+---
+
+### Task #3 — MCP Tools Notificações — ✅ COMPLETA
+
+**Implementer completou:** 2026-05-15
+**Reviewer aprovou:** 2026-05-15 (Score 8.8/10)
+**Módulo:** `src/mcp/tools/` + `src/notifications/`
+**Build:** `make build` PASS
+**Tests:** 12 specs novos em `mcp-tools.notifications.spec.ts` + 1 suite schema-consistency + 1 MCP block-D → **100% PASS (96/96 total MCP)**
+
+**Deliverables:**
+- ✅ `src/mcp/tools/list-notifications.tool.ts` (~101 linhas) — cursor pagination + filtro `unreadOnly` (boolean→BooleanString)
+- ✅ `src/mcp/tools/update-notification.tool.ts` (~117 linhas) — 3 ações: mark_read, mark_all_read, delete
+- ✅ `src/mcp/tools/get-unread-count.tool.ts` (~66 linhas) — thin wrapper contagem não-lidas
+- ✅ Registração em `mcp.module.ts` (3 providers) + `mcp-router.service.ts` (tools[8,9,10]) + `tools.schema.json` (10→13 tools)
+- ✅ JSDoc completo em todas as 3 tools (padrão V2 Devari)
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — notificações são estruturais (DEvento -490)
+- Pilar 2 (Endpoints): Reutiliza NotificationsService existente (zero controller novo)
+- Pilar 3 (Seed): Zero DClasses novas (DEvento -490 já existe)
+
+**Tenant Isolation (ADR-V2-042):** `ctx.dEntidadeId` propagado; NotificationsService valida proprietário
+
+**ADRs:** ADR-V2-001 (zero tabela), ADR-V2-042 (tenant isolation)
 
 ---
 
@@ -3208,5 +3246,27 @@ Plano `workspace/plans/plan-orphan-workspace.md`. Ciclo completo Strategist → 
 **Task:** #6
 **Timestamp:** 14/05/2026 15:25:00
 **Agent:** documenter
+**Status:** Completo
+
+
+---
+
+<!-- dedup:implementer:3 -->
+### Agent Concluído: implementer
+
+**Task:** #3
+**Timestamp:** 15/05/2026 00:45:11
+**Agent:** implementer
+**Status:** Completo
+
+
+---
+
+<!-- dedup:reviewer:3 -->
+### Agent Concluído: reviewer
+
+**Task:** #3
+**Timestamp:** 15/05/2026 00:48:39
+**Agent:** reviewer
 **Status:** Completo
 

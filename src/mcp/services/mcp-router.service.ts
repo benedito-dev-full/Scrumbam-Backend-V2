@@ -12,11 +12,14 @@ import { McpJsonRpcError, McpToolDefinition, McpUserContext } from '../interface
 import { CreateTaskTool } from '../tools/create-task.tool';
 import { GetProjectTool } from '../tools/get-project.tool';
 import { GetTaskTool } from '../tools/get-task.tool';
+import { GetUnreadCountTool } from '../tools/get-unread-count.tool';
 import { ListMembersTool } from '../tools/list-members.tool';
+import { ListNotificationsTool } from '../tools/list-notifications.tool';
 import { ListProjectsTool } from '../tools/list-projects.tool';
 import { ListSprintsTool } from '../tools/list-sprints.tool';
 import { ListTasksTool } from '../tools/list-tasks.tool';
 import { McpTool, McpToolError } from '../tools/tool.interface';
+import { UpdateNotificationTool } from '../tools/update-notification.tool';
 import { UpdateProjectTool } from '../tools/update-project.tool';
 import { UpdateStatusTool } from '../tools/update-status.tool';
 import { UpdateTaskTool } from '../tools/update-task.tool';
@@ -65,6 +68,9 @@ export class McpRouterService {
     listMembersTool?: ListMembersTool,
     getProjectTool?: GetProjectTool,
     updateProjectTool?: UpdateProjectTool,
+    listNotificationsTool?: ListNotificationsTool,
+    updateNotificationTool?: UpdateNotificationTool,
+    getUnreadCountTool?: GetUnreadCountTool,
     configService?: ConfigService,
   ) {
     const tools: Array<McpTool | undefined> = [
@@ -78,6 +84,9 @@ export class McpRouterService {
       listMembersTool,
       getProjectTool,
       updateProjectTool,
+      listNotificationsTool,
+      updateNotificationTool,
+      getUnreadCountTool,
     ];
     this.tools = tools.filter((tool): tool is McpTool => tool !== undefined);
     this.cachedToolDefinitions = (toolsSchema.tools as McpToolDefinition[]).map((tool) => ({
