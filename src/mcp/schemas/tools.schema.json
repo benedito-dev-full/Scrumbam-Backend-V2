@@ -206,6 +206,23 @@
           }
         }
       }
+    },
+    {
+      "name": "update_project",
+      "description": "Atualiza propriedades de um projeto. Requer role MANAGER no projeto. Use get_project para consultar antes de editar.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["projectId"],
+        "properties": {
+          "projectId": { "type": "string" },
+          "nome": { "type": "string", "maxLength": 200 },
+          "description": { "type": "string", "maxLength": 2000 },
+          "prefix": { "type": "string" },
+          "automationEnabled": { "type": "boolean" },
+          "gitRepo": { "type": "string" },
+          "teamId": { "type": ["string", "null"] }
+        }
+      }
     }
   ]
 }

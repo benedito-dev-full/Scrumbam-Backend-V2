@@ -2923,6 +2923,102 @@ Ambos registrados no CHANGELOG.md em "Known issues" e rastreados para próximas 
 
 ---
 
+### Task #7: MCP Tool `update_project` — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** mcp
+**Fase V2:** F11 (MCP Expansion — Task #7 de 8)
+**Tempo Real:** ~1.5h Implementer + ~20min Reviewer + ~20min Documenter
+**Completado em:** 2026-05-15
+**Quality Score:** 9.0/10 APPROVED
+
+**O Que Foi Feito:**
+
+- **Tool MCP `update_project`** — atualiza propriedades de um projeto existente (nome, description, prefix, automationEnabled, gitRepo, teamId)
+  - Classe `UpdateProjectTool` em `src/mcp/tools/update-project.tool.ts` (~209 linhas)
+  - Design: UMA tool com todos os campos opcionais (excluindo `projectId` obrigatório)
+  - Campos suportados: `nome`, `description`, `prefix`, `automationEnabled` (boolean), `gitRepo`, `teamId` (string | null | undefined)
+  - **Semântica Ternária para teamId:** `undefined` = não tocar o vínculo, `null` = desvincular time, `string` = novo time
+  - Validação: ao menos UM campo além de `projectId` deve estar presente (lançado antes de chamar service)
+  - Tenant isolation (ADR-V2-042): `ctx.dEntidadeId` sem `organizationId` (MCP cross-org by design); MANAGER check via `requireManagerRole` no service
+  - Sem try/catch: exceções (ForbiddenException, NotFoundException) propagam para router
+  - JSDoc completo (55L) com descrição detalhada, @example JSON-RPC, semântica ternária documentada, @throws, @see referências
+
+- **3 Helpers Privados (bem documentados)**
+  - `parseOptionalBoolean(input, field)` — valida tipo boolean ou undefined
+  - `parseOptionalTeamId(input)` — extrai string | null | undefined com semântica ternária clara
+  - Validação `hasUpdate` centralizada antes do service call
+
+- **Schema em `tools.schema.json`**
+  - Entrada `update_project` (10º tool no array) com `inputSchema: { projectId: string required; nome, description, prefix, gitRepo: string opcionais; automationEnabled: boolean opcional; teamId: [string, null] opcional }`
+  - 10º tool confirmado em schema-consistency spec
+
+- **Registração**
+  - `src/mcp/services/mcp-router.service.ts` — 10º param do constructor (ANTES de `configService`)
+  - `src/mcp/mcp.module.ts` — adiciona `UpdateProjectTool` em providers
+  - `src/mcp/__tests__/mcp-block-d.spec.ts` — atualiza `toHaveLength(9)` → `(10)` + lista de nomes
+
+- **Testes (13 novos specs)**
+  - `mcp-tools.update-project.spec.ts`: 13 casos
+    - (a) happy path — atualiza nome OK
+    - (b) atualiza múltiplos campos (nome + description + automationEnabled)
+    - (c) projectId missing → INVALID_PARAMS
+    - (d) projectId tipo errado (number) → INVALID_PARAMS
+    - (e) projectId BigInt inválido → INVALID_PARAMS (parseBigIntParam falha)
+    - (f) nenhum campo fornecido (além de projectId) → INVALID_PARAMS "at least one field"
+    - (g) teamId=null (desvincular) → service chamado com null
+    - (h) teamId=string (novo time) → service chamado com string
+    - (i) teamId=undefined (omitido) → service chamado com undefined (não tocar)
+    - (j) automationEnabled=true/false → service chamado corretamente
+    - (k) tenant isolation: RBAC MANAGER via service (ForbiddenException não é interceptada) → propagada ao router
+    - (l) projeto 404 → NotFoundException propagada ao router
+    - (m) tools/list expõe `update_project` com name/description/inputSchema corretos
+  - Atualização `mcp-block-d.spec.ts` (9→10 tools)
+  - Entrada em `schema-consistency.spec.ts` (ternária teamId validada)
+  - **Total suite MCP:** 110/110 PASS (0 regressões)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — atualização em DProject (tabela estrutural, sem Engine)
+- Pilar 2 (Endpoints): MCP é canal alternativo ao REST; tool reutiliza ProjectsService (zero controller novo)
+- Pilar 3 (Seed): N/A — zero DClasses novas
+
+**ADRs vinculados:** ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation defense-in-depth)
+
+**Build & Smoke:**
+- `make build` → PASS (0 warnings)
+- `npx tsc --noEmit` → 7 pre-existing erros (não são novos)
+- ESLint → PASS (6 arquivos modificados/criados, 0 warnings)
+- Test suite MCP → 110/110 PASS
+
+**Divergência Positiva do Plano:**
+- Plano §Task#7 sugeria `statusId` como campo atualizável
+- **Implementação entregue:** `nome`, `description`, `prefix`, `automationEnabled`, `gitRepo`, `teamId` (sem `statusId` — alinhado com modelo de projeto V3)
+  - **Razão:** DProject não usa `statusId` (status é derivado de tasks + sprints); campo não existia no schema — mais simples adicionar quando necessário
+
+**Débitos Abertos (rastreados):**
+- **Tasks anteriores continuam abertos:**
+  - MEDIUM: `taskType` omitido do inputSchema Task #2 (resolução agendada Tasks #3+)
+  - MEDIUM: `priority: null` é no-op silencioso Task #2 (resolução futura)
+  - MEDIUM: ProjectMembersService.getMembers JSDoc vs impl Task #5 (mitigação: gate na tool)
+  - LOW: `logger.debug?.()` Task #6 (padronizar em próximas tasks)
+
+**Plan:** [`workspace/plans/plan-mcp-expansion-8tools.md`](../workspace/plans/plan-mcp-expansion-8tools.md) §Task #7 (linhas 515-540)
+**Review:** APPROVED 9.0/10
+**Memory:** [[mcp-expansion-task7-gotchas]] — semântica ternária teamId, validação hasUpdate antes de service, Pilar 2 confirmado
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan Task #7 (2h) |
+| Implementer | ~1.5h | 100% PASS: tool + 13 testes + semântica ternária |
+| Reviewer | ~20min | 9.0/10 APPROVED (padrão tenant isolation robusto; semântica ternária bem implementada) |
+| Documenter | ~20min | JSDoc, ROADMAP, CHANGELOG, STATUS, commit Conventional |
+
+**Next:** Task #8 `delete_project` (soft-delete com cascata de tasks/sprints) — reusa padrão defense-in-depth, final da expansão MCP
+
+---
+
 ## Proximas fases (preview)
 
 | Fase | Nome | Pilar dominante |

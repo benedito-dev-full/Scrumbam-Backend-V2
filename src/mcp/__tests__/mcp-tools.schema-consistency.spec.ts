@@ -7,6 +7,7 @@ import { ListProjectsTool } from '../tools/list-projects.tool';
 import { ListSprintsTool } from '../tools/list-sprints.tool';
 import { ListTasksTool } from '../tools/list-tasks.tool';
 import { McpTool } from '../tools/tool.interface';
+import { UpdateProjectTool } from '../tools/update-project.tool';
 import { UpdateStatusTool } from '../tools/update-status.tool';
 import { UpdateTaskTool } from '../tools/update-task.tool';
 
@@ -50,6 +51,7 @@ function buildRegisteredTools(): McpTool[] {
     new UpdateTaskTool(noop, noop),
     new ListMembersTool(noop, noop),
     new GetProjectTool(noop, noop, noop),
+    new UpdateProjectTool(noop),
   ];
 }
 

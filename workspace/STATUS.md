@@ -2943,6 +2943,97 @@ Plano `workspace/plans/plan-orphan-workspace.md`. Ciclo completo Strategist → 
 
 ---
 
+### ✅ Task #7: MCP Tool `update_project` — COMPLETA
+
+**Módulo:** mcp  
+**Fase:** F11 (MCP Expansion — Task #7 de 8)  
+**Status:** COMPLETA  
+**Implementer completou:** 2026-05-15  
+**Reviewer aprovou:** 2026-05-15 (Score 9.0/10)  
+**Documenter finalizou:** 2026-05-15  
+
+**Tempo Real:**
+- Implementer: ~1.5h (tool + 13 testes + semântica ternária teamId)
+- Reviewer: ~20min (validação de tenant scope + MANAGER check)
+- Documenter: ~20min (ROADMAP + CHANGELOG + STATUS + commit)
+
+**Deliverables:**
+
+| Item | Status | Detalhe |
+|------|--------|---------|
+| `src/mcp/tools/update-project.tool.ts` | ✅ | ~209 linhas, JSDoc 55L, injeta ProjectsService |
+| `src/mcp/__tests__/mcp-tools.update-project.spec.ts` | ✅ | 13 cases (happy path, múltiplos campos, teamId ternária, validação hasUpdate, RBAC, 404) |
+| `src/mcp/__tests__/mcp-tools.schema-consistency.spec.ts` | ✅ | Atualizado — 10 tools agora (adicionou update_project ao array) |
+| Registração em McpRouterService | ✅ | 10º param (ANTES de configService) + import em mcp.module.ts |
+| Entrada em tools.schema.json | ✅ | name + description + inputSchema com [string, null] para teamId |
+| mcp-block-d.spec.ts atualizado | ✅ | toHaveLength(9)→(10), lista de nomes atualizada |
+| 2 Helpers Privados | ✅ | parseOptionalBoolean, parseOptionalTeamId com JSDoc |
+
+**Campos Suportados:**
+- `nome` (string, max 200) — nome do projeto
+- `description` (string, max 2000) — descrição/documentação
+- `prefix` (string) — prefixo para nomenclatura de tasks
+- `automationEnabled` (boolean) — habilita automação via agente
+- `gitRepo` (string) — URL do repositório Git vinculado
+- `teamId` (string | null | undefined) — semântica ternária para vínculo de time
+
+**Semântica Ternária para teamId:**
+- `undefined` (omitido) → não tocar o vínculo atual (NOOP)
+- `null` (explícito) → desvincular time (limpar relação)
+- `string` (valor) → vincular novo time (ou mover para time diferente)
+
+**Validação Centralizada:**
+- Obriga ao menos UM campo além de `projectId` (validação antes de chamar service)
+- Se nenhum campo fornecido → `invalidParams("at least one field to update...")`
+- Semântica: DTO construído APENAS com campos presentes (omite `undefined` para que service diferencie omitido vs null)
+
+**Tenant Isolation (ADR-V2-042):**
+- Passa `ctx.dEntidadeId` sem `organizationId` (MCP cross-org by design)
+- Service `ProjectsService.update` valida MANAGER role via `requireManagerRole` (ForbiddenException)
+- Exceção não é interceptada na tool → propagada ao router para tradução MCP
+
+**Sem try/catch:** Exceções (ForbiddenException, NotFoundException) propagam para `McpRouterService.dispatchTool` sem tratamento local — router decide como traduzir para erro MCP.
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — atualização em DProject (estrutural)
+- Pilar 2 (Endpoints): REUTILIZADO (ProjectsService, zero controller novo)
+- Pilar 3 (Seed): RESPEITADO (zero DClasses novas)
+
+**Build & Smoke:**
+- `make build` → PASS (TypeScript clean, 0 warnings)
+- `npx tsc --noEmit` → 7 pre-existing erros (não novos)
+- ESLint → PASS (6 arquivos modificados/criados, 0 warnings)
+- Test suite MCP → 110/110 PASS (0 regressões)
+
+**DÉBITOS TÉCNICOS (pré-existentes, rastreados):**
+
+1. **Tasks #2 continuam abertos:**
+   - MEDIUM: `taskType` omitido do inputSchema (resolução agendada Tasks #3+)
+   - MEDIUM: `priority: null` é no-op silencioso (resolução futura)
+
+2. **Task #5 continuam abertos:**
+   - MEDIUM: ProjectMembersService.getMembers JSDoc vs impl (mitigação: gate na tool)
+
+3. **Task #6 continuam abertos:**
+   - LOW: `logger.debug?.()` (padronizar em próximas tasks)
+
+**ADRs vinculados:** ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation defense-in-depth)
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan Task #7 (2h) |
+| Implementer | ~1.5h | 100% PASS (tool + 13 specs + semântica ternária confirmada) |
+| Reviewer | ~20min | 9.0/10 APPROVED (padrão tenant isolation robusto; RBAC via service) |
+| Documenter | ~20min | ROADMAP ✅, CHANGELOG ✅, STATUS ✅, commit Conventional ✅ |
+
+**Status:** ✅ COMPLETA — Pronto para merge (JSDoc ✅, ROADMAP ✅, CHANGELOG ✅, STATUS ✅, commit ✅)
+
+**Next Task:** #8 `delete_project` (soft-delete com cascata de tasks/sprints) — final da expansão MCP
+
+---
+
 <!-- dedup:implementer:4 -->
 ### Agent Concluído: implementer
 

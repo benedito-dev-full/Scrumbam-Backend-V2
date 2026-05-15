@@ -22,6 +22,7 @@ import { ListMembersTool } from './tools/list-members.tool';
 import { ListProjectsTool } from './tools/list-projects.tool';
 import { ListSprintsTool } from './tools/list-sprints.tool';
 import { ListTasksTool } from './tools/list-tasks.tool';
+import { UpdateProjectTool } from './tools/update-project.tool';
 import { UpdateStatusTool } from './tools/update-status.tool';
 import { UpdateTaskTool } from './tools/update-task.tool';
 
@@ -45,6 +46,7 @@ import { UpdateTaskTool } from './tools/update-task.tool';
     UpdateTaskTool,
     ListMembersTool,
     GetProjectTool,
+    UpdateProjectTool,
   ],
   exports: [McpKeyService, McpRouterService, McpRateLimitService, McpAuditService],
 })

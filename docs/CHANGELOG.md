@@ -14,6 +14,17 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F11 Task #7: MCP Tool `update_project` com Semântica Ternária para teamId (ADR-V2-042)** - 2026-05-15
+  - **Tool MCP `update_project`:** atualiza propriedades de um projeto existente (nome, description, prefix, automationEnabled, gitRepo, teamId)
+  - **Classe `UpdateProjectTool`** em `src/mcp/tools/update-project.tool.ts` (~209 linhas) — validação de ao menos 1 campo além de projectId
+  - **Semântica Ternária para teamId:** `undefined` = não tocar, `null` = desvincular, `string` = novo time
+  - **Tenant Isolation (ADR-V2-042):** `ctx.dEntidadeId` sem `organizationId` (MCP cross-org by design); MANAGER check via service
+  - **Registração:** 10º param ao constructor `McpRouterService` (ANTES de `configService`), entrada em `tools.schema.json`
+  - **Testes:** 13 cases em `mcp-tools.update-project.spec.ts` (happy path, validação campos, BigInt parse, MANAGER RBAC, projeto 404, ternária teamId) + schema-consistency atualizado → 96/96 PASS MCP total
+  - **Pilares:** Pilar 2 RESPEITADO (reutiliza ProjectsService — zero controller novo); Pilar 3 RESPEITADO (zero DClasses novas)
+  - **ADRs:** ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation defense-in-depth)
+  - **Quality Score:** 9.0/10 APPROVED | Build: PASS, TypeScript: 0 errors
+
 - **F11 Task #1: MCP Tool `get_task` com Tenant Isolation (ADR-V2-042)** - 2026-05-14
   - **Tool MCP `get_task`:** busca task por ID, escopada aos projetos acessíveis ao usuário via `findAccessibleProjectIds` (defense-in-depth ADR-V2-042)
   - **Classe `GetTaskTool`** em `src/mcp/tools/get-task.tool.ts` (~90 linhas) — injeção de `TasksService` + `ProjectsService`
