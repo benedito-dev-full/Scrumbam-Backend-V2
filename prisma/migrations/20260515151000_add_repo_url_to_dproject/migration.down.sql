@@ -11,8 +11,11 @@
 --   * Restaura dados.gitRepo APENAS para registros com repoUrl NÃO-NULO
 --     e que NÃO já tinham gitRepo no JSON (não sobrescreve).
 --   * Drop com IF EXISTS — re-run = no-op.
-
-BEGIN;
+--
+-- NOTA: BEGIN/COMMIT removidos por consistência com migration.sql UP.
+-- Quando este script é executado manualmente via psql, envolver em
+-- transação explícita pelo operador (psql -1 -f migration.down.sql) ou
+-- aceitar autocommit por statement.
 
 -- 1. Garantir que dados.gitRepo está populado para registros que só
 --    tinham repoUrl (caso o frontend já tenha começado a escrever só
@@ -49,5 +52,3 @@ END $$;
 
 -- 2. Drop da coluna (IF EXISTS — idempotente).
 ALTER TABLE "DProject" DROP COLUMN IF EXISTS "repoUrl";
-
-COMMIT;

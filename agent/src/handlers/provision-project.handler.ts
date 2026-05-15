@@ -252,6 +252,8 @@ function errorCodeToStatus(code: string): number {
     case 'PULL_FAILED':
     case 'IO_ERROR':
       return 500;
+    case 'CLONE_TIMEOUT':
+      return 504;
     default:
       return 500;
   }

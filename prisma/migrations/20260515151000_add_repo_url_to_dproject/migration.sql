@@ -11,8 +11,11 @@
 -- Rollback: ver companion file `migration.down.sql` no mesmo diretório
 -- (não executado automaticamente pelo Prisma — script manual para staging/prod
 -- caso seja necessário reverter).
-
-BEGIN;
+--
+-- NOTA: BEGIN/COMMIT removidos pós-aplicação (Prisma gerencia transação).
+-- Em dev local que já aplicou a versão antiga: rodar
+--   npx prisma migrate resolve --applied 20260515151000_add_repo_url_to_dproject
+-- caso surja erro de hash mismatch.
 
 -- 1. Adicionar coluna (nullable — não quebra inserts antigos).
 --    IF NOT EXISTS garante idempotência se a coluna já existir (re-run).
@@ -32,5 +35,3 @@ WHERE "repoUrl" IS NULL
 -- 3. NÃO apagar dados->'gitRepo' — manter por 1 release para compat
 --    com leituras antigas (frontend legado, services em desenvolvimento).
 --    A remoção será feita em migration separada após release N+1.
-
-COMMIT;

@@ -23,6 +23,7 @@ export type ProvisionProjectErrorCode =
   | 'GIT_MISSING'
   | 'CLONE_FAILED'
   | 'PULL_FAILED'
+  | 'CLONE_TIMEOUT'
   | 'IO_ERROR';
 
 export class ProvisionProjectError extends Error {
@@ -117,7 +118,11 @@ export function provisionProject(
       throw mapGitError(err, 'PULL_FAILED', 'git pull falhou');
     }
   } else {
-    const depth = options.depth ?? 1;
+    // ADR-V2-044: default depth=0 (full clone) para suportar `git push`
+    // pelo Claude Code no Milestone 2. Clone inicial ~2x-4x mais lento, mas
+    // sem necessidade de `git fetch --unshallow` posterior. Override via
+    // `options.depth` continua disponivel para casos especiais.
+    const depth = options.depth ?? 0;
     const cloneArgs =
       depth > 0
         ? ['clone', '--depth', String(depth), repoUrl, projectPath]
@@ -238,13 +243,23 @@ function mapGitError(
   fallbackCode: ProvisionProjectErrorCode,
   prefix: string,
 ): ProvisionProjectError {
-  const code = (err as NodeJS.ErrnoException).code;
+  const errno = err as NodeJS.ErrnoException & { signal?: string; killed?: boolean };
+  const code = errno.code;
   if (code === 'ENOENT') {
     return new ProvisionProjectError(
       'GIT_MISSING',
       'comando git nao encontrado no PATH (install.sh deve garantir git)',
       err,
     );
+  }
+  // Timeout: `execFileSync` com option `timeout` mata o processo com
+  // SIGTERM e seta `killed=true`. Em alguns ambientes vem como
+  // `code: 'ETIMEDOUT'`. Cobrir ambos. Convencao: timeout em CLONE ou
+  // PULL mapeia para CLONE_TIMEOUT (bucket unico). Prefix distingue
+  // origem na mensagem (audit clarity).
+  if (errno.signal === 'SIGTERM' || code === 'ETIMEDOUT' || errno.killed === true) {
+    const message = err instanceof Error ? err.message : String(err);
+    return new ProvisionProjectError('CLONE_TIMEOUT', `${prefix} excedeu timeout: ${message}`, err);
   }
   const message = err instanceof Error ? err.message : String(err);
   return new ProvisionProjectError(fallbackCode, `${prefix}: ${message}`, err);

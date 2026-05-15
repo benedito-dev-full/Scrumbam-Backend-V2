@@ -117,4 +117,84 @@ describe('PROVISION_PROJECT handler', () => {
     );
     expect(provisionImpl).not.toHaveBeenCalled();
   });
+
+  /**
+   * C11#1 payload sem projectSlug: validatePayload roda
+   * `typeof b.projectSlug !== 'string'` → falha como INVALID_SLUG
+   * (regex nao bate em undefined). Handler responde 422 e NAO chama
+   * provisionImpl.
+   */
+  it('payload sem projectSlug vira 422 INVALID_SLUG e nao chama provisionImpl', () => {
+    const provisionImpl = jest.fn();
+    const { status, json } = invokeHandler(
+      // sem projectSlug
+      { repoUrl: 'https://github.com/org/repo' },
+      { provisionImpl: provisionImpl as never },
+    );
+
+    expect(status).toHaveBeenCalledWith(422);
+    expect(json).toHaveBeenCalledWith(expect.objectContaining({ errorCode: 'INVALID_SLUG' }));
+    expect(provisionImpl).not.toHaveBeenCalled();
+  });
+
+  /**
+   * C11#2 baseDir fora do permitido (allowedBaseDirs): a checagem
+   * acontece dentro de provisionProject (allowedBaseDirs vem do agent
+   * config). Handler propaga ProvisionProjectError(BASE_DIR_INVALID)
+   * mapeando para 422.
+   */
+  it('baseDir fora de allowedBaseDirs vira 422 BASE_DIR_INVALID', () => {
+    const provisionImpl = jest.fn(() => {
+      throw new ProvisionProjectError(
+        'BASE_DIR_INVALID',
+        'baseDir /etc nao esta em allowedProjectRoots',
+      );
+    });
+    const { status, json } = invokeHandler(
+      {
+        projectSlug: 'proj',
+        repoUrl: 'https://github.com/org/repo.git',
+        baseDir: '/etc',
+      },
+      {
+        provisionImpl: provisionImpl as never,
+        allowedBaseDirs: ['/home/dev-benedito/projetos'],
+      },
+    );
+
+    expect(status).toHaveBeenCalledWith(422);
+    expect(json).toHaveBeenCalledWith(expect.objectContaining({ errorCode: 'BASE_DIR_INVALID' }));
+    expect(provisionImpl).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * C11#3 alreadyExisted=true: pasta existente com .git valido, pull
+   * --ff-only deu certo. Handler propaga `alreadyExisted: true` no ACK
+   * (frontend usa para distinguir provisionamento novo vs sync).
+   */
+  it('sucesso com alreadyExisted=true reflete no ACK 200', () => {
+    const provisionImpl = jest.fn(() => ({
+      projectPath: '/home/dev-benedito/projetos/proj-existing',
+      alreadyExisted: true,
+      currentBranch: 'main',
+      headCommitSha: 'c'.repeat(40),
+      usedSshKey: true,
+    }));
+
+    const { status, json } = invokeHandler(
+      { projectSlug: 'proj-existing', repoUrl: 'git@github.com:org/repo.git' },
+      { provisionImpl: provisionImpl as never },
+    );
+
+    expect(status).toHaveBeenCalledWith(200);
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accepted: true,
+        alreadyExisted: true,
+        projectPath: '/home/dev-benedito/projetos/proj-existing',
+        currentBranch: 'main',
+        headCommitSha: 'c'.repeat(40),
+      }),
+    );
+  });
 });

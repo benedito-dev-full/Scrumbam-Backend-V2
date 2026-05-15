@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  GatewayTimeoutException,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -338,6 +339,177 @@ describe('ProvisionService.provision', () => {
       }),
     );
   });
+
+  it('C2: 409 quando useSshKey=true mas metaDados.deployKeyPub esta ausente', async () => {
+    const prisma = buildPrismaMock();
+    prisma.dProject.findFirst.mockResolvedValue(baseProject());
+    // Vinculo sem deployKeyPub
+    prisma.dVincula.findFirst.mockResolvedValue({
+      chave: LINK_ID,
+      metaDados: { projectSlug: PROJECT_SLUG },
+    });
+    prisma.dEntidade.findFirst.mockResolvedValue(baseAgent());
+
+    const dispatch = jest.fn();
+    const service = buildService({
+      prisma,
+      remoteClient: { dispatch },
+      eventProducer: { addInternalEvent: jest.fn() },
+      roleResolver: {
+        getProjectRole: jest.fn().mockResolvedValue('MANAGER'),
+        getOrgRole: jest.fn(),
+      },
+    });
+
+    // useSshKey=true (default quando undefined)
+    await expect(service.provision(PROJECT_ID, AGENT_ID, true, USER_ID)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+
+    // Mensagem acionavel deve mencionar deploy key e o endpoint para gera-la
+    await expect(service.provision(PROJECT_ID, AGENT_ID, true, USER_ID)).rejects.toThrow(
+      /deploy key/i,
+    );
+
+    // Nao deve disparar ao agente quando bloqueia pre-dispatch
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('C2: useSshKey=false NAO exige deployKeyPub (segue para dispatch)', async () => {
+    const prisma = buildPrismaMock();
+    prisma.dProject.findFirst.mockResolvedValue(baseProject());
+    // Vinculo sem deployKeyPub (apenas projectSlug)
+    prisma.dVincula.findFirst.mockResolvedValue({
+      chave: LINK_ID,
+      metaDados: { projectSlug: PROJECT_SLUG },
+    });
+    prisma.dEntidade.findFirst.mockResolvedValue(baseAgent());
+    prisma.dVincula.update.mockResolvedValue({});
+
+    const dispatch = jest.fn().mockResolvedValue({
+      accepted: true,
+      alreadyExisted: false,
+      projectPath: `/home/dev-benedito/projetos/${PROJECT_SLUG}`,
+      currentBranch: 'main',
+      headCommitSha: 'd'.repeat(40),
+      usedSshKey: false,
+    });
+
+    const service = buildService({
+      prisma,
+      remoteClient: { dispatch },
+      eventProducer: { addInternalEvent: jest.fn() },
+      roleResolver: {
+        getProjectRole: jest.fn().mockResolvedValue('MANAGER'),
+        getOrgRole: jest.fn(),
+      },
+    });
+
+    await expect(service.provision(PROJECT_ID, AGENT_ID, false, USER_ID)).resolves.toEqual(
+      expect.objectContaining({ usedSshKey: false }),
+    );
+
+    expect(dispatch).toHaveBeenCalled();
+  });
+
+  it('C3: 504 GatewayTimeout quando agente reporta errorCode=CLONE_TIMEOUT', async () => {
+    const prisma = buildPrismaMock();
+    prisma.dProject.findFirst.mockResolvedValue(baseProject());
+    prisma.dVincula.findFirst.mockResolvedValue(baseLink());
+    prisma.dEntidade.findFirst.mockResolvedValue(baseAgent());
+
+    const dispatch = jest.fn().mockResolvedValue({
+      accepted: false,
+      errorCode: 'CLONE_TIMEOUT',
+      message: 'git clone excedeu 60s',
+    });
+
+    const service = buildService({
+      prisma,
+      remoteClient: { dispatch },
+      eventProducer: { addInternalEvent: jest.fn().mockResolvedValue(undefined) },
+      roleResolver: {
+        getProjectRole: jest.fn().mockResolvedValue('MANAGER'),
+        getOrgRole: jest.fn(),
+      },
+    });
+
+    await expect(
+      service.provision(PROJECT_ID, AGENT_ID, undefined, USER_ID),
+    ).rejects.toBeInstanceOf(GatewayTimeoutException);
+  });
+
+  it('C4: 503 quando headCommitSha do ACK nao bate regex de SHA-1 (40 hex)', async () => {
+    const prisma = buildPrismaMock();
+    prisma.dProject.findFirst.mockResolvedValue(baseProject());
+    prisma.dVincula.findFirst.mockResolvedValue(baseLink());
+    prisma.dEntidade.findFirst.mockResolvedValue(baseAgent());
+
+    const dispatch = jest.fn().mockResolvedValue({
+      accepted: true,
+      alreadyExisted: false,
+      projectPath: `/home/dev-benedito/projetos/${PROJECT_SLUG}`,
+      currentBranch: 'main',
+      headCommitSha: 'malformed', // nao bate /^[a-f0-9]{40}$/
+      usedSshKey: true,
+    });
+
+    const service = buildService({
+      prisma,
+      remoteClient: { dispatch },
+      eventProducer: { addInternalEvent: jest.fn().mockResolvedValue(undefined) },
+      roleResolver: {
+        getProjectRole: jest.fn().mockResolvedValue('MANAGER'),
+        getOrgRole: jest.fn(),
+      },
+    });
+
+    await expect(
+      service.provision(PROJECT_ID, AGENT_ID, undefined, USER_ID),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+    // Garante que NAO persistiu DVincula com lixo no metaDados
+    expect(prisma.dVincula.update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['empty string', ''],
+    ['HEAD ref', 'HEAD'],
+    ['too short (8 hex)', 'deadbeef'],
+  ])(
+    'C4: 503 quando headCommitSha=%s nao bate regex de SHA-1 (40 hex)',
+    async (_label, invalidSha) => {
+      const prisma = buildPrismaMock();
+      prisma.dProject.findFirst.mockResolvedValue(baseProject());
+      prisma.dVincula.findFirst.mockResolvedValue(baseLink());
+      prisma.dEntidade.findFirst.mockResolvedValue(baseAgent());
+
+      const dispatch = jest.fn().mockResolvedValue({
+        accepted: true,
+        alreadyExisted: false,
+        projectPath: `/home/dev-benedito/projetos/${PROJECT_SLUG}`,
+        currentBranch: 'main',
+        headCommitSha: invalidSha,
+        usedSshKey: true,
+      });
+
+      const service = buildService({
+        prisma,
+        remoteClient: { dispatch },
+        eventProducer: { addInternalEvent: jest.fn().mockResolvedValue(undefined) },
+        roleResolver: {
+          getProjectRole: jest.fn().mockResolvedValue('MANAGER'),
+          getOrgRole: jest.fn(),
+        },
+      });
+
+      await expect(
+        service.provision(PROJECT_ID, AGENT_ID, undefined, USER_ID),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+      expect(prisma.dVincula.update).not.toHaveBeenCalled();
+    },
+  );
 
   it('useSshKey=false no body e repassado ao agent', async () => {
     const prisma = buildPrismaMock();

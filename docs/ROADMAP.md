@@ -2,9 +2,45 @@
 
 **Versao:** 1.0
 **Mantido por:** Documenter Agent V2
-**Atualizado em:** 2026-05-12
+**Atualizado em:** 2026-05-15
 
 > Este documento rastreia tasks por Fase (F0..F17). Strategist abre, Implementer entrega, Reviewer valida, Documenter fecha. Cada task tem entrada com Status, Modulo, Fase, Tempo Real, Quality Score, Pilares aplicados e ADRs vinculados.
+
+---
+
+## F13 — Auto-Provisionamento VPS / Clone do Repositório (Milestone 1)
+
+### Milestone 1: Auto-Provisionamento VPS — Clone do Repositório — 🟡 EM CORREÇÃO (post-review 156e194)
+
+**Status:** 🟡 EM CORREÇÃO — Reviewer apontou 13 itens no commit `156e194` (Score 6.2/10 NEEDS_CHANGES). Plano corretivo em execução em 4 frentes paralelas (A/B/C/D). Alvo pós-corretivo: ≥ 8.5/10 APPROVED.
+**Módulo V2:** automation + projects + agent (monorepo)
+**Fase V2:** F13 (Automation Claude Code — extensão pós-deploy-key, antes de F13 Milestone 2 Claude Code real)
+**Tempo Real:** ~22h plano original + ~10h corretivo = **~32h total** (commit base em ~1 dia)
+**Quality Score:** 6.2/10 NEEDS_CHANGES (review original) → alvo ≥ 8.5/10 APPROVED (pós-corretivo)
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — clone é estrutural (DVincula UPDATE em `metaDados.provisioning`), não transacional
+- Pilar 2 (Endpoints): reuso `/projects`, `/projects/:id/agent`, `/projects/:id/agent/:agentId/deploy-key`; novo `POST /projects/:id/agent/:agentId/provision` justificado (HMAC outbound + idempotência específica + dispatch síncrono)
+- Pilar 3 (Seed): ZERO DClasses novas — reuso `-489 AUDIT_GENERIC` (eventos) e `-185 PROJECT_AGENT` (DVincula)
+
+**ADRs vinculados:** ADR-V2-001 (exceção via ADR-V2-043), ADR-V2-033, ADR-V2-035, ADR-V2-036, ADR-V2-037, ADR-V2-042, **ADR-V2-043 (NOVO — coluna `repoUrl` em DProject)**, **ADR-V2-044 (NOVO — full clone vs shallow clone)**
+
+**Endpoint entregue:** `POST /projects/:id/agent/:agentId/provision` (síncrono, HMAC outbound, idempotente via UPDATE em DVincula -185 `metaDados.provisioning`)
+
+**Comando outbound:** `PROVISION_PROJECT` (5º tipo do dispatcher do agente, junto a `PING`/`RUN_CLAUDE_CODE`/`SET_ENV`/`GENERATE_DEPLOY_KEY`)
+
+**Migration:** `20260515151000_add_repo_url_to_dproject` — `DProject.repoUrl VARCHAR(512)` + backfill idempotente de `dados.gitRepo` (ADR-V2-043). Corretivo C12 removeu `BEGIN/COMMIT` redundante (Prisma gerencia transação). Em dev local: `npx prisma migrate resolve --applied 20260515151000_add_repo_url_to_dproject` recalibra checksum.
+
+**Frentes do Corretivo:**
+
+| Frente | Escopo | Itens cobertos |
+|--------|--------|----------------|
+| A | Agente: fix spec dispatcher SUPPORTED_TYPES_LIST + `DEFAULT_DEPTH=0` + errorCode `CLONE_TIMEOUT` | P1, P3, P13 |
+| B | Backend: defesas pré-dispatch (`deployKeyPub` check, regex SHA-1 em ACK) | P2, P4 |
+| C | Specs: provision.controller/service + agente provision-project.handler + clone.spec ampliado | P8, P9, P10, P11 |
+| D | Docs canônicos: STATUS/ROADMAP/MEMORY/migration SQL sem BEGIN/COMMIT + ADR-V2-044 | P5, P6, P7, P12, P13 docs |
+
+**Próximo milestone:** Milestone 2 — Claude Code F13 (mapping `projectSlug` → workdir no CLAUDE.md global, executar `claude -p` no repo provisionado, `git push` outbound).
 
 ---
 

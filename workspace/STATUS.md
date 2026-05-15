@@ -1,6 +1,75 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-15 (Documenter finalizando F11 Task #3 MCP Notifications — COMPLETA)
+**Ultima atualizacao:** 2026-05-15 (F13 Milestone 1 Auto-Provisionamento VPS — Clone — EM CORREÇÃO pós-review 6.2/10)
+
+---
+
+## 🎯 F13 Milestone 1 — Auto-Provisionamento VPS / Clone — 🟡 EM CORREÇÃO (post-review 156e194)
+
+**Plano original:** `workspace/plans/plan-vps-provision-clone-milestone1.md`
+**Plano corretivo:** `workspace/plans/plan-vps-provision-clone-milestone1-corretivo.md` (fecha 13 itens do Reviewer)
+**Implementer (commit base):** sonnet — commit `156e194` "feat(automation): provisionar projeto na vps"
+**Reviewer (review original):** sonnet — 2026-05-15 → Score 6.2/10 NEEDS_CHANGES (13 itens em 4 blocos)
+**Status atual:** Corretivo EM EXECUÇÃO (4 frentes paralelas A/B/C/D) — alvo pós-corretivo ≥ 8.5/10 APPROVED
+
+### Estado Pós-Commit `156e194` (Build + Tests)
+
+**Build:** `make build` PASS
+**Tests:**
+- Backend: build verde; specs do milestone parcialmente entregues (~37/52 cenários planejados)
+- Agent: 1 spec falhando — `agent/__tests__/dispatcher.spec.ts:234`
+  (`SUPPORTED_TYPES_LIST` foi de 4 para 5 tipos com `PROVISION_PROJECT`; assertion `toHaveLength(4)` precisa ir para `5`)
+- Bloco 1 do corretivo (C1) trata esse spec — hook de Stop bloqueia commit enquanto vermelho
+
+### Deliverables (commit `156e194`)
+
+- **Migration:** `prisma/migrations/20260515151000_add_repo_url_to_dproject/` — adiciona `DProject.repoUrl VARCHAR(512)` + backfill idempotente de `dados.gitRepo` (ADR-V2-043 — exceção autorizada ao ADR-V2-001)
+- **Backend:** `ProvisionService`, `ProvisionController`, `ProvisionRequestDto`, `ProvisionResponseDto`, helper `repo-url.ts`, dual-write em `ProjectsService` (escreve em `repoUrl` E em `dados.gitRepo` por 1 release)
+- **Endpoint:** `POST /projects/:id/agent/:agentId/provision` (síncrono, HMAC outbound, idempotente — DVincula -185 UPDATE em `metaDados.provisioning`)
+- **Agente:** `agent/src/git/clone.ts` (clone com `execFile`, sem shell, allowlist de hosts), `agent/src/handlers/provision-project.handler.ts`, dispatcher branch `'PROVISION_PROJECT'` (5º tipo suportado)
+- **Comando outbound:** `PROVISION_PROJECT` (5º tipo do dispatcher do agente, junto a `PING`/`RUN_CLAUDE_CODE`/`SET_ENV`/`GENERATE_DEPLOY_KEY`)
+
+### Frentes do Corretivo em Andamento
+
+| Frente | Escopo | Itens cobertos |
+|--------|--------|----------------|
+| A | Agente: fix spec dispatcher (C1) + `DEFAULT_DEPTH=0` (full clone para suportar push do Milestone 2) + errorCode `CLONE_TIMEOUT` (C13/parte) | P1, P3 (CLONE_TIMEOUT), P13 (DEFAULT_DEPTH) |
+| B | Backend: `provision.service.ts` — defesas pré-dispatch (`deployKeyPub` check, regex SHA-1 em ACK) (C2, C4) | P2, P4 |
+| C | Specs: `provision.controller.spec.ts`, `provision.service.spec.ts`, agente `provision-project.handler.spec.ts`, `clone.spec.ts` ampliado (C8–C11) | P8, P9, P10, P11 |
+| D | Docs canônicos: STATUS.md (este bloco), ROADMAP.md, MEMORY.md (precedente ADR-V2-043), migration SQL sem `BEGIN/COMMIT` redundante (C12), ADR-V2-044 (full clone) (C5, C6, C7, C12, ADR-V2-044) | P5, P6, P7, P12, P13 docs |
+
+### Migration SQL — Nota Operacional Importante
+
+A migration `20260515151000_add_repo_url_to_dproject` JÁ FOI APLICADA em dev. O corretivo (C12) remove `BEGIN/COMMIT` redundante do `.sql` (Prisma envolve em transação automaticamente). Edição do `.sql` muda o hash registrado em `_prisma_migrations.checksum`. Em ambientes onde a migration já foi aplicada (dev local atual; ainda NÃO em prod neste milestone), executar:
+
+```bash
+npx prisma migrate resolve --applied 20260515151000_add_repo_url_to_dproject
+```
+
+para recalibrar o checksum sem rodar SQL. Documentado em CHANGELOG e no runbook do agente quando o milestone for promovido.
+
+### 3 Pilares
+
+- **Pilar 1 (Engine):** N/A — clone é estrutural (DVincula UPDATE em `metaDados.provisioning`), não transacional. Engine continua reservado a DPedido idClasse=-300 (executions F6).
+- **Pilar 2 (Endpoints):** Reuso de `/projects`, `/projects/:id/agent`, `/projects/:id/agent/:agentId/deploy-key`. Endpoint NOVO `POST /projects/:id/agent/:agentId/provision` justificado (HMAC outbound + idempotência específica + dispatch síncrono do agente).
+- **Pilar 3 (Seed):** ZERO DClasses novas — reuso `-489 AUDIT_GENERIC` (eventos) e `-185 PROJECT_AGENT` (DVincula) já existentes.
+
+### ADRs Vinculados
+
+- **ADR-V2-001** — 17 tabelas canônicas (referenciado via exceção autorizada de coluna)
+- **ADR-V2-042** — Tenant Isolation Defense-in-Depth (guard cobre `/projects/:id/...`)
+- **ADR-V2-043 (NOVO)** — Coluna `repoUrl` em DProject (precedente ÚNICO de exceção; ver `docs/decisions/ADR-V2-043-repo-url-coluna-dproject.md`)
+- **ADR-V2-044 (NOVO)** — Full Clone vs Shallow Clone no Auto-Provisionamento (`DEFAULT_DEPTH=0` para suportar `git push` do Milestone 2; ver `docs/decisions/ADR-V2-044-shallow-clone-vs-full-clone.md`)
+- ADR-V2-033 (contrato HTTP+HMAC), ADR-V2-035 (projectSlug + CLAUDE.md global), ADR-V2-036 (monorepo `agent/`), ADR-V2-037 (claudeSessionId)
+
+### Tempo e Próximos Passos
+
+- **Tempo plano original:** ~22h
+- **Tempo plano corretivo:** ~10h (7h30 trabalho líquido + 1h30 buffer + 1h margem)
+- **Total esperado F13 Milestone 1:** ~32h
+- **Próximo:** Consolidação dos 4 commits (A+B+C+D), re-review, fechamento com score ≥ 8.5/10. Em seguida: Milestone 2 (CLAUDE.md global mapping projectSlug → workdir).
+
+**Status:** 🟡 EM CORREÇÃO — não merge enquanto frentes A/B/C/D não fecharem e re-review não passar do gate 7.0.
 
 ---
 

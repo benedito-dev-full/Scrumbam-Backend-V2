@@ -65,3 +65,8 @@ Negativas:
 - `ProjectsService`: escrita dual e fallback de leitura.
 - DTOs de projeto: `repoUrl` validado por whitelist restritiva.
 - `ProvisionService`: revalida `repoUrl` antes do dispatch ao agente.
+
+## Vê também
+
+- [ADR-V2-001](./ADR-V2-001-zero-tabela-nova.md) — princípio "ZERO tabela nova" que esta exceção referencia.
+- [ADR-V2-044](./ADR-V2-044-shallow-clone-vs-full-clone.md) — decisão complementar do mesmo milestone (full clone via `DEFAULT_DEPTH=0`).

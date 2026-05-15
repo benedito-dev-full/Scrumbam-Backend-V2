@@ -1,8 +1,12 @@
 # Strategist Agent Memory — Scrumban-Backend-V2
 
-**Versão:** 1.2
-**Última atualização:** 2026-05-09 (F5 Task #1 — plan-domain-structural-f5-task1.md)
+**Versão:** 1.3
+**Última atualização:** 2026-05-15 (F13 Milestone 1 corretivo — ADR-V2-043 precedente, ADR-V2-044 full clone)
 **Atualizar:** ao concluir cada task. Limite ~200 linhas; acima disso, mover histórico antigo para `agent-memory/strategist/<topic>.md`.
+
+**Tópicos extras (vide arquivos no mesmo diretório):**
+- `historico-plans.md` — tabela completa de plans produzidos + padrões estabelecidos em F2
+- `referencias-canonicas.md` — conflitos resolvidos no §3.3 do plano-mestre + tabela de documentação-chave
 
 ---
 
@@ -143,14 +147,7 @@ ADRs adicionais (V2-015+):
 
 ## CONFLITOS RESOLVIDOS NO §3.3 DO PLANO-MESTRE
 
-| Conflito original | Resolução |
-|-------------------|-----------|
-| -152 AGENT vs ORGANIZATION | AGENT virou -156; ORGANIZATION fica -152 |
-| -491 EXECUCAO_CLAUDE vs WEBHOOK_ATTEMPT vs AGENT_STATUS_OFFLINE | Execution sai p/ -300..-303; -491 = WEBHOOK_ATTEMPT; AGENT_STATUS p/ -510..-513 |
-| -493 TELEGRAM_MSG_IN vs AGENT_STATUS_NEVER_CONNECTED | TELEGRAM_MSG_IN fica -493; AGENT_STATUS deslocado p/ -510..-513 |
-| -497 PROJECT_DELETED vs EXEC_STATUS_APPROVED vs MCP_CALL | TASK_CREATED = -497; PROJECT_LIFECYCLE = -499 (renomeado por ADR-V2-027); MCP_CALL = -495; EXEC_STATUS p/ -514..-522. F7 Task#1 adiciona AUDIT_GENERIC = -489 (ADR-V2-026). Total seed: 131 DClasses. |
-| -301..-303 EXEC_LOW/MED/HIGH vs EXECUTION_REFACTOR/FIX/FEATURE | Risk via idClasse prevalece (DVFS diferentes); categoria operacional vai em `dados.category` |
-| -460 WEBHOOK_CONFIG vs -470 WEBHOOK | -470..-479 reservada para configs/tokens consolidada |
+Detalhe completo (tabela de 6 conflitos canônicos sequestrados/renumerados) movido para `referencias-canonicas.md`. Consultar lá antes de propor nova renumeração de DClasse no range -150..-529.
 
 ---
 
@@ -191,18 +188,7 @@ ADRs adicionais (V2-015+):
 
 ## DOCUMENTAÇÃO CHAVE V2
 
-| Necessita | Abrir |
-|-----------|-------|
-| Visão geral, decisões, gates | `docs/plano/00-PLANO-MESTRE.md` |
-| Detalhe schema, seed, endpoints, auth | `docs/plano/01-FUNDACAO.md` |
-| Detalhe Engine, OperacaoExecucaoClaude, eventos, flow metrics | `docs/plano/02-DOMINIO-ENGINE.md` |
-| Detalhe Telegram, MCP, Webhooks, Automation | `docs/plano/03-INTEGRACOES.md` |
-| Detalhe testes, security, migration, runbook, launch | `docs/plano/04-HARDENING-HANDOFF.md` |
-| Diagnóstico do que foi corrigido | `docs/auditoria/00-AUDITORIA-CONSOLIDADA.md` |
-| Regras canônicas (auto-injetadas) | `.claude/rules/devari-*.md` |
-| Schema das 17 tabelas | `Devari-Core/RELATORIO-DEVARI-PARTE-1-BACKEND-CORE.md` |
-| Capacidades a replicar | `Scrumbam-Backend/docs/SYSTEM-OVERVIEW.md` |
-| Contrato HTTP a manter (128 endpoints) | `Scrumbam-Backend/docs/API-CONTRACT.md` |
+Tabela completa (10 docs canônicos + onde abrir) movida para `referencias-canonicas.md`. Consultar lá quando precisar localizar contrato, schema, runbook, etc.
 
 ---
 
@@ -227,18 +213,47 @@ ADRs adicionais (V2-015+):
 
 ## HISTÓRICO DE PLANS PRODUZIDOS
 
-| Task | Plan | Data | Decisões-chave |
-|------|------|------|----------------|
-| F2-Task1 | `workspace/plans/plan-endpoints-genericos-f2-task1.md` | 2026-05-08 | Pilar 2 ativo: 3 controllers genéricos (entidades/tabelas/classes). ZERO controller específico (sem UserController, SprintController). ADR-V2-015 compat wrapper `?classe=NOME` com LRU cache 5min + Logger.warn + header Deprecation/Sunset. ClasseController READ-ONLY. F2.1→F2.6 sequência com Infraestrutura Comum PRIMEIRO. Eventos inline em DEvento até F7 criar EventProducerService. ADR-V2-025 proposto para BigInt serialization strategy. `createSeller` helper canônico incluído mesmo sem uso no Scrumban V2. |
-| F3-Task1 | `workspace/plans/plan-auth-rbac-f3-task1.md` | 2026-05-08 | AuthCompositeGuard ordem: MCP→API Key→JWT (mais específico primeiro). RoleResolverService: LRU in-memory TTL 5min (Redis não ativo em F3). Refresh token: rotação estrita (reuse detection). MCP Key: DTabela(-472) + hash duplicado em DUserGroup.dados.mcpKeyHash. API Key: DTabela(-471). Dívidas F2 resolvidas na Fase 1 do plano (antes de qualquer guard). @SkipGuard() tombstone após remoção. Pergunta aberta Q1 para CEO sobre OrgTenantGuard e PATH_PARAM strategy em F5. |
-| F6-Task1 | `workspace/plans/plan-engine-operacao-execucao-claude-task1.md` | 2026-05-09 | Pilar 1 ATIVO: Engine base Operacao.ts + OperacaoPedido.ts (FULL) + OperacaoExecucaoClaude.ts (V2). Migration chcriacao_seq START WITH 1000000 (separação de range vs BIGSERIAL). DVFS usa `chaveScript INTEGER` (campo correto no schema V2) — NUNCA `s.id` (ADR-V2-016). dvfs-loader carrega por idClasse com fallback ao pai (Q1 para CEO). Scripts seeded em idClasse=-300 (compartilhados por -301/-302/-303). 2 testes regressivos BLOQUEANTES R-CHAVE-5 e R-CHAVE-7. Task 1 = G+H+I (Engine puro); Task 2 = J+K+L (Controller/Service/testes integration). agentTunnelService e eventProducer são STUBS em F6. |
-| F6-Task2 | `workspace/plans/plan-f6-executions-task2.md` | 2026-05-09 | Correção M1: `matchedPatterns: string[]` → `Array<{pattern,level}>` em IExecucaoData. ExecutionsService.execute() instancia Engine fresh (nova→calcula→[aprova/gravarComoAwaitingApproval]→grava). ApprovalFlowService.approve() usa $executeRaw race-safe (UPDATE com WHERE status='awaiting_approval' — 0 linhas = ConflictException 409). Sweeper @Cron findMany+filter+$executeRaw (Prisma ORM não suporta WHERE JSON em updateMany). rollback() cria nova execution que passa pelo Risk Gate (será HIGH). ExecutionThrottlerGuard: hash SHA-256 de projectId como tracker key (30 req/min). ExecutionAccessGuard: verifica DVincula -170..-173; ADMIN = idClasse=-171 PROJECT_MANAGER para approve/reject/rollback. Questão aberta Q1 para Implementer: reconstituição do Engine em approve() — Opção A (gravarAposAprovacaoManual) recomendada para preservar DVFS 6-7 e _executarClaude() intactos. 50 patterns adversariais: 25 HIGH + 15 MEDIUM + 10 LOW (spec verificável). |
+Movido para `agent-memory/strategist/historico-plans.md` em 2026-05-15 (índice ficou acima de 200 linhas). Adicionar novos plans diretamente lá.
 
-## PADRÕES ESTABELECIDOS EM F2
+---
 
-- **Serialização BigInt:** `format-entidade-response.ts` + `format-tabela-response.ts` por módulo (ou interceptor global — registrar como ADR-V2-025)
-- **LRU cache compartilhado:** `src/common/helpers/lru-cache.ts` (max 200, TTL 5min) — reutilizado por EntidadeService e TabelaService para alias `?classe=NOME`
-- **Validação DClasse:** sempre `prisma.dClasse.findFirst({ where: { chave, excluido: false } })` antes de qualquer query principal — 404 se não existe
-- **Placeholder de auth:** `@SkipGuard()` em todos os controllers F2 — F3 substitui por guards reais
-- **Tree builder:** 1 `findMany` + Map em memória — NUNCA recursão de queries (N+1 proibido)
-- **`?idClasse` obrigatório em GET /entidades e GET /tabelas** — listagem sem filtro de tipo proibida em F2
+## PRECEDENTES E EXCEÇÕES
+
+### ADR-V2-043 — Coluna `repoUrl` em DProject (PRECEDENTE ÚNICO de exceção ao ADR-V2-001)
+
+**Data:** 2026-05-15
+**Decisor:** CEO autorizou explicitamente.
+**Status:** Aprovado e formalizado em `docs/decisions/ADR-V2-043-repo-url-coluna-dproject.md`.
+**Contexto operacional:** F13 Milestone 1 — Auto-Provisionamento VPS (commit `156e194`).
+
+**O que aconteceu:** Adicionada coluna `repoUrl String? @db.VarChar(512)` em DProject (canônica) para hospedar a URL git do projeto de forma estrutural, tipada e indexável, em vez de continuar em `dados.gitRepo` (Json solto). Backend faz dual-write (escreve em ambos) por 1 release para compatibilidade com frontend legado.
+
+**Por que isso NÃO viola ADR-V2-001:** O ADR-V2-001 proíbe TABELA nova, não coluna. Mas o espírito é "não inflar schema canônico" — então qualquer coluna nova exige ADR justificando, com aprovação CEO. O hook `enforce-canonical-tables.sh` permanece válido: ele bloqueia tabela nova, mas não bloqueia coluna — a defesa contra abuso é o checklist abaixo.
+
+**Critérios estritos para FUTURAS exceções de coluna nova (replicar este precedente):**
+
+1. Dado deve ser ESTRUTURAL do projeto/entidade (não metadado opcional).
+2. Deve ter justificativa de PERFORMANCE, TIPO ou SEGURANÇA (não estética).
+3. Cabe em VARCHAR ≤512, ou Decimal/Int/Boolean/Date nativo (não Json).
+4. **EXIGE ADR redigido + aprovação CEO** — Strategist NÃO autorizado decidir sozinho mesmo cumprindo 1-3.
+5. Strategist registra em MEMORY como NOVO precedente sob critérios acima.
+
+Este é, até hoje (2026-05-15), o ÚNICO precedente. Não é regra geral. Próximos casos exigem nova aprovação CEO mesmo cumprindo os 5 critérios — não há "abertura automática" baseada nesta entrada.
+
+**Anti-padrões a rejeitar (cenários que NÃO se qualificam):**
+- "Vou adicionar coluna `cor` em DEntidade para o cliente preferir tema dark" → NÃO. Vai em `dados.preferencias.tema`.
+- "Vou adicionar `lastLoginAt` em DUserGroup" → NÃO. Já existe rastro em DEvento.
+- "Vou criar `repoUrl2` para segundo repositório" → NÃO. Múltiplos repos = DVincula + DTabela.
+- "Vou adicionar `slug` em DProject" → questionar primeiro. Se for derivável do nome, calcular em runtime. Se for único e indexado, candidato a ADR — mas começa em `dados`.
+
+**Lição:** Coluna nova ≠ tabela nova, mas custo arquitetural similar. Default = Json em `dados`. Exceção = ADR + CEO.
+
+### ADR-V2-044 — Full Clone vs Shallow Clone (decisão pré-Milestone 2)
+
+**Data:** 2026-05-15
+**Decisor:** Strategist Agent V2 (proposto), Reviewer (apontou limitação), aguarda ratificação CEO.
+**Status:** Proposto. Arquivo em `docs/decisions/ADR-V2-044-shallow-clone-vs-full-clone.md`.
+
+**Resumo:** `DEFAULT_DEPTH = 0` (full clone) em `agent/src/git/clone.ts` desde o Milestone 1, em vez do shallow `depth=1` originalmente proposto. Motivo: Milestone 2 (Claude Code F13) precisa de `git push`, e push em shallow falha com `fatal: shallow update not allowed`. Mudar agora evita migração `git fetch --unshallow` em projetos já provisionados.
+
+**Lição para o Strategist:** ao planejar features de longo prazo divididas em milestones, validar TODOS os caminhos de leitura/escrita do último milestone ANTES de fixar o default no primeiro. Trade-off "performance no MVP" pode virar débito caro se o caminho final for invalidado pelo default escolhido.

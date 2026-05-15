@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  GatewayTimeoutException,
   Injectable,
   Logger,
   NotFoundException,
@@ -80,6 +81,7 @@ export class ProvisionService {
    * @throws {ForbiddenException} Usuario sem permissao gerencial.
    * @throws {BadRequestException} Projeto sem `repoUrl` valido.
    * @throws {ConflictException} Vinculo sem `projectSlug` ou agente retorna conflito funcional.
+   * @throws {GatewayTimeoutException} Agente reportou `CLONE_TIMEOUT` no ACK (504).
    * @throws {ServiceUnavailableException} Agente offline, desatualizado ou ACK invalido.
    */
   async provision(
@@ -91,8 +93,23 @@ export class ProvisionService {
     const project = await this.requireProjectManagerOrOrgAdmin(projectId, userId);
     const repoUrl = this.resolveRepoUrl(project);
     const { link, agent, projectSlug } = await this.loadLinkAndAgent(projectId, agentId);
-    const correlationId = this.correlationIdService.getOrGenerate();
     const effectiveUseSshKey = useSshKey ?? true;
+
+    // Defesa em profundidade — se useSshKey=true, deploy key DEVE ter sido
+    // gerada antes via POST /deploy-key. Sem ela, o agente cairia em
+    // "Permission denied (publickey)" com mensagem opaca. Falha rapido aqui
+    // com mensagem acionavel.
+    if (effectiveUseSshKey) {
+      const deployKeyPub = link.metaDados.deployKeyPub;
+      if (typeof deployKeyPub !== 'string' || deployKeyPub.trim().length === 0) {
+        throw new ConflictException(
+          `Projeto ${projectId.toString()} sem deploy key para agente ${agentId.toString()}. ` +
+            `Gere via POST /projects/:id/agent/:agentId/deploy-key antes de provisionar com useSshKey=true.`,
+        );
+      }
+    }
+
+    const correlationId = this.correlationIdService.getOrGenerate();
 
     let ack: ProvisionAck;
     try {
@@ -216,6 +233,15 @@ export class ProvisionService {
       if (code === 'PROJECT_DIR_EXISTS_NOT_GIT') {
         throw new ConflictException(message);
       }
+      // CLONE_TIMEOUT do agente — o agente eh o gateway entre o backend e o git
+      // remoto. Mapeamos para 504 (Gateway Timeout) ao inves de 503, pois o erro
+      // originou no recurso remoto (git) atraves do gateway (agente).
+      if (code === 'CLONE_TIMEOUT') {
+        throw new GatewayTimeoutException(
+          `Clone do repositorio excedeu o tempo limite no agente ${agentId.toString()} ` +
+            `(slug=${projectSlug}). Aumente timeoutSec ou verifique conectividade.`,
+        );
+      }
       throw new ServiceUnavailableException(
         `Agent ${agentId.toString()} nao confirmou provisionamento (code=${code})`,
       );
@@ -227,6 +253,15 @@ export class ProvisionService {
     ) {
       throw new ServiceUnavailableException(
         `Agent ${agentId.toString()} retornou ACK invalido para provision (slug=${projectSlug})`,
+      );
+    }
+    // headCommitSha deve ser SHA-1 de 40 hex chars lowercase. Agentes buggy podem
+    // retornar string vazia, "HEAD" ou "deadbeef" — bloquear aqui com mensagem
+    // clara em vez de propagar o lixo para DVincula.metaDados.
+    if (!/^[a-f0-9]{40}$/.test(ack.headCommitSha)) {
+      throw new ServiceUnavailableException(
+        `Agent ${agentId.toString()} retornou headCommitSha invalido para provision ` +
+          `(slug=${projectSlug}, sha=${ack.headCommitSha.slice(0, 16)}...)`,
       );
     }
   }
