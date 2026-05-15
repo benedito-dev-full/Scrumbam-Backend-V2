@@ -26,6 +26,9 @@ import request from 'supertest';
 import { EnvWriterError } from '../src/env/env-file-writer';
 import { createSetEnvHandler } from '../src/handlers/set-env.handler';
 
+/** Unix-only: chmod é no-op no Windows — stat retorna 0o666 para qualquer arquivo. */
+const itUnix = process.platform === 'win32' ? it.skip : it;
+
 function silentLogger() {
   return pino({ level: 'silent' });
 }
@@ -66,6 +69,18 @@ describe('SET_ENV handler', () => {
     const content = readFileSync(envFilePath, 'utf8');
     expect(content).toContain('GITHUB_TOKEN=ghp_abc123');
     expect(content).toContain('ANTHROPIC_API_KEY=sk-ant-xyz');
+  });
+
+  itUnix('1b) modo do env file é 0600 após escrita [Unix only]', async () => {
+    const envFilePath = makeTempEnvPath();
+    const app = buildApp({ logger: silentLogger(), envFilePath });
+
+    await request(app)
+      .post('/v1/execute')
+      .send({
+        vars: { GITHUB_TOKEN: 'ghp_abc123', ANTHROPIC_API_KEY: 'sk-ant-xyz' },
+        restartAfter: false,
+      });
 
     const mode = statSync(envFilePath).mode & 0o777;
     expect(mode).toBe(0o600);

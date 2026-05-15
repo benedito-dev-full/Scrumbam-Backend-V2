@@ -17,6 +17,9 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { ALLOWED_KEYS, EnvWriterError, writeEnvVars } from '../src/env/env-file-writer';
 
+/** Unix-only: chmod é no-op no Windows — stat retorna 0o666 para qualquer arquivo. */
+const itUnix = process.platform === 'win32' ? it.skip : it;
+
 function tempEnvPath(): { dir: string; path: string } {
   const dir = mkdtempSync(join(tmpdir(), 'envwriter-'));
   return { dir, path: join(dir, 'environment') };
@@ -32,7 +35,7 @@ describe('writeEnvVars', () => {
     expect(files).toEqual(['environment']);
   });
 
-  it('2) modo final é 0600 mesmo com umask permissivo', () => {
+  itUnix('2) modo final é 0600 mesmo com umask permissivo', () => {
     const { path } = tempEnvPath();
     const originalUmask = process.umask(0o022);
     try {

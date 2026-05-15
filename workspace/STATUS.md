@@ -1,6 +1,37 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-15 (Documenter finalizando F11 Task #3 MCP Notifications — COMPLETA)
+**Ultima atualizacao:** 2026-05-15 (Corretivo F13 VPS Provision Milestone 1 — depth=0, ADR-V2-044)
+
+---
+
+## 🎯 Task #5 — VPS Provision Milestone 1 (F13) — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Score 6.2/10 → 8.0/10 APPROVED)  
+**Módulo V2:** `src/automation/project-agent/` + `agent/src/git/` + `agent/src/handlers/`  
+**Build:** PASS | **Agent Tests:** 169 specs (14 suites)  
+**Commits:** `156e194` (impl base, 6.2/10) + `4faaa65` (corretivo, 8.0/10)  
+**Reviewer aprovou:** 2026-05-15 (Score 8.0/10 APPROVED — ajustes pós-revisão independente)
+
+### Entregáveis
+
+- ✅ `POST /projects/:id/agent/:agentId/provision` — síncrono, HMAC outbound, idempotente
+- ✅ Comando `PROVISION_PROJECT` (5º tipo no dispatcher do agente)
+- ✅ `agent/src/git/clone.ts` — `execFile` sem shell, allowlist de hosts, `CLONE_TIMEOUT`
+- ✅ `agent/src/handlers/provision-project.handler.ts` — mapping `errorCodeToStatus`
+- ✅ `prisma/migrations/20260515151000_add_repo_url_to_dproject` — coluna `repoUrl VARCHAR(512)` + backfill idempotente + rollback manual
+- ✅ Dual-write `repoUrl ↔ dados.gitRepo` em `projects.service.ts` (compat legado)
+- ✅ ADR-V2-043 (exceção ao ADR-V2-001 para coluna estrutural tipada)
+- ✅ ADR-V2-044 (full clone `depth=0` para compatibilidade com Milestone 2 push)
+
+### Pilares
+
+- Pilar 1 (Engine): N/A — provision é dispatch outbound, não transação DPedido
+- Pilar 2 (Endpoints): `POST /projects/:id/agent/:agentId/provision` (controller próprio — lógica de negócio justifica)
+- Pilar 3 (Seed): Zero DClasses novas
+
+### Próximo passo
+
+**Milestone 2** — Mapping `projectSlug → workdir` em CLAUDE.md global + `git push` outbound após execução Claude Code.
 
 ---
 

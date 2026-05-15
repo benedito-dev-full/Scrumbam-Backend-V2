@@ -15,6 +15,9 @@ import * as os from 'os';
 import * as path from 'path';
 import { loadConfig } from '../src/config/loader';
 
+/** Unix-only: chmod é no-op no Windows — stat retorna 0o666 para qualquer arquivo. */
+const itUnix = process.platform === 'win32' ? it.skip : it;
+
 /** Config válido base reutilizado nos testes. */
 const VALID_CONFIG = {
   agentId: 'agent-123',
@@ -55,7 +58,7 @@ describe('loadConfig', () => {
     fs.chmodSync(cfgPath, mode);
   }
 
-  it('1) config válido em modo 0600 retorna AgentConfig parseado', () => {
+  itUnix('1) config válido em modo 0600 retorna AgentConfig parseado', () => {
     writeConfig(JSON.stringify(VALID_CONFIG), 0o600);
 
     const cfg = loadConfig(cfgPath);
@@ -70,7 +73,7 @@ describe('loadConfig', () => {
     expect(cfg.logLevel).toBe('info');
   });
 
-  it('1b) usa defaults quando campos opcionais ausentes', () => {
+  itUnix('1b) usa defaults quando campos opcionais ausentes', () => {
     // Remove campos opcionais — zod deve aplicar defaults.
     const minimal = {
       agentId: 'a1',
@@ -91,26 +94,26 @@ describe('loadConfig', () => {
     expect(cfg.logLevel).toBe('info');
   });
 
-  it('2) modo 0644 → erro mencionando "0600"', () => {
+  itUnix('2) modo 0644 → erro mencionando "0600"', () => {
     writeConfig(JSON.stringify(VALID_CONFIG), 0o644);
 
     expect(() => loadConfig(cfgPath)).toThrow(/0600/);
     expect(() => loadConfig(cfgPath)).toThrow(/0644/);
   });
 
-  it('2b) modo 0640 também é rejeitado', () => {
+  itUnix('2b) modo 0640 também é rejeitado', () => {
     writeConfig(JSON.stringify(VALID_CONFIG), 0o640);
 
     expect(() => loadConfig(cfgPath)).toThrow(/0600/);
   });
 
-  it('3) JSON malformado → erro de parse', () => {
+  itUnix('3) JSON malformado → erro de parse', () => {
     writeConfig('{ "agentId": "abc", invalid json', 0o600);
 
     expect(() => loadConfig(cfgPath)).toThrow(/JSON malformado/);
   });
 
-  it('4) faltando agentId → erro zod mencionando "agentId"', () => {
+  itUnix('4) faltando agentId → erro zod mencionando "agentId"', () => {
     const invalid = { ...VALID_CONFIG };
     delete (invalid as Record<string, unknown>).agentId;
     writeConfig(JSON.stringify(invalid), 0o600);
@@ -118,7 +121,7 @@ describe('loadConfig', () => {
     expect(() => loadConfig(cfgPath)).toThrow(/agentId/);
   });
 
-  it('4b) faltando agentCommandSecret → erro zod mencionando o campo', () => {
+  itUnix('4b) faltando agentCommandSecret → erro zod mencionando o campo', () => {
     const invalid = { ...VALID_CONFIG };
     delete (invalid as Record<string, unknown>).agentCommandSecret;
     writeConfig(JSON.stringify(invalid), 0o600);
@@ -126,7 +129,7 @@ describe('loadConfig', () => {
     expect(() => loadConfig(cfgPath)).toThrow(/agentCommandSecret/);
   });
 
-  it('5) backendBaseUrl inválida → erro zod', () => {
+  itUnix('5) backendBaseUrl inválida → erro zod', () => {
     const invalid = { ...VALID_CONFIG, backendBaseUrl: 'not-a-url' };
     writeConfig(JSON.stringify(invalid), 0o600);
 
@@ -134,7 +137,7 @@ describe('loadConfig', () => {
     expect(() => loadConfig(cfgPath)).toThrow(/URL/);
   });
 
-  it('6) allowedProjectRoots vazio → erro zod', () => {
+  itUnix('6) allowedProjectRoots vazio → erro zod', () => {
     const invalid = { ...VALID_CONFIG, allowedProjectRoots: [] };
     writeConfig(JSON.stringify(invalid), 0o600);
 
@@ -148,7 +151,7 @@ describe('loadConfig', () => {
     expect(() => loadConfig(missing)).toThrow(missing);
   });
 
-  it('7b) override via env SCRUMBAN_AGENT_CONFIG_PATH é respeitado', () => {
+  itUnix('7b) override via env SCRUMBAN_AGENT_CONFIG_PATH é respeitado', () => {
     writeConfig(JSON.stringify(VALID_CONFIG), 0o600);
     const prev = process.env.SCRUMBAN_AGENT_CONFIG_PATH;
     process.env.SCRUMBAN_AGENT_CONFIG_PATH = cfgPath;

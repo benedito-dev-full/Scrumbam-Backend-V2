@@ -26,6 +26,9 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { DeployKeyError, generateDeployKey } from '../src/ssh/deploy-key-generator';
 
+/** Unix-only: chmod é no-op no Windows — stat retorna 0o666 para qualquer arquivo. */
+const itUnix = process.platform === 'win32' ? it.skip : it;
+
 function tempBase(): string {
   return mkdtempSync(join(tmpdir(), 'deploykey-'));
 }
@@ -74,7 +77,7 @@ function buildExecFileMock(opts?: {
 }
 
 describe('generateDeployKey', () => {
-  it('1) happy path: cria chave, retorna pubkey + fingerprint', () => {
+  itUnix('1) happy path: cria chave, retorna pubkey + fingerprint', () => {
     const baseDir = tempBase();
     const exec = buildExecFileMock({
       pubContent: 'ssh-ed25519 AAAA scrumban-agent@dinpayz',
@@ -90,7 +93,7 @@ describe('generateDeployKey', () => {
     expect(existsSync(join(baseDir, 'dinpayz.pub'))).toBe(true);
   });
 
-  it('2) permissões: privada 0600, pública 0644', () => {
+  itUnix('2) permissões: privada 0600, pública 0644', () => {
     const baseDir = tempBase();
     const exec = buildExecFileMock();
     generateDeployKey('proj', { baseDir, execFile: exec });
@@ -101,7 +104,7 @@ describe('generateDeployKey', () => {
     expect(pubMode).toBe(0o644);
   });
 
-  it('3) idempotência: 2ª chamada NÃO invoca ssh-keygen para gerar', () => {
+  itUnix('3) idempotência: 2ª chamada NÃO invoca ssh-keygen para gerar', () => {
     const baseDir = tempBase();
     const calls: string[][] = [];
     const exec = ((cmd: string, args: readonly string[]) => {
@@ -139,7 +142,7 @@ describe('generateDeployKey', () => {
     }
   });
 
-  it('5) comment customizado é passado ao ssh-keygen via -C', () => {
+  itUnix('5) comment customizado é passado ao ssh-keygen via -C', () => {
     const baseDir = tempBase();
     const calls: string[][] = [];
     const exec = ((cmd: string, args: readonly string[]) => {
@@ -162,7 +165,7 @@ describe('generateDeployKey', () => {
     expect(genCall![cIdx + 1]).toBe('custom@host');
   });
 
-  it('6) comment default é scrumban-agent@<slug>', () => {
+  itUnix('6) comment default é scrumban-agent@<slug>', () => {
     const baseDir = tempBase();
     const calls: string[][] = [];
     const exec = ((cmd: string, args: readonly string[]) => {
@@ -184,7 +187,7 @@ describe('generateDeployKey', () => {
     expect(genCall![cIdx + 1]).toBe('scrumban-agent@foo-bar');
   });
 
-  it('7) fingerprint extraído corretamente do output canônico', () => {
+  itUnix('7) fingerprint extraído corretamente do output canônico', () => {
     const baseDir = tempBase();
     const exec = buildExecFileMock({
       fingerprint: 'SHA256:VeryLongFingerprintBase64=',
@@ -194,7 +197,7 @@ describe('generateDeployKey', () => {
     expect(r.fingerprint).toBe('SHA256:VeryLongFingerprintBase64=');
   });
 
-  it('8) baseDir não-existente é criado recursivo', () => {
+  itUnix('8) baseDir não-existente é criado recursivo', () => {
     const root = tempBase();
     const baseDir = join(root, 'nested', 'ssh-keys');
     expect(existsSync(baseDir)).toBe(false);
@@ -222,7 +225,7 @@ describe('generateDeployKey', () => {
     );
   });
 
-  it('11) só pub OU só priv presente (estado quebrado) → regera (não considera idempotente)', () => {
+  itUnix('11) só pub OU só priv presente (estado quebrado) → regera (não considera idempotente)', () => {
     const baseDir = tempBase();
     // Pré-cria SÓ a privada (sem .pub) — simula estado corrompido.
     writeFileSync(join(baseDir, 'broken'), 'orphan-priv', { mode: 0o600 });

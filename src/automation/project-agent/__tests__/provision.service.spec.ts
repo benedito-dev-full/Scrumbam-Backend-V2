@@ -283,7 +283,7 @@ describe('ProvisionService.provision', () => {
         repoUrl: REPO_URL,
         useSshKey: true,
         baseDir: '/home/dev-benedito/projetos',
-        depth: 1,
+        depth: 0,
         timeoutSec: 60,
       },
       expect.objectContaining({

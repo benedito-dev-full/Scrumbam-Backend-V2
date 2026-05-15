@@ -3095,6 +3095,14 @@ Ambos registrados no CHANGELOG.md em "Known issues" e rastreados para próximas 
 
 ---
 
+## F13 — VPS Provision Milestone 1 — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (8.0/10 APPROVED) | **Data:** 2026-05-15  
+Implementa auto-provisionamento de repositório git na VPS ao linkar projeto+agente. Backend envia `PROVISION_PROJECT` via HMAC; agente executa `git clone --depth=0` com defesas (execFile, allowlist hosts, SHA regex). Coluna `repoUrl VARCHAR(512)` adicionada ao DProject (ADR-V2-043 — exceção única ao ADR-V2-001). Full clone por padrão (ADR-V2-044) para compatibilidade com push no Milestone 2.  
+**Commits:** `156e194` (6.2/10) + `4faaa65` (8.0/10) | **ADRs:** V2-043, V2-044
+
+---
+
 ## Proximas fases (preview)
 
 | Fase | Nome | Pilar dominante |

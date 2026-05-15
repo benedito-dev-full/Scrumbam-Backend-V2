@@ -227,11 +227,17 @@ describe('Dispatcher /v1/execute', () => {
       });
     });
 
-    it('SUPPORTED_TYPES_LIST exposto contém todos os 4 tipos', () => {
+    it('SUPPORTED_TYPES_LIST exposto contém todos os 5 tipos', () => {
       expect(SUPPORTED_TYPES_LIST).toEqual(
-        expect.arrayContaining(['PING', 'RUN_CLAUDE_CODE', 'SET_ENV', 'GENERATE_DEPLOY_KEY']),
+        expect.arrayContaining([
+          'PING',
+          'RUN_CLAUDE_CODE',
+          'SET_ENV',
+          'GENERATE_DEPLOY_KEY',
+          'PROVISION_PROJECT',
+        ]),
       );
-      expect(SUPPORTED_TYPES_LIST).toHaveLength(4);
+      expect(SUPPORTED_TYPES_LIST).toHaveLength(5);
     });
   });
 });
