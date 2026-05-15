@@ -18,6 +18,7 @@ import {
   ListProjectResponseDto,
   ProjectStatsDto,
 } from './dto/project-response.dto';
+import { DeleteProjectResponseDto } from './dto/delete-project-response.dto';
 import { fallbackSlug, slugify } from './utils/slugify';
 
 /** idClasse de DProject no seed F1 (classes canônicas V2). */
@@ -765,7 +766,11 @@ export class ProjectsService implements OnModuleInit {
    * await service.delete('1', BigInt(managerId));
    * ```
    */
-  async delete(id: string, userEntidadeId: bigint, organizationId?: string): Promise<void> {
+  async delete(
+    id: string,
+    userEntidadeId: bigint,
+    organizationId?: string,
+  ): Promise<DeleteProjectResponseDto> {
     const projectId = BigInt(id);
 
     // ADR-V2-042: tenant check ANTES de qualquer query/RBAC.
@@ -791,9 +796,9 @@ export class ProjectsService implements OnModuleInit {
       throw new NotFoundException(`Projeto ${id} não encontrado`);
     }
 
-    await this.prisma.$transaction(async (tx) => {
+    const counts = await this.prisma.$transaction(async (tx) => {
       // Cascade: DVincula dos membros (idLocEscritu=projectId).
-      await tx.dVincula.updateMany({
+      const membersResult = await tx.dVincula.updateMany({
         where: { idLocEscritu: projectId, excluido: false },
         data: { excluido: true },
       });
@@ -809,7 +814,7 @@ export class ProjectsService implements OnModuleInit {
       });
 
       // Cascade: DTask do projeto
-      await tx.dTask.updateMany({
+      const tasksResult = await tx.dTask.updateMany({
         where: { idProject: projectId, excluido: false },
         data: { excluido: true },
       });
@@ -819,6 +824,8 @@ export class ProjectsService implements OnModuleInit {
         where: { chave: projectId },
         data: { excluido: true },
       });
+
+      return { tasks: tasksResult.count, members: membersResult.count };
     });
 
     // Audit APÓS commit — tipo project.deleted → idClasse=-499 PROJECT_LIFECYCLE (ADR-V2-027)
@@ -834,6 +841,18 @@ export class ProjectsService implements OnModuleInit {
     );
 
     this.logger.log(`Projeto ${projectId} deletado por user=${userEntidadeId}`);
+
+    return {
+      deleted: true,
+      id,
+      projectName: project.nome,
+      counts: {
+        tasks: counts.tasks,
+        members: counts.members,
+        webhooks: 0,
+        notifications: 0,
+      },
+    };
   }
 
   /**

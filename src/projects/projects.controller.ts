@@ -3,8 +3,6 @@ import {
   Controller,
   Delete,
   Get,
-  HttpCode,
-  HttpStatus,
   Logger,
   Param,
   Patch,
@@ -34,6 +32,7 @@ import {
 } from './dto/project-response.dto';
 import { ProjectActivityQueryDto } from './dto/project-activity-query.dto';
 import { ListProjectsQueryDto } from './dto/list-projects-query.dto';
+import { DeleteProjectResponseDto } from './dto/delete-project-response.dto';
 
 /**
  * Tipo do payload populado em `req.user` pelo JwtStrategy.
@@ -196,19 +195,24 @@ export class ProjectsController {
   /**
    * Soft-delete do projeto (MANAGER).
    *
-   * Cascades em tasks e memberships.
+   * Cascades em tasks e memberships. Retorna 200 com contadores do cascade
+   * para que o frontend exiba feedback rico ao usuário (ex.: "Projeto X
+   * excluído — 12 intenções, 3 membros").
    *
    * @param id - ID do projeto
+   * @returns DTO com `deleted`, `id`, `projectName` e `counts`.
    */
   @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Deletar projeto (MANAGER)' })
   @ApiParam({ name: 'id', description: 'ID do projeto' })
-  @ApiResponse({ status: 204, description: 'Projeto deletado' })
+  @ApiResponse({ status: 200, description: 'Projeto deletado', type: DeleteProjectResponseDto })
   @ApiResponse({ status: 403, description: 'Requer role MANAGER' })
   @ApiResponse({ status: 404, description: 'Projeto não encontrado' })
-  async delete(@Param('id') id: string, @Request() req: JwtRequest): Promise<void> {
-    await this.projectsService.delete(id, BigInt(req.user.entidadeId), req.user.organizationId);
+  async delete(
+    @Param('id') id: string,
+    @Request() req: JwtRequest,
+  ): Promise<DeleteProjectResponseDto> {
+    return this.projectsService.delete(id, BigInt(req.user.entidadeId), req.user.organizationId);
   }
 
   /**
