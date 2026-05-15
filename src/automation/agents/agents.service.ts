@@ -389,6 +389,7 @@ export class AgentsService {
           idClasse: AUTOMATION_CLASS_IDS.AGENT,
           nome: dto.hostname,
           idLocEscritu,
+          idEstab: consumed.organizationId ?? undefined,
           dados: {
             projectId: consumed.projectId !== null ? consumed.projectId.toString() : null,
             installTokenId: consumed.tokenId.toString(),

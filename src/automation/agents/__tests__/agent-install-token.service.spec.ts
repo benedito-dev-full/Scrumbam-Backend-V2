@@ -114,6 +114,7 @@ describe('AgentInstallTokenService', () => {
         tokenId: BigInt(10),
         projectId: BigInt(3),
         createdBy: BigInt(2),
+        organizationId: null,
       });
       expect(tx.dTabela.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -147,6 +148,7 @@ describe('AgentInstallTokenService', () => {
         tokenId: BigInt(11),
         projectId: null,
         createdBy: BigInt(2),
+        organizationId: null,
       });
       expect(tx.dTabela.update).toHaveBeenCalled();
     });

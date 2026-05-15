@@ -95,6 +95,7 @@ export class AgentsController {
         ? BigInt(dto.projectId)
         : null,
       BigInt(req.user.entidadeId),
+      req.user.organizationId ? BigInt(req.user.organizationId) : null,
     );
     return {
       token: result.token,

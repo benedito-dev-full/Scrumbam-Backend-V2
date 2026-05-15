@@ -22,6 +22,7 @@ export interface ConsumedInstallToken {
   tokenId: bigint;
   projectId: bigint | null;
   createdBy: bigint;
+  organizationId: bigint | null;
 }
 
 @Injectable()
@@ -57,6 +58,7 @@ export class AgentInstallTokenService {
   async createInstallToken(
     projectId: bigint | null,
     createdBy: bigint,
+    organizationId: bigint | null = null,
   ): Promise<{ token: string; installTokenId: bigint; expiresAt: Date }> {
     if (projectId !== null) {
       await this.requireProjectManagerOrOrgAdmin(projectId, createdBy);
@@ -81,6 +83,7 @@ export class AgentInstallTokenService {
           tokenHash,
           projectId: projectId !== null ? projectId.toString() : null,
           createdBy: createdBy.toString(),
+          organizationId: organizationId !== null ? organizationId.toString() : null,
           expiresAt: expiresAt.toISOString(),
           used: false,
         } as Prisma.InputJsonValue,
@@ -144,10 +147,14 @@ export class AgentInstallTokenService {
       },
     });
 
+    const organizationIdRaw =
+      typeof dados.organizationId === 'string' ? dados.organizationId : null;
+
     return {
       tokenId: row.chave,
       projectId: row.idLocEscrituracao ?? null,
       createdBy: row.dEntidadeId,
+      organizationId: organizationIdRaw !== null ? BigInt(organizationIdRaw) : null,
     };
   }
 
