@@ -9,6 +9,7 @@ import { ListProjectsTool } from '../tools/list-projects.tool';
 import { ListSprintsTool } from '../tools/list-sprints.tool';
 import { ListTasksTool } from '../tools/list-tasks.tool';
 import { McpTool } from '../tools/tool.interface';
+import { SearchTasksTool } from '../tools/search-tasks.tool';
 import { UpdateNotificationTool } from '../tools/update-notification.tool';
 import { UpdateProjectTool } from '../tools/update-project.tool';
 import { UpdateStatusTool } from '../tools/update-status.tool';
@@ -58,6 +59,7 @@ function buildRegisteredTools(): McpTool[] {
     new ListNotificationsTool(noop),
     new UpdateNotificationTool(noop),
     new GetUnreadCountTool(noop),
+    new SearchTasksTool(noop, noop),
   ];
 }
 

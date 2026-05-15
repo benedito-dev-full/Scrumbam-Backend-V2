@@ -5,6 +5,7 @@ import { AuthModule } from '../auth/auth.module';
 import { EntidadesModule } from '../entidades/entidades.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ProjectsModule } from '../projects/projects.module';
+import { SearchModule } from '../search/search.module';
 import { TabelasModule } from '../tabelas/tabelas.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { McpEnabledGuard } from './guards/mcp-enabled.guard';
@@ -25,13 +26,14 @@ import { ListNotificationsTool } from './tools/list-notifications.tool';
 import { ListProjectsTool } from './tools/list-projects.tool';
 import { ListSprintsTool } from './tools/list-sprints.tool';
 import { ListTasksTool } from './tools/list-tasks.tool';
+import { SearchTasksTool } from './tools/search-tasks.tool';
 import { UpdateNotificationTool } from './tools/update-notification.tool';
 import { UpdateProjectTool } from './tools/update-project.tool';
 import { UpdateStatusTool } from './tools/update-status.tool';
 import { UpdateTaskTool } from './tools/update-task.tool';
 
 @Module({
-  imports: [AuthModule, EntidadesModule, TasksModule, ProjectsModule, TabelasModule, NotificationsModule],
+  imports: [AuthModule, EntidadesModule, TasksModule, ProjectsModule, TabelasModule, NotificationsModule, SearchModule],
   controllers: [McpController, McpKeysController],
   providers: [
     McpJsonRpcService,
@@ -54,6 +56,7 @@ import { UpdateTaskTool } from './tools/update-task.tool';
     ListNotificationsTool,
     UpdateNotificationTool,
     GetUnreadCountTool,
+    SearchTasksTool,
   ],
   exports: [McpKeyService, McpRouterService, McpRateLimitService, McpAuditService],
 })

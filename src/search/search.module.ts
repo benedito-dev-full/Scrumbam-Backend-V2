@@ -24,5 +24,6 @@ import { SearchService } from './search.service';
   imports: [AuthModule],
   controllers: [SearchController],
   providers: [SearchService],
+  exports: [SearchService],
 })
 export class SearchModule {}

@@ -346,6 +346,80 @@ export class SearchService {
   }
 
   /**
+   * Busca tasks para o canal MCP, usando lista de IDs de projetos acessíveis
+   * como escopo de tenant (em vez de `organizationId`).
+   *
+   * Diferença em relação ao `search()`:
+   *  - NÃO exige `organizationId` — MCP não tem org no contexto.
+   *  - Filtra DTask via `idProject IN (accessibleProjectIds)` (IN clause — ZERO N+1).
+   *  - Retorna apenas tasks (sem projects nem people) para UX de LLM otimizada.
+   *  - Se `opts.projectId` fornecido, filtra adicionalmente por esse projeto.
+   *
+   * Queries por chamada: 1 (ZERO N+1).
+   * ZERO Engine/Operação — read-only puro.
+   *
+   * @param q - Termo de busca (mín 2 chars, validado na tool)
+   * @param _userEntidadeId - ID do usuário autenticado (reservado para extensão futura)
+   * @param accessibleProjectIds - Lista de IDs de projetos acessíveis (já resolvida pela tool)
+   * @param opts.projectId - Filtro adicional por projeto específico (opcional)
+   * @param opts.limit - Máximo de tasks a retornar (default 20, máx 50)
+   * @returns Objeto com lista de tasks e metadados de busca
+   */
+  async searchForMcp(
+    q: string,
+    _userEntidadeId: bigint,
+    accessibleProjectIds: string[],
+    opts: { projectId?: string; limit?: number },
+  ): Promise<{ tasks: TaskSearchResultDto[]; total: number; q: string }> {
+    const limit = Math.max(1, Math.min(50, opts.limit ?? 20));
+
+    this.logger.debug(
+      `searchForMcp q="${q}" projects=[${accessibleProjectIds.length}] limit=${limit}`,
+    );
+
+    // Determinar conjunto de projectIds a filtrar
+    const projectIdsToSearch =
+      opts.projectId !== undefined ? [opts.projectId] : accessibleProjectIds;
+
+    const projectBigInts = projectIdsToSearch.map((id) => BigInt(id));
+
+    // 1 query: DTask IN (projectIds) + ILIKE em nome/descricao — ZERO N+1
+    const tasks = await this.prisma.dTask.findMany({
+      where: {
+        excluido: false,
+        idProject: { in: projectBigInts },
+        OR: [
+          { nome: { contains: q, mode: 'insensitive' } },
+          { descricao: { contains: q, mode: 'insensitive' } },
+        ],
+      },
+      select: {
+        chave: true,
+        nome: true,
+        descricao: true,
+        idProject: true,
+        idStatus: true,
+        criadoEm: true,
+        project: { select: { chave: true, nome: true } },
+      },
+      orderBy: { chave: 'asc' },
+      take: limit,
+    });
+
+    const taskDtos: TaskSearchResultDto[] = tasks.map((t) => ({
+      chave: t.chave.toString(),
+      nome: t.nome,
+      descricao: this.truncate(t.descricao),
+      idProject: t.idProject?.toString() ?? null,
+      projectNome: t.project?.nome ?? null,
+      idStatus: t.idStatus?.toString() ?? null,
+      criadoEm: t.criadoEm.toISOString(),
+    }));
+
+    return { tasks: taskDtos, total: taskDtos.length, q };
+  }
+
+  /**
    * Trunca texto em `max` caracteres com sufixo '...' se necessário.
    *
    * Usado para limitar payloads de descrição em responses de busca.

@@ -1,7 +1,7 @@
 # Documenter Agent Memory — Scrumban-Backend-V2
 
-**Versão:** 1.4 (atualizado após Task 01 F4 priority persistence)
-**Última atualização:** 2026-05-12
+**Versão:** 1.5 (atualizado após Task #3 F11 MCP Notifications)
+**Última atualização:** 2026-05-15
 
 ---
 

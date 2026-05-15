@@ -255,6 +255,19 @@
         "type": "object",
         "properties": {}
       }
+    },
+    {
+      "name": "search_tasks",
+      "description": "Busca tasks por texto livre em projetos acessíveis ao usuário. Escopo automático por tenant — retorna apenas tasks de projetos dos quais o usuário é membro.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["q"],
+        "properties": {
+          "q": { "type": "string", "minLength": 2, "maxLength": 200 },
+          "projectId": { "type": "string" },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 20 }
+        }
+      }
     }
   ]
 }

@@ -19,6 +19,7 @@ import { ListProjectsTool } from '../tools/list-projects.tool';
 import { ListSprintsTool } from '../tools/list-sprints.tool';
 import { ListTasksTool } from '../tools/list-tasks.tool';
 import { McpTool, McpToolError } from '../tools/tool.interface';
+import { SearchTasksTool } from '../tools/search-tasks.tool';
 import { UpdateNotificationTool } from '../tools/update-notification.tool';
 import { UpdateProjectTool } from '../tools/update-project.tool';
 import { UpdateStatusTool } from '../tools/update-status.tool';
@@ -71,6 +72,7 @@ export class McpRouterService {
     listNotificationsTool?: ListNotificationsTool,
     updateNotificationTool?: UpdateNotificationTool,
     getUnreadCountTool?: GetUnreadCountTool,
+    searchTasksTool?: SearchTasksTool,
     configService?: ConfigService,
   ) {
     const tools: Array<McpTool | undefined> = [
@@ -87,6 +89,7 @@ export class McpRouterService {
       listNotificationsTool,
       updateNotificationTool,
       getUnreadCountTool,
+      searchTasksTool,
     ];
     this.tools = tools.filter((tool): tool is McpTool => tool !== undefined);
     this.cachedToolDefinitions = (toolsSchema.tools as McpToolDefinition[]).map((tool) => ({

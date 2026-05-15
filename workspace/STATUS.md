@@ -4,15 +4,18 @@
 
 ---
 
-## 🎯 F11 — MCP Expansion — ✅ TASKS 1,2,3,7 COMPLETAS (8/10 Tools Entregues)
+## 🎯 F11 — MCP Expansion — ✅ TASKS 1,2,3,4,5,6,7 COMPLETAS (9/10 Tools Entregues)
 
 **Status Consolidado:**
 - Task #1 (`get_task`) — ✅ COMPLETA (8.7/10)
 - Task #2 (`update_task`) — ✅ COMPLETA (8.5/10)  
 - Task #3 (`list_notifications`, `update_notification`, `get_unread_count`) — ✅ COMPLETA (8.8/10)
+- Task #4 (`search_tasks`) — ✅ COMPLETA (8.8/10)
+- Task #5 (`list_members`) — ✅ COMPLETA (8.8/10)
+- Task #6 (`get_project`) — ✅ COMPLETA (9.0/10)
 - Task #7 (`update_project`) — ✅ COMPLETA (9.0/10)
-- **Total Tools MCP entregues:** 8 de 10 (80% do plano F11)
-- **Build:** PASS | **Tests:** 96/96 PASS (100%)
+- **Total Tools MCP entregues:** 9 de 10 (90% do plano F11)
+- **Build:** PASS | **Tests:** 105/105 PASS (100%)
 
 ---
 
@@ -39,6 +42,34 @@
 **Tenant Isolation (ADR-V2-042):** `ctx.dEntidadeId` propagado; NotificationsService valida proprietário
 
 **ADRs:** ADR-V2-001 (zero tabela), ADR-V2-042 (tenant isolation)
+
+---
+
+### Task #4 — MCP Tool `search_tasks` — ✅ COMPLETA
+
+**Implementer completou:** 2026-05-15
+**Reviewer aprovou:** 2026-05-15 (Score 8.8/10)
+**Módulo:** `src/mcp/tools/` + `src/search/`
+**Build:** `make build` PASS
+**Tests:** 9 specs novos em `mcp-tools.search-tasks.spec.ts` + schema-consistency atualizado → **100% PASS (105/105 total MCP)**
+
+**Deliverables:**
+- ✅ `src/mcp/tools/search-tasks.tool.ts` (~160 linhas) — busca tasks por texto; filtro projectId opcional; limit 1-50 (default 20); anti-enumeration
+- ✅ `SearchService.searchForMcp()` em `src/search/search.service.ts` (~50 linhas) — 1 query DTask com IN clause, ZERO N+1
+- ✅ `SearchModule` exporta SearchService para injeção em McpModule
+- ✅ Registração em `mcp.module.ts` (SearchModule) + `mcp-router.service.ts` (SearchTasksTool 14º param) + `tools.schema.json` (14→15 tools)
+- ✅ JSDoc completo em tool e adaptador (padrão V2 Devari)
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — busca read-only em DTask (estrutural)
+- Pilar 2 (Endpoints): Reutiliza SearchService existente (zero controller novo)
+- Pilar 3 (Seed): Zero DClasses novas (DTask já existe)
+
+**Tenant Isolation (ADR-V2-042):** `ctx.dEntidadeId` propagado; ProjectsService resolveAccessibleProjectIds; anti-enumeration projectId inválido
+
+**ADRs:** ADR-V2-001 (zero tabela), ADR-V2-042 (tenant isolation, gate em tool-side)
+
+**Débito Técnico (M1):** searchForMcp sem early return defensivo para `accessibleProjectIds.length === 0` — seguro porque tool garante, mas padrão para F15+ review
 
 ---
 
@@ -3268,5 +3299,16 @@ Plano `workspace/plans/plan-orphan-workspace.md`. Ciclo completo Strategist → 
 **Task:** #3
 **Timestamp:** 15/05/2026 00:48:39
 **Agent:** reviewer
+**Status:** Completo
+
+
+---
+
+<!-- dedup:documenter:3 -->
+### Agent Concluído: documenter
+
+**Task:** #3
+**Timestamp:** 15/05/2026 00:52:12
+**Agent:** documenter
 **Status:** Completo
 

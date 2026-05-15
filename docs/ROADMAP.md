@@ -2739,6 +2739,82 @@ Ambos registrados no CHANGELOG.md em "Known issues" e rastreados para próximas 
 | Reviewer | ~30min | 8.5/10 APPROVED (orquestração OK, 2 débitos MEDIUM não-bloqueantes) |
 | Documenter | ~30min | JSDoc, ROADMAP, CHANGELOG, STATUS, commit Conventional |
 
+### Task #4: MCP Tool `search_tasks` — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** mcp
+**Fase V2:** F11 (MCP Expansion — Task #4 de 8)
+**Tempo Real:** ~1.5h Implementer + ~20min Reviewer + ~30min Documenter
+**Completado em:** 2026-05-15
+**Quality Score:** 8.8/10 APPROVED
+
+**O Que Foi Feito:**
+
+- **Tool MCP `search_tasks`** — busca tasks por texto livre em projetos acessíveis ao usuário, com filtro opcional por projeto
+  - Classe `SearchTasksTool` em `src/mcp/tools/search-tasks.tool.ts` (~160 linhas)
+  - Padrão: injeta `ProjectsService` + `SearchService`
+  - Fluxo: resolve `accessibleProjectIds` (ADR-V2-042 defense-in-depth) → delega para `SearchService.searchForMcp(q, userId, accessibleProjectIds, opts)`
+  - Validação: `q` obrigatório (mín 2 chars), `projectId` opcional com anti-enumeration (mesmo status se não acessível), `limit` 1-50 (default 20)
+  - JSDoc completo com descrição detalhada, @example JSON-RPC, fluxo, @throws, Pilares e ADRs
+
+- **Adaptador `SearchService.searchForMcp()`**
+  - Novo método em `src/search/search.service.ts` (~50 linhas)
+  - 1 query DTask com `idProject IN (accessibleProjectIds)` + ILIKE nome/descricao — **ZERO N+1**
+  - Reutiliza método `search()` original intocado (backward-compat)
+  - Retorna tasks apenas (sem projects nem people) — UX otimizada para LLM
+
+- **Registração**
+  - `src/mcp/services/mcp-router.service.ts` — 14º param do constructor (ANTES de `configService`)
+  - `src/mcp/mcp.module.ts` — adiciona `SearchTasksTool` em providers + `SearchModule` em imports
+  - `src/search/search.module.ts` — exporta `SearchService` para injeção em McpModule
+  - `src/mcp/schemas/tools.schema.json` — entrada `search_tasks` com inputSchema (q, projectId, limit)
+  - `src/mcp/__tests__/mcp-block-d.spec.ts` — atualiza `toHaveLength(14)` → `(15)` + lista de nomes
+
+- **Testes (9 novos specs)**
+  - `mcp-tools.search-tasks.spec.ts`: 9 casos
+    - (a) happy path — busca tasks por texto OK
+    - (b) q ausente → INVALID_PARAMS
+    - (c) q < 2 chars → INVALID_PARAMS
+    - (d) limit clamping (0 → 1, 51 → 50)
+    - (e) tenant isolation: projectId fora do scope → INVALID_PARAMS (sem chamar service)
+    - (f) accessibleProjectIds vazio → resultado vazio (sem chamar service)
+    - (g) projectId opcionalmente filtra em subconjunto
+    - (h) ctx.dEntidadeId propagado corretamente
+    - (i) tools/list expõe `search_tasks` com name/description/inputSchema corretos
+  - `mcp-tools.schema-consistency.spec.ts` — atualiza para 15 tools (adicionou `search_tasks` no array)
+  - **Total suite MCP:** 107 suites PASS, 105/105 specs PASS (0 regressões)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — leitura em DTask (tabela estrutural, sem Engine)
+- Pilar 2 (Endpoints): MCP é canal alternativo ao REST; tool reutiliza SearchService (zero controller novo)
+- Pilar 3 (Seed): N/A — zero DClasses novas
+
+**ADRs vinculados:** ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation defense-in-depth)
+
+**Build & Smoke:**
+- `make build` → PASS (0 warnings)
+- `npx tsc --noEmit` → 7 pre-existing erros (não são novos)
+- ESLint → PASS (3 arquivos modificados/criados, 0 warnings)
+- Test suite MCP → 105/105 PASS
+
+**Débito técnico (não-bloqueante):**
+- M1: `searchForMcp` sem early return defensivo para `accessibleProjectIds.length === 0` — seguro porque tool garante, mas débito para consistency com gate patterns anteriores
+  - Mitigação: Tool já checa `if (accessibleIds.length === 0) return { tasks: [], total: 0 }`
+  - Status: Registrado para F15+ (defensive query gate pattern review)
+
+**Plan:** [`workspace/plans/plan-mcp-expansion-8tools.md`](../workspace/plans/plan-mcp-expansion-8tools.md) §Task #4 (linhas)
+**Review:** APPROVED 8.8/10
+**Memory:** [[mcp-expansion-task4-search]] — adaptador SearchForMcp pattern, tool-side gate validation
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan Task #4 §busca unificada MCP |
+| Implementer | ~1.5h | 100% PASS: tool + adaptador + 9 testes + schema-consistency |
+| Reviewer | ~20min | 8.8/10 APPROVED (tool padrão completo, ZERO N+1, anti-enumeration) |
+| Documenter | ~30min | JSDoc, ROADMAP, CHANGELOG, STATUS, commit Conventional |
+
 ### Task #5: MCP Tool `list_members` — ✅ COMPLETA
 
 **Status:** Completo

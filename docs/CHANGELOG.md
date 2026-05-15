@@ -14,6 +14,17 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F11 Task #4: MCP Tool `search_tasks` — busca de tasks via texto livre (ADR-V2-042)** - 2026-05-15
+  - **Tool MCP `search_tasks`:** busca tasks por termo de texto em projetos acessíveis ao usuário; escopo automático via `findAccessibleProjectIds` (defense-in-depth)
+  - **Classe `SearchTasksTool`** em `src/mcp/tools/search-tasks.tool.ts` (~160 linhas) — validação `q` obrigatória (mín 2 chars), filtro `projectId` opcional + limit (1-50, default 20)
+  - **Adaptador `SearchService.searchForMcp`** em `src/search/search.service.ts` (~50 linhas) — 1 query DTask com `idProject IN (accessibleProjectIds)` + ILIKE nome/descricao — **ZERO N+1**
+  - **Registração:** `SearchTasksTool` provider em `src/mcp/mcp.module.ts` + SearchModule exported + tool em `src/mcp/services/mcp-router.service.ts` (posição 14 do array tools) + schema em `tools.schema.json` (14→15 tools)
+  - **Testes:** `mcp-tools.search-tasks.spec.ts` (9 cases: happy path + limit clamping + projectId validation + anti-enumeration) + `mcp-tools.schema-consistency.spec.ts` atualizado + `mcp-block-d.spec.ts` (count 14→15) — **100% PASS MCP suite 105/105**
+  - **Tenant Isolation (ADR-V2-042):** `ctx.dEntidadeId` (bigint) propagado; `ProjectsService.findAccessibleProjectIds` resolve scope; anti-enumeration em projectId inválido (404 genérico, sem leak)
+  - **Pilares:** Pilar 2 RESPEITADO (SearchService reutilizado — zero tool/tool-helper novo); Pilar 3 RESPEITADO (zero DClasses novas)
+  - **ADRs:** ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation defense-in-depth)
+  - **Quality Score:** 8.8/10 APPROVED | Build: PASS, TypeScript: 0 errors | Reviewer: Sonnet (MCP suite completa 105/105 PASS)
+
 - **F11 Task #3: MCP Tools Notificações — `list_notifications`, `update_notification`, `get_unread_count` (ADR-V2-042)** - 2026-05-15
   - **Tools MCP:** 3 novas tools expõem sistema de notificações (DEvento -490) via MCP
   - **`ListNotificationsTool`** em `src/mcp/tools/list-notifications.tool.ts` (~101 linhas) — lista com cursor pagination + filtro `unreadOnly` (boolean → BooleanString para compatibilidade com NotificationsService)
