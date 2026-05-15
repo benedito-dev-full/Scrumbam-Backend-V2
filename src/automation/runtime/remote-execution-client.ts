@@ -98,7 +98,11 @@ export interface RemoteExecutionAck {
  * task `vps-project-config-via-frontend` (ADR-V2-041, ADR-V2-042) — usados
  * via `dispatch<TReq,TRes>()`.
  */
-export type RemoteCommandType = 'RUN_CLAUDE_CODE' | 'SET_ENV' | 'GENERATE_DEPLOY_KEY';
+export type RemoteCommandType =
+  | 'RUN_CLAUDE_CODE'
+  | 'SET_ENV'
+  | 'GENERATE_DEPLOY_KEY'
+  | 'PROVISION_PROJECT';
 
 /**
  * Contexto necessario para qualquer chamada outbound HMAC ao agente.

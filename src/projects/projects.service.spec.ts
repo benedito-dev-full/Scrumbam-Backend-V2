@@ -713,6 +713,117 @@ describe('ProjectsService', () => {
     });
   });
 
+  describe('repoUrl dual-write (ADR-V2-043, Sub-task 3)', () => {
+    const REPO = 'git@github.com:org/repo.git';
+
+    it('create({ repoUrl }) deve gravar coluna repoUrl + dados.gitRepo', async () => {
+      const txProjectCreate = jest.fn().mockResolvedValue({
+        ...mockProject,
+        repoUrl: REPO,
+        dados: { ...mockProject.dados, slug: 'test-project', gitRepo: REPO },
+      });
+      const txProjectFindFirst = jest.fn().mockResolvedValue(null); // sem colisão slug
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        return fn({
+          dProject: { create: txProjectCreate, findFirst: txProjectFindFirst },
+          dVincula: { create: jest.fn() },
+        });
+      });
+
+      const result = await service.create({ nome: 'Test Project', repoUrl: REPO }, BigInt(100));
+
+      const createArg = txProjectCreate.mock.calls[0][0];
+      expect(createArg.data.repoUrl).toBe(REPO);
+      expect(createArg.data.dados.gitRepo).toBe(REPO);
+      expect(result.gitRepo).toBe(REPO);
+    });
+
+    it('create({ gitRepo }) legado deve auto-migrar (popula repoUrl + dados.gitRepo)', async () => {
+      const txProjectCreate = jest.fn().mockResolvedValue({
+        ...mockProject,
+        repoUrl: REPO,
+        dados: { ...mockProject.dados, slug: 'test-project', gitRepo: REPO },
+      });
+      const txProjectFindFirst = jest.fn().mockResolvedValue(null);
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        return fn({
+          dProject: { create: txProjectCreate, findFirst: txProjectFindFirst },
+          dVincula: { create: jest.fn() },
+        });
+      });
+
+      await service.create({ nome: 'Test Project', gitRepo: REPO }, BigInt(100));
+
+      const createArg = txProjectCreate.mock.calls[0][0];
+      // Auto-migrate: gitRepo legado popula a coluna canônica também.
+      expect(createArg.data.repoUrl).toBe(REPO);
+      expect(createArg.data.dados.gitRepo).toBe(REPO);
+    });
+
+    it('update({ repoUrl, gitRepo }) com conflito deve priorizar repoUrl + emitir WARN', async () => {
+      const novoRepo = 'git@github.com:org/novo.git';
+      const antigoRepo = 'git@github.com:org/antigo.git';
+      const projAtual = { ...mockProject, repoUrl: null };
+
+      // requireManagerRole → 1ª findFirst MANAGER
+      prisma.dVincula.findFirst.mockResolvedValueOnce({ chave: BigInt(99) });
+      prisma.dProject.findFirst.mockResolvedValue(projAtual);
+      prisma.dVincula.count.mockResolvedValue(1);
+      // resolver teamId final (no-op, sem teamId no dto)
+      prisma.dVincula.findFirst.mockResolvedValueOnce(null);
+
+      const txUpdateProject = jest.fn().mockResolvedValue({
+        ...projAtual,
+        repoUrl: novoRepo,
+        dados: { ...projAtual.dados, gitRepo: novoRepo },
+      });
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        return fn({
+          dProject: { update: txUpdateProject },
+          dVincula: { update: jest.fn(), create: jest.fn(), findFirst: jest.fn() },
+        });
+      });
+
+      const warnSpy = jest
+        .spyOn((service as unknown as { logger: { warn: (m: string) => void } }).logger, 'warn')
+        .mockImplementation(() => undefined);
+
+      await service.update('1', { repoUrl: novoRepo, gitRepo: antigoRepo }, BigInt(100));
+
+      // Coluna e Json recebem repoUrl (vencedor); gitRepo legado é ignorado.
+      const updateArg = txUpdateProject.mock.calls[0][0];
+      expect(updateArg.data.repoUrl).toBe(novoRepo);
+      expect(updateArg.data.dados.gitRepo).toBe(novoRepo);
+      // WARN com projectId + userId (audit).
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/dual_write_repo_url_conflict.*projectId=1.*userId=100/),
+      );
+
+      warnSpy.mockRestore();
+    });
+
+    it('buildResponse fallback: repoUrl=null e dados.gitRepo=legacy deve retornar gitRepo=legacy', async () => {
+      const legacyRepo = 'git@github.com:org/legacy.git';
+      // Projeto antigo: coluna repoUrl ainda NULL (não-backfillado), mas
+      // dados.gitRepo preservado pela migração de dual-write.
+      const projLegacy = {
+        ...mockProject,
+        repoUrl: null,
+        dados: { ...mockProject.dados, gitRepo: legacyRepo },
+      };
+      prisma.dProject.findFirst.mockResolvedValue(projLegacy);
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce({ chave: BigInt(1) }) // membership
+        .mockResolvedValueOnce(null); // teamLink
+      prisma.dVincula.count.mockResolvedValue(1);
+
+      const result = await service.findOne('1', BigInt(100));
+
+      // Fallback: lê dados.gitRepo porque a coluna repoUrl é null.
+      expect(result.gitRepo).toBe(legacyRepo);
+    });
+  });
+
   describe('delete()', () => {
     it('deve fazer soft-delete em cascade (DVincula + DTask + DProject)', async () => {
       // Simular requireManagerRole — primeiro findFirst para MANAGER check

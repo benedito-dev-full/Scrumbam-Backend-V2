@@ -16,6 +16,8 @@ import { ProjectAgentController } from './project-agent/project-agent.controller
 import { ProjectAgentLinkService } from './project-agent/project-agent-link.service';
 import { DeployKeyController } from './project-agent/deploy-key.controller';
 import { DeployKeyService } from './project-agent/deploy-key.service';
+import { ProvisionController } from './project-agent/provision.controller';
+import { ProvisionService } from './project-agent/provision.service';
 import { GithubPrService } from './github/github-pr.service';
 import { ExecutionRuntimeLogService } from './runtime/execution-runtime-log.service';
 import { ExecutionWorktreeService } from './runtime/execution-worktree.service';
@@ -31,6 +33,7 @@ import { AutomationMetricsService } from './metrics/automation-metrics.service';
     AgentEnvController,
     ProjectAgentController,
     DeployKeyController,
+    ProvisionController,
     AutomationMetricsController,
   ],
   providers: [
@@ -44,6 +47,7 @@ import { AutomationMetricsService } from './metrics/automation-metrics.service';
     AgentSecurityService,
     ProjectAgentLinkService,
     DeployKeyService,
+    ProvisionService,
     AgentAuthGuard,
     ExecutionRuntimeLogService,
     RemoteExecutionClient,

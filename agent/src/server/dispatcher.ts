@@ -29,11 +29,18 @@ import type { Request, Response } from 'express';
 import type { Logger } from 'pino';
 import type { AgentConfig } from '../config/schema';
 import { createGenerateDeployKeyHandler } from '../handlers/generate-deploy-key.handler';
+import { createProvisionProjectHandler } from '../handlers/provision-project.handler';
 import { createRunClaudeCodeHandler, type ProjectMutex } from '../handlers/run-claude-code.handler';
 import { createSetEnvHandler } from '../handlers/set-env.handler';
 import type { BackendClient } from '../outbound/backend-client';
 
-const SUPPORTED_TYPES = ['PING', 'RUN_CLAUDE_CODE', 'SET_ENV', 'GENERATE_DEPLOY_KEY'] as const;
+const SUPPORTED_TYPES = [
+  'PING',
+  'RUN_CLAUDE_CODE',
+  'SET_ENV',
+  'GENERATE_DEPLOY_KEY',
+  'PROVISION_PROJECT',
+] as const;
 type SupportedType = (typeof SUPPORTED_TYPES)[number];
 
 /** Dependências do dispatcher injetadas pelo `createServer`. */
@@ -57,6 +64,11 @@ export interface DispatcherDeps {
    * via `createGenerateDeployKeyHandler`. Plan-2026-05-13 §4.
    */
   generateDeployKeyHandler?: (req: Request, res: Response) => void;
+  /**
+   * Override do handler de PROVISION_PROJECT (testes). Default cria via
+   * `createProvisionProjectHandler`.
+   */
+  provisionProjectHandler?: (req: Request, res: Response) => void;
 }
 
 /**
@@ -78,6 +90,12 @@ export function createDispatcher(deps: DispatcherDeps) {
   const setEnvHandler = deps.setEnvHandler ?? createSetEnvHandler({ logger });
   const generateDeployKeyHandler =
     deps.generateDeployKeyHandler ?? createGenerateDeployKeyHandler({ logger });
+  const provisionProjectHandler =
+    deps.provisionProjectHandler ??
+    createProvisionProjectHandler({
+      logger,
+      allowedBaseDirs: deps.config.allowedProjectRoots,
+    });
 
   return (req: Request, res: Response): void => {
     const body = (req.body ?? {}) as Record<string, unknown>;
@@ -126,6 +144,11 @@ export function createDispatcher(deps: DispatcherDeps) {
 
     if (type === 'GENERATE_DEPLOY_KEY') {
       generateDeployKeyHandler(req, res);
+      return;
+    }
+
+    if (type === 'PROVISION_PROJECT') {
+      provisionProjectHandler(req, res);
       return;
     }
 

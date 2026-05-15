@@ -15,6 +15,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
  *   "orgId": "100",
  *   "memberCount": 1,
  *   "gitRepo": null,
+ *   "repoUrl": null,
  *   "criadoEm": "2026-05-09T00:00:00.000Z",
  *   "atualizadoEm": "2026-05-09T00:00:00.000Z"
  * }
@@ -39,8 +40,17 @@ export class ProjectResponseDto {
   @ApiProperty({ description: 'Número de membros', example: 1 })
   memberCount!: number;
 
-  @ApiPropertyOptional({ description: 'URL do repositório git', nullable: true })
+  @ApiPropertyOptional({
+    description: 'URL do repositório git (legado; espelha repoUrl por compatibilidade)',
+    nullable: true,
+  })
   gitRepo!: string | null;
+
+  @ApiPropertyOptional({
+    description: 'URL canônica do repositório git (DProject.repoUrl)',
+    nullable: true,
+  })
+  repoUrl!: string | null;
 
   /**
    * ID do time ao qual o projeto está vinculado (DVincula -182).

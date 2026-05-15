@@ -1,5 +1,15 @@
-import { IsBoolean, IsOptional, IsString, IsUrl, MaxLength, MinLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Matches,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+import { REPO_URL_REGEX } from '../utils/repo-url';
 
 /**
  * DTO para criação de projeto (DProject).
@@ -87,15 +97,53 @@ export class CreateProjectDto {
   automationEnabled?: boolean;
 
   /**
-   * URL do repositório git.
+   * URL do repositório git (LEGADO — armazenada em `DProject.dados.gitRepo`).
+   *
+   * @deprecated Use `repoUrl` (coluna canônica `DProject.repoUrl`, ADR-V2-043).
+   * Mantido por 1 release para compatibilidade com clients antigos. Será
+   * removido após migração completa do frontend.
    */
   @ApiPropertyOptional({
-    description: 'URL do repositório git',
+    description: 'URL do repositório git (LEGADO — use repoUrl)',
     example: 'https://github.com/org/repo',
+    deprecated: true,
   })
   @IsOptional()
   @IsUrl()
   gitRepo?: string;
+
+  /**
+   * URL canônica do repositório git (coluna `DProject.repoUrl` —
+   * exceção autorizada por ADR-V2-043). Substitui `gitRepo` legado
+   * em `dados.gitRepo` (mantido por 1 release para compat).
+   *
+   * Aceita apenas protocolos da whitelist (`REPO_URL_REGEX`):
+   *  - `git@github.com:org/repo.git`
+   *  - `git@gitlab.com:org/repo.git`
+   *  - `git@bitbucket.org:org/repo.git`
+   *  - `https://github.com/org/repo(.git)?`
+   *  - `https://gitlab.com/org/repo(.git)?`
+   *  - `https://bitbucket.org/org/repo(.git)?`
+   *
+   * Anti-injection: este valor é despachado ao agente VPS para `git clone`,
+   * portanto a regex é o ÚNICO ponto de confiança. Service e
+   * `RemoteExecutionClient` re-validam antes do dispatch.
+   *
+   * @see ADR-V2-043 — Provisioning via clone com whitelist restritiva
+   * @see REPO_URL_REGEX em `src/projects/utils/repo-url.ts`
+   */
+  @ApiPropertyOptional({
+    description: 'URL do repositório git (whitelist: github/gitlab/bitbucket SSH ou HTTPS)',
+    example: 'git@github.com:org/repo.git',
+    maxLength: 512,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  @Matches(REPO_URL_REGEX, {
+    message: 'repoUrl deve ser git@... ou https://github.com|gitlab.com|bitbucket.org/...',
+  })
+  repoUrl?: string;
 
   /**
    * ID do time ao qual o projeto será vinculado (DVincula -182).

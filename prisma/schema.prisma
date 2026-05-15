@@ -390,6 +390,13 @@ model DProject {
   nome      String  @db.VarChar(255)
   descricao String? @db.Text
 
+  // ADR-V2-043 (exceção autorizada ADR-V2-001):
+  // URL do repositório git para auto-provisionamento via agent VPS.
+  // Validada por DTO (regex git@... ou https://) — backend nunca
+  // confia no que veio do banco; sempre revalida no service antes
+  // de mandar para o agente.
+  repoUrl String? @db.VarChar(512)
+
   // Json polimórfico — git deploy keys, automation config, etc.
   dados Json?
 
