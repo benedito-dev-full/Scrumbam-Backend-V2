@@ -18,7 +18,8 @@ import { RemoteExecutionClient } from '../runtime/remote-execution-client';
 import { ProvisionResponseDto } from './dto/provision-response.dto';
 
 const DEFAULT_BASE_DIR = '/home/dev-benedito/projetos';
-const DEFAULT_DEPTH = 0; // full clone (ADR-V2-044): shallow (depth=1) quebra git push no Milestone 2
+// depth omitido = full clone no agente (readOptionalPositiveInt rejeita 0)
+// ADR-V2-044: shallow (depth=1) quebra git push no Milestone 2
 const DEFAULT_TIMEOUT_SEC = 60;
 
 interface ProvisionAck {
@@ -102,7 +103,6 @@ export class ProvisionService {
           repoUrl: string;
           useSshKey: boolean;
           baseDir: string;
-          depth: number;
           timeoutSec: number;
         },
         ProvisionAck
@@ -113,7 +113,6 @@ export class ProvisionService {
           repoUrl,
           useSshKey: effectiveUseSshKey,
           baseDir: DEFAULT_BASE_DIR,
-          depth: DEFAULT_DEPTH,
           timeoutSec: DEFAULT_TIMEOUT_SEC,
         },
         {
