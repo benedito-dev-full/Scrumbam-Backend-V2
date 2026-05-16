@@ -2,7 +2,6 @@ import {
   IsBoolean,
   IsOptional,
   IsString,
-  IsUrl,
   Matches,
   MaxLength,
   MinLength,
@@ -20,6 +19,9 @@ import { REPO_URL_REGEX } from '../utils/repo-url';
  * 3. 9 DTabela statuses V3 padrão (INBOX a VALIDATED)
  * 4. 1 DTabela Sprint default ("Sprint 1")
  *
+ * A URL do repositório git é armazenada exclusivamente em `DProject.repoUrl`
+ * (ADR-V2-043). O campo `dados.gitRepo` foi removido — use `repoUrl`.
+ *
  * @example
  * ```typescript
  * const dto: CreateProjectDto = {
@@ -27,6 +29,7 @@ import { REPO_URL_REGEX } from '../utils/repo-url';
  *   prefix: 'DEV',
  *   description: 'Refundação canônica Devari-Core',
  *   orgId: '100',
+ *   repoUrl: 'git@github.com:org/repo.git',
  * };
  * ```
  */
@@ -97,25 +100,9 @@ export class CreateProjectDto {
   automationEnabled?: boolean;
 
   /**
-   * URL do repositório git (LEGADO — armazenada em `DProject.dados.gitRepo`).
-   *
-   * @deprecated Use `repoUrl` (coluna canônica `DProject.repoUrl`, ADR-V2-043).
-   * Mantido por 1 release para compatibilidade com clients antigos. Será
-   * removido após migração completa do frontend.
-   */
-  @ApiPropertyOptional({
-    description: 'URL do repositório git (LEGADO — use repoUrl)',
-    example: 'https://github.com/org/repo',
-    deprecated: true,
-  })
-  @IsOptional()
-  @IsUrl()
-  gitRepo?: string;
-
-  /**
    * URL canônica do repositório git (coluna `DProject.repoUrl` —
-   * exceção autorizada por ADR-V2-043). Substitui `gitRepo` legado
-   * em `dados.gitRepo` (mantido por 1 release para compat).
+   * exceção autorizada por ADR-V2-043). Fonte única de verdade para
+   * URL de repositório — o campo `dados.gitRepo` foi removido.
    *
    * Aceita apenas protocolos da whitelist (`REPO_URL_REGEX`):
    *  - `git@github.com:org/repo.git`

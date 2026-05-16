@@ -14,7 +14,6 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
  *   "description": null,
  *   "orgId": "100",
  *   "memberCount": 1,
- *   "gitRepo": null,
  *   "repoUrl": null,
  *   "criadoEm": "2026-05-09T00:00:00.000Z",
  *   "atualizadoEm": "2026-05-09T00:00:00.000Z"
@@ -41,13 +40,7 @@ export class ProjectResponseDto {
   memberCount!: number;
 
   @ApiPropertyOptional({
-    description: 'URL do repositório git (legado; espelha repoUrl por compatibilidade)',
-    nullable: true,
-  })
-  gitRepo!: string | null;
-
-  @ApiPropertyOptional({
-    description: 'URL canônica do repositório git (DProject.repoUrl)',
+    description: 'URL canônica do repositório git (DProject.repoUrl — ADR-V2-043)',
     nullable: true,
   })
   repoUrl!: string | null;

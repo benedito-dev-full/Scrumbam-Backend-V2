@@ -219,7 +219,7 @@
           "description": { "type": "string", "maxLength": 2000 },
           "prefix": { "type": "string" },
           "automationEnabled": { "type": "boolean" },
-          "gitRepo": { "type": "string" },
+          "repoUrl": { "type": ["string", "null"] },
           "teamId": { "type": ["string", "null"] }
         }
       }

@@ -149,6 +149,36 @@
 
 ---
 
+## Débito Técnico — Limpeza Dual-Write `dados.gitRepo` — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (V2 F13 cleanup)
+**Implementer completou:** 2026-05-15
+**Reviewer aprovou:** 2026-05-15 (Score 8.7/10 APPROVED)
+**Módulo:** `src/projects/`, `src/automation/github/`, `src/mcp/tools/`
+**Build:** `make build` PASS
+**Tests:** 35/35 PASS + 2 regressões adicionadas (resolveProjectRepo com repoUrl)
+
+**Deliverables:**
+- ✅ DTOs limpos: removido `gitRepo` de CreateProjectDto, UpdateProjectDto, ProjectResponseDto
+- ✅ Schema limpo: removido `gitRepo` da interface ProjectDados e parseProjectDados()
+- ✅ Service refatorado: removidos `resolveEffectiveRepoUrl()`, dual-write em create()/update(), fallback em buildResponse()
+- ✅ GithubPr adaptado: `GithubPrInput` ganhou `repoUrl?: string | null`; `resolveProjectRepo()` usa coluna canônica
+- ✅ MCP tool limpa: removido `gitRepo` do inputSchema update_project
+- ✅ Specs: bloco dual-write removido (4 testes colapsados); 2 regressões adicionadas para `repoUrl` direto
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — refactoring estrutural
+- Pilar 2 (Endpoints): N/A — zero controllers modificados
+- Pilar 3 (Seed): N/A — zero DClasses novas
+
+**ADRs vinculados:** ADR-V2-043 (repoUrl coluna canônica — dual-write encerrado em 2026-05-15)
+
+**Rationale:** Transitório ADR-V2-043 cumprido (1 release compatibilidade). Legado completamente removido. Sistema usa agora apenas `DProject.repoUrl` — nenhuma leitura em `dados.gitRepo`.
+
+**Status:** ✅ COMPLETA — Pronto para merge (JSDoc ✅, ROADMAP ✅, CHANGELOG ✅, STATUS ✅, ADR-V2-043 atualizado ✅, commit ✅)
+
+---
+
 ## 🎯 Task #2 — Cancelamento de Convites Pendentes (Pós-F8) — ✅ COMPLETA
 
 Plano `plan-invites-cancel-pending-invite-taskCancelInvite.md`. Refinamento ADR-V2-028.
@@ -3341,5 +3371,27 @@ Plano `workspace/plans/plan-orphan-workspace.md`. Ciclo completo Strategist → 
 **Task:** #3
 **Timestamp:** 15/05/2026 00:52:12
 **Agent:** documenter
+**Status:** Completo
+
+
+---
+
+<!-- dedup:implementer:24 -->
+### Agent Concluído: implementer
+
+**Task:** #24
+**Timestamp:** 15/05/2026 22:33:55
+**Agent:** implementer
+**Status:** Completo
+
+
+---
+
+<!-- dedup:reviewer:24 -->
+### Agent Concluído: reviewer
+
+**Task:** #24
+**Timestamp:** 15/05/2026 22:39:46
+**Agent:** reviewer
 **Status:** Completo
 

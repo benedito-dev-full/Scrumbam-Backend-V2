@@ -2,7 +2,6 @@ import {
   IsBoolean,
   IsOptional,
   IsString,
-  IsUrl,
   Matches,
   MaxLength,
   MinLength,
@@ -56,23 +55,9 @@ export class UpdateProjectDto {
   automationEnabled?: boolean;
 
   /**
-   * URL do repositório git (LEGADO — armazenada em `DProject.dados.gitRepo`).
-   *
-   * @deprecated Use `repoUrl` (coluna canônica `DProject.repoUrl`, ADR-V2-043).
-   * Mantido por 1 release para compatibilidade com clients antigos.
-   */
-  @ApiPropertyOptional({
-    description: 'URL do repositório git (LEGADO — use repoUrl)',
-    example: 'https://github.com/org/novo-repo',
-    deprecated: true,
-  })
-  @IsOptional()
-  @IsUrl()
-  gitRepo?: string;
-
-  /**
    * URL canônica do repositório git (coluna `DProject.repoUrl` —
-   * exceção autorizada por ADR-V2-043). Substitui `gitRepo` legado.
+   * exceção autorizada por ADR-V2-043). Fonte única de verdade para
+   * URL de repositório (ADR-V2-043).
    *
    * Aceita apenas protocolos da whitelist (`REPO_URL_REGEX`):
    *  - `git@github.com:org/repo.git`
@@ -90,17 +75,18 @@ export class UpdateProjectDto {
    * @see REPO_URL_REGEX em `src/projects/utils/repo-url.ts`
    */
   @ApiPropertyOptional({
-    description: 'URL do repositório git (whitelist: github/gitlab/bitbucket SSH ou HTTPS)',
+    description: 'URL do repositório git (whitelist: github/gitlab/bitbucket SSH ou HTTPS). null para limpar.',
     example: 'git@github.com:org/repo.git',
     maxLength: 512,
+    nullable: true,
   })
-  @IsOptional()
+  @ValidateIf((o: UpdateProjectDto) => o.repoUrl !== null && o.repoUrl !== undefined)
   @IsString()
   @MaxLength(512)
   @Matches(REPO_URL_REGEX, {
     message: 'repoUrl deve ser git@... ou https://github.com|gitlab.com|bitbucket.org/...',
   })
-  repoUrl?: string;
+  repoUrl?: string | null;
 
   @ApiPropertyOptional({
     description: 'Prefixo do identifier das tasks',

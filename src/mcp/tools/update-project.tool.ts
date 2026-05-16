@@ -66,7 +66,7 @@ export class UpdateProjectTool implements McpTool {
       description: { type: 'string', maxLength: 2000 },
       prefix: { type: 'string' },
       automationEnabled: { type: 'boolean' },
-      gitRepo: { type: 'string' },
+      repoUrl: { type: ['string', 'null'] },
       teamId: { type: ['string', 'null'] },
     },
   };
@@ -104,7 +104,9 @@ export class UpdateProjectTool implements McpTool {
     const nome = optionalString(input, 'nome');
     const description = optionalString(input, 'description');
     const prefix = optionalString(input, 'prefix');
-    const gitRepo = optionalString(input, 'gitRepo');
+
+    // repoUrl: string | null | undefined (null = limpar repoUrl).
+    const repoUrl = this.parseOptionalRepoUrl(input);
 
     // automationEnabled: boolean opcional.
     const automationEnabled = this.parseOptionalBoolean(input, 'automationEnabled');
@@ -117,14 +119,14 @@ export class UpdateProjectTool implements McpTool {
       nome !== undefined ||
       description !== undefined ||
       prefix !== undefined ||
-      gitRepo !== undefined ||
+      repoUrl !== undefined ||
       automationEnabled !== undefined ||
       teamId !== undefined;
 
     if (!hasUpdate) {
       throw invalidParams(
         'body',
-        'at least one field to update must be provided (nome, description, prefix, automationEnabled, gitRepo, teamId)',
+        'at least one field to update must be provided (nome, description, prefix, automationEnabled, repoUrl, teamId)',
       );
     }
 
@@ -140,8 +142,8 @@ export class UpdateProjectTool implements McpTool {
     if (prefix !== undefined) {
       dto.prefix = prefix;
     }
-    if (gitRepo !== undefined) {
-      dto.gitRepo = gitRepo;
+    if (repoUrl !== undefined) {
+      dto.repoUrl = repoUrl;
     }
     if (automationEnabled !== undefined) {
       dto.automationEnabled = automationEnabled;
@@ -156,6 +158,31 @@ export class UpdateProjectTool implements McpTool {
     const result = await this.projectsService.update(projectId, dto, ctx.dEntidadeId);
 
     return textResult(result);
+  }
+
+  /**
+   * Extrai `repoUrl` do input respeitando semântica ternária:
+   *  - ausente/undefined → undefined (não tocar o campo)
+   *  - null explícito    → null (limpar repoUrl)
+   *  - string não vazia  → string (nova URL)
+   *
+   * @param input - Params já validados como Record
+   * @returns string | null | undefined
+   * @throws {McpToolError} INVALID_PARAMS se o valor não for string nem null
+   */
+  private parseOptionalRepoUrl(input: Record<string, unknown>): string | null | undefined {
+    if (!('repoUrl' in input)) {
+      return undefined;
+    }
+    const value = input.repoUrl;
+    if (value === null) {
+      return null;
+    }
+    if (typeof value !== 'string' || value.trim() === '') {
+      throw invalidParams('repoUrl', 'string or null expected');
+    }
+
+    return value;
   }
 
   /**

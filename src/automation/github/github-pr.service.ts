@@ -10,6 +10,8 @@ export interface GithubPrInput {
   agentId: string;
   correlationId: string;
   projectDados: Record<string, unknown>;
+  /** URL canônica do repositório (DProject.repoUrl — ADR-V2-043). */
+  repoUrl?: string | null;
   branch: string;
   baseBranch?: string;
   commandText: string;
@@ -73,7 +75,7 @@ export class GithubPrService {
       return null;
     }
 
-    const repo = this.resolveProjectRepo(input.projectDados);
+    const repo = this.resolveProjectRepo(input);
     if (!repo) {
       await this.auditPrFailure(input, 'PROJECT_GITHUB_REPO_MISSING');
       return null;
@@ -118,11 +120,13 @@ export class GithubPrService {
   }
 
   private resolveProjectRepo(
-    projectDados: Record<string, unknown>,
+    input: GithubPrInput,
   ): { owner: string; name: string; baseBranch: string } | null {
-    const automation = this.asRecord(projectDados.automation);
+    const automation = this.asRecord(input.projectDados.automation);
+    // Preferir automation.remoteRepoUrl (config específica de automação), depois
+    // a coluna canônica DProject.repoUrl (ADR-V2-043). dados.gitRepo não é lido.
     const repoUrl =
-      this.asString(automation?.remoteRepoUrl) ?? this.asString(projectDados.gitRepo);
+      this.asString(automation?.remoteRepoUrl) ?? (input.repoUrl ?? undefined);
     if (!repoUrl) return null;
 
     const match = /github\.com[:/]([^/]+)\/(.+?)(?:\.git)?$/.exec(repoUrl);

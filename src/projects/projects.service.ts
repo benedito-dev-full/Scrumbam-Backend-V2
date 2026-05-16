@@ -166,29 +166,17 @@ export class ProjectsService implements OnModuleInit {
         (dto.teamId ? ` (team=${dto.teamId})` : ''),
     );
 
-    // Dual-write repo URL (ADR-V2-043): `repoUrl` (coluna canônica) é a
-    // fonte de verdade; `dados.gitRepo` é mantido por 1 release para
-    // compat com clients legados. Se ambos vierem, `repoUrl` ganha e
-    // `gitRepo` é ignorado (com WARN para audit).
-    const effectiveRepoUrl = this.resolveEffectiveRepoUrl(
-      dto.repoUrl,
-      dto.gitRepo,
-      'create',
-      userEntidadeId,
-    );
-
     const project = await this.prisma.$transaction(async (tx) => {
       // Derivar slug único antes de criar o projeto (ADR-V2-030).
       // Reutiliza tx para enxergar inserções desta mesma transação.
       const slug = await this.deriveUniqueSlug(tx, dto.nome);
 
-      // Construir dados polimórficos
+      // Construir dados polimórficos — sem gitRepo (ADR-V2-043 limpeza dual-write).
       const dadosPayload: Record<string, unknown> = {
         prefix: dto.prefix ?? 'DEV',
         automationEnabled: dto.automationEnabled ?? false,
         slug,
         ...(dto.description ? { description: dto.description } : {}),
-        ...(effectiveRepoUrl ? { gitRepo: effectiveRepoUrl } : {}),
       };
 
       // 1. DProject
@@ -198,7 +186,7 @@ export class ProjectsService implements OnModuleInit {
           nome: dto.nome,
           ...(dto.description ? { descricao: dto.description } : {}),
           ...(dto.orgId ? { idEstab: BigInt(dto.orgId) } : {}),
-          ...(effectiveRepoUrl ? { repoUrl: effectiveRepoUrl } : {}),
+          ...(dto.repoUrl ? { repoUrl: dto.repoUrl } : {}),
           dados: dadosPayload as Prisma.InputJsonValue,
         },
       });
@@ -651,29 +639,15 @@ export class ProjectsService implements OnModuleInit {
       previousTeamId = existing?.idLocEscritu.toString() ?? null;
     }
 
-    // Dual-write repo URL (ADR-V2-043): resolve qual valor sera persistido
-    // tanto em `repoUrl` (coluna) quanto em `dados.gitRepo` (compat legado).
-    // Distinguimos "campo nao enviado" (undefined → nao mexe em nada) de
-    // "campo enviado como null" (limpa ambos).
-    const repoUrlProvided = 'repoUrl' in dto;
-    const gitRepoProvided = 'gitRepo' in dto;
-    let effectiveRepoUrl: string | null | undefined;
-    if (repoUrlProvided || gitRepoProvided) {
-      effectiveRepoUrl = this.resolveEffectiveRepoUrl(
-        dto.repoUrl,
-        dto.gitRepo,
-        'update',
-        userEntidadeId,
-        projectId,
-      );
-    }
+    // repoUrl: undefined = não toca, null = limpa, string = novo valor (ADR-V2-043).
+    const effectiveRepoUrl: string | null | undefined =
+      'repoUrl' in dto ? (dto.repoUrl ?? null) : undefined;
 
     const dadosAtuais = (project.dados as Record<string, unknown>) ?? {};
     const novosDados: Record<string, unknown> = {
       ...dadosAtuais,
       ...(dto.prefix !== undefined ? { prefix: dto.prefix } : {}),
       ...(dto.automationEnabled !== undefined ? { automationEnabled: dto.automationEnabled } : {}),
-      ...(effectiveRepoUrl !== undefined ? { gitRepo: effectiveRepoUrl } : {}),
       ...(dto.description !== undefined ? { description: dto.description } : {}),
     };
 
@@ -1227,14 +1201,6 @@ export class ProjectsService implements OnModuleInit {
   ): ProjectResponseDto {
     const dados = project.dados as Record<string, unknown> | null;
 
-    // Fallback de leitura (ADR-V2-043): preferir coluna `repoUrl` (canônica),
-    // mas cair em `dados.gitRepo` quando projeto antigo ainda não passou pelo
-    // backfill. Defesa em profundidade — o backfill da migration já cobre o
-    // grosso do caso, mas mantemos o fallback para cobrir janelas de race
-    // entre deploy/migration e para preservar UX de projetos legados.
-    const legacyGitRepo = (dados?.gitRepo as string | null | undefined) ?? null;
-    const effectiveRepoUrl = project.repoUrl ?? legacyGitRepo;
-
     return {
       id: project.chave.toString(),
       nome: project.nome,
@@ -1242,61 +1208,11 @@ export class ProjectsService implements OnModuleInit {
       description: (dados?.description as string | null | undefined) ?? project.descricao ?? null,
       orgId: project.idEstab?.toString() ?? null,
       memberCount,
-      gitRepo: effectiveRepoUrl,
-      repoUrl: effectiveRepoUrl,
+      repoUrl: project.repoUrl ?? null,
       teamId,
       criadoEm: project.criadoEm.toISOString(),
       atualizadoEm: project.atualizadoEm.toISOString(),
     };
   }
 
-  /**
-   * Resolve qual URL de repositório será persistida no dual-write
-   * (`DProject.repoUrl` + `dados.gitRepo`).
-   *
-   * Regras (ADR-V2-043):
-   *  1. `repoUrl` é a fonte primária — sempre ganha quando presente.
-   *  2. `gitRepo` (legado) é fallback para clients antigos — populado em
-   *     ambos os campos (auto-migrate em runtime).
-   *  3. Se ambos vierem, emite WARN com projectId/userId para audit e ignora
-   *     `gitRepo`. Os dois campos jamais divergem no banco.
-   *  4. Valor `null` (explícito) limpa o repo. Valor `undefined` significa
-   *     "campo não enviado" — chamador decide o que fazer.
-   *
-   * @param repoUrl - Valor do campo canônico (DTO).
-   * @param gitRepo - Valor do campo legado (DTO).
-   * @param operation - "create" ou "update" — usado apenas no log.
-   * @param userId - Chave do usuário executante (audit).
-   * @param projectId - Chave do projeto sendo atualizado (undefined em create).
-   * @returns URL efetiva (string), null para limpar, ou undefined quando
-   *   nenhum dos dois campos foi enviado (caller decide).
-   *
-   * @private
-   */
-  private resolveEffectiveRepoUrl(
-    repoUrl: string | null | undefined,
-    gitRepo: string | null | undefined,
-    operation: 'create' | 'update',
-    userId: bigint,
-    projectId?: bigint,
-  ): string | null | undefined {
-    const repoUrlSent = repoUrl !== undefined;
-    const gitRepoSent = gitRepo !== undefined;
-
-    if (repoUrlSent && gitRepoSent && repoUrl !== gitRepo) {
-      this.logger.warn(
-        `dual_write_repo_url_conflict op=${operation} ` +
-          `projectId=${projectId?.toString() ?? 'new'} userId=${userId.toString()} ` +
-          `gitRepo_legacy=ignored repoUrl_wins=true`,
-      );
-    }
-
-    if (repoUrlSent) {
-      return repoUrl ?? null;
-    }
-    if (gitRepoSent) {
-      return gitRepo ?? null;
-    }
-    return undefined;
-  }
 }

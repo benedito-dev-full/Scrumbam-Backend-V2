@@ -8,7 +8,7 @@ import { UpdateProjectTool } from '../tools/update-project.tool';
  *
  * Cobre:
  * (a) happy path — atualiza `nome` com sucesso
- * (b) happy path — atualiza múltiplos campos (nome + description + gitRepo)
+ * (b) happy path — atualiza múltiplos campos (nome + description + repoUrl)
  * (c) params inválidos — `projectId` ausente → INVALID_PARAMS, nenhum service chamado
  * (d) params inválidos — nenhum campo além de projectId → INVALID_PARAMS
  * (e) ForbiddenException (caller não é MANAGER) → propagada como exception
@@ -87,12 +87,12 @@ describe('MCP update_project tool', () => {
     });
   });
 
-  it('(b) happy path — atualiza múltiplos campos (nome + description + gitRepo)', async () => {
+  it('(b) happy path — atualiza múltiplos campos (nome + description + repoUrl)', async () => {
     const args = {
       projectId,
       nome: 'Projeto Atualizado',
       description: 'Descrição nova',
-      gitRepo: 'https://github.com/org/repo',
+      repoUrl: 'git@github.com:org/repo.git',
     };
 
     const response = await router.dispatch(
@@ -107,7 +107,7 @@ describe('MCP update_project tool', () => {
       expect.objectContaining({
         nome: 'Projeto Atualizado',
         description: 'Descrição nova',
-        gitRepo: 'https://github.com/org/repo',
+        repoUrl: 'git@github.com:org/repo.git',
       }),
       userCtx.dEntidadeId,
     );

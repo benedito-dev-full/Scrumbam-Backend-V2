@@ -3103,6 +3103,26 @@ Implementa auto-provisionamento de repositório git na VPS ao linkar projeto+age
 
 ---
 
+### Débito Técnico — Limpeza Dual-Write `dados.gitRepo` — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (8.7/10 APPROVED) | **Data:** 2026-05-15
+Remoção cirúrgica do write-path dual entre `DProject.repoUrl` (coluna canônica, ADR-V2-043) e `dados.gitRepo` (campo JSON legado). Sistema usa agora apenas `repoUrl` como fonte única de verdade. Limpeza compatibilidade transitória (1 release) encerrada.
+
+**Modulos afetados:** `src/projects/`, `src/automation/github/`, `src/mcp/tools/`
+**Artefatos removidos:** 
+- `resolveEffectiveRepoUrl()` service method
+- `gitRepo` DTOs (create, update, response)
+- `gitRepo` schema JSON + parser
+- Dual-write em `projects.service.ts` create/update
+- Fallback de leitura em buildResponse()
+- `gitRepo` MCP inputSchema tool
+
+**Specs:** 35/35 PASS + 2 regressões adicionadas (resolveProjectRepo com repoUrl)
+
+**ADRs:** ADR-V2-043 (atualizado — dual-write encerrado em 2026-05-15)
+
+---
+
 ## Proximas fases (preview)
 
 | Fase | Nome | Pilar dominante |

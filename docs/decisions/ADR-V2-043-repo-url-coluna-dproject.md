@@ -65,3 +65,23 @@ Negativas:
 - `ProjectsService`: escrita dual e fallback de leitura.
 - DTOs de projeto: `repoUrl` validado por whitelist restritiva.
 - `ProvisionService`: revalida `repoUrl` antes do dispatch ao agente.
+
+## Transição Completada
+
+**Data:** 2026-05-15  
+**Scope:** Limpeza débito técnico F13
+
+O período transitório de 1 release (compatibilidade legado) foi encerrado.
+Dual-write completamente removido:
+
+- `projects.service.ts`: `resolveEffectiveRepoUrl()` removido
+- `create()` / `update()`: nenhuma escrita mais em `dados.gitRepo`
+- `buildResponse()`: nenhuma leitura de fallback
+- DTOs (create, update, response): campo `gitRepo` removido
+- Schema: `gitRepo` removido da interface `ProjectDados`
+- MCP tool `update_project`: campo `gitRepo` removido do inputSchema
+- `GithubPrService.resolveProjectRepo()`: usa agora `repoUrl` coluna canônica
+
+**Source of truth:** `DProject.repoUrl` (coluna VARCHAR 512)
+
+Sistema estável. Nenhuma lógica legada pendente.
