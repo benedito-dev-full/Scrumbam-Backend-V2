@@ -103,6 +103,8 @@ export const EVENT_TYPES = {
   AGENT_GITBOT_UPDATED: 'agent.gitbot.updated',
   PROJECT_DEPLOY_KEY_GENERATED: 'project.deploy-key.generated',
   PROJECT_DEPLOY_KEY_REVOKED: 'project.deploy-key.revoked',
+  PROJECT_PROVISIONED: 'project.provisioned',
+  PROJECT_PROVISION_FAILED: 'project.provision.failed',
   WEBHOOK_ATTEMPTED: 'webhook.attempted',
   WEBHOOK_AUTO_DISABLED: 'webhook.auto_disabled',
   MCP_CALL: 'mcp.call',
