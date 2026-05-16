@@ -17,7 +17,7 @@ import { AUTOMATION_CLASS_IDS } from '../constants/automation-class-ids';
 import { RemoteExecutionClient } from '../runtime/remote-execution-client';
 import { ProvisionResponseDto } from './dto/provision-response.dto';
 
-const DEFAULT_BASE_DIR = '/home/dev-benedito/projetos';
+const DEFAULT_BASE_DIR = '/home/projetos';
 // depth omitido = full clone no agente (readOptionalPositiveInt rejeita 0)
 // ADR-V2-044: shallow (depth=1) quebra git push no Milestone 2
 const DEFAULT_TIMEOUT_SEC = 60;
