@@ -1,5 +1,11 @@
 ---
-# Nao e path-specific - aplica a qualquer contexto de git commit
+# Path-specific: carrega quando atualizar documentacao versionada.
+# (Documenter declara esta skill explicitamente em .claude/agents/documenter.md,
+#  então tem acesso garantido independentemente destes paths.)
+paths:
+  - "docs/CHANGELOG.md"
+  - "docs/ROADMAP.md"
+  - "workspace/STATUS.md"
 ---
 
 # Conventional Commits - Padrao Devari Core
