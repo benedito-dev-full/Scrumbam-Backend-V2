@@ -10,6 +10,7 @@ import { PrismaService } from '../../prisma.service';
 import { RoleResolverService } from '../../auth/services/role-resolver.service';
 import { AUTOMATION_CLASS_IDS } from '../constants/automation-class-ids';
 import { AgentTunnelService } from '../agents/agent-tunnel.service';
+import { RemoteExecutionClient } from '../runtime/remote-execution-client';
 import { LinkAgentResponseDto, ProjectAgentTipo } from './dto/link-agent.dto';
 import { ProjectAgentStatusResponseDto } from './dto/agent-status-response.dto';
 
@@ -84,6 +85,7 @@ export class ProjectAgentLinkService {
     private readonly prisma: PrismaService,
     private readonly roleResolver: RoleResolverService,
     private readonly agentTunnelService: AgentTunnelService,
+    private readonly remoteClient: RemoteExecutionClient,
   ) {}
 
   async linkAgent(
@@ -205,6 +207,8 @@ export class ProjectAgentLinkService {
   async unlinkAgent(projectId: bigint, agentId: bigint, userEntidadeId: bigint): Promise<void> {
     await this.requireProjectManagerOrOrgAdmin(projectId, userEntidadeId);
 
+    let projectSlug: string | null = null;
+
     await this.prisma.$transaction(async (tx) => {
       await this.lockProjectAgentLinks(tx, projectId);
 
@@ -215,7 +219,7 @@ export class ProjectAgentLinkService {
           idEntidade: agentId,
           excluido: false,
         },
-        select: { chave: true },
+        select: { chave: true, metaDados: true },
       });
       if (!link) {
         throw new NotFoundException(`Vinculo project-agent nao encontrado`);
@@ -228,6 +232,11 @@ export class ProjectAgentLinkService {
         );
       }
 
+      const meta = (link.metaDados as Record<string, unknown> | null) ?? {};
+      if (typeof meta.projectSlug === 'string' && PROJECT_SLUG_REGEX.test(meta.projectSlug)) {
+        projectSlug = meta.projectSlug;
+      }
+
       await tx.dVincula.update({
         where: { chave: link.chave },
         data: { excluido: true },
@@ -235,6 +244,76 @@ export class ProjectAgentLinkService {
     });
 
     this.logger.log(`project-agent unlink project=${projectId} agent=${agentId}`);
+
+    // Fire-and-forget: dispara UNPROVISION_PROJECT para o agente remover a
+    // secao do projeto do CLAUDE.md global. Falha nao bloqueia o unlink.
+    if (projectSlug) {
+      void this.dispatchUnprovisionFireAndForget(projectId, agentId, projectSlug);
+    }
+  }
+
+  /**
+   * Dispara UNPROVISION_PROJECT para o agente de forma fire-and-forget.
+   *
+   * Busca o runtime do agente (tunnelPort + secret) e envia o comando.
+   * Qualquer falha (agente offline, secret invalido, etc.) e apenas logada
+   * como warn — nao lanca excecao nem afeta o response do unlink.
+   *
+   * @param projectId - ID do projeto desvinculado (para logging).
+   * @param agentId - ID do agente (DEntidade -156).
+   * @param projectSlug - Slug do projeto a remover do CLAUDE.md.
+   */
+  private async dispatchUnprovisionFireAndForget(
+    projectId: bigint,
+    agentId: bigint,
+    projectSlug: string,
+  ): Promise<void> {
+    try {
+      const agent = await this.prisma.dEntidade.findFirst({
+        where: { chave: agentId, idClasse: AUTOMATION_CLASS_IDS.AGENT, excluido: false },
+        select: { dados: true },
+      });
+
+      const dados = (agent?.dados as Record<string, unknown> | null) ?? {};
+      const tunnelPort = dados.tunnelPort;
+      const secretRaw = dados.agentCommandSecretEncrypted;
+
+      if (
+        !agent ||
+        typeof tunnelPort !== 'number' ||
+        !Number.isInteger(tunnelPort) ||
+        typeof secretRaw !== 'string' ||
+        secretRaw.length === 0
+      ) {
+        this.logger.warn(
+          `unprovision-skipped: agente ${agentId.toString()} sem runtime valido ` +
+            `(project=${projectId.toString()} slug=${projectSlug})`,
+        );
+        return;
+      }
+
+      await this.remoteClient.dispatch<{ projectSlug: string }, unknown>(
+        'UNPROVISION_PROJECT',
+        { projectSlug },
+        {
+          agent: {
+            agentId: agentId.toString(),
+            tunnelPort: tunnelPort as number,
+            agentCommandSecretEncrypted: secretRaw as string,
+          },
+        },
+      );
+
+      this.logger.log(
+        `unprovision-dispatched project=${projectId.toString()} agent=${agentId.toString()} slug=${projectSlug}`,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `unprovision-failed project=${projectId.toString()} agent=${agentId.toString()} ` +
+          `slug=${projectSlug} error=${message}`,
+      );
+    }
   }
 
   async getStatus(

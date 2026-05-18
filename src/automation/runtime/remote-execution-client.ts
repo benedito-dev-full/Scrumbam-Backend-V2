@@ -102,7 +102,8 @@ export type RemoteCommandType =
   | 'RUN_CLAUDE_CODE'
   | 'SET_ENV'
   | 'GENERATE_DEPLOY_KEY'
-  | 'PROVISION_PROJECT';
+  | 'PROVISION_PROJECT'
+  | 'UNPROVISION_PROJECT';
 
 /**
  * Contexto necessario para qualquer chamada outbound HMAC ao agente.

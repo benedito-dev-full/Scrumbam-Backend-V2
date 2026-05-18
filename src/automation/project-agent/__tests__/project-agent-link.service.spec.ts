@@ -3,6 +3,7 @@ import { PrismaService } from '../../../prisma.service';
 import { RoleResolverService } from '../../../auth/services/role-resolver.service';
 import { AUTOMATION_CLASS_IDS } from '../../constants/automation-class-ids';
 import { AgentTunnelService } from '../../agents/agent-tunnel.service';
+import { RemoteExecutionClient } from '../../runtime/remote-execution-client';
 import { ProjectAgentLinkService } from '../project-agent-link.service';
 
 function buildService(overrides?: {
@@ -60,11 +61,16 @@ function buildService(overrides?: {
       }),
   } as unknown as AgentTunnelService;
 
+  const remoteClient = {
+    dispatch: jest.fn().mockResolvedValue({}),
+  } as unknown as RemoteExecutionClient;
+
   return {
-    service: new ProjectAgentLinkService(prisma, roleResolver, agentTunnelService),
+    service: new ProjectAgentLinkService(prisma, roleResolver, agentTunnelService, remoteClient),
     prisma,
     roleResolver,
     agentTunnelService,
+    remoteClient,
     tx,
   };
 }
