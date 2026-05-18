@@ -235,8 +235,9 @@ describe('ProjectsService', () => {
 
       expect(result.items).toHaveLength(1);
       expect(result.items[0].teamId).toBe('200');
-      // 3 chamadas: time, user-roles, team-links batch.
-      expect(prisma.dVincula.findMany).toHaveBeenCalledTimes(3);
+      // 4 chamadas: time, user-roles, team-links batch, folder-links batch
+      // (ADR-V2-FOLDERS-001 adicionou resolveFolderIdsForProjects).
+      expect(prisma.dVincula.findMany).toHaveBeenCalledTimes(4);
     });
 
     it('deve manter filtro teamId combinado com cursor na 2ª página (regressão review Task 19)', async () => {

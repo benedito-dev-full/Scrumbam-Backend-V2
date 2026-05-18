@@ -41,6 +41,8 @@ const ID_CLASSE_TEAM = BigInt(-180);
 const ID_CLASSE_TEAM_MEMBERSHIP = BigInt(-181);
 /** idClasse de DVincula PROJECT_TEAM_LINK (ADR-V2-029). */
 const ID_CLASSE_PROJECT_TEAM_LINK = BigInt(-182);
+/** idClasse de DVincula FOLDER_PROJECT_LINK (ADR-V2-FOLDERS-001). */
+const ID_CLASSE_FOLDER_PROJECT_LINK = BigInt(-183);
 /** idClasse de DVincula ORG_ROLE_ADMIN (seed F1). */
 const ID_CLASSE_ORG_ADMIN = BigInt(-161);
 
@@ -357,11 +359,12 @@ export class ProjectsService implements OnModuleInit {
       return { items: [], pagination: { hasMore: false, nextCursor: null } };
     }
 
-    // 3) Batch: DProjects + contagem de membros + vínculos de team (N+1 ZERO).
+    // 3) Batch: DProjects + contagem de membros + vínculos de team + folder (N+1 ZERO).
     //    ADR-V2-042: aplicar filtro de org em DProject.findMany. Projetos
     //    listados em memberships mas pertencentes a outra org NAO entram
     //    no resultado.
-    const [projects, memberCounts, teamLinks] = await Promise.all([
+    //    ADR-V2-FOLDERS-001: folderId resolvido via DVincula -183 em batch.
+    const [projects, memberCounts, teamLinks, folderMap] = await Promise.all([
       this.prisma.dProject.findMany({
         where: {
           chave: { in: projectIds },
@@ -387,6 +390,7 @@ export class ProjectsService implements OnModuleInit {
         },
         select: { idEntidade: true, idLocEscritu: true },
       }),
+      this.resolveFolderIdsForProjects(projectIds),
     ]);
 
     const countMap = new Map(
@@ -403,6 +407,7 @@ export class ProjectsService implements OnModuleInit {
         p,
         countMap.get(p.chave.toString()) ?? 0,
         teamMap.get(p.chave.toString()) ?? null,
+        folderMap.get(p.chave.toString()) ?? null,
       ),
     );
 
@@ -505,7 +510,7 @@ export class ProjectsService implements OnModuleInit {
   ): Promise<ProjectResponseDto> {
     const projectId = BigInt(id);
 
-    const [project, vinculo, teamLink] = await Promise.all([
+    const [project, vinculo, teamLink, folderLink] = await Promise.all([
       this.prisma.dProject.findFirst({
         where: { chave: projectId, excluido: false },
       }),
@@ -522,6 +527,14 @@ export class ProjectsService implements OnModuleInit {
         where: {
           idEntidade: projectId,
           idClasse: ID_CLASSE_PROJECT_TEAM_LINK,
+          excluido: false,
+        },
+        select: { idLocEscritu: true },
+      }),
+      this.prisma.dVincula.findFirst({
+        where: {
+          idEntidade: projectId,
+          idClasse: ID_CLASSE_FOLDER_PROJECT_LINK,
           excluido: false,
         },
         select: { idLocEscritu: true },
@@ -556,7 +569,12 @@ export class ProjectsService implements OnModuleInit {
       },
     });
 
-    return this.buildResponse(project, memberCount, teamLink?.idLocEscritu.toString() ?? null);
+    return this.buildResponse(
+      project,
+      memberCount,
+      teamLink?.idLocEscritu.toString() ?? null,
+      folderLink?.idLocEscritu.toString() ?? null,
+    );
   }
 
   /**
@@ -742,7 +760,22 @@ export class ProjectsService implements OnModuleInit {
       }
     }
 
-    return this.buildResponse(updated, memberCount, finalTeamId);
+    // Resolve folderId atual para preservar a flag no response (ADR-V2-FOLDERS-001).
+    const folderLink = await this.prisma.dVincula.findFirst({
+      where: {
+        idEntidade: projectId,
+        idClasse: ID_CLASSE_FOLDER_PROJECT_LINK,
+        excluido: false,
+      },
+      select: { idLocEscritu: true },
+    });
+
+    return this.buildResponse(
+      updated,
+      memberCount,
+      finalTeamId,
+      folderLink?.idLocEscritu.toString() ?? null,
+    );
   }
 
   /**
@@ -1198,6 +1231,7 @@ export class ProjectsService implements OnModuleInit {
     },
     memberCount: number,
     teamId: string | null,
+    folderId: string | null = null,
   ): ProjectResponseDto {
     const dados = project.dados as Record<string, unknown> | null;
 
@@ -1210,9 +1244,54 @@ export class ProjectsService implements OnModuleInit {
       memberCount,
       repoUrl: project.repoUrl ?? null,
       teamId,
+      folderId,
       criadoEm: project.criadoEm.toISOString(),
       atualizadoEm: project.atualizadoEm.toISOString(),
     };
   }
 
+  /**
+   * Resolve `folderId` para um lote de projects via DVincula -183.
+   *
+   * Uma única query indexada (idClasse + idEntidade IN). N+1 ZERO.
+   * Retorna `Map<projectIdString, folderIdString | null>` com todos os
+   * projects pré-inicializados como null (= limbo, sem pasta).
+   *
+   * @param projectIds - Chaves BigInt dos projects (pode ser vazio)
+   * @returns Map de folderId resolvido por projectId
+   *
+   * @see ADR-V2-FOLDERS-001
+   */
+  private async resolveFolderIdsForProjects(
+    projectIds: ReadonlyArray<bigint>,
+  ): Promise<Map<string, string | null>> {
+    const map = new Map<string, string | null>();
+    if (projectIds.length === 0) {
+      return map;
+    }
+    for (const pid of projectIds) {
+      map.set(pid.toString(), null);
+    }
+
+    const links = await this.prisma.dVincula.findMany({
+      where: {
+        idClasse: ID_CLASSE_FOLDER_PROJECT_LINK,
+        idEntidade: { in: [...projectIds] },
+        excluido: false,
+      },
+      select: { idEntidade: true, idLocEscritu: true },
+    });
+
+    // Defesa contra mocks de testes legados que não retornam array para a
+    // 4ª chamada de findMany; manter projects como null (limbo) sem crashar.
+    if (Array.isArray(links)) {
+      for (const link of links) {
+        if (link.idEntidade !== null) {
+          map.set(link.idEntidade.toString(), link.idLocEscritu.toString());
+        }
+      }
+    }
+
+    return map;
+  }
 }

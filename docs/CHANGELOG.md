@@ -14,6 +14,19 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Folders MVP: Agrupamento de Projetos por Organização (Pós-F5, ADR-V2-FOLDERS-001)** - 2026-05-18
+  - **DClasses novas (Pilar 3):** -155 FOLDER + -183 FOLDER_PROJECT_LINK (sem tabela ou coluna nova — ADR-V2-001 respeitado)
+  - **Service `FoldersService`:** 9 métodos (create, findAllByOrg, listUnassigned, listProjects, update, delete, moveProject + helpers)
+  - **8 Rotas REST:** `/folders/unassigned`, `/folders`, `POST /folders`, `/folders/:id/projects`, `PATCH /folders/:id`, `DELETE /folders/:id`, `POST /folders/:id/projects/:pid`, `DELETE /folders/:id/projects/:pid`
+  - **DTOs completos:** CreateFolderDto, UpdateFolderDto, FolderResponseDto, ListFolderResponseDto (class-validator + Swagger)
+  - **Decisões CEO aplicadas:** folders flat (Q1), cor derivada frontend (Q2), ordem alfabética (Q3), delete move projects para limbo (Q4), migration cria "Projetos" default (Q5)
+  - **Testes:** 30/30 PASS (24 unit FoldersService + 6 integration in-memory)
+  - **Migration:** script backfill idempotente para orgs existentes (cria pasta "Projetos", vincula projects via DVincula -183)
+  - **Pilares:** Pilar 2 RESPEITADO (zero FolderController — tudo em EntidadeController genérico); Pilar 3 RESPEITADO (2 DClasses, seed canônico)
+  - **ADRs:** ADR-V2-FOLDERS-001 (redigida), ADR-V2-001 (zero tabela nova), ADR-V2-029 (precedente DVincula)
+  - **Quality Score:** 8.3/10 APPROVED | Build: PASS, TypeScript: 0 errors, Lint: PASS
+  - **Débito Técnico:** `resolveFolderIdsForProjects` duplicada (FoldersService/ProjectsService) — extrair em futuro quando circular dep for resolvida
+
 - **F11 Task #4: MCP Tool `search_tasks` — busca de tasks via texto livre (ADR-V2-042)** - 2026-05-15
   - **Tool MCP `search_tasks`:** busca tasks por termo de texto em projetos acessíveis ao usuário; escopo automático via `findAccessibleProjectIds` (defense-in-depth)
   - **Classe `SearchTasksTool`** em `src/mcp/tools/search-tasks.tool.ts` (~160 linhas) — validação `q` obrigatória (mín 2 chars), filtro `projectId` opcional + limit (1-50, default 20)

@@ -24,14 +24,19 @@ import {
 } from '@nestjs/swagger';
 import { Response } from 'express';
 import { EntidadeService } from './entidades.service';
+import { FoldersService } from './folders.service';
 import { AuthCompositeGuard } from '../auth/guards/auth-composite.guard';
 import { OrgTenantGuard } from '../auth/guards/org-tenant.guard';
 import { ParseBigIntPipe } from '../common/pipes/parse-bigint.pipe';
+import { CurrentUser, JwtPayload } from '../auth/decorators/current-user.decorator';
 import { ListEntidadeQueryDto } from './dto/list-entidade-query.dto';
 import { CreateEntidadeDto } from './dto/create-entidade.dto';
 import { UpdateEntidadeDto } from './dto/update-entidade.dto';
 import { EntidadeResponseDto } from './dto/entidade-response.dto';
 import { ListEntidadeResponseDto } from './dto/list-entidade-response.dto';
+import { CreateFolderDto } from './dto/create-folder.dto';
+import { UpdateFolderDto } from './dto/update-folder.dto';
+import { FolderResponseDto, ListFolderResponseDto } from './dto/folder-response.dto';
 
 /**
  * Controller genérico canônico para DEntidade (Pilar 2 — Endpoints Genéricos).
@@ -57,7 +62,259 @@ import { ListEntidadeResponseDto } from './dto/list-entidade-response.dto';
 @UseGuards(AuthCompositeGuard, OrgTenantGuard)
 @Controller('entidades')
 export class EntidadeController {
-  constructor(private readonly entidadeService: EntidadeService) {}
+  constructor(
+    private readonly entidadeService: EntidadeService,
+    private readonly foldersService: FoldersService,
+  ) {}
+
+  // ───────────────────────────────────────────────────────────────────────
+  // FOLDERS (ADR-V2-FOLDERS-001) — DEntidade -155 + DVincula -183
+  //
+  // Rotas declaradas ANTES de `/:id` para que `/folders/unassigned` e
+  // `/folders/:folderId/projects` não sejam capturadas pela rota dinâmica.
+  // Padrão idêntico ao precedente `/entidades/plataformas/...` do template.
+  // ───────────────────────────────────────────────────────────────────────
+
+  /**
+   * Lista projects de uma organização SEM pasta vinculada ("limbo").
+   *
+   * Retorna projects órfãos onde o usuário tem acesso à org. Útil para o
+   * frontend exibir a aba "Sem pasta" no workspace.
+   *
+   * IMPORTANTE: rota declarada antes de `/folders/:folderId/...` para que
+   * `unassigned` não seja interpretado como folderId.
+   *
+   * @param organizationId - ID da organização (query param obrigatório)
+   * @param user - JWT payload (CurrentUser decorator)
+   * @returns Lista de projects sem pasta
+   *
+   * @throws {ForbiddenException} Se usuário não é membro da org
+   *
+   * @example
+   * ```bash
+   * curl 'http://localhost:3000/api/v1/entidades/folders/unassigned?organizationId=100' \
+   *   -H 'Authorization: Bearer ...'
+   * ```
+   */
+  @Get('folders/unassigned')
+  @ApiOperation({
+    summary: 'Lista projects da org SEM pasta vinculada (limbo)',
+    description:
+      'Retorna todos projects de `organizationId` que não estão em nenhuma pasta. Use para a aba "Sem pasta" do workspace.',
+  })
+  @ApiQuery({
+    name: 'organizationId',
+    required: true,
+    description: 'ID da organização',
+    example: '100',
+  })
+  @ApiResponse({ status: 200, description: 'Lista de projects órfãos' })
+  @ApiResponse({ status: 403, description: 'Usuário sem acesso à organização' })
+  async listUnassignedProjects(
+    @Query('organizationId') organizationId: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<{ items: { id: string; nome: string; orgId: string | null }[] }> {
+    return this.foldersService.listUnassigned(organizationId, BigInt(user.entidadeId));
+  }
+
+  /**
+   * Lista pastas de uma organização (ordenadas por nome alfabético).
+   *
+   * Wrapper de conveniência. Para consultas paginadas/filtradas avançadas
+   * use `GET /entidades?idClasse=-155&idEstab=<orgId>` (Pilar 2).
+   *
+   * @param organizationId - ID da organização
+   * @param user - JWT payload
+   * @returns Lista de pastas com `projectCount` por pasta
+   */
+  @Get('folders')
+  @ApiOperation({
+    summary: 'Lista pastas (DEntidade -155) de uma organização',
+    description: 'Retorna pastas da org ordenadas por nome. Cada item inclui projectCount.',
+  })
+  @ApiQuery({
+    name: 'organizationId',
+    required: true,
+    description: 'ID da organização',
+    example: '100',
+  })
+  @ApiResponse({ status: 200, description: 'Lista de pastas', type: ListFolderResponseDto })
+  @ApiResponse({ status: 403, description: 'Usuário sem acesso à organização' })
+  async listFolders(
+    @Query('organizationId') organizationId: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<ListFolderResponseDto> {
+    return this.foldersService.findAllByOrg(organizationId, BigInt(user.entidadeId));
+  }
+
+  /**
+   * Cria nova pasta.
+   *
+   * Body: `{ nome, organizationId }`. Cor/ícone OUT do MVP (CEO Q2).
+   *
+   * @param dto - Dados da pasta
+   * @param user - JWT payload
+   * @returns Pasta criada com `projectCount=0`
+   *
+   * @throws {NotFoundException} Se organização não encontrada
+   * @throws {ForbiddenException} Se usuário não é membro da org
+   */
+  @Post('folders')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Cria pasta (DEntidade -155)',
+    description: 'Cria nova pasta vinculada à organização. Usuário deve ser membro da org.',
+  })
+  @ApiBody({ type: CreateFolderDto })
+  @ApiResponse({ status: 201, description: 'Pasta criada', type: FolderResponseDto })
+  @ApiResponse({ status: 403, description: 'Usuário sem acesso à organização' })
+  @ApiResponse({ status: 404, description: 'Organização não encontrada' })
+  async createFolder(
+    @Body() dto: CreateFolderDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<FolderResponseDto> {
+    return this.foldersService.create(dto, BigInt(user.entidadeId));
+  }
+
+  /**
+   * Lista projects vinculados a uma pasta específica.
+   *
+   * @param folderId - ID da pasta (path param)
+   * @param user - JWT payload
+   * @returns Lista de projects vinculados
+   *
+   * @throws {NotFoundException} Se pasta não encontrada
+   * @throws {ForbiddenException} Se usuário sem acesso à org
+   */
+  @Get('folders/:folderId/projects')
+  @ApiOperation({
+    summary: 'Lista projects vinculados a uma pasta',
+    description: 'Retorna projects ativos vinculados via DVincula -183.',
+  })
+  @ApiParam({ name: 'folderId', description: 'ID da pasta', example: '500' })
+  @ApiResponse({ status: 200, description: 'Lista de projects' })
+  @ApiResponse({ status: 403, description: 'Sem acesso à organização' })
+  @ApiResponse({ status: 404, description: 'Pasta não encontrada' })
+  async listFolderProjects(
+    @Param('folderId', ParseBigIntPipe) folderId: bigint,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<{ items: { id: string; nome: string; orgId: string | null }[] }> {
+    return this.foldersService.listProjects(folderId.toString(), BigInt(user.entidadeId));
+  }
+
+  /**
+   * Renomeia pasta (apenas `nome` no MVP — CEO Q2/Q3).
+   *
+   * @param folderId - ID da pasta
+   * @param dto - Campos a atualizar
+   * @param user - JWT payload
+   * @returns Pasta atualizada
+   */
+  @Patch('folders/:folderId')
+  @ApiOperation({ summary: 'Renomeia pasta' })
+  @ApiParam({ name: 'folderId', description: 'ID da pasta', example: '500' })
+  @ApiBody({ type: UpdateFolderDto })
+  @ApiResponse({ status: 200, description: 'Pasta atualizada', type: FolderResponseDto })
+  @ApiResponse({ status: 403, description: 'Sem acesso à organização' })
+  @ApiResponse({ status: 404, description: 'Pasta não encontrada' })
+  async updateFolder(
+    @Param('folderId', ParseBigIntPipe) folderId: bigint,
+    @Body() dto: UpdateFolderDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<FolderResponseDto> {
+    return this.foldersService.update(folderId.toString(), dto, BigInt(user.entidadeId));
+  }
+
+  /**
+   * Soft-delete da pasta com cascata (CEO Q4 — projects movem p/ limbo).
+   *
+   * @param folderId - ID da pasta
+   * @param user - JWT payload
+   */
+  @Delete('folders/:folderId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Soft-delete da pasta (projects ficam órfãos — movem p/ limbo)',
+    description:
+      'CEO Q4: soft-deleta DEntidade -155 + soft-deleta cascata dos DVincula -183. DProject permanece intacto.',
+  })
+  @ApiParam({ name: 'folderId', description: 'ID da pasta', example: '500' })
+  @ApiResponse({ status: 204, description: 'Pasta excluída' })
+  @ApiResponse({ status: 403, description: 'Sem acesso à organização' })
+  @ApiResponse({ status: 404, description: 'Pasta não encontrada' })
+  async deleteFolder(
+    @Param('folderId', ParseBigIntPipe) folderId: bigint,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<void> {
+    return this.foldersService.delete(folderId.toString(), BigInt(user.entidadeId));
+  }
+
+  /**
+   * Move um project para a pasta (idempotente e race-safe).
+   *
+   * Garante invariante N:1: project com vínculo ativo anterior é
+   * soft-deletado em transação antes de criar o novo vínculo.
+   *
+   * @param folderId - ID da pasta destino
+   * @param projectId - ID do project a mover
+   * @param user - JWT payload
+   *
+   * @throws {ConflictException} Se project pertence a outra org
+   */
+  @Post('folders/:folderId/projects/:projectId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Move project para a pasta (cria/recria DVincula -183)',
+    description:
+      'Race-safe: soft-deleta qualquer vínculo ativo anterior do project antes de criar o novo. Idempotente.',
+  })
+  @ApiParam({ name: 'folderId', description: 'ID da pasta destino', example: '500' })
+  @ApiParam({ name: 'projectId', description: 'ID do project', example: '300' })
+  @ApiResponse({ status: 204, description: 'Project movido' })
+  @ApiResponse({ status: 403, description: 'Sem acesso à organização' })
+  @ApiResponse({ status: 404, description: 'Pasta ou project não encontrados' })
+  @ApiResponse({ status: 409, description: 'Project pertence a outra organização' })
+  async moveProjectToFolder(
+    @Param('folderId', ParseBigIntPipe) folderId: bigint,
+    @Param('projectId', ParseBigIntPipe) projectId: bigint,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<void> {
+    return this.foldersService.moveProject(
+      folderId.toString(),
+      projectId.toString(),
+      BigInt(user.entidadeId),
+    );
+  }
+
+  /**
+   * Desvincula project da pasta (move para o limbo).
+   *
+   * @param folderId - ID da pasta
+   * @param projectId - ID do project
+   * @param user - JWT payload
+   */
+  @Delete('folders/:folderId/projects/:projectId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Desvincula project da pasta (move p/ limbo)',
+    description: 'Soft-delete do DVincula -183. DProject permanece intacto.',
+  })
+  @ApiParam({ name: 'folderId', description: 'ID da pasta', example: '500' })
+  @ApiParam({ name: 'projectId', description: 'ID do project', example: '300' })
+  @ApiResponse({ status: 204, description: 'Project desvinculado' })
+  @ApiResponse({ status: 403, description: 'Sem acesso à organização' })
+  @ApiResponse({ status: 404, description: 'Pasta não encontrada' })
+  async unmoveProjectFromFolder(
+    @Param('folderId', ParseBigIntPipe) folderId: bigint,
+    @Param('projectId', ParseBigIntPipe) projectId: bigint,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<void> {
+    return this.foldersService.unmoveProject(
+      folderId.toString(),
+      projectId.toString(),
+      BigInt(user.entidadeId),
+    );
+  }
 
   /**
    * Lista entidades paginadas filtradas por classe.
@@ -80,13 +337,39 @@ export class EntidadeController {
   @Get()
   @ApiOperation({
     summary: 'Lista entidades por classe (Pilar 2 — endpoint genérico)',
-    description: 'Retorna lista paginada de DEntidade filtrada por idClasse. Use ?idClasse=-150 para Users, -152 para Orgs, -180 para Teams, -156 para Agents.',
+    description:
+      'Retorna lista paginada de DEntidade filtrada por idClasse. Use ?idClasse=-150 para Users, -152 para Orgs, -180 para Teams, -156 para Agents.',
   })
-  @ApiQuery({ name: 'idClasse', required: false, description: 'ID da DClasse (canônico V2). Ex: -150', example: '-150' })
-  @ApiQuery({ name: 'classe', required: false, description: '[DEPRECATED] Código da DClasse. Use idClasse.', deprecated: true })
-  @ApiQuery({ name: 'nome', required: false, description: 'Filtro por nome (parcial)', example: 'João' })
-  @ApiQuery({ name: 'cursor', required: false, description: 'Cursor para próxima página', example: '999' })
-  @ApiQuery({ name: 'pageSize', required: false, description: 'Itens por página (default 20, max 100)', example: 20 })
+  @ApiQuery({
+    name: 'idClasse',
+    required: false,
+    description: 'ID da DClasse (canônico V2). Ex: -150',
+    example: '-150',
+  })
+  @ApiQuery({
+    name: 'classe',
+    required: false,
+    description: '[DEPRECATED] Código da DClasse. Use idClasse.',
+    deprecated: true,
+  })
+  @ApiQuery({
+    name: 'nome',
+    required: false,
+    description: 'Filtro por nome (parcial)',
+    example: 'João',
+  })
+  @ApiQuery({
+    name: 'cursor',
+    required: false,
+    description: 'Cursor para próxima página',
+    example: '999',
+  })
+  @ApiQuery({
+    name: 'pageSize',
+    required: false,
+    description: 'Itens por página (default 20, max 100)',
+    example: 20,
+  })
   @ApiResponse({ status: 200, description: 'Lista retornada', type: ListEntidadeResponseDto })
   @ApiResponse({ status: 400, description: 'Parâmetro idClasse ausente ou inválido' })
   @ApiResponse({ status: 404, description: 'DClasse não encontrada' })
@@ -118,7 +401,8 @@ export class EntidadeController {
   @Get('fields')
   @ApiOperation({
     summary: 'Retorna campos dinâmicos (tableFields) de uma DClasse',
-    description: 'Retorna a definição de campos customizados da DClasse para renderização de formulários dinâmicos.',
+    description:
+      'Retorna a definição de campos customizados da DClasse para renderização de formulários dinâmicos.',
   })
   @ApiQuery({ name: 'idClasse', required: true, description: 'ID da DClasse', example: '-150' })
   @ApiResponse({ status: 200, description: 'tableFields da DClasse (ou null)' })
@@ -174,7 +458,8 @@ export class EntidadeController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Cria nova entidade',
-    description: 'Cria DEntidade de qualquer tipo via idClasse. Executa em transaction com DEvento de audit.',
+    description:
+      'Cria DEntidade de qualquer tipo via idClasse. Executa em transaction com DEvento de audit.',
   })
   @ApiBody({ type: CreateEntidadeDto })
   @ApiResponse({ status: 201, description: 'Entidade criada', type: EntidadeResponseDto })

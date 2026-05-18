@@ -60,6 +60,22 @@ export class ProjectResponseDto {
   })
   teamId!: string | null;
 
+  /**
+   * ID da pasta (folder) à qual o projeto está vinculado (DVincula -183).
+   *
+   * `null` quando o projeto está no "limbo" (sem pasta — visualização
+   * `/workspace` mostra como "Sem pasta"). Backend SEMPRE retorna
+   * `string | null` — nunca `undefined`.
+   *
+   * @see ADR-V2-FOLDERS-001
+   */
+  @ApiPropertyOptional({
+    description: 'ID da pasta vinculada (DVincula -183) ou null se em limbo',
+    example: '500',
+    nullable: true,
+  })
+  folderId!: string | null;
+
   @ApiProperty({ description: 'Data de criação ISO 8601', example: '2026-05-09T00:00:00.000Z' })
   criadoEm!: string;
 

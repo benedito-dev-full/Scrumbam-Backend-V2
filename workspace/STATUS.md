@@ -1,6 +1,103 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-17 (F13 VPS Provision Milestone 2 — auto-update CLAUDE.md + UNPROVISION_PROJECT)
+**Ultima atualizacao:** 2026-05-18 (Folders MVP COMPLETA + F13 VPS Provision Milestone 2 COMPLETA)
+
+---
+
+## ✅ Folders MVP — Agrupamento de Projetos por Organização — COMPLETA
+
+**Status:** ✅ COMPLETA (ADR-V2-FOLDERS-001 redigida)
+**Módulo:** entidades (DEntidade -155 + DVincula -183)
+**Fase:** Pós-F5 (extensão arquitetural)
+**Duration:** ~21.5h total (Strategist ~5h, Implementer ~13h, Reviewer ~2h, Documenter ~1.5h)
+**Quality Score:** 8.3/10 APPROVED
+
+### Agents Performance
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | ~5h | Plano detalhado, 5 decisões CEO resolvidas |
+| Implementer | ~13h | 9 métodos service + 8 rotas + DTOs + tests 30/30 PASS |
+| Reviewer | ~2h | Score 8.3/10, sem bloqueadores |
+| Documenter | ~1.5h | JSDoc completo, ADR, ROADMAP, CHANGELOG, STATUS |
+
+### Deliverables
+
+**Seed (Pilar 3):**
+- `-155 FOLDER` (DEntidade, idPai=-37)
+- `-183 FOLDER_PROJECT_LINK` (DVincula, idPai=-37)
+
+**Service:**
+- `FoldersService` com 9 métodos públicos + helpers
+- Batch query com `groupBy` — N+1 ZERO
+- Race-safe moveProject via `prisma.$transaction`
+
+**Controller Routes (all in EntidadeController):**
+1. `GET /entidades/folders/unassigned` — projects sem pasta
+2. `GET /entidades/folders` — lista pastas com projectCount
+3. `POST /entidades/folders` — cria pasta
+4. `GET /entidades/folders/:folderId/projects` — projects da pasta
+5. `PATCH /entidades/folders/:folderId` — renomeia pasta
+6. `DELETE /entidades/folders/:folderId` — soft-delete + cascata
+7. `POST /entidades/folders/:folderId/projects/:projectId` — move project
+8. `DELETE /entidades/folders/:folderId/projects/:projectId` — tira project
+
+**DTOs:**
+- `CreateFolderDto` (nome, organizationId)
+- `UpdateFolderDto` (nome optional)
+- `FolderResponseDto` (id, nome, organizationId, projectCount, timestamps)
+- `ListFolderResponseDto` (items array)
+
+**Migration:**
+- Backfill script idempotente: cria "Projetos" default por org existente
+
+**Tests:** 30/30 PASS
+- 24 unit (FoldersService)
+- 6 integration (in-memory Prisma mock)
+
+### Pilares
+
+- **Pilar 1 (Engine):** N/A — Folder é cadastro estrutural
+- **Pilar 2 (Endpoints):** Reutilizado EntidadeController genérico (zero FolderController)
+- **Pilar 3 (Seed):** 2 DClasses novas no range -150..-527
+
+### ADRs
+
+- **ADR-V2-FOLDERS-001** — Folder via DEntidade(-155) + DVincula(-183), sem tabela/coluna nova ✅
+- **ADR-V2-001** — Zero tabela nova (respeitado) ✅
+- **ADR-V2-029** — Precedente DVincula PROJECT_TEAM_LINK (-182) ✅
+- **ADR-V2-043** — Coluna repoUrl em DProject (não se aplica a Folders) ✅
+
+### Decisões CEO (2026-05-18)
+
+| Q# | Pergunta | Decisão |
+|----|----------|---------|
+| Q1 | Aninhamento? | OUT MVP — flat |
+| Q2 | Cor/ícone? | OUT MVP — frontend hash(nome) |
+| Q3 | Drag-drop? | OUT MVP — ordem alfabética |
+| Q4 | Delete com projects? | MOVE para limbo (soft-delete DVincula) |
+| Q5 | Migration default? | SIM — cria "Projetos" por org |
+
+### Métricas
+
+- **Build:** PASS ✅
+- **TypeScript:** 0 errors ✅
+- **ESLint:** 0 warnings ✅
+- **Tests:** 30/30 PASS ✅
+- **N+1 Queries:** ZERO (batch with groupBy) ✅
+- **Queries/request:** ~2-3 (O(1) vs O(n) de folders) ✅
+
+### Débito Técnico
+
+- `resolveFolderIdsForProjects` duplicada em FoldersService/ProjectsService
+  - Causa: evitar circular dependency
+  - Solução futura: extrair para `common/` quando circular dep for resolvida
+
+### Frontend Integration
+
+Scrumbam-FrontEnd adaptará em fase separada (Task #9):
+- `useProjects()` consumirá novo campo `folderId` do endpoint V2
+- Agrupamento visual por pasta (lógica já implementada no workspace/page.tsx)
 
 ---
 

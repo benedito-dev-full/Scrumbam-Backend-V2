@@ -3099,7 +3099,7 @@ Ambos registrados no CHANGELOG.md em "Known issues" e rastreados para próximas 
 
 **Status:** ✅ COMPLETA (8.0/10 APPROVED) | **Data:** 2026-05-15  
 Implementa auto-provisionamento de repositório git na VPS ao linkar projeto+agente. Backend envia `PROVISION_PROJECT` via HMAC; agente executa `git clone --depth=0` com defesas (execFile, allowlist hosts, SHA regex). Coluna `repoUrl VARCHAR(512)` adicionada ao DProject (ADR-V2-043 — exceção única ao ADR-V2-001). Full clone por padrão (ADR-V2-044) para compatibilidade com push no Milestone 2.  
-**Commits:** `156e194` (6.2/10) + `4faaa65` (8.0/10) | **ADRs:** V2-043, V2-044
+**Commits:** `156e194` (6.2/10) + `5ad15a5` (8.0/10) | **ADRs:** V2-043, V2-044
 
 ---
 
@@ -3123,6 +3123,71 @@ Remoção cirúrgica do write-path dual entre `DProject.repoUrl` (coluna canôni
 
 ---
 
+## Extensões Pós-F17 (Backlog Refinado)
+
+### Folders MVP (Agrupamento de Projetos por Organização) — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA
+**Módulo V2:** entidades + seeds
+**Fase V2:** Pós-F5 (extensão arquitetural, consome Pilares F1+F2+F3 já entregues)
+**Tempo Real:** ~18h Strategist/Implementer + ~2h Reviewer + ~1.5h Documenter = **~21.5h total**
+**Quality Score:** 8.3/10 APPROVED
+
+**O Que Foi Feito:**
+- **Seed (Pilar 3):** 2 novas DClasses em range -150..-527
+  - `-155 FOLDER` (DEntidade, idPai=-37 ENTIDADES)
+  - `-183 FOLDER_PROJECT_LINK` (DVincula, idPai=-37 ENTIDADES)
+
+- **Estrutural (Pilar 2):** 8 rotas REST novas, todas em `EntidadeController` (zero controller novo)
+  - `GET /entidades/folders/unassigned` — projects sem pasta ("limbo")
+  - `GET /entidades/folders` — lista pastas com projectCount (batch, N+1 ZERO)
+  - `POST /entidades/folders` — cria pasta
+  - `GET /entidades/folders/:folderId/projects` — projects da pasta
+  - `PATCH /entidades/folders/:folderId` — renomeia pasta
+  - `DELETE /entidades/folders/:folderId` — soft-delete + cascata em DVincula
+  - `POST /entidades/folders/:folderId/projects/:projectId` — move project (race-safe)
+  - `DELETE /entidades/folders/:folderId/projects/:projectId` — tira project da pasta
+
+- **Service (FoldersService):** 9 métodos públicos + helpers, testes 30/30 PASS
+  - `create()`, `findAllByOrg()`, `listUnassigned()`, `listProjects()`, `update()`, `delete()`, `moveProject()`, ...
+
+- **DTOs (class-validator + Swagger):**
+  - `CreateFolderDto` — nome + organizationId
+  - `UpdateFolderDto` — rename apenas
+  - `FolderResponseDto` — id, nome, organizationId, projectCount, timestamps
+  - `ListFolderResponseDto` — lista ordenada alfabeticamente
+
+- **Migration:**
+  - Script backfill idempotente: `prisma/scripts/backfill-default-folders.ts`
+  - Cria 1 pasta "Projetos" por org existente com ≥1 project
+  - Vincula todos projects da org via DVincula -183
+
+- **Tests:** 30/30 PASS (24 unit `folders.service.spec.ts` + 6 integration `folders.integration.spec.ts`)
+
+- **Decisões CEO aplicadas:**
+  - Q1 (aninhamento): OUT MVP — folders flat ✓
+  - Q2 (cor/ícone): OUT MVP — frontend deriva via hash(nome) ✓
+  - Q3 (drag-drop): OUT MVP — ordem alfabética ✓
+  - Q4 (delete): MOVE projects para limbo (soft-delete DVincula) ✓
+  - Q5 (migration): SIM — cria "Projetos" default ✓
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — Folder é cadastro estrutural (Prisma direto)
+- Pilar 2 (Endpoints): Reutilizado EntidadeController genérico (zero controller novo)
+- Pilar 3 (Seed): 2 DClasses novas no range -150..-527 (sem tabela/coluna nova)
+
+**ADRs vinculados:** ADR-V2-FOLDERS-001 (redigido pelo Documenter), ADR-V2-001, ADR-V2-029, ADR-V2-043
+
+**Débito Técnico:**
+- `resolveFolderIdsForProjects` duplicada em FoldersService (public) e ProjectsService (private)
+  - Causa: evitar circular dependency (ProjectsModule ↔ EntidadesModule via FoldersService)
+  - Mitigação: extrair para `common/helpers/` quando circular dep for resolvida (futuro)
+
+**Build:** PASS (`npm run build` — TypeScript 0 errors, NestJS compilation OK)
+**Frontend Integration:** Scrumbam-FrontEnd adaptará em fase separada (Task #9) — endpoint aumenta `ProjectResponseDto` com `folderId`
+
+---
+
 ## Proximas fases (preview)
 
 | Fase | Nome | Pilar dominante |
@@ -3133,6 +3198,7 @@ Remoção cirúrgica do write-path dual entre `DProject.repoUrl` (coluna canôni
 | F15 | **Migration de dados do legado** | — |
 | F16 | Documentacao + Handoff | — |
 | F17 | Launch + pos-launch | — |
+| Pós-F17 | **Folders MVP** (✅ COMPLETA) + Frontend adapter | — |
 
 Detalhes completos: `docs/plano/00-PLANO-MESTRE.md` §1.1.
 

@@ -4,12 +4,13 @@
  * Composicao do seed (ADR-V2-019: monolitico):
  *   - 45 classes fixas universais Devari-Core (range -1..-110), via spread de
  *     `templates/classes-base-template.ts`.
- *   - 95 classes especificas Scrumban-V2 (range -150..-527), declaradas
+ *   - 97 classes especificas Scrumban-V2 (range -150..-527), declaradas
  *     neste arquivo, agrupadas por seccao (DEntidade, DVincula, DPedido,
  *     DTabela, DEvento, DTabela secundario) com comentarios `// === ... ===`.
  *
- * Total: 140 DClasses (ADR-V2-026: +1 AUDIT_GENERIC; ADR-V2-028: +6 INVITE_*;
- *   ADR-V2-029: +1 PROJECT_TEAM_LINK; ADR-V2-033: +2 AGENT_SESSION_*).
+ * Total: 142 DClasses (ADR-V2-026: +1 AUDIT_GENERIC; ADR-V2-028: +6 INVITE_*;
+ *   ADR-V2-029: +1 PROJECT_TEAM_LINK; ADR-V2-033: +2 AGENT_SESSION_*;
+ *   ADR-V2-FOLDERS-001: +1 FOLDER, +1 FOLDER_PROJECT_LINK).
  *
  * Validacao automatica:
  *   `validateHierarchy(classes)` e chamado no topo deste modulo. Qualquer
@@ -74,14 +75,16 @@ function esp(
 }
 
 /**
- * Array de classes especificas Scrumban-V2 (95 entradas).
+ * Array de classes especificas Scrumban-V2 (97 entradas).
  *
  * Ordem:
- *   1. DEntidade — 7 (sub-tipos de Pessoa: USER, PLATFORM_SCRUMBAN,
- *      ORGANIZATION, SCRUMBAN_PROJECT, SCRUMBAN_TASK, AGENT, TEAM).
- *   2. DVincula — 12 (relacoes Org-User, Project-User, Team, Project-Agent,
- *      Telegram, Project-Team).
+ *   1. DEntidade — 8 (sub-tipos de Pessoa: USER, PLATFORM_SCRUMBAN,
+ *      ORGANIZATION, SCRUMBAN_PROJECT, SCRUMBAN_TASK, AGENT, TEAM, FOLDER).
+ *      ADR-V2-FOLDERS-001 (+1 FOLDER).
+ *   2. DVincula — 13 (relacoes Org-User, Project-User, Team, Project-Agent,
+ *      Telegram, Project-Team, Folder-Project).
  *      ADR-V2-029 (+1 PROJECT_TEAM_LINK).
+ *      ADR-V2-FOLDERS-001 (+1 FOLDER_PROJECT_LINK).
  *   3. DPedido — 4 (EXECUTION + EXEC_LOW/MED/HIGH para Pilar 1 / F6).
  *   4. DTabela principal — 35 (SPRINT, PRIORITY, TASK_TYPE, STATUS V3,
  *      CHANNEL, WEBHOOK, API_KEY, MCP_KEY, INSTALL_TOKEN, PAIRING_TOKEN,
@@ -97,16 +100,21 @@ function esp(
  *      INVITE_TOKEN, INVITE_STATUS_*).
  *      ADR-V2-028 (+5 INVITE_TOKEN, INVITE_STATUS_PENDING/ACCEPTED/EXPIRED/REVOKED).
  *
- * Soma: 7 + 12 + 4 + 35 + 16 + 21 = 95.
+ * Soma: 8 + 13 + 4 + 35 + 16 + 21 = 97.
  */
 const classesEspecificas: DClasseSeed[] = [
-  // === DEntidade — sub-tipos de Pessoa (5) + DProject/DTask (2) ===
-  // Filhos de PESSOAS (-43)
+  // === DEntidade — sub-tipos de Pessoa (5) + DProject/DTask (2) + FOLDER (1) ===
+  // Filhos de PESSOAS (-43) ou ENTIDADES (-37)
   esp(-150, 'USER', 'Usuario Scrumban', -43),
   esp(-151, 'PLATFORM_SCRUMBAN', 'Platform Scrumban', -43),
   esp(-152, 'ORGANIZATION', 'Organizacao', -43),
   esp(-153, 'SCRUMBAN_PROJECT', 'Projeto Scrumban', -37),
   esp(-154, 'SCRUMBAN_TASK', 'Task Scrumban', -37),
+  // ADR-V2-FOLDERS-001: pasta agrupadora de projetos por organizacao.
+  // Folder e DEntidade (nao DTabela) porque tem lifecycle proprio (CRUD,
+  // soft-delete com cascata de vinculos) e e cidada de primeira classe da
+  // navegacao (/workspace/folders/:id). idEstab=orgId estabelece o tenant.
+  esp(-155, 'FOLDER', 'Pasta (agrupamento de projetos)', -37),
   esp(-156, 'AGENT', 'Agente Claude Code', -43),
   esp(-180, 'TEAM', 'Time', -43),
 
@@ -126,6 +134,12 @@ const classesEspecificas: DClasseSeed[] = [
   // do no service). Permite que projetos sejam orfaos (sem time) — vinculo
   // ausente = teamId null no response.
   esp(-182, 'PROJECT_TEAM_LINK', 'Vinculo Project-Team', -37),
+  // ADR-V2-FOLDERS-001: vincula DProject a DEntidade-Folder (-155) via DVincula.
+  // Padrao espelhado de PROJECT_TEAM_LINK (-182) — idLocEscritu=folderId (DONO
+  // do vinculo), idEntidade=projectId. Cardinalidade N:1 (1 projeto pertence
+  // a no maximo 1 folder ativo, validado em service — nao ha unique parcial).
+  // Soft-delete por projeto = move para "limbo" (CEO Q4).
+  esp(-183, 'FOLDER_PROJECT_LINK', 'Vinculo Folder-Project', -37),
   esp(-185, 'PROJECT_AGENT', 'Vinculo Project-Agent', -37),
   esp(-186, 'TELEGRAM_LINK', 'Vinculo User-Telegram chat', -37),
 
@@ -246,7 +260,7 @@ const classesEspecificas: DClasseSeed[] = [
 ];
 
 /**
- * Array completo do seed (45 fixas + 95 especificas = 140 DClasses).
+ * Array completo do seed (45 fixas + 97 especificas = 142 DClasses).
  * Validado automaticamente em time de import (validateHierarchy abaixo).
  */
 export const classes: DClasseSeed[] = [...classesFixas, ...classesEspecificas];
