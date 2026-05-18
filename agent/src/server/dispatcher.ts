@@ -32,6 +32,7 @@ import { createGenerateDeployKeyHandler } from '../handlers/generate-deploy-key.
 import { createProvisionProjectHandler } from '../handlers/provision-project.handler';
 import { createRunClaudeCodeHandler, type ProjectMutex } from '../handlers/run-claude-code.handler';
 import { createSetEnvHandler } from '../handlers/set-env.handler';
+import { createUnprovisionProjectHandler } from '../handlers/unprovision-project.handler';
 import type { BackendClient } from '../outbound/backend-client';
 
 const SUPPORTED_TYPES = [
@@ -40,6 +41,7 @@ const SUPPORTED_TYPES = [
   'SET_ENV',
   'GENERATE_DEPLOY_KEY',
   'PROVISION_PROJECT',
+  'UNPROVISION_PROJECT',
 ] as const;
 type SupportedType = (typeof SUPPORTED_TYPES)[number];
 
@@ -69,6 +71,11 @@ export interface DispatcherDeps {
    * `createProvisionProjectHandler`.
    */
   provisionProjectHandler?: (req: Request, res: Response) => void;
+  /**
+   * Override do handler de UNPROVISION_PROJECT (testes). Default cria via
+   * `createUnprovisionProjectHandler`.
+   */
+  unprovisionProjectHandler?: (req: Request, res: Response) => void;
 }
 
 /**
@@ -95,6 +102,13 @@ export function createDispatcher(deps: DispatcherDeps) {
     createProvisionProjectHandler({
       logger,
       allowedBaseDirs: deps.config.allowedProjectRoots,
+      claudeMdPath: deps.config.claudeMdPath,
+    });
+  const unprovisionProjectHandler =
+    deps.unprovisionProjectHandler ??
+    createUnprovisionProjectHandler({
+      logger,
+      claudeMdPath: deps.config.claudeMdPath,
     });
 
   return (req: Request, res: Response): void => {
@@ -149,6 +163,11 @@ export function createDispatcher(deps: DispatcherDeps) {
 
     if (type === 'PROVISION_PROJECT') {
       provisionProjectHandler(req, res);
+      return;
+    }
+
+    if (type === 'UNPROVISION_PROJECT') {
+      unprovisionProjectHandler(req, res);
       return;
     }
 

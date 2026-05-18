@@ -10,11 +10,14 @@ import {
   type ProvisionProjectResult,
 } from '../git/clone';
 import { PROJECT_SLUG_REGEX } from '../ssh/deploy-key-generator';
+import { upsertProjectEntry } from '../claude-code/claude-md-writer';
 
 export interface ProvisionProjectDeps {
   logger: Logger;
   allowedBaseDirs?: readonly string[];
   provisionImpl?: typeof provisionProject;
+  claudeMdPath?: string;
+  claudeMdWriterImpl?: typeof upsertProjectEntry;
 }
 
 interface ValidatedPayload {
@@ -111,6 +114,23 @@ export function createProvisionProjectHandler(deps: ProvisionProjectDeps) {
       headCommitSha: result.headCommitSha,
       usedSshKey: result.usedSshKey,
     });
+
+    if (deps.claudeMdPath) {
+      const writerImpl = deps.claudeMdWriterImpl ?? upsertProjectEntry;
+      void writerImpl(payload.projectSlug, result.projectPath, deps.claudeMdPath).catch(
+        (err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          deps.logger.error(
+            {
+              stage: 'provision-project',
+              projectSlug: payload.projectSlug,
+              err: msg,
+            },
+            'falha ao atualizar CLAUDE.md apos provision (nao afeta o resultado)',
+          );
+        },
+      );
+    }
   };
 }
 

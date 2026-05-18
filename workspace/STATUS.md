@@ -1,6 +1,6 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-15 (Corretivo F13 VPS Provision Milestone 1 — depth=0, ADR-V2-044)
+**Ultima atualizacao:** 2026-05-17 (F13 VPS Provision Milestone 2 — auto-update CLAUDE.md + UNPROVISION_PROJECT)
 
 ---
 
@@ -21,7 +21,7 @@
 - ✅ `prisma/migrations/20260515151000_add_repo_url_to_dproject` — coluna `repoUrl VARCHAR(512)` + backfill idempotente + rollback manual
 - ✅ Dual-write `repoUrl ↔ dados.gitRepo` em `projects.service.ts` (compat legado)
 - ✅ ADR-V2-043 (exceção ao ADR-V2-001 para coluna estrutural tipada)
-- ✅ ADR-V2-044 (full clone `depth=0` para compatibilidade com Milestone 2 push)
+- ✅ ADR-V2-044 (full clone `depth=0` para compatibilidade com Milestone 2)
 
 ### Pilares
 
@@ -31,7 +31,38 @@
 
 ### Próximo passo
 
-**Milestone 2** — Mapping `projectSlug → workdir` em CLAUDE.md global + `git push` outbound após execução Claude Code.
+**Milestone 2** — Mapping `projectSlug → workdir` em CLAUDE.md global + handler `UNPROVISION_PROJECT`.
+
+---
+
+## 🎯 F13 VPS Provision Milestone 2 — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Score 9.0/10 APPROVED)  
+**Módulo V2:** `agent/src/claude-code/` + `agent/src/handlers/`  
+**Build:** PASS | **Agent Tests:** 175 specs (14 suites), 20 skipped, 0 failed  
+**Reviewer aprovou:** 2026-05-17 (Score 9.0/10 APPROVED)
+
+### Entregáveis
+
+- ✅ `agent/src/claude-code/claude-md-writer.ts` — upsertProjectEntry / removeProjectEntry com mutex singleton
+- ✅ `agent/__tests__/claude-md-writer.spec.ts` — 7 testes (vazio, append, update, re-provision, remove, idempotente, concorrência)
+- ✅ `agent/src/handlers/unprovision-project.handler.ts` — validação `projectSlug`, remoção via `removeProjectEntry`, respostas 200/422/500
+- ✅ `agent/__tests__/unprovision-project.handler.spec.ts` — 4 testes
+- ✅ `agent/src/handlers/provision-project.handler.ts` — fire-and-forget após provision bem-sucedido (campos `claudeMdPath?`, `claudeMdWriterImpl?`)
+- ✅ `agent/__tests__/provision-project.handler.spec.ts` — +3 casos adicionais
+- ✅ `agent/src/server/dispatcher.ts` — UNPROVISION_PROJECT registrado (6 tipos agora), claudeMdPath passado ao provision handler
+- ✅ `agent/__tests__/dispatcher.spec.ts` — toHaveLength(6), describe UNPROVISION_PROJECT
+
+### Pilares
+
+- Pilar 1 (Engine): N/A — provision é dispatch outbound, não transação DPedido
+- Pilar 2 (Endpoints): ADR-V2-035 FORTALECIDO (agente escreve CLAUDE.md automaticamente)
+- Pilar 3 (Seed): Zero DClasses novas
+
+### ADRs Refinados
+
+- **ADR-V2-035:** Identidade de projeto via `projectSlug` + CLAUDE.md global — agora com AUTO-UPDATE pós-provision
+- **ADR-V2-033:** Contrato `/v1/execute` outbound + `execution-result` inbound — UNPROVISION_PROJECT adicionado
 
 ---
 

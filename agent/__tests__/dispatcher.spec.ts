@@ -65,6 +65,7 @@ function buildApp(overrides?: {
   runClaudeCodeHandler?: ReturnType<typeof jest.fn>;
   setEnvHandler?: ReturnType<typeof jest.fn>;
   generateDeployKeyHandler?: ReturnType<typeof jest.fn>;
+  unprovisionProjectHandler?: ReturnType<typeof jest.fn>;
 }) {
   const app = express();
   app.use(express.json());
@@ -78,6 +79,7 @@ function buildApp(overrides?: {
       runClaudeCodeHandler: overrides?.runClaudeCodeHandler,
       setEnvHandler: overrides?.setEnvHandler,
       generateDeployKeyHandler: overrides?.generateDeployKeyHandler,
+      unprovisionProjectHandler: overrides?.unprovisionProjectHandler,
     }),
   );
   return app;
@@ -201,6 +203,23 @@ describe('Dispatcher /v1/execute', () => {
     });
   });
 
+  describe('UNPROVISION_PROJECT (novo type — sanity)', () => {
+    it('roteia para unprovisionProjectHandler injetado', async () => {
+      const handler = jest.fn((_req, res) =>
+        res.status(200).json({ accepted: true }),
+      );
+      const app = buildApp({ unprovisionProjectHandler: handler });
+
+      const res = await request(app)
+        .post('/v1/execute')
+        .send({ type: 'UNPROVISION_PROJECT', projectSlug: 'meu-proj' });
+
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ accepted: true });
+    });
+  });
+
   describe('Erros padronizados (regressão)', () => {
     it('MISSING_TYPE quando body sem campo type', async () => {
       const app = buildApp();
@@ -212,7 +231,14 @@ describe('Dispatcher /v1/execute', () => {
         errorCode: 'MISSING_TYPE',
       });
       expect(res.body.supportedTypes).toEqual(
-        expect.arrayContaining(['PING', 'RUN_CLAUDE_CODE', 'SET_ENV', 'GENERATE_DEPLOY_KEY']),
+        expect.arrayContaining([
+          'PING',
+          'RUN_CLAUDE_CODE',
+          'SET_ENV',
+          'GENERATE_DEPLOY_KEY',
+          'PROVISION_PROJECT',
+          'UNPROVISION_PROJECT',
+        ]),
       );
     });
 
@@ -227,7 +253,7 @@ describe('Dispatcher /v1/execute', () => {
       });
     });
 
-    it('SUPPORTED_TYPES_LIST exposto contém todos os 5 tipos', () => {
+    it('SUPPORTED_TYPES_LIST exposto contém todos os 6 tipos', () => {
       expect(SUPPORTED_TYPES_LIST).toEqual(
         expect.arrayContaining([
           'PING',
@@ -235,9 +261,10 @@ describe('Dispatcher /v1/execute', () => {
           'SET_ENV',
           'GENERATE_DEPLOY_KEY',
           'PROVISION_PROJECT',
+          'UNPROVISION_PROJECT',
         ]),
       );
-      expect(SUPPORTED_TYPES_LIST).toHaveLength(5);
+      expect(SUPPORTED_TYPES_LIST).toHaveLength(6);
     });
   });
 });

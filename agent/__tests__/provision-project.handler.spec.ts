@@ -3,6 +3,9 @@ import pino from 'pino';
 import { ProvisionProjectError } from '../src/git/clone';
 import { createProvisionProjectHandler } from '../src/handlers/provision-project.handler';
 
+const MOCK_PROJECT_PATH = '/home/dev-benedito/projetos/proj';
+const MOCK_CLAUDE_MD_PATH = '/home/dev/.claude/CLAUDE.md';
+
 function silentLogger() {
   return pino({ level: 'silent' });
 }
@@ -116,5 +119,91 @@ describe('PROVISION_PROJECT handler', () => {
       expect.objectContaining({ errorCode: 'INVALID_USE_SSH_KEY' }),
     );
     expect(provisionImpl).not.toHaveBeenCalled();
+  });
+
+  describe('claudeMdWriterImpl (fire-and-forget)', () => {
+    const validBody = {
+      projectSlug: 'proj',
+      repoUrl: 'git@github.com:org/repo.git',
+      useSshKey: true,
+    };
+
+    function makeProvisionImpl() {
+      return jest.fn(() => ({
+        projectPath: MOCK_PROJECT_PATH,
+        alreadyExisted: false,
+        currentBranch: 'main',
+        headCommitSha: 'a'.repeat(40),
+        usedSshKey: true,
+      }));
+    }
+
+    it('claudeMdWriterImpl é chamado com (slug, projectPath, claudeMdPath) após 200', async () => {
+      const writerImpl = jest.fn(() => Promise.resolve());
+      const json = jest.fn();
+      const status = jest.fn(() => ({ json }));
+
+      const handler = createProvisionProjectHandler({
+        logger: pino({ level: 'silent' }),
+        provisionImpl: makeProvisionImpl() as never,
+        claudeMdPath: MOCK_CLAUDE_MD_PATH,
+        claudeMdWriterImpl: writerImpl,
+      });
+
+      handler({ body: validBody } as Request, { status } as unknown as Response);
+
+      expect(status).toHaveBeenCalledWith(200);
+
+      // Fire-and-forget: aguardar micro/macrotask
+      await new Promise<void>((r) => setImmediate(r));
+
+      expect(writerImpl).toHaveBeenCalledTimes(1);
+      expect(writerImpl).toHaveBeenCalledWith('proj', MOCK_PROJECT_PATH, MOCK_CLAUDE_MD_PATH);
+    });
+
+    it('falha do writer não altera status do response (ainda 200)', async () => {
+      const writerImpl = jest.fn(() => Promise.reject(new Error('disco cheio')));
+      const json = jest.fn();
+      const status = jest.fn(() => ({ json }));
+
+      const handler = createProvisionProjectHandler({
+        logger: pino({ level: 'silent' }),
+        provisionImpl: makeProvisionImpl() as never,
+        claudeMdPath: MOCK_CLAUDE_MD_PATH,
+        claudeMdWriterImpl: writerImpl,
+      });
+
+      handler({ body: validBody } as Request, { status } as unknown as Response);
+
+      expect(status).toHaveBeenCalledWith(200);
+      expect(json).toHaveBeenCalledWith(expect.objectContaining({ accepted: true }));
+
+      // Aguardar a rejeição ser capturada silenciosamente
+      await new Promise<void>((r) => setImmediate(r));
+
+      // Sem exceção não tratada: o teste não deve ter falhado
+      expect(writerImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it('sem claudeMdPath, writer não é chamado', async () => {
+      const writerImpl = jest.fn(() => Promise.resolve());
+      const json = jest.fn();
+      const status = jest.fn(() => ({ json }));
+
+      const handler = createProvisionProjectHandler({
+        logger: pino({ level: 'silent' }),
+        provisionImpl: makeProvisionImpl() as never,
+        claudeMdWriterImpl: writerImpl,
+        // claudeMdPath ausente
+      });
+
+      handler({ body: validBody } as Request, { status } as unknown as Response);
+
+      expect(status).toHaveBeenCalledWith(200);
+
+      await new Promise<void>((r) => setImmediate(r));
+
+      expect(writerImpl).not.toHaveBeenCalled();
+    });
   });
 });
