@@ -54,11 +54,13 @@ fi
 
 # Check 6: Branch
 BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
-CONTEXT+="Git branch: $BRANCH\n"
+# volátil → stderr (não invalida cache de prompt do Claude Code)
+echo "Git branch: $BRANCH" >&2
 
 # Check 7: Modified files
 MODIFIED=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
-CONTEXT+="Arquivos modificados: $MODIFIED\n"
+# volátil → stderr
+echo "Arquivos modificados: $MODIFIED" >&2
 
 # Check 8: workspace/
 if [ ! -d "workspace" ]; then
@@ -79,7 +81,8 @@ fi
 # Check 10: seed canônico V2 (≥90 DClasses)
 if [ -f "prisma/seeds/classes.seed.ts" ]; then
   CLASSES=$(grep -c "chave:" prisma/seeds/classes.seed.ts 2>/dev/null || echo "0")
-  CONTEXT+="DClasses no seed: $CLASSES (esperado: ≥90 quando F1 fechar)\n"
+  # volátil → stderr
+  echo "DClasses no seed: $CLASSES (esperado: ≥90 quando F1 fechar)" >&2
   if [ "$CLASSES" -lt 90 ] && [ "$CLASSES" -gt 0 ]; then
     WARNINGS=$((WARNINGS + 1))
   fi
