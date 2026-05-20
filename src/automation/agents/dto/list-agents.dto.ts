@@ -59,4 +59,12 @@ export class AgentListItemDto {
 
   @ApiProperty({ description: 'Timestamp ISO de criação do registro' })
   createdAt!: string;
+
+  @ApiPropertyOptional({
+    description:
+      'ID do install token usado na instalação. Permite correlacionar wizard ↔ agente via polling.',
+    nullable: true,
+    example: '42',
+  })
+  installTokenId!: string | null;
 }

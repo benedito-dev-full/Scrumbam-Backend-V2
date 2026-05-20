@@ -579,6 +579,7 @@ export class AgentsService {
         lastHeartbeat: lastSeenRaw,
         installedAt: typeof dados.installedAt === 'string' ? dados.installedAt : null,
         createdAt: a.criadoEm.toISOString(),
+        installTokenId: (a.dados as any)?.installTokenId ?? null,
       };
     });
 
