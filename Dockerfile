@@ -15,6 +15,7 @@ COPY nest-cli.json ./
 COPY src ./src
 COPY templates ./templates
 COPY .env.example ./.env.example
+COPY agent/install.sh ./agent/install.sh
 
 RUN npm run build
 RUN npm run build:seeds
@@ -33,6 +34,7 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/templates ./templates
+COPY --from=builder /app/agent/install.sh ./agent/install.sh
 
 EXPOSE 3000
 

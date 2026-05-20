@@ -25,6 +25,7 @@ import { RemoteExecutionClient } from './runtime/remote-execution-client';
 import { RollbackService } from './runtime/rollback.service';
 import { AutomationMetricsController } from './metrics/automation-metrics.controller';
 import { AutomationMetricsService } from './metrics/automation-metrics.service';
+import { AgentDistController } from './agents/agent-dist.controller';
 
 @Module({
   imports: [AuthModule, TasksModule],
@@ -35,6 +36,7 @@ import { AutomationMetricsService } from './metrics/automation-metrics.service';
     DeployKeyController,
     ProvisionController,
     AutomationMetricsController,
+    AgentDistController,
   ],
   providers: [
     AgentInstallTokenService,
