@@ -73,7 +73,9 @@ SSH_USER="agent"
 DRY_RUN=0
 
 # Resolve diretório onde install.sh está (default para bundle-dir).
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+# BASH_SOURCE[0] fica unbound quando executado via pipe (curl | bash).
+# Nesse caso usa o diretório atual como fallback.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" &>/dev/null && pwd 2>/dev/null || pwd)"
 
 usage() {
   cat <<EOF
