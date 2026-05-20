@@ -1,5 +1,27 @@
 ---
-# Carrega sempre -- conhecimento estrutural do modelo polimorfico
+# Modelo polimorfico (17 tabelas + DClasse + Engine/Operacao) afeta TODO codigo
+# backend e schema. Globs sobrepostos por LOCALIZACAO e por NOME para garantir
+# cobertura mesmo em refactors (Camada 1 — protecao contra falso negativo).
+paths:
+  # Cobertura por localizacao (backend principal)
+  - "src/**/*.ts"
+  - "agent/src/**/*.ts"
+  # Cobertura por schema/prisma (DClasse, 17 tabelas, seeds)
+  - "prisma/schema.prisma"
+  - "prisma/seeds/**/*.ts"
+  - "prisma/migrations/**/*.sql"
+  - "prisma/migrations/**/*.ts"
+  # Cobertura por NOME (resiliente a refactor que move pasta)
+  - "**/Operacao*.ts"
+  - "**/operacao*.ts"
+  - "**/Engine*.ts"
+  - "**/engine*.ts"
+  - "**/*engine*.ts"
+  - "**/*operacao*.ts"
+  # Cobertura DTOs/services/controllers (consumidores do modelo)
+  - "**/*.controller.ts"
+  - "**/*.service.ts"
+  - "**/*.dto.ts"
 ---
 
 # Modelo Polimorfico Devari Core (Referencia Definitiva)
