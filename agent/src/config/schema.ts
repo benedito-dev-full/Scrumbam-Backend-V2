@@ -64,6 +64,97 @@ export const AgentConfigSchema = z.object({
 
   /** Nível de log mínimo. */
   logLevel: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
+
+  /**
+   * Configuração opcional do Cache Warmer.
+   *
+   * Quando habilitado, o agente dispara periodicamente sessões fantasma
+   * do CLI claude para renovar o TTL=1h do prompt cache do Anthropic API
+   * (que cacheia o conteúdo de ~58k tokens do `--system-prompt` enviado
+   * com cada execução real).
+   *
+   * Mecânica: a cada `intervalMinutes` (default 40min, margem 20min
+   * antes do TTL de 60min), itera sequencialmente `projects[]`, executa
+   * o mesmo pipeline de validação (resolveProjectPath → validateWorkspace
+   * → leitura CLAUDE.md → buildClaudeArgs) e dispara o CLI com
+   * mensagem fixa minúscula + flags `--permission-mode=plan --max-turns=1`.
+   *
+   * Telemetria de cada execução é log estruturado pino (stage
+   * `cache-warmer.report`). Observabilidade via SSH + journalctl +
+   * Anthropic Console (sem persistência no backend).
+   *
+   * Bloco INTEIRAMENTE opcional — agentes em produção sem este bloco
+   * (ou com `enabled=false`) operam idêntico ao agente sem a feature.
+   */
+  cacheWarmer: z
+    .object({
+      /** Liga/desliga o loop. Se false, agente não dispara nenhum warm. */
+      enabled: z.boolean().default(false),
+
+      /**
+       * Intervalo entre ciclos do loop, em minutos.
+       *
+       * Mínimo 5min como defesa contra config absurda (R4 — loop tight).
+       * Default 40min: margem segura antes do TTL=60min do prompt cache.
+       * Máximo 60min: passar disso significa que cada ciclo já encontra
+       * cache expirado, anulando o propósito do warmer.
+       */
+      intervalMinutes: z.number().int().min(5).max(60).default(40),
+
+      /**
+       * Slugs dos projetos a aquecer (NÃO paths absolutos — ADR-V2-035).
+       * Cada slug deve estar mapeado no `CLAUDE.md` global (mesma
+       * resolução usada pelo handler real).
+       *
+       * Se `enabled=true`, este array DEVE ser não-vazio (validação
+       * cruzada no `.refine()` abaixo).
+       */
+      projects: z.array(z.string().min(1)).default([]),
+
+      /**
+       * Mensagem que vai como `-p <warmupPrompt>`. Curtíssima por design
+       * (não fazemos trabalho útil — só queremos o cache hit do
+       * --system-prompt acima).
+       */
+      warmupPrompt: z.string().min(1).default('responda apenas ok. nao use ferramentas.'),
+
+      /**
+       * Flags extras inseridas APÓS as flags-base. Default inclui
+       * `--permission-mode=plan` (impede qualquer tool call) e
+       * `--max-turns=1` (resposta única, sem follow-up).
+       */
+      claudeFlags: z.array(z.string().min(1)).default(['--permission-mode=plan', '--max-turns=1']),
+
+      /** Timeout por warm individual (segundos). Default 30s. */
+      timeoutSeconds: z.number().int().positive().max(120).default(30),
+
+      /**
+       * Cap diário de custo (USD) por agente. Quando atingido, loop
+       * pausa até o próximo dia operacional (reset no restart).
+       *
+       * Default conservador: 1.0 USD/dia. Custo real esperado de 5
+       * projetos × 36 warms/dia × $0.003 ≈ $0.54/dia → cap em $1.00
+       * dá 2x folga. Defesa contra R4 (loop tight) e R6 (desvio de
+       * pricing Anthropic).
+       *
+       * Se 0 ou ausente, kill switch DESLIGADO (não recomendado em
+       * produção).
+       */
+      dailyCostCapUsd: z.number().nonnegative().default(1.0),
+    })
+    .optional()
+    .refine(
+      (cfg) => {
+        if (cfg === undefined) return true;
+        if (cfg.enabled === false) return true;
+        return cfg.projects.length > 0;
+      },
+      {
+        message: 'cacheWarmer.projects não pode ser vazio quando cacheWarmer.enabled=true',
+        path: ['projects'],
+      },
+    ),
 });
 
 export type AgentConfig = z.infer<typeof AgentConfigSchema>;
+export type CacheWarmerConfig = NonNullable<AgentConfig['cacheWarmer']>;

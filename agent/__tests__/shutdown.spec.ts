@@ -173,6 +173,89 @@ describe('gracefulShutdown', () => {
     expect(tracker.order).toEqual(['heartbeat', 'server-start', 'server-done', 'tunnel']);
     expect(exit).toHaveBeenCalledWith(0);
   });
+
+  it('cacheWarmer presente → ordem heartbeat -> cacheWarmer -> server -> tunnel (ADR-V2-045)', async () => {
+    const tracker = makeOrderTracker();
+    const exit = jest.fn();
+    const ctx: ShutdownContext = {
+      heartbeat: { stop: () => tracker.push('heartbeat') },
+      cacheWarmer: { stop: () => tracker.push('cache-warmer') },
+      server: {
+        stop: async () => {
+          tracker.push('server');
+        },
+      },
+      tunnel: {
+        stop: async () => {
+          tracker.push('tunnel');
+        },
+      },
+      logger: silentLogger(),
+      exit: exit as unknown as (code: number) => never,
+    };
+
+    await gracefulShutdown(ctx, 'SIGTERM');
+
+    expect(tracker.order).toEqual(['heartbeat', 'cache-warmer', 'server', 'tunnel']);
+    expect(exit).toHaveBeenCalledWith(0);
+  });
+
+  it('cacheWarmer ausente (config sem warmer) → ordem clássica sem regressão', async () => {
+    const tracker = makeOrderTracker();
+    const exit = jest.fn();
+    const ctx: ShutdownContext = {
+      heartbeat: { stop: () => tracker.push('heartbeat') },
+      // cacheWarmer omitido — agent sem feature configurada
+      server: {
+        stop: async () => {
+          tracker.push('server');
+        },
+      },
+      tunnel: {
+        stop: async () => {
+          tracker.push('tunnel');
+        },
+      },
+      logger: silentLogger(),
+      exit: exit as unknown as (code: number) => never,
+    };
+
+    await gracefulShutdown(ctx, 'SIGTERM');
+
+    expect(tracker.order).toEqual(['heartbeat', 'server', 'tunnel']);
+    expect(exit).toHaveBeenCalledWith(0);
+  });
+
+  it('cacheWarmer.stop() lança → não bloqueia resto, exit(1)', async () => {
+    const tracker = makeOrderTracker();
+    const exit = jest.fn();
+    const ctx: ShutdownContext = {
+      heartbeat: { stop: () => tracker.push('heartbeat') },
+      cacheWarmer: {
+        stop: () => {
+          tracker.push('cw-throw');
+          throw new Error('cw boom');
+        },
+      },
+      server: {
+        stop: async () => {
+          tracker.push('server');
+        },
+      },
+      tunnel: {
+        stop: async () => {
+          tracker.push('tunnel');
+        },
+      },
+      logger: silentLogger(),
+      exit: exit as unknown as (code: number) => never,
+    };
+
+    await gracefulShutdown(ctx, 'SIGTERM');
+
+    expect(tracker.order).toEqual(['heartbeat', 'cw-throw', 'server', 'tunnel']);
+    expect(exit).toHaveBeenCalledWith(1);
+  });
 });
 
 describe('installSignalHandlers', () => {

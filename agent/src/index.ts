@@ -67,6 +67,7 @@
  */
 import { loadConfig } from './config/loader';
 import { createProjectMutex } from './handlers/run-claude-code.handler';
+import { startCacheWarmerLoop, type CacheWarmerHandle } from './lifecycle/cache-warmer-loop';
 import { startHeartbeatLoop, type HeartbeatHandle } from './lifecycle/heartbeat-loop';
 import { installSignalHandlers } from './lifecycle/shutdown';
 import { createLogger } from './logger';
@@ -102,6 +103,15 @@ async function bootstrap(): Promise<void> {
     tunnelHealthCheck: () => autossh.isHealthy(),
   });
 
+  // 4. Cache Warmer — condicional (ADR-V2-045). Sem bloco ou enabled=false
+  // → loop não inicia (sem custo, sem overhead). Validação cruzada do
+  // schema (zod .refine) já garantiu que `projects` é não-vazio quando
+  // enabled=true.
+  let cacheWarmer: CacheWarmerHandle | undefined;
+  if (config.cacheWarmer !== undefined && config.cacheWarmer.enabled === true) {
+    cacheWarmer = startCacheWarmerLoop(config, config.cacheWarmer, logger);
+  }
+
   logger.info(
     {
       agentId: config.agentId,
@@ -115,10 +125,11 @@ async function bootstrap(): Promise<void> {
     'scrumban-agent pronto (Task #1 completo: tunnel + lifecycle + RUN_CLAUDE_CODE + heartbeat)',
   );
 
-  // 4. Graceful shutdown — ordem: heartbeat → server → autossh → exit.
+  // 5. Graceful shutdown — ordem: heartbeat → cacheWarmer → server → autossh → exit.
   // Ver `src/lifecycle/shutdown.ts` para o flow completo e o porquê da ordem.
   installSignalHandlers({
     heartbeat,
+    ...(cacheWarmer !== undefined ? { cacheWarmer } : {}),
     server,
     tunnel: autossh,
     logger,
