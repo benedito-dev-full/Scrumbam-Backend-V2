@@ -151,6 +151,88 @@ describe('loadConfig', () => {
     expect(() => loadConfig(missing)).toThrow(missing);
   });
 
+  // ===========================================================================
+  // cacheWarmer (ADR-V2-045) — bloco opcional
+  // ===========================================================================
+
+  itUnix('8) config sem bloco cacheWarmer → AgentConfig.cacheWarmer = undefined', () => {
+    writeConfig(JSON.stringify(VALID_CONFIG), 0o600);
+
+    const cfg = loadConfig(cfgPath);
+    expect(cfg.cacheWarmer).toBeUndefined();
+  });
+
+  itUnix('8b) config com cacheWarmer.enabled=false e projects=[] é VÁLIDA', () => {
+    const withWarmer = {
+      ...VALID_CONFIG,
+      cacheWarmer: { enabled: false, projects: [] },
+    };
+    writeConfig(JSON.stringify(withWarmer), 0o600);
+
+    const cfg = loadConfig(cfgPath);
+    expect(cfg.cacheWarmer?.enabled).toBe(false);
+    expect(cfg.cacheWarmer?.projects).toEqual([]);
+    // Defaults aplicados
+    expect(cfg.cacheWarmer?.intervalMinutes).toBe(40);
+    expect(cfg.cacheWarmer?.warmupPrompt).toBe('responda apenas ok. nao use ferramentas.');
+    expect(cfg.cacheWarmer?.claudeFlags).toEqual(['--permission-mode=plan', '--max-turns=1']);
+    expect(cfg.cacheWarmer?.timeoutSeconds).toBe(30);
+    expect(cfg.cacheWarmer?.dailyCostCapUsd).toBe(1.0);
+  });
+
+  itUnix(
+    '8c) config com cacheWarmer.enabled=true e projects=[] → erro zod (validação cruzada)',
+    () => {
+      const invalid = {
+        ...VALID_CONFIG,
+        cacheWarmer: { enabled: true, projects: [] },
+      };
+      writeConfig(JSON.stringify(invalid), 0o600);
+
+      expect(() => loadConfig(cfgPath)).toThrow(/projects/);
+      expect(() => loadConfig(cfgPath)).toThrow(/vazio/);
+    },
+  );
+
+  itUnix('8d) config com cacheWarmer.enabled=true e projects=[...] é VÁLIDA', () => {
+    const withWarmer = {
+      ...VALID_CONFIG,
+      cacheWarmer: {
+        enabled: true,
+        projects: ['scrumban-backend', 'scrumban-frontend'],
+        intervalMinutes: 35,
+        dailyCostCapUsd: 2.5,
+      },
+    };
+    writeConfig(JSON.stringify(withWarmer), 0o600);
+
+    const cfg = loadConfig(cfgPath);
+    expect(cfg.cacheWarmer?.enabled).toBe(true);
+    expect(cfg.cacheWarmer?.projects).toEqual(['scrumban-backend', 'scrumban-frontend']);
+    expect(cfg.cacheWarmer?.intervalMinutes).toBe(35);
+    expect(cfg.cacheWarmer?.dailyCostCapUsd).toBe(2.5);
+  });
+
+  itUnix('8e) cacheWarmer.intervalMinutes < 5 → erro zod (defesa loop tight)', () => {
+    const invalid = {
+      ...VALID_CONFIG,
+      cacheWarmer: { enabled: true, projects: ['a'], intervalMinutes: 1 },
+    };
+    writeConfig(JSON.stringify(invalid), 0o600);
+
+    expect(() => loadConfig(cfgPath)).toThrow(/intervalMinutes/);
+  });
+
+  itUnix('8f) cacheWarmer.intervalMinutes > 60 → erro zod (passa do TTL)', () => {
+    const invalid = {
+      ...VALID_CONFIG,
+      cacheWarmer: { enabled: true, projects: ['a'], intervalMinutes: 90 },
+    };
+    writeConfig(JSON.stringify(invalid), 0o600);
+
+    expect(() => loadConfig(cfgPath)).toThrow(/intervalMinutes/);
+  });
+
   itUnix('7b) override via env SCRUMBAN_AGENT_CONFIG_PATH é respeitado', () => {
     writeConfig(JSON.stringify(VALID_CONFIG), 0o600);
     const prev = process.env.SCRUMBAN_AGENT_CONFIG_PATH;

@@ -205,9 +205,7 @@ describe('Dispatcher /v1/execute', () => {
 
   describe('UNPROVISION_PROJECT (novo type — sanity)', () => {
     it('roteia para unprovisionProjectHandler injetado', async () => {
-      const handler = jest.fn((_req, res) =>
-        res.status(200).json({ accepted: true }),
-      );
+      const handler = jest.fn((_req, res) => res.status(200).json({ accepted: true }));
       const app = buildApp({ unprovisionProjectHandler: handler });
 
       const res = await request(app)

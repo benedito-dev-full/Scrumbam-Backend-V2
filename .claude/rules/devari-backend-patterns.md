@@ -1,5 +1,22 @@
 ---
-# Skill de contexto geral - carrega sempre
+# Padroes obrigatorios de codigo backend (PrismaService, BigInt, transaction,
+# N+1, DTOs, Guards, Logger, etc.). Carrega em TODO codigo .ts do backend e do
+# agent (mesmos padroes). Globs sobrepostos por LOCALIZACAO e por SUFIXO de
+# arquivo (controller/service/dto/guard) para reforco em refactors.
+paths:
+  # Cobertura por localizacao
+  - "src/**/*.ts"
+  - "agent/src/**/*.ts"
+  - "prisma/seeds/**/*.ts"
+  # Cobertura por SUFIXO (qualquer pasta — resiliente a refactor)
+  - "**/*.controller.ts"
+  - "**/*.service.ts"
+  - "**/*.dto.ts"
+  - "**/*.guard.ts"
+  - "**/*.module.ts"
+  - "**/*.processor.ts"
+  - "**/*.handler.ts"
+  - "**/*.worker.ts"
 ---
 
 # Padroes Backend Devari Core (Template Framework)

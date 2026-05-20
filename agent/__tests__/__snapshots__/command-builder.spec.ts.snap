@@ -1,0 +1,47 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`buildClaudeArgs paridade task real vs warm (ADR-V2-045/039) snapshot do argv de um warm (referência de paridade) 1`] = `
+[
+  "--system-prompt",
+  "# Padrões Backend Devari
+
+... 58k tokens ...",
+  "-p",
+  "responda apenas ok. nao use ferramentas.",
+  "--output-format",
+  "json",
+  "--dangerously-skip-permissions",
+  "--permission-mode=plan",
+  "--max-turns=1",
+]
+`;
+
+exports[`buildClaudeArgs paridade task real vs warm (ADR-V2-045/039) snapshot do argv de uma task real (referência de paridade) 1`] = `
+[
+  "--system-prompt",
+  "# Padrões Backend Devari
+
+... 58k tokens ...",
+  "-p",
+  "You are an Implementer. Faça X.",
+  "--output-format",
+  "json",
+  "--dangerously-skip-permissions",
+]
+`;
+
+exports[`buildClaudeArgs paridade task real vs warm (ADR-V2-045/039) snapshot do argv de uma task real COM resume (referência) 1`] = `
+[
+  "--system-prompt",
+  "# Padrões Backend Devari
+
+... 58k tokens ...",
+  "-p",
+  "You are an Implementer. Faça X.",
+  "--output-format",
+  "json",
+  "--dangerously-skip-permissions",
+  "--resume",
+  "session-uuid-here",
+]
+`;

@@ -22,6 +22,7 @@
  * @see ADR-V2-032 (contrato run-claude-code)
  */
 import { execFile, type ExecFileException } from 'node:child_process';
+import { buildClaudeArgs } from './command-builder';
 
 const DEFAULT_TIMEOUT_SEC = 30 * 60; // 30min
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024; // 10MB
@@ -87,34 +88,18 @@ export async function runClaudeCode(input: RunnerInput): Promise<RunnerResult> {
     input.timeoutSec && input.timeoutSec > 0 ? input.timeoutSec : DEFAULT_TIMEOUT_SEC;
   const execFn = input.execFileImpl ?? execFile;
 
-  // `--dangerously-skip-permissions`:
-  //   No modo `-p` (headless/non-interactive), o Claude Code recusa Edit/Write
-  //   por padrao porque nao tem como pedir confirmacao ao usuario. Em
-  //   contexto de automation remota disparada pela UI, o usuario JA aprovou
-  //   ao clicar "Executar" (e Risk Gate ja classificou + Approval Flow ja
-  //   filtrou HIGH risk). Sem esta flag, todo run-claude-code termina em
-  //   "permission denied" e working tree fica limpo (claude apenas planeja
-  //   sem aplicar). Container do agent roda como `scrumban-agent` (sem root)
-  //   dentro de allowedProjectRoots — blast radius contido.
-  const args: string[] = [];
-
-  // `--system-prompt`: injeta regras globais (ex: conteúdo do ~/.claude/CLAUDE.md)
-  // antes do prompt da tarefa. Em modo `-p`, o Claude Code não lê o CLAUDE.md
-  // global — esta flag supre essa ausência sem poluir o histórico da intenção.
-  if (input.systemPrompt && input.systemPrompt.trim() !== '') {
-    args.push('--system-prompt', input.systemPrompt);
-  }
-
-  args.push(
-    '-p',
-    input.prompt,
-    '--output-format',
-    'json',
-    '--dangerously-skip-permissions',
-  );
-  if (input.resumeSessionId && input.resumeSessionId.length > 0) {
-    args.push('--resume', input.resumeSessionId);
-  }
+  // Montagem do argv DELEGADA a `buildClaudeArgs` (ADR-V2-046) — único
+  // call-site no codebase. O Cache Warmer (`warm-cache.handler.ts`) chama
+  // a MESMA função para garantir paridade byte-a-byte do prefixo cacheável
+  // do Anthropic API (sem o que warmer não aquece o cache certo).
+  //
+  // Comentários longos sobre `--dangerously-skip-permissions` e
+  // `--system-prompt` agora vivem em `command-builder.ts` — fonte única.
+  const { args } = buildClaudeArgs({
+    prompt: input.prompt,
+    systemPrompt: input.systemPrompt,
+    resumeSessionId: input.resumeSessionId,
+  });
 
   const startMs = Date.now();
 

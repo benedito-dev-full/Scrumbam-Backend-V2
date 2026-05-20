@@ -1,5 +1,26 @@
 ---
-# Carrega sempre -- conhecimento estrutural critico
+# 3 Pilares (Engine/Operacao, Endpoints Genericos, Seed de Classes) sao
+# obrigatorios em TODO codigo backend e em qualquer arquivo de schema/seed.
+# Globs sobrepostos por LOCALIZACAO e por NOME para garantir cobertura mesmo
+# em refactors (Camada 1 — protecao contra falso negativo).
+paths:
+  # Cobertura por localizacao
+  - "src/**/*.ts"
+  - "agent/src/**/*.ts"
+  # Cobertura por schema/prisma (Pilar 3 — Seed de Classes)
+  - "prisma/schema.prisma"
+  - "prisma/seeds/**/*.ts"
+  - "prisma/migrations/**/*.sql"
+  - "prisma/migrations/**/*.ts"
+  # Cobertura por NOME (Pilar 1 — Engine/Operacao)
+  - "**/Operacao*.ts"
+  - "**/operacao*.ts"
+  - "**/Engine*.ts"
+  - "**/engine*.ts"
+  # Cobertura por SUFIXO (Pilar 2 — Endpoints/Services)
+  - "**/*.controller.ts"
+  - "**/*.service.ts"
+  - "**/*.dto.ts"
 ---
 
 # 3 Pilares Devari Core (Conhecimento Operacional)

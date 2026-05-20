@@ -2,16 +2,22 @@
  * Graceful shutdown coordinator — Sub-tarefa 5 do Task #1 (F13 cliente).
  *
  * Ordem (DEFENSIVA — autossh por último):
- *   1. heartbeat.stop()   — para de mandar batidas (evita log enganoso de
- *                            timeout enquanto o socket cai).
- *   2. server.stop()      — drena requests in-flight no HTTP local. O
- *                            próprio `createServer` tem timeout de 30s e
- *                            cai pra closeAllConnections() se passar.
- *   3. autossh.stop()     — só DEPOIS do server fechar, derruba o tunnel.
- *                            Garante que requests inbound em curso (vindo
- *                            do backend via tunnel) finalizam antes da
- *                            conexão SSH morrer.
- *   4. process.exit(0)    — sucesso. Se algo lançar, sai com 1.
+ *   1. heartbeat.stop()      — para de mandar batidas (evita log enganoso de
+ *                               timeout enquanto o socket cai).
+ *   2. cacheWarmer.stop()    — para o loop do warmer (warm em andamento
+ *                               termina sozinho — handler nunca bloqueia
+ *                               > timeoutSeconds). Antes do server porque
+ *                               cacheWarmer reporta via outbound; sem
+ *                               heartbeat já estamos coerentes em "ficar
+ *                               quieto" do lado outbound. (ADR-V2-045)
+ *   3. server.stop()         — drena requests in-flight no HTTP local. O
+ *                               próprio `createServer` tem timeout de 30s e
+ *                               cai pra closeAllConnections() se passar.
+ *   4. autossh.stop()        — só DEPOIS do server fechar, derruba o tunnel.
+ *                               Garante que requests inbound em curso (vindo
+ *                               do backend via tunnel) finalizam antes da
+ *                               conexão SSH morrer.
+ *   5. process.exit(0)       — sucesso. Se algo lançar, sai com 1.
  *
  * Idempotente: chamadas concorrentes (SIGTERM + SIGINT quase simultâneos)
  * são deduplicadas — só o primeiro signal dispara o flow.
@@ -30,10 +36,21 @@ export interface ShutdownTunnel {
   stop(): Promise<void>;
 }
 
+/**
+ * Cache Warmer expõe a mesma interface `stop()` síncrona do heartbeat
+ * (ADR-V2-045). Opcional — agentes sem warmer configurado simplesmente
+ * não passam este campo.
+ */
+export interface ShutdownCacheWarmer {
+  stop(): void;
+}
+
 export interface ShutdownContext {
   heartbeat: ShutdownHeartbeat;
   server: ShutdownServer;
   tunnel: ShutdownTunnel;
+  /** Opcional — só presente quando `config.cacheWarmer.enabled=true`. */
+  cacheWarmer?: ShutdownCacheWarmer;
   logger: Logger;
   /** Override de process.exit para testes. Default `process.exit`. */
   exit?: (code: number) => never;
@@ -64,7 +81,22 @@ export async function gracefulShutdown(
     ctx.logger.warn({ stage: 'shutdown.heartbeat', err: message }, 'falha ao parar heartbeat');
   }
 
-  // 2. HTTP server — drena requests in-flight.
+  // 2. cacheWarmer — opcional. ANTES do server porque warmer reporta via
+  // outbound; parar ele aqui evita um último report durante o drain.
+  if (ctx.cacheWarmer !== undefined) {
+    try {
+      ctx.cacheWarmer.stop();
+    } catch (err) {
+      hadError = true;
+      const message = err instanceof Error ? err.message : String(err);
+      ctx.logger.warn(
+        { stage: 'shutdown.cache-warmer', err: message },
+        'falha ao parar cache-warmer',
+      );
+    }
+  }
+
+  // 3. HTTP server — drena requests in-flight.
   try {
     await ctx.server.stop();
   } catch (err) {
@@ -73,7 +105,7 @@ export async function gracefulShutdown(
     ctx.logger.warn({ stage: 'shutdown.server', err: message }, 'falha ao parar HTTP server');
   }
 
-  // 3. autossh — só agora derruba o tunnel.
+  // 4. autossh — só agora derruba o tunnel.
   try {
     await ctx.tunnel.stop();
   } catch (err) {

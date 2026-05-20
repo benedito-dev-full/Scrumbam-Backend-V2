@@ -1,7 +1,11 @@
 # Strategist Agent Memory — Scrumban-Backend-V2
 
-**Versão:** 1.2
-**Última atualização:** 2026-05-09 (F5 Task #1 — plan-domain-structural-f5-task1.md)
+**Versão:** 1.3
+**Última atualização:** 2026-05-20 (Plan Fases via DTask.idPai — ADR-V2-047 proposto)
+
+**Indice de topicos:**
+- [phase-hierarchy-pattern.md](phase-hierarchy-pattern.md) — Padrao de hierarquia auto-referencial via idPai em DTask para Fases/Blocos (ADR-V2-047).
+
 **Atualizar:** ao concluir cada task. Limite ~200 linhas; acima disso, mover histórico antigo para `agent-memory/strategist/<topic>.md`.
 
 ---

@@ -62,8 +62,40 @@ Schema validado por `zod` (ver `src/config/schema.ts`). Campos chave:
 - `allowedProjectRoots` (string[]): raízes válidas para `claude -p` (anti path-injection).
 - `claudeMdPath`: default `/root/.claude/CLAUDE.md` (`install.sh` resolve `~/.claude/CLAUDE.md` do CEO).
 - `logLevel`: `error|warn|info|debug` (default `info`).
+- `cacheWarmer` (objeto opcional): habilita loop de prompt cache warming. Bloco INTEIRAMENTE opcional — sem ele, agente opera exatamente como antes da feature. Campos:
+  - `enabled` (boolean, default `false`): liga/desliga o loop.
+  - `intervalMinutes` (int, range 5..60, default `40`): intervalo entre ciclos. Default escolhido com margem 20min antes do TTL=60min do prompt cache da Anthropic.
+  - `projects` (string[], obrigatório se `enabled=true`): slugs (NÃO paths) dos projetos a aquecer. Cada slug deve estar mapeado no CLAUDE.md global.
+  - `warmupPrompt` (string, default `"responda apenas ok. nao use ferramentas."`): mensagem enviada como `-p <prompt>`.
+  - `claudeFlags` (string[], default `["--permission-mode=plan", "--max-turns=1"]`): flags extras passadas APÓS o prefixo cacheável (impedem qualquer tool call e limitam a 1 resposta).
+  - `timeoutSeconds` (int, default `30`): timeout por warm individual.
+  - `dailyCostCapUsd` (number, default `1.0`): kill switch — quando atingido, loop pausa até próximo dia. Conservador: 5 projetos × 36 warms/dia × ~$0.003 ≈ $0.54/dia → cap em $1.00 dá 2x folga.
 
 **Segurança:** o loader rejeita config com modo ≠ `0600`. Permissão errada = crash de boot.
+
+**Exemplo com Cache Warmer habilitado:**
+
+```json
+{
+  "agentId": "...",
+  "agentApiKey": "...",
+  "agentCommandSecret": "...",
+  "backendBaseUrl": "https://api.scrumban.com.br",
+  "backendTunnelHost": "...",
+  "backendTunnelPort": 22,
+  "tunnelPort": 39999,
+  "allowedProjectRoots": ["/root/projetos"],
+  "claudeMdPath": "/root/.claude/CLAUDE.md",
+  "agentSshKeyPath": "/etc/scrumban-agent/ssh_key",
+  "logLevel": "info",
+  "cacheWarmer": {
+    "enabled": true,
+    "intervalMinutes": 40,
+    "projects": ["scrumban-backend", "scrumban-frontend"],
+    "dailyCostCapUsd": 1.0
+  }
+}
+```
 
 ---
 
@@ -393,6 +425,76 @@ SCRUMBAN_AGENT_CONFIG_PATH=/tmp/agent-cfg.json node dist/index.js
 Atenção: rodar sem `autossh` + `claude` instalados localmente fará os componentes
 correspondentes falharem (autossh wrapper entra em circuit breaker, RUN_CLAUDE_CODE
 retorna 500). Para testes unitários, use `npm test` (mocks).
+
+---
+
+## Cache Warmer
+
+Loop opcional que dispara sessões fantasma curtíssimas a cada `intervalMinutes`
+(default 40min) para renovar o TTL=1h do prompt cache da Anthropic API antes
+que ele expire.
+
+Resultado esperado: **`cache_creation_input_tokens` cai de ~58.077 → 0** quando
+o prefixo é reusado dentro da janela de cache, derrubando custo por task em
+~90%. Sem warmer, projetos com volume esparso perdem o cache no primeiro
+intervalo > 1h sem tasks.
+
+### Como ativar
+
+Adicione o bloco `cacheWarmer` ao `/etc/scrumban-agent/config.json` (ver §Config
+para detalhes dos campos):
+
+```json
+{
+  "...": "...",
+  "cacheWarmer": {
+    "enabled": true,
+    "intervalMinutes": 40,
+    "projects": ["scrumban-backend", "scrumban-frontend"],
+    "dailyCostCapUsd": 1.0
+  }
+}
+```
+
+Reinicie o agente (`systemctl restart scrumban-agent`). Sem o bloco ou com
+`enabled=false`, o loop não inicia (custo zero, comportamento idêntico ao
+agente sem a feature).
+
+### Como validar (procedimento A/B)
+
+Telemetria é log estruturado pino — sem persistência no backend. Observabilidade
+direta via SSH na VPS + Anthropic Console.
+
+Após habilitar em homologação:
+
+1. **T0:** dispare 1 task real qualquer. No JSON do CLI, registre `cache_creation_input_tokens` (esperado ~58k em baseline frio) e `cache_read_input_tokens` (esperado 0).
+2. **T0+5min (warm imediato):** dispare warm manualmente (ou aguarde o primeiro tick automático). No log do agent (`journalctl -u scrumban-agent -f`), procure linha com `stage=cache-warmer.report` — deve ter `cacheReadTokens` ≈ 58k (warmer reaproveitou cache do baseline T0).
+3. **T0+10min:** dispare outra task real no mesmo projeto. Esperado: `cache_read_input_tokens > 0` e `cache_creation_input_tokens = 0`. **Esta é a prova primária — feature funcionando.**
+4. **Controle negativo:** desligue o warmer (`enabled=false`, restart), espere 60min, dispare task real. Esperado: `cache_creation_input_tokens` volta a ~58k (sem warmer, cache morre).
+
+### Como observar custo/uso
+
+**Agent local (logs estruturados):**
+
+```bash
+# Últimos warms reportados
+journalctl -u scrumban-agent --since "1 hour ago" | grep cache-warmer.report
+
+# Filtrar via jq (se logs em JSON)
+journalctl -u scrumban-agent -o json --since "24 hours ago" | \
+  jq -r 'select(.MESSAGE | fromjson? | .stage == "cache-warmer.report") |
+         .MESSAGE | fromjson | "\(.projectSlug) cost=\(.costUsd) read=\(.cacheReadTokens) success=\(.success)"'
+```
+
+**Anthropic Console:**
+- Painel `Usage` (https://console.anthropic.com/usage) mostra cache write/read em real-time, filtra por API key.
+- Compare picos de cache_read antes/depois de habilitar o warmer.
+
+### Kill switch (defesa)
+
+`dailyCostCapUsd` (default $1.0/dia/agente) pausa o loop quando o custo
+acumulado do dia operacional atinge o cap. Reset automático na virada do dia
+UTC. Defende contra (a) bug de intervalo zero, (b) desvio de pricing Anthropic.
 
 ---
 
