@@ -322,6 +322,73 @@ export class TasksService {
       ...(query.cursor ? { chave: { lt: BigInt(query.cursor) } } : {}),
     };
 
+    // ADR-V2-047 — Fase 4: filtros hierárquicos.
+    // `idClasse` (polimórfico) — string negativa → BigInt.
+    if (query.idClasse) {
+      where.idClasse = BigInt(query.idClasse);
+    }
+
+    // `idPai` — aceita string numérica OU literal "null" (raiz).
+    // Quando combinado com `depth >= 2`, expande via CTE recursiva
+    // (1 query extra para descobrir os chaves descendentes; nunca em loop).
+    if (query.idPai !== undefined) {
+      if (query.idPai === 'null') {
+        where.idPai = null;
+      } else {
+        const rootId = BigInt(query.idPai);
+        // depth=0 → apenas a própria raiz
+        // depth=1 (default quando idPai presente) → filhas diretas
+        // depth>=2 → descendentes recursivos limitados por `depth`
+        const depth = query.depth ?? 1;
+
+        if (depth === 0) {
+          // Combinar com cursor (chave: { lt: cursor }) se já presente.
+          if (where.chave && typeof where.chave === 'object') {
+            where.chave = { ...(where.chave as Prisma.BigIntFilter), equals: rootId };
+          } else {
+            where.chave = rootId;
+          }
+        } else if (depth === 1) {
+          where.idPai = rootId;
+        } else {
+          // CTE recursiva PostgreSQL — descobre todos os descendentes até
+          // `depth` níveis e usa o resultado em `chave IN (...)`. Guardrail
+          // hardcoded 20 também na CTE (defense-in-depth com MAX_PHASE_DEPTH).
+          const cappedDepth = Math.min(depth, 20);
+          const descendants = await this.prisma.$queryRaw<Array<{ chave: bigint }>>`
+            WITH RECURSIVE descendants AS (
+              SELECT chave, 0 AS depth
+              FROM "DTask"
+              WHERE "idPai" = ${rootId} AND excluido = false
+
+              UNION ALL
+
+              SELECT t.chave, d.depth + 1
+              FROM "DTask" t
+              INNER JOIN descendants d ON t."idPai" = d.chave
+              WHERE t.excluido = false AND d.depth < ${cappedDepth - 1} AND d.depth < 20
+            )
+            SELECT chave FROM descendants
+          `;
+
+          if (descendants.length === 0) {
+            return { items: [], pagination: { hasMore: false, nextCursor: null } };
+          }
+
+          const descendantIds = descendants.map((d) => d.chave);
+          // Combinar com cursor (chave: { lt: cursor }) se já presente.
+          if (where.chave && typeof where.chave === 'object') {
+            where.chave = {
+              ...(where.chave as Prisma.BigIntFilter),
+              in: descendantIds,
+            };
+          } else {
+            where.chave = { in: descendantIds };
+          }
+        }
+      }
+    }
+
     // Filtro por status: buscar idStatus das DTabelas correspondentes
     const statuses = query.statuses?.length ? query.statuses : query.status ? [query.status] : [];
     if (statuses.length > 0) {

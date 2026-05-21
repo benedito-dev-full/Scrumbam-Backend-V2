@@ -190,6 +190,7 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 | Task#1 Fase0 | fases-via-dtask-idpai (ADR-V2-047) | pós-F5 | **8.5** | **APPROVED** | ADR doc-only; gate CEO 8.0; H1: CTE métricas referencia d.depth sem propagar coluna depth (SQL inválido); M1: decisão anti-trigger DB ausente; M2: §3.1 citado como §3.2 |
 | Task#1 Fase1 | fases-via-dtask-idpai (Seed PHASE) | pós-F5 | **8.8** | **APPROVED** | Seed-only; gate CEO 8.0; PHASE(-200) correto; 5 COUNTS atualizados; H1/M1/M2 todos corrigidos no ADR; L1: cast bigint explícito na CTE (cosmético); L2: ref §4 do plano imprecisa |
 | Task#1 Fase3 | fases-via-dtask-idpai (Service Layer) | pós-F5 | **8.7** | **APPROVED** | 24/24 specs OK; build verde; M1: query redundante no create (findFirst+validateNoCycle re-busca pai); M2: cobertura integracao create->validateNoCycle ausente; M3: 24 falhas pre-existentes no tasks.service.spec.ts (debito state-machine) |
+| Task#1 Fase4 | fases-via-dtask-idpai (Endpoints REST) | pós-F5 | **8.5** | **APPROVED** | 28/28 specs; tenant gate ANTES dos stubs (anti-enumeration); CTE 1 query; M1: `BigInt("abc")` sem @Matches em CreateTaskDto/UpdateTaskDto.idPai → 500 em vez de 400; disciplina escopo exemplar |
 
 ## PADRÕES APRENDIDOS F13 TASK1 SUB4 (Agente V2 — RUN_CLAUDE_CODE + session extraction)
 
@@ -201,6 +202,13 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 - **`is_error:true` no output JSON do Claude Code não entra automaticamente no campo `success`**: a lógica `success = exitCode === 0 && parsedSuccess && !timedOut` não considera `isError`. Isso é decisão de design aceitável para MVP (log de warn presente, comportamento detectável), mas gera débito semântico: o backend pode registrar `success:true` em execuções que o Claude Code reportou como erro. Verificar se a intenção foi explicitamente documentada — se ausente, pontuar como M1.
 - **Teste com título prometendo comportamento que o assert não verifica**: quando um teste diz "X → Y" no título mas o assert não verifica Y explicitamente (apenas um comportamento diferente relacionado), é MEDIUM — não CRITICAL. Não bloqueia aprovação se o comportamento documentado em comentário é razoável para MVP, mas registrar como débito de qualidade.
 - **Slug sanitização como defesa em profundidade contra injection em parsers de texto**: `projectSlug` deve ser validado com regex estrita (`/^[a-zA-Z0-9._-]+$/`) ANTES de ser usado para buscar seção em arquivo de texto. Sem essa sanitização, um slug como `## evil\n- Caminho: /etc` poderia manipular o parser line-by-line. Verificar presença no `validatePayload`.
+
+## PADRÕES APRENDIDOS — ENDPOINTS HIERÁRQUICOS (task fases-via-dtask-idpai F4, 2026-05-21)
+
+- **`@Matches()` obrigatório em DTOs que passam para `BigInt()`**: campos `idPai` em `CreateTaskDto`/`UpdateTaskDto` usam só `@IsString()` — se string não numérica chegar, `BigInt("abc")` lança `SyntaxError` (500 em vez de 400). Padrão correto já aplicado em `ListTasksQueryDto` (`@Matches(/^(-?\d+|null)$/)`). Em revisão de qualquer DTO com `BigInt(field)` no service: verificar que `@Matches(/^-?\d+$/)` está presente.
+- **Ordenação de rotas NestJS: `:id/tree` ANTES de `:id`**: rota paramétrica captura o que vier. `/:id` capturaria a string `"5/tree"` se declarada antes de `/:id/tree`. Sempre verificar que nested resource paths estão declarados antes do catch-all `/:id`.
+- **Tenant gate anti-enumeration em stubs**: verificar que o controller chama `findOne(id, allowed)` para validar acesso ANTES de chamar o stub. Padrão: `resolveScopedProjectIds` → `tasksService.findOne(id, allowed)` → `stubService.method()`. Sem isso, atacante distingue "404 não existe" de "501 não implementado" e enumera IDs válidos.
+- **CTE recursiva para `depth >= 2` — merge cursor + IN**: ao combinar cursor pagination (`where.chave = { lt: cursor }`) com CTE (`in: descendantIds`), usar spread para preservar ambos: `where.chave = { ...(where.chave as BigIntFilter), in: ids }`. Sem o spread, o cursor é perdido.
 
 ## PADRÕES APRENDIDOS — ADR REVIEWS (task fases-via-dtask-idpai, 2026-05-21)
 

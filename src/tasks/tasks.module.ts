@@ -5,6 +5,8 @@ import { TasksController } from './tasks.controller';
 import { TasksService } from './tasks.service';
 import { TasksIdentifierService } from './tasks-identifier.service';
 import { PhaseHierarchyService } from './services/phase-hierarchy.service';
+import { PhaseTreeService } from './services/phase-tree.service';
+import { PhaseMetricsService } from './services/phase-metrics.service';
 
 /**
  * TasksModule — Domínio de tasks (DTask + V3 Intentions) V2.
@@ -17,6 +19,8 @@ import { PhaseHierarchyService } from './services/phase-hierarchy.service';
  * - TasksIdentifierService: identifier atômico DEV-N via DTabela -475
  * - PhaseHierarchyService: validacao de ciclo + cascade soft-delete
  *   (ADR-V2-047 — Fases via DTask.idPai)
+ * - PhaseTreeService: **STUB Fase 4** — árvore recursiva (CTE em Fase 5)
+ * - PhaseMetricsService: **STUB Fase 4** — % conclusão (CTE em Fase 5)
  *
  * Imports:
  * - `AuthModule` (forwardRef) — `AuthCompositeGuard` no controller (ADR-V2-042).
@@ -32,7 +36,13 @@ import { PhaseHierarchyService } from './services/phase-hierarchy.service';
 @Module({
   imports: [forwardRef(() => AuthModule), forwardRef(() => ProjectsModule)],
   controllers: [TasksController],
-  providers: [TasksService, TasksIdentifierService, PhaseHierarchyService],
+  providers: [
+    TasksService,
+    TasksIdentifierService,
+    PhaseHierarchyService,
+    PhaseTreeService,
+    PhaseMetricsService,
+  ],
   exports: [TasksService],
 })
 export class TasksModule {}

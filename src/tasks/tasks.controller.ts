@@ -1,28 +1,42 @@
 import {
+  BadRequestException,
   Body,
   Controller,
+  DefaultValuePipe,
   Delete,
   Get,
   HttpCode,
   HttpStatus,
   Logger,
   Param,
+  ParseBoolPipe,
   Post,
   Put,
   Query,
   Request,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { AuthCompositeGuard } from '../auth/guards/auth-composite.guard';
 import { ProjectsService } from '../projects/projects.service';
 import { TasksService } from './tasks.service';
+import { PhaseTreeService } from './services/phase-tree.service';
+import { PhaseMetricsService } from './services/phase-metrics.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { UpdateTaskStatusDto } from './dto/update-task-status.dto';
 import { UpdateTaskSprintDto } from './dto/update-task-sprint.dto';
 import { ListTasksQueryDto } from './dto/list-tasks-query.dto';
 import { TaskResponseDto, ListTasksResponseDto } from './dto/task-response.dto';
+import { PhaseTreeResponseDto } from './dto/phase-tree-response.dto';
+import { PhaseMetricsResponseDto } from './dto/phase-metrics-response.dto';
 
 interface JwtRequest {
   user: { entidadeId: string; organizationId?: string };
@@ -53,6 +67,8 @@ export class TasksController {
   constructor(
     private readonly tasksService: TasksService,
     private readonly projectsService: ProjectsService,
+    private readonly phaseTreeService: PhaseTreeService,
+    private readonly phaseMetricsService: PhaseMetricsService,
   ) {}
 
   /**
@@ -88,11 +104,16 @@ export class TasksController {
   @Post()
   @ApiOperation({
     summary: 'Criar task com identifier atômico DEV-N',
-    description: 'Estado inicial: INBOX. Identifier gerado atomicamente.',
+    description:
+      'Estado inicial: INBOX. Identifier gerado atomicamente. Aceita `idPai` ' +
+      'opcional para criar a task dentro de uma fase (ADR-V2-047). Quando ' +
+      '`idPai` é informado, o service valida (1) que o pai existe no mesmo ' +
+      'projeto e (2) que a profundidade total não excede MAX_PHASE_DEPTH=20.',
   })
   @ApiResponse({ status: 201, description: 'Task criada', type: TaskResponseDto })
+  @ApiResponse({ status: 400, description: 'Validação: cross-project parent ou profundidade' })
   @ApiResponse({ status: 401, description: 'Não autenticado' })
-  @ApiResponse({ status: 404, description: 'Projeto não encontrado / fora do scope' })
+  @ApiResponse({ status: 404, description: 'Projeto / pai não encontrado / fora do scope' })
   async create(@Body() dto: CreateTaskDto, @Request() req: JwtRequest): Promise<TaskResponseDto> {
     this.logger.log(`POST /tasks — user=${req.user.entidadeId}, project=${dto.projectId}`);
     const allowed = await this.resolveScopedProjectIds(req);
@@ -112,7 +133,33 @@ export class TasksController {
    * ```
    */
   @Get()
-  @ApiOperation({ summary: 'Listar tasks com filtros (scopado por org+membership)' })
+  @ApiOperation({
+    summary: 'Listar tasks com filtros (scopado por org+membership)',
+    description:
+      'Suporta filtros canônicos (projectId, status, assigneeId, sprintId) + ' +
+      'filtros hierárquicos ADR-V2-047 (idPai, idClasse, depth). Quando ' +
+      '`idPai` é informado com `depth>=2`, uma CTE recursiva PostgreSQL ' +
+      'resolve os descendentes em 1 query antes do findMany principal (zero N+1).',
+  })
+  @ApiQuery({
+    name: 'idPai',
+    required: false,
+    description:
+      'Filtra por pai na hierarquia. String numérica = filhas; "null" = raízes.',
+    example: '5',
+  })
+  @ApiQuery({
+    name: 'idClasse',
+    required: false,
+    description: 'idClasse polimórfica. -200=PHASE; -154=SCRUMBAN_TASK.',
+    example: '-200',
+  })
+  @ApiQuery({
+    name: 'depth',
+    required: false,
+    description: 'Profundidade da descida (0-20). Combinar com idPai.',
+    example: 1,
+  })
   @ApiResponse({ status: 200, description: 'Lista de tasks', type: ListTasksResponseDto })
   async findMany(
     @Query() query: ListTasksQueryDto,
@@ -120,6 +167,118 @@ export class TasksController {
   ): Promise<ListTasksResponseDto> {
     const allowed = await this.resolveScopedProjectIds(req);
     return this.tasksService.findMany(query, allowed);
+  }
+
+  /**
+   * Retorna a árvore recursiva de descendentes de uma task ou fase
+   * (ADR-V2-047).
+   *
+   * **Fase 4: stub** — registrado em F4 com Swagger e validação de scope,
+   * porém `PhaseTreeService.buildTree` lança `NotImplementedException` até
+   * a Fase 5 do plano. O endpoint responde 501 enquanto isso (NestJS
+   * mapeia `NotImplementedException` → HTTP 501).
+   *
+   * Tenant gate é aplicado ANTES do service: `findOne` resolve o
+   * `accessibleProjectIds` e nega 404 se a task estiver fora do escopo.
+   *
+   * @param id - chave da raiz da árvore (task ou fase)
+   * @param maxDepth - profundidade máxima (1-20; default ilimitado, capped em 20)
+   * @param includeMetrics - quando `true`, anexa `metrics` em cada nó-fase
+   */
+  @Get(':id/tree')
+  @ApiOperation({
+    summary: 'Árvore recursiva de descendentes (ADR-V2-047 — STUB Fase 4)',
+    description:
+      'Retorna a hierarquia completa abaixo da task/fase indicada. Implementação ' +
+      'real em Fase 5 (CTE recursiva). Em Fase 4 o endpoint responde 501.',
+  })
+  @ApiParam({ name: 'id', description: 'ID da task/fase raiz', example: '5' })
+  @ApiQuery({
+    name: 'maxDepth',
+    required: false,
+    description: 'Profundidade máxima (cap absoluto 20). Default: ilimitado.',
+    example: 5,
+  })
+  @ApiQuery({
+    name: 'includeMetrics',
+    required: false,
+    description: 'Quando true, anexa métricas em nós-fase.',
+    example: false,
+  })
+  @ApiResponse({ status: 200, description: 'Árvore retornada', type: PhaseTreeResponseDto })
+  @ApiResponse({ status: 400, description: 'Parâmetro maxDepth inválido' })
+  @ApiResponse({ status: 404, description: 'Task não encontrada ou fora do scope' })
+  @ApiResponse({ status: 501, description: 'Não implementado em Fase 4 (aguarda Fase 5)' })
+  async getTree(
+    @Param('id') id: string,
+    @Request() req: JwtRequest,
+    @Query('maxDepth') maxDepthRaw?: string,
+    @Query('includeMetrics', new DefaultValuePipe(false), ParseBoolPipe)
+    includeMetrics?: boolean,
+  ): Promise<PhaseTreeResponseDto> {
+    this.logger.log(`GET /tasks/${id}/tree — user=${req.user.entidadeId}`);
+
+    // Validar maxDepth (string → int 1..20). Omitido = ilimitado (undefined).
+    let maxDepth: number | undefined;
+    if (maxDepthRaw !== undefined) {
+      const parsed = Number.parseInt(maxDepthRaw, 10);
+      if (!Number.isFinite(parsed) || parsed < 1 || parsed > 20) {
+        throw new BadRequestException('maxDepth deve ser inteiro entre 1 e 20');
+      }
+      maxDepth = parsed;
+    }
+
+    // Tenant gate: garante que a raiz pertence a projeto acessível.
+    const allowed = await this.resolveScopedProjectIds(req);
+    await this.tasksService.findOne(id, allowed); // lança 404 se fora do scope
+
+    return this.phaseTreeService.buildTree(BigInt(id), {
+      maxDepth,
+      includeMetrics: includeMetrics ?? false,
+    });
+  }
+
+  /**
+   * Retorna métricas agregadas (% conclusão + contagens) de uma fase
+   * (ADR-V2-047).
+   *
+   * **Fase 4: stub** — `PhaseMetricsService.compute` lança 501 até a Fase 5
+   * implementar a CTE recursiva. O endpoint está registrado para que o
+   * frontend e os clientes (MCP, webhooks) já tenham a URL definida.
+   *
+   * @param id - chave da fase
+   * @param recursive - `true` (default) agrega descendentes; `false` apenas
+   *   filhas diretas
+   */
+  @Get(':id/metrics')
+  @ApiOperation({
+    summary: 'Métricas agregadas de uma fase (ADR-V2-047 — STUB Fase 4)',
+    description:
+      'Retorna `{ total, done, failed, inProgress, pending, percent }`. ' +
+      'Implementação real em Fase 5 (CTE recursiva). Em Fase 4 retorna 501.',
+  })
+  @ApiParam({ name: 'id', description: 'ID da fase/task raiz', example: '5' })
+  @ApiQuery({
+    name: 'recursive',
+    required: false,
+    description: 'Agregação recursiva (true) ou apenas filhas diretas (false). Default: true.',
+    example: true,
+  })
+  @ApiResponse({ status: 200, description: 'Métricas calculadas', type: PhaseMetricsResponseDto })
+  @ApiResponse({ status: 404, description: 'Fase não encontrada ou fora do scope' })
+  @ApiResponse({ status: 501, description: 'Não implementado em Fase 4 (aguarda Fase 5)' })
+  async getMetrics(
+    @Param('id') id: string,
+    @Request() req: JwtRequest,
+    @Query('recursive', new DefaultValuePipe(true), ParseBoolPipe) recursive?: boolean,
+  ): Promise<PhaseMetricsResponseDto> {
+    this.logger.log(`GET /tasks/${id}/metrics — user=${req.user.entidadeId}`);
+
+    // Tenant gate: 404 padrão se fora do scope (mensagem idêntica = anti enumeration).
+    const allowed = await this.resolveScopedProjectIds(req);
+    await this.tasksService.findOne(id, allowed);
+
+    return this.phaseMetricsService.compute(BigInt(id), { recursive: recursive ?? true });
   }
 
   /**
@@ -147,10 +306,20 @@ export class TasksController {
    * @param dto - Campos a atualizar
    */
   @Put(':id')
-  @ApiOperation({ summary: 'Atualizar task (não altera status)' })
+  @ApiOperation({
+    summary: 'Atualizar task (não altera status)',
+    description:
+      'Atualiza campos parciais. `idPai` aceita ADR-V2-047: ' +
+      '`string` move a task para a fase indicada (valida ciclo + ' +
+      'consistência cross-project); `null` move para raiz; ausente não toca.',
+  })
   @ApiParam({ name: 'id', description: 'ID da task' })
   @ApiResponse({ status: 200, description: 'Task atualizada', type: TaskResponseDto })
-  @ApiResponse({ status: 404, description: 'Task não encontrada ou fora do scope' })
+  @ApiResponse({
+    status: 400,
+    description: 'Validação: ciclo na hierarquia ou cross-project parent',
+  })
+  @ApiResponse({ status: 404, description: 'Task / pai não encontrada ou fora do scope' })
   async update(
     @Param('id') id: string,
     @Body() dto: UpdateTaskDto,

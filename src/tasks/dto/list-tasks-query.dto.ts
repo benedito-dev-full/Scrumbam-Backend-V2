@@ -1,11 +1,23 @@
-import { IsArray, IsEnum, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import {
+  IsArray,
+  IsEnum,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  Min,
+} from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
 /**
  * DTO para query de listagem de tasks (GET /tasks).
  *
- * Suporta filtros por projectId, status, assignee e sprint.
+ * Suporta filtros por projectId, status, assignee, sprint e — desde a Fase 4
+ * de ADR-V2-047 — filtros hierárquicos (`idPai`, `idClasse`, `depth`).
+ *
  * Cursor pagination decrescente por chave.
  *
  * @example
@@ -15,6 +27,15 @@ import { Type } from 'class-transformer';
  *   status: 'INBOX',
  *   limit: 20,
  * };
+ *
+ * // Listar filhas diretas de uma fase
+ * const query2: ListTasksQueryDto = { idPai: '5', limit: 50 };
+ *
+ * // Listar apenas as fases (idClasse=-200) de um projeto
+ * const query3: ListTasksQueryDto = { projectId: '1', idClasse: '-200' };
+ *
+ * // Listar descendentes até 3 níveis de profundidade
+ * const query4: ListTasksQueryDto = { idPai: '5', depth: 3 };
  * ```
  */
 export class ListTasksQueryDto {
@@ -107,4 +128,75 @@ export class ListTasksQueryDto {
   @Max(100)
   @Type(() => Number)
   limit?: number = 20;
+
+  /**
+   * Filtro por pai na hierarquia de fases (ADR-V2-047).
+   *
+   * - `string numérica`: retorna apenas filhas diretas (1 nível) da task indicada.
+   * - `'null'` (literal): retorna apenas tasks raiz (sem `idPai`) — útil para
+   *   listar as fases do topo do projeto.
+   * - omitido: não aplica filtro hierárquico.
+   *
+   * Combine com `idClasse=-200` para listar somente fases filhas, ou com
+   * `depth` para descer N níveis.
+   */
+  @ApiPropertyOptional({
+    description:
+      'ID da task pai (ADR-V2-047). Aceita "null" literal para listar raízes. ' +
+      'Combine com `idClasse=-200` para listar somente fases.',
+    example: '5',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^(-?\d+|null)$/, {
+    message: 'idPai deve ser string numérica (positiva/negativa) ou "null"',
+  })
+  idPai?: string;
+
+  /**
+   * Filtro por classe polimórfica de DTask (chave da DClasse).
+   *
+   * - `-200` (PHASE): retorna apenas fases (agrupadores hierárquicos).
+   * - `-154` (SCRUMBAN_TASK): retorna apenas tasks executáveis.
+   *
+   * Em F5 outras classes (MILESTONE/EPIC/BLOCK) podem aparecer.
+   */
+  @ApiPropertyOptional({
+    description:
+      'Filtrar por idClasse da DTask. -200=PHASE, -154=SCRUMBAN_TASK. Inteiro negativo.',
+    example: '-200',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^-?\d+$/, { message: 'idClasse deve ser string numérica (positiva/negativa)' })
+  idClasse?: string;
+
+  /**
+   * Profundidade da consulta hierárquica (descida na árvore via `idPai`).
+   *
+   * Aplicável apenas quando combinado com `idPai`. Quando informado, a
+   * listagem retorna descendentes recursivos até `depth` níveis (CTE
+   * recursiva PostgreSQL).
+   *
+   * - `1` (default quando `idPai` informado): apenas filhas diretas.
+   * - `0`: apenas a própria raiz (`idPai` indicado).
+   * - `2..20`: descendentes até esse nível.
+   *
+   * Cap absoluto: 20 níveis (guardrail anti-DoS — mesmo limite de
+   * `MAX_PHASE_DEPTH` em PhaseHierarchyService).
+   */
+  @ApiPropertyOptional({
+    description:
+      'Profundidade de descida na árvore (1=filhas diretas, ..., 20=máximo). ' +
+      'Combinar com `idPai`. Sem `idPai` é ignorado.',
+    example: 1,
+    minimum: 0,
+    maximum: 20,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(20)
+  @Type(() => Number)
+  depth?: number;
 }
