@@ -358,6 +358,7 @@ model DTask {
   idSprint   BigInt? // → DTabela idClasse=-40X
   idAssignee BigInt? // → DEntidade (User)
   idCreator  BigInt? // → DEntidade (User)
+  idPai      BigInt? // → DTask (self-FK) — hierarquia de fases (ADR-V2-047)
 
   // Json polimórfico — V3 intentions, telemetria, workSessions[], etc.
   dados Json?
@@ -370,6 +371,8 @@ model DTask {
   project  DProject?  @relation(fields: [idProject], references: [chave], onDelete: NoAction, onUpdate: NoAction)
   assignee DEntidade? @relation("TaskAssignee", fields: [idAssignee], references: [chave], onDelete: NoAction, onUpdate: NoAction)
   creator  DEntidade? @relation("TaskCreator", fields: [idCreator], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  parent   DTask?     @relation("TaskHierarchy", fields: [idPai], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  children DTask[]    @relation("TaskHierarchy")
 
   @@index([idClasse])
   @@index([idProject])
@@ -377,6 +380,8 @@ model DTask {
   @@index([idAssignee])
   @@index([idSprint])
   @@index([excluido, idProject])
+  @@index([idPai])
+  @@index([idPai, excluido])
 }
 
 // =====================================================================
