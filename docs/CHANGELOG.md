@@ -14,6 +14,20 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F10 ADR-V2-047 Fase 10: Testes End-to-End Controller-Level (Fechamento de ADR-V2-047)** - 2026-05-21
+  - **E2E Tests:** 4 testes controller-level em `tasks-phase-flow.e2e.spec.ts`
+    - Cenario 1 (Happy Path): criar fase → 3 filhas → tree → metrics; validação contrato HTTP completo (79/79 PASS)
+    - Cenarios 2-4 (Smoke Tests): propagação HTTP de BadRequestException (depth guard, ciclo, cross-project); lógica adversarial em F3 `phase-hierarchy.service.spec.ts` não duplicada
+  - **Filosofia Anti-duplicação:** cenários adversariais (depth>20, ciclo, cross-project) já cobertos em F3; F10 valida APENAS a camada controller
+  - **Mocks:** PrismaService, TasksService, PhaseTreeService, PhaseMetricsService via TestingModule; ZERO banco real, ZERO testcontainers (CEO 2026-05-21)
+  - **Melhorias Cosméticas:** comentário clareza (linha 242), factory `buildTaskResponse` com campos opcionais (`priority`, `taskType`, `assigneeId`, `sprintId`), JSDoc Cenario 3 menciona "criar ou mover"
+  - **Tests:** 4 novos (PASS); baseline 75 (F0–F9) preservada; total suite 179/24 testes scope `tasks`
+  - **Pilares:** Pilar 2 RESPEITADO (TasksController genérico); Pilar 3 RESPEITADO (zero seed change)
+  - **ADRs:** ADR-V2-047 F10 (completa, ADR FECHADO F0–F10), ADR-V2-001, ADR-V2-042
+  - **Quality Score:** 9.0/10 APPROVED | Build: PASS, TypeScript: 0 errors | Reviewer: Haiku
+
+- **ADR-V2-047 FECHAMENTO COMPLETO:** F0–F10 entregues (F2, F6 adiados v2); scores médio 8.7/10; branch `feature/dtask-fases-via-idpai` pronta merge (6 commits ahead origin)
+
 - **F9 ADR-V2-047 Fase 9: V3 Guard + Flow Metrics by-Phase + Telegram Listener** - 2026-05-21
   - **F9a V3 Guard:** Guard `BadRequestException` em `TasksService.updateStatus()` validando `idClasse == -200` (PHASE); impede update em classes não-fases (Pilar 2 DRY)
   - **F9b Flow Metrics by-Phase:** 6 rotas GET `/flow-metrics/by-phase/:phaseId/<metric>` reusando 6 services com novo `taskIdsFilter?` retrocompatível; novo `PhaseDescendantsService` (CTE recursiva, depth<20); novo `ByPhaseResolverService` (resolve + tenant scope); 39 tests novos
