@@ -19,8 +19,8 @@ import { PhaseMetricsService } from './services/phase-metrics.service';
  * - TasksIdentifierService: identifier atômico DEV-N via DTabela -475
  * - PhaseHierarchyService: validacao de ciclo + cascade soft-delete
  *   (ADR-V2-047 — Fases via DTask.idPai)
- * - PhaseTreeService: **STUB Fase 4** — árvore recursiva (CTE em Fase 5)
- * - PhaseMetricsService: **STUB Fase 4** — % conclusão (CTE em Fase 5)
+ * - PhaseTreeService: CTE recursiva real (Fase 5 — ADR-V2-047)
+ * - PhaseMetricsService: % conclusão via CTE recursiva (Fase 5 — ADR-V2-047)
  *
  * Imports:
  * - `AuthModule` (forwardRef) — `AuthCompositeGuard` no controller (ADR-V2-042).

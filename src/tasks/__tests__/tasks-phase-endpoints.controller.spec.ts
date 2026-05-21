@@ -9,16 +9,17 @@ import { PhaseMetricsService } from '../services/phase-metrics.service';
 import { AuthCompositeGuard } from '../../auth/guards/auth-composite.guard';
 
 /**
- * Testes Fase 4 (ADR-V2-047) — endpoints novos no TasksController:
+ * Testes ADR-V2-047 — endpoints de fase no TasksController:
  *
  * - GET /tasks/:id/tree → delega para PhaseTreeService.buildTree
  * - GET /tasks/:id/metrics → delega para PhaseMetricsService.compute
  *
- * Em Fase 4 ambos os services são stubs (lançam `NotImplementedException`).
- * Validamos aqui o contrato HTTP completo:
+ * Services têm implementação real (CTE recursiva — Fase 5), mas estes
+ * testes mockam os services — o foco é o contrato HTTP do controller,
+ * não a lógica SQL. Validamos:
  * - Tenant gate executado ANTES do service (findOne com 404 anti-enumeration).
  * - Validação de query params (`maxDepth` 1..20, `includeMetrics` boolean).
- * - Propagação correta da exception 501 quando service não-implementado.
+ * - Propagação correta de exceptions (erro genérico para mock/teste, método real em prod).
  */
 describe('TasksController — endpoints de fase (Fase 4, ADR-V2-047)', () => {
   let controller: TasksController;
@@ -71,13 +72,11 @@ describe('TasksController — endpoints de fase (Fase 4, ADR-V2-047)', () => {
 
   describe('getTree()', () => {
     it('chama tenant gate (tasksService.findOne) antes do PhaseTreeService', async () => {
-      phaseTreeService.buildTree.mockRejectedValue(
-        new NotImplementedException('stub Fase 4'),
-      );
+      phaseTreeService.buildTree.mockRejectedValue(new NotImplementedException('stub Fase 4'));
 
-      await expect(
-        controller.getTree('5', buildReq() as never, undefined, false),
-      ).rejects.toThrow(NotImplementedException);
+      await expect(controller.getTree('5', buildReq() as never, undefined, false)).rejects.toThrow(
+        NotImplementedException,
+      );
 
       expect(projectsService.findAccessibleProjectIds).toHaveBeenCalledWith(BigInt(100), '1');
       expect(tasksService.findOne).toHaveBeenCalledWith('5', ['1']);
@@ -112,7 +111,11 @@ describe('TasksController — endpoints de fase (Fase 4, ADR-V2-047)', () => {
     });
 
     it('passa maxDepth=10 quando query "10" é fornecida', async () => {
-      phaseTreeService.buildTree.mockResolvedValue({ root: null, totalNodes: 0, maxDepthReached: 0 });
+      phaseTreeService.buildTree.mockResolvedValue({
+        root: null,
+        totalNodes: 0,
+        maxDepthReached: 0,
+      });
 
       await controller.getTree('5', buildReq() as never, '10', true);
 
@@ -124,7 +127,15 @@ describe('TasksController — endpoints de fase (Fase 4, ADR-V2-047)', () => {
 
     it('quando service responde, retorna o payload conforme PhaseTreeResponseDto', async () => {
       const payload = {
-        root: { id: '5', nome: 'Fase 1', idClasse: '-200', idPai: null, status: null, depth: 0, children: [] },
+        root: {
+          id: '5',
+          nome: 'Fase 1',
+          idClasse: '-200',
+          idPai: null,
+          status: null,
+          depth: 0,
+          children: [],
+        },
         totalNodes: 1,
         maxDepthReached: 0,
       };
@@ -139,13 +150,11 @@ describe('TasksController — endpoints de fase (Fase 4, ADR-V2-047)', () => {
 
   describe('getMetrics()', () => {
     it('aplica tenant gate antes do PhaseMetricsService', async () => {
-      phaseMetricsService.compute.mockRejectedValue(
-        new NotImplementedException('stub Fase 4'),
-      );
+      phaseMetricsService.compute.mockRejectedValue(new NotImplementedException('stub Fase 4'));
 
-      await expect(
-        controller.getMetrics('5', buildReq() as never, true),
-      ).rejects.toThrow(NotImplementedException);
+      await expect(controller.getMetrics('5', buildReq() as never, true)).rejects.toThrow(
+        NotImplementedException,
+      );
 
       expect(tasksService.findOne).toHaveBeenCalledWith('5', ['1']);
       expect(phaseMetricsService.compute).toHaveBeenCalledWith(BigInt(5), { recursive: true });
@@ -197,25 +206,6 @@ describe('TasksController — endpoints de fase (Fase 4, ADR-V2-047)', () => {
       );
 
       expect(phaseMetricsService.compute).not.toHaveBeenCalled();
-    });
-  });
-
-  // ─── Stubs Fase 4 — comportamento esperado ────────────────────────────────
-
-  describe('Stubs PhaseTreeService / PhaseMetricsService (Fase 4 → Fase 5)', () => {
-    it('PhaseTreeService.buildTree real lança NotImplementedException', async () => {
-      // Mock anterior é substituído por instância real do stub.
-      const real = new (
-        await import('../services/phase-tree.service')
-      ).PhaseTreeService({} as never);
-      await expect(real.buildTree(BigInt(5))).rejects.toThrow(NotImplementedException);
-    });
-
-    it('PhaseMetricsService.compute real lança NotImplementedException', async () => {
-      const real = new (
-        await import('../services/phase-metrics.service')
-      ).PhaseMetricsService({} as never);
-      await expect(real.compute(BigInt(5))).rejects.toThrow(NotImplementedException);
     });
   });
 });

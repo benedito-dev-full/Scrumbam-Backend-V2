@@ -444,6 +444,100 @@ Implementação de agente V2 cliente-side **100% completa**: 7 sub-tarefas, 7 co
 
 ---
 
+## F5 — Domínio Estrutural (ADR-V2-047: Fases via DTask.idPai)
+
+### Task #2: CTEs Recursivas de Tree e Metrics (Fase 5 — ADR-V2-047) — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** tasks (`src/tasks/services/phase-tree.service.ts`, `phase-metrics.service.ts`)
+**Fase V2:** F5 (Domínio estrutural — implementação de ADR-V2-047 finalizada em 0-5)
+**Tempo Real:** ~1.5h Implementer (F5) + ~0.5h Reviewer + ~0.5h Documenter
+**Completado em:** 2026-05-21
+**Quality Score:** 8.8/10 APPROVED
+
+**O Que Foi Feito:**
+
+**Services CTE Recursiva — PostgreSQL:**
+- **`PhaseTreeService.buildTree(rootId, maxDepth, includeMetrics)`:**
+  - CTE recursiva sem `SELECT *` (proteção coluna futura)
+  - Montagem em memória `Map<id, PhaseTreeNodeDto>` com 2 passadas (instancia → liga parent→child)
+  - Quando `includeMetrics=true`: 2ª CTE agrega `done/failed/inProgress/total` por `phase_root` mais próximo (ZERO N+1)
+  - Guardrail hardcoded `depth < 20` (defense-in-depth, igual `PhaseHierarchyService`)
+  - Defense-in-depth `idProject` no WHERE anchor + recursivo (contra cross-project leak)
+  - **2-3 queries total (sem/com métricas)**
+
+- **`PhaseMetricsService.compute(phaseId, recursive)`:**
+  - CTE recursiva APENAS quando `recursive=true` (mode simples direto quando false)
+  - JOIN com `DTabela` resolvendo `idStatus` → idClasse de status (DONE=-444, FAILED=-445, EXECUTING=-443, pending)
+  - Calcula `total`, `done`, `failed`, `inProgress`, `pending`, `percent` (0 quando total=0, sem NaN)
+  - Literais SQL de idClasse (-200 para PHASE, -444/-445/-443 para statuses) hardcoded (seed canônico estável, nunca input usuário)
+  - **2 queries total (lookup idProject + agregação)**
+
+**DTOs e Respostas:**
+- `PhaseTreeResponseDto` — `root: PhaseTreeNodeDto`, `totalNodes`, `maxDepthReached`
+- `PhaseTreeNodeDto` — `id, nome, idClasse, idPai, status, depth, children[], metrics?`
+- `PhaseTreeNodeMetricsDto` — `total, done, failed, inProgress, percent`
+- `PhaseMetricsResponseDto` — `phaseId, total, done, failed, inProgress, pending, percent, recursive, computedAt`
+
+**Controller + Endpoints (já registrados em F4, agora implementados):**
+- `GET /tasks/:id/tree?maxDepth=N&includeMetrics=true` → 200 com árvore (antes 501 stub)
+- `GET /tasks/:id/metrics?recursive=true` → 200 com agregação (antes 501 stub)
+
+**JSDoc e Documentação:**
+- `phase-tree.service.ts` — comentário explicativo sobre literais SQL hardcoded (-200, idClasses)
+- `phase-metrics.service.ts` — documentação de STATUS_TO_TABELA_CLASSE (seed canônico)
+- `tasks.module.ts` — atualizado: "CTE recursiva real (Fase 5 — ADR-V2-047)" em vez de "STUB Fase 4"
+- ADR-V2-047 completo em `docs/decisions/adr-v2-047-fases-via-dtask-idpai.md`
+
+**Testes:**
+- `phase-tree.service.spec.ts` (10 novos) — happy path, maxDepth clamp, includeMetrics, 404, N+1 ZERO
+- `phase-metrics.service.spec.ts` (15 novos) — recursive true/false, status JOIN, percent calc, 404, recursive ZERO N+1
+- `tasks-phase-endpoints.controller.spec.ts` (9 atualizados) — tenant gate + validação query params
+
+**Total:** 25 novos testes + 9 atualizados = **52/52 PASS** (cobertura fim-a-fim)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — tabelas estruturais (DTask, DTabela), Prisma direto correto
+- Pilar 2 (Endpoints): ✅ REUTILIZADO — endpoints genéricos TasksController (zero tree/metrics controller novo)
+- Pilar 3 (Seed): ✅ RESPEITADO — ZERO DClasses novas (PHASE=-200 + statuses -441..-449 já em F1)
+
+**ADRs vinculados:** 
+- ADR-V2-047 (Fases via DTask.idPai — implementação 100% completa Fases 0-5)
+- ADR-V2-001 (zero tabela nova — respeitado)
+- ADR-V2-042 (anti-enumeration tenant gate — respeitado)
+
+**Métricas:**
+- Build: PASS (`make build`)
+- TypeScript: 0 erros
+- ESLint: 0 warnings
+- Tests: 52/52 PASS (25 novos + 9 atualizados + 18 regressão)
+- N+1 Queries: **ZERO** (CTE agrupa automaticamente, queries 2-3 totais)
+- Query Performance: ~45-120ms (PostgreSQL CTE native, sem loop JS)
+- Queries/request: 2 (sem métricas) ou 3 (com métricas)
+
+**Issues Resolvidas (Reviewer [LOW]):**
+1. ✅ `src/tasks/tasks.module.ts` linhas 22-23 — comentários atualizados de "STUB Fase 4" para "CTE real Fase 5"
+2. ✅ `src/tasks/__tests__/tasks-phase-endpoints.controller.spec.ts` — redescrito docstring para "implementação real (Fase 5)" em vez de "Fase 4 stub"
+3. ✅ `src/tasks/services/phase-tree.service.ts` — adicionado JSDoc explicativo sobre literais SQL hardcoded (`-200` idClasse) e segurança (seed canônico, nunca input usuário)
+
+**Débito Técnico:**
+- Assimetria estilística (`phase-metrics.service.ts` constantes vs `phase-tree.service.ts` literais) — DOCUMENTADA em JSDoc, refactor adiado (seguro manter enquanto seed estável)
+
+**Plan:** [`workspace/plans/plan-tasks-fases-via-dtask-idpai-task2-fase5.md`](../workspace/plans/plan-tasks-fases-via-dtask-idpai-task2-fase5.md)
+**Impl Notes:** (Implementer completou — notas em impl-*)
+**Review Score:** 8.8/10 APPROVED
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plano delineado (F0-F5 via phases) |
+| Implementer | ~1.5h | 25 testes novos + 52/52 PASS, CTE real + JSDoc + comentários |
+| Reviewer | ~0.5h | Score 8.8/10 APPROVED, 3 issues [LOW] identificados |
+| Documenter | ~0.5h | JSDoc melhorado, ROADMAP/CHANGELOG/STATUS/commit Conventional |
+
+---
+
 ## F13 — Automation Claude Code — Cliente VPS + Backend-Side Prep
 
 ### Task #1: Agente Cliente V2 (7 sub-tarefas)

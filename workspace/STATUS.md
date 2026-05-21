@@ -1,6 +1,81 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-18 (Folders MVP COMPLETA + F13 VPS Provision Milestone 2 COMPLETA)
+**Ultima atualizacao:** 2026-05-21 (F5 Task #2 ADR-V2-047 Fase 5 COMPLETA + Documenter finalizou)
+
+---
+
+## ✅ F5 Task #2 — CTE Recursivas de Tree e Metrics (ADR-V2-047 Fase 5) — COMPLETA
+
+**Status:** ✅ COMPLETA (ADR-V2-047 100% fim-a-fim Fases 0-5)
+**Módulo:** tasks (services + controller + DTOs)
+**Fase:** F5 (Domínio estrutural)
+**Duration:** ~0.5h Implementer (Fase 5 — SQL) + ~0.5h Reviewer + ~0.5h Documenter
+**Quality Score:** 8.8/10 APPROVED
+**Date:** 2026-05-21
+
+### Agents Performance
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plano F0-F5 |
+| Implementer | ~1.5h total (F4-F5) | 25 novos testes + CTE real + build PASS |
+| Reviewer | ~0.5h | Score 8.8/10, 3 issues [LOW] |
+| Documenter | ~0.5h | JSDoc, ROADMAP, CHANGELOG, STATUS, commit |
+
+### Deliverables
+
+**Services:**
+- `PhaseTreeService.buildTree(rootId, maxDepth?, includeMetrics?)` — CTE recursiva PostgreSQL
+  - Montagem em memória Map<id, PhaseTreeNodeDto> com 2 passadas
+  - 2ª CTE opcional agrega métricas por phase_root (ZERO N+1)
+  - Guardrail depth<20, defense-in-depth idProject
+  - Response: PhaseTreeResponseDto { root, totalNodes, maxDepthReached }
+
+- `PhaseMetricsService.compute(phaseId, recursive?)` — CTE recursiva ou query simples
+  - JOIN com DTabela resolvendo idStatus→idClasse (status types DONE/FAILED/EXECUTING/pending)
+  - Calcula total, done, failed, inProgress, pending, percent (0 quando total=0)
+  - Response: PhaseMetricsResponseDto { phaseId, total, done, failed, inProgress, pending, percent, recursive, computedAt }
+
+**Endpoints (já registrados F4, agora implementados):**
+- GET `/tasks/:id/tree?maxDepth=1-20&includeMetrics=bool` → 200 PhaseTreeResponseDto
+- GET `/tasks/:id/metrics?recursive=bool` → 200 PhaseMetricsResponseDto
+
+**Tests:**
+- `phase-tree.service.spec.ts` — 10 novos (happy path, depth clamp, metrics, 404, N+1)
+- `phase-metrics.service.spec.ts` — 15 novos (recursive, status JOIN, percent, 404, N+1)
+- `tasks-phase-endpoints.controller.spec.ts` — 9 atualizados (descrição melhorada)
+- **Total: 25 novos + 9 atualizados = 52/52 PASS**
+
+**Documentation:**
+- JSDoc: literais SQL hardcoded (-200 PHASE, -444/-445/-443 status) documentados + padrão seguro
+- tasks.module.ts: "STUB Fase 4" → "CTE real Fase 5"
+- ADR-V2-047: completo (redigido Fase 0, seed Fase 1, schema Fase 2, validator Fase 3, endpoints Fase 4, implementação Fase 5)
+
+### Pilares
+
+- **Pilar 1 (Engine):** N/A — estrutural (Prisma)
+- **Pilar 2 (Endpoints):** REUTILIZADO TasksController (zero controller novo)
+- **Pilar 3 (Seed):** ZERO DClasses novas (PHASE=-200 + statuses já em F1)
+
+### ADRs
+
+- **ADR-V2-047** — 100% IMPLEMENTADO (Fases 0-5 COMPLETA) ✅
+- **ADR-V2-001** — Zero tabela nova ✅
+- **ADR-V2-042** — Tenant gate defense-in-depth ✅
+
+### Métricas
+
+- **Build:** PASS ✅
+- **TypeScript:** 0 errors ✅
+- **Tests:** 52/52 PASS ✅
+- **N+1 Queries:** ZERO ✅
+- **Queries/request:** 2 (sem métricas) ou 3 (com métricas) ✅
+
+### Issues Resolvidos (Reviewer)
+
+1. ✅ tasks.module.ts linhas 22-23 — comentários "STUB" → "CTE real"
+2. ✅ tasks-phase-endpoints.controller.spec.ts — docstring atualizado
+3. ✅ phase-tree.service.ts — JSDoc de literais SQL hardcoded (seguro, seed canônico)
 
 ---
 

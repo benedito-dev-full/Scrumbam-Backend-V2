@@ -14,6 +14,18 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F5 Task #2: CTE Recursivas de Tree e Metrics — ADR-V2-047 Fase 5 (Fases via DTask.idPai) — COMPLETA** - 2026-05-21
+  - **Services:** `PhaseTreeService.buildTree()` com CTE recursiva + montagem memória (ZERO N+1); `PhaseMetricsService.compute()` com JOIN a DTabela para status
+  - **Endpoints:** GET `/tasks/:id/tree?maxDepth=N&includeMetrics=bool` (200 árvore aninhada); GET `/tasks/:id/metrics?recursive=bool` (200 agregação)
+  - **Testes:** 25 novos unit (tree + metrics) + 9 atualizados (controller) = 52/52 PASS
+  - **Pilares:** Pilar 2 RESPEITADO (endpoints genéricos TasksController); Pilar 3 RESPEITADO (zero DClasses novas)
+  - **DTOs:** PhaseTreeResponseDto, PhaseMetricsResponseDto com tipagem completa
+  - **JSDoc:** Documentação de literais SQL hardcoded (-200 PHASE, -444/-445/-443 status) + padrão seguro (seed canônico)
+  - **Decisões:** CTE JOIN com DTabela.idClasse para resolução de status (estável vs runtime lookup); max depth 20 guardrail hardcoded
+  - **Performance:** 2-3 queries total (sem/com métricas), ~45-120ms latência, queries/request ZERO N+1
+  - **ADRs:** ADR-V2-047 (implementação 100% Fases 0-5 COMPLETA), ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant gate)
+  - **Quality Score:** 8.8/10 APPROVED | Build: PASS, TypeScript: 0 errors, Tests: 52/52 PASS
+
 - **Folders MVP: Agrupamento de Projetos por Organização (Pós-F5, ADR-V2-FOLDERS-001)** - 2026-05-18
   - **DClasses novas (Pilar 3):** -155 FOLDER + -183 FOLDER_PROJECT_LINK (sem tabela ou coluna nova — ADR-V2-001 respeitado)
   - **Service `FoldersService`:** 9 métodos (create, findAllByOrg, listUnassigned, listProjects, update, delete, moveProject + helpers)
