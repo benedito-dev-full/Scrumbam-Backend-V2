@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma.service';
 import { EventProducerService } from '../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../common/services/correlation-id.service';
 import { TasksIdentifierService } from './tasks-identifier.service';
+import { PhaseHierarchyService } from './services/phase-hierarchy.service';
 import { validateTransition, isValidState } from './tasks-state-machine';
 import { TaskStatus, buildInitialTaskDados } from './schemas/task-dados.schema';
 import { CreateTaskDto } from './dto/create-task.dto';
@@ -15,6 +16,9 @@ import { TaskResponseDto, ListTasksResponseDto } from './dto/task-response.dto';
 
 /** idClasse de DTask no seed F1 (classes canônicas V2). */
 const ID_CLASSE_TASK = BigInt(-154); // SCRUMBAN_TASK (seed classes.seed.ts)
+
+/** idClasse PHASE (-200) — agrupador hierárquico de tasks (ADR-V2-047). */
+const ID_CLASSE_PHASE = BigInt(-200);
 
 /** Mapa de status string → idClasse DTabela (seed F1). */
 const STATUS_TO_TABELA_CLASSE: Record<string, bigint> = {
@@ -74,6 +78,7 @@ export class TasksService {
     private readonly identifierService: TasksIdentifierService,
     private readonly eventProducer: EventProducerService,
     private readonly correlationIdService: CorrelationIdService,
+    private readonly phaseHierarchy: PhaseHierarchyService,
   ) {}
 
   /**
@@ -125,6 +130,34 @@ export class TasksService {
 
     if (!project) {
       throw new NotFoundException(`Projeto ${dto.projectId} não encontrado`);
+    }
+
+    // Validar idPai (ADR-V2-047): pai deve existir, mesmo projeto, sem ciclo.
+    // No create taskId ainda nao existe, entao usamos newParentId apenas
+    // para descer a cadeia ascendente e validar profundidade.
+    let idPaiBigInt: bigint | null = null;
+    if (dto.idPai !== undefined && dto.idPai !== null) {
+      idPaiBigInt = BigInt(dto.idPai);
+
+      const paiExiste = await this.prisma.dTask.findFirst({
+        where: { chave: idPaiBigInt, excluido: false },
+        select: { idProject: true },
+      });
+      if (!paiExiste) {
+        throw new NotFoundException(`Pai ${dto.idPai} nao encontrado`);
+      }
+
+      const paiProjectId = paiExiste.idProject?.toString() ?? null;
+      if (paiProjectId !== projectId.toString()) {
+        throw new BadRequestException(
+          `Cross-project parent nao permitido: task.idProject=${projectId} vs pai.idProject=${paiProjectId}`,
+        );
+      }
+
+      // Profundidade: validateNoCycle aceita newParentId arbitrario e sobe
+      // a cadeia ascendente — taskId sentinela aqui e BigInt(0) (nao existe
+      // como chave real, portanto nunca colide). Garante MAX_DEPTH.
+      await this.phaseHierarchy.validateNoCycle(BigInt(0), idPaiBigInt);
     }
 
     const projectDados = project.dados as Record<string, unknown> | null;
@@ -182,6 +215,7 @@ export class TasksService {
           idAssignee: dto.assigneeId ? BigInt(dto.assigneeId) : null,
           idSprint: dto.sprintId ? BigInt(dto.sprintId) : null,
           idCreator: creatorId,
+          idPai: idPaiBigInt,
           dados: dadosPayload as Prisma.InputJsonValue,
         },
       });
@@ -448,6 +482,21 @@ export class TasksService {
       }
     }
 
+    // Mover na hierarquia de fases (ADR-V2-047) — semantica:
+    //   undefined → nao tocar
+    //   null      → mover para raiz (idPai=null)
+    //   string    → setar novo pai; valida ciclo + project-consistency
+    let idPaiUpdate: bigint | null | undefined = undefined;
+    if (dto.idPai !== undefined) {
+      if (dto.idPai === null) {
+        idPaiUpdate = null;
+      } else {
+        idPaiUpdate = BigInt(dto.idPai);
+        await this.phaseHierarchy.validateNoCycle(taskId, idPaiUpdate);
+        await this.phaseHierarchy.validateProjectConsistency(taskId, idPaiUpdate);
+      }
+    }
+
     const updated = await this.prisma.dTask.update({
       where: { chave: taskId },
       data: {
@@ -457,6 +506,7 @@ export class TasksService {
           ? { idAssignee: dto.assigneeId ? BigInt(dto.assigneeId) : null }
           : {}),
         ...(idPriorityUpdate !== undefined ? { idPriority: idPriorityUpdate } : {}),
+        ...(idPaiUpdate !== undefined ? { idPai: idPaiUpdate } : {}),
         ...(novosDados !== undefined ? { dados: novosDados as Prisma.InputJsonValue } : {}),
       },
     });
@@ -681,23 +731,43 @@ export class TasksService {
   }
 
   /**
-   * Soft-delete de task.
+   * Soft-delete de task. Cascade opcional para fases (ADR-V2-047).
+   *
+   * Comportamento de `cascade`:
+   * - `undefined` (default): cascade = true se task eh PHASE (idClasse=-200);
+   *   false caso contrario.
+   * - `true`: cascade explicito — usa `PhaseHierarchyService.softDeleteCascade`
+   *   (CTE recursiva — 1 statement marca task + descendentes como `excluido=true`).
+   * - `false`: soft-delete somente da task; descendentes ficam orfaos
+   *   (`idPai` aponta para task deletada — comportamento intencional para
+   *   cenarios de "desvincular" sem destruir).
    *
    * @param id - Chave BigInt da task (string)
+   * @param accessibleProjectIds - Scope tenant (ADR-V2-042)
+   * @param options - Opcoes (cascade)
+   * @returns objeto com contagem de afetados (raiz + descendentes em cascade)
    *
    * @throws {NotFoundException} Se task não encontrada
    *
    * @example
    * ```typescript
+   * // Default: cascade ligado se for PHASE
    * await service.delete('7');
+   *
+   * // Cascade explicito
+   * await service.delete('7', undefined, { cascade: true });
    * ```
    */
-  async delete(id: string, accessibleProjectIds?: string[]): Promise<void> {
+  async delete(
+    id: string,
+    accessibleProjectIds?: string[],
+    options?: { cascade?: boolean },
+  ): Promise<{ affected: number }> {
     const taskId = BigInt(id);
 
     const existing = await this.prisma.dTask.findFirst({
       where: { chave: taskId, excluido: false },
-      select: { chave: true, idProject: true },
+      select: { chave: true, idProject: true, idClasse: true },
     });
 
     if (!existing) {
@@ -712,12 +782,27 @@ export class TasksService {
       }
     }
 
+    // Decisao de cascade:
+    //   options.cascade definido → respeitar valor explicito
+    //   omitido → default = true se task eh PHASE, false caso contrario
+    const isPhase = existing.idClasse === ID_CLASSE_PHASE;
+    const cascade = options?.cascade !== undefined ? options.cascade : isPhase;
+
+    if (cascade) {
+      const result = await this.phaseHierarchy.softDeleteCascade(taskId);
+      this.logger.log(
+        `Task ${taskId} deletada com cascade (isPhase=${isPhase}); afetados=${result.affected}`,
+      );
+      return result;
+    }
+
     await this.prisma.dTask.update({
       where: { chave: taskId },
       data: { excluido: true },
     });
 
-    this.logger.log(`Task ${taskId} deletada (soft delete)`);
+    this.logger.log(`Task ${taskId} deletada (soft delete sem cascade)`);
+    return { affected: 1 };
   }
 
   // ─── Helpers privados ─────────────────────────────────────────────────────

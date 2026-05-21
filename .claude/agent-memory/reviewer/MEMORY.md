@@ -189,6 +189,7 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 | Task#1 | folders-mvp | pós-F5 | **8.3** | **APPROVED** | Pilar 2 OK (zero FolderController); seed -155/-183 corretos; 30/30 specs; M1: comentário seed desatualizado (95→97); M2: ADR-V2-FOLDERS-001 não criado (Documenter); M5: DRY duplicate resolveFolderIds |
 | Task#1 Fase0 | fases-via-dtask-idpai (ADR-V2-047) | pós-F5 | **8.5** | **APPROVED** | ADR doc-only; gate CEO 8.0; H1: CTE métricas referencia d.depth sem propagar coluna depth (SQL inválido); M1: decisão anti-trigger DB ausente; M2: §3.1 citado como §3.2 |
 | Task#1 Fase1 | fases-via-dtask-idpai (Seed PHASE) | pós-F5 | **8.8** | **APPROVED** | Seed-only; gate CEO 8.0; PHASE(-200) correto; 5 COUNTS atualizados; H1/M1/M2 todos corrigidos no ADR; L1: cast bigint explícito na CTE (cosmético); L2: ref §4 do plano imprecisa |
+| Task#1 Fase3 | fases-via-dtask-idpai (Service Layer) | pós-F5 | **8.7** | **APPROVED** | 24/24 specs OK; build verde; M1: query redundante no create (findFirst+validateNoCycle re-busca pai); M2: cobertura integracao create->validateNoCycle ausente; M3: 24 falhas pre-existentes no tasks.service.spec.ts (debito state-machine) |
 
 ## PADRÕES APRENDIDOS F13 TASK1 SUB4 (Agente V2 — RUN_CLAUDE_CODE + session extraction)
 

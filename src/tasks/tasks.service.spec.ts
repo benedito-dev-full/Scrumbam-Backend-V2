@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import { TasksIdentifierService } from './tasks-identifier.service';
+import { PhaseHierarchyService } from './services/phase-hierarchy.service';
 import { PrismaService } from '../prisma.service';
 import { EventProducerService } from '../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../common/services/correlation-id.service';
@@ -88,6 +89,12 @@ describe('TasksService', () => {
     const identifierMock = { getNextIdentifier: jest.fn() };
     const eventProducerMock = { addInternalEvent: jest.fn().mockResolvedValue(undefined) };
     const correlationIdMock = { getOrGenerate: jest.fn().mockReturnValue('test-corr-id') };
+    const phaseHierarchyMock = {
+      maxDepth: 20,
+      validateNoCycle: jest.fn().mockResolvedValue(undefined),
+      validateProjectConsistency: jest.fn().mockResolvedValue(undefined),
+      softDeleteCascade: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -96,6 +103,7 @@ describe('TasksService', () => {
         { provide: TasksIdentifierService, useValue: identifierMock },
         { provide: EventProducerService, useValue: eventProducerMock },
         { provide: CorrelationIdService, useValue: correlationIdMock },
+        { provide: PhaseHierarchyService, useValue: phaseHierarchyMock },
       ],
     }).compile();
 
@@ -668,6 +676,15 @@ describe('TasksService', () => {
           {
             provide: CorrelationIdService,
             useValue: { getOrGenerate: jest.fn().mockReturnValue('cid') },
+          },
+          {
+            provide: PhaseHierarchyService,
+            useValue: {
+              maxDepth: 20,
+              validateNoCycle: jest.fn().mockResolvedValue(undefined),
+              validateProjectConsistency: jest.fn().mockResolvedValue(undefined),
+              softDeleteCascade: jest.fn().mockResolvedValue({ affected: 1 }),
+            },
           },
         ],
       }).compile();
