@@ -3187,6 +3187,92 @@ Ambos registrados no CHANGELOG.md em "Known issues" e rastreados para próximas 
 
 **Next:** Task #8 `delete_project` (soft-delete com cascata de tasks/sprints) — reusa padrão defense-in-depth, final da expansão MCP
 
+### Task #8: MCP Tools `list_phases` + `get_phase_tree` + filtro `idClasse` em `list_tasks` — ✅ COMPLETA
+
+**Status:** Completo
+**Módulo V2:** mcp (tools, schemas, testes)
+**Fase V2:** F11 (MCP Expansion — Task #8 de 8) + ADR-V2-047 Fase 7 (integração)
+**Tempo Real:** ~2h Implementer + ~30min Reviewer + ~30min Documenter
+**Completado em:** 2026-05-21
+**Quality Score:** 9.0/10 APPROVED
+
+**O Que Foi Feito:**
+
+- **Tool MCP `list_phases`** — lista fases (DTask idClasse=-200) de um projeto com paginação cursor
+  - Classe `ListPhasesTool` em `src/mcp/tools/list-phases.tool.ts` (~120 linhas)
+  - Wrapper fino sobre `TasksService.findMany` com `idClasse='-200'` fixo
+  - Tenant isolation (ADR-V2-042): resolve `accessibleProjectIds`, retorna vazio para projeto out-of-scope (anti-enumeration)
+  - Parâmetro `includeMetrics` aceito por compat futura, porém ignorado v1 (use `get_phase_tree` para métricas — evita N+1 em listagem)
+  - JSDoc completo com exemplos JSON-RPC, ADRs, Pilares
+
+- **Tool MCP `get_phase_tree`** — retorna árvore recursiva de fase/task com suporte a métricas consolidadas
+  - Classe `GetPhaseTreeTool` em `src/mcp/tools/get-phase-tree.tool.ts` (~122 linhas)
+  - Delega para `PhaseTreeService.buildTree` com defense-in-depth tenant gate (`findOne` antes de `buildTree`)
+  - Suporta `maxDepth` (1..20 guardrail), `includeMetrics` (CTE agregadora ZERO N+1)
+  - Retorna `PhaseTreeResponseDto` { root, totalNodes, maxDepthReached }
+  - JSDoc detalhado com exemplos árvore simples e com métricas, fluxo de validação, status DONE/FAILED/EXECUTING/PENDING agregados
+
+- **Extensão de `list_tasks` com filtro `idClasse`** (novo F7/ADR-V2-047)
+  - Campo `idClasse` adicionado ao inputSchema (string numérica negativa ou positiva)
+  - Validação regex `^-?\d+$` (number validation seguro)
+  - Permite filtros por tipo de task: `-200`=PHASE (agrupador), `-154`=SCRUMBAN_TASK (concreta), ou tipos de domínio específicos
+  - JSDoc melhorado documentando novo filtro, exemplos com idClasse=-200 e -154
+  - Pilar 3 (polimorfismo DTask): zero DClasses novas, usa seed canônico
+
+- **Schema em `tools.schema.json`**
+  - Adicionadas `list_phases` (11º tool) e `get_phase_tree` (12º tool) com descriptions + inputSchemas idênticas às classes
+  - Atualizado `list_tasks` schema com novo campo `idClasse` optional
+  - Total: 14→16 tools (jump de 2, confirmado em schema-consistency spec)
+
+- **Registração**
+  - `src/mcp/services/mcp-router.service.ts` — 11º e 12º params do constructor (ANTES de `configService`)
+  - `src/mcp/mcp.module.ts` — adiciona `ListPhasesTool`, `GetPhaseTreeTool` em providers
+  - `src/mcp/__tests__/mcp-block-d.spec.ts` — atualiza `toHaveLength(14)` → `(16)` + lista de nomes
+
+- **Testes (25 novos specs)**
+  - `mcp-tools.list-phases.spec.ts`: 8 casos (happy path, limit clamping, projectId validation, anti-enumeration vazio, includeMetrics ignored, cursor pagination)
+  - `mcp-tools.get-phase-tree.spec.ts`: 10 casos (happy path, maxDepth clamp 1-20, includeMetrics true/false, metrics aggregation, 404 notfound, tenant isolation, totalNodes count)
+  - `mcp-tools.list-tasks-phase-filter.spec.ts`: 7 casos (happy path com idClasse=-200, com idClasse=-154, validation regex, multi-filter projectId+status+idClasse, negative/positive idClasse)
+  - `mcp-tools.schema-consistency.spec.ts` — atualiza para 16 tools (adicionou `list_phases`, `get_phase_tree`, atualizado `list_tasks`)
+  - **Total suite MCP:** 158/158 PASS (+ 25 novos, 0 regressões)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — leitura em DTask (estrutural), sem Engine
+- Pilar 2 (Endpoints): MCP é canal alternativo ao REST; tools reutilizam TasksService + PhaseTreeService (zero controller novo)
+- Pilar 3 (Seed): RESPEITADO — zero DClasses novas (idClasse=-200 PHASE, -154 SCRUMBAN_TASK já existem seed canônico)
+
+**ADRs vinculados:** ADR-V2-047 Fase 7 (integração MCP de fases), ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation defense-in-depth)
+
+**Build & Smoke:**
+- `make build` → PASS (0 warnings)
+- `npx tsc --noEmit` → 7 pre-existing erros (não são novos)
+- ESLint → PASS (9 arquivos modificados/criados, 0 warnings)
+- Test suite MCP → 158/158 PASS
+
+**Issues [LOW] do Reviewer:**
+1. `list_phases` retorna lista vazia vs `get_phase_tree` lança 404 para projectId fora scope — assimetria documentada por design (anti-enumeration) + justificada em JSDoc
+2. `TaskResponseDto` não expõe `idClasse` — pré-existente, não é débito F7, registrado para futuro
+
+**Débito Técnico:**
+- `PhaseTreeService._buildMap()` privado — poderia ser extraído em helper se crescer; monitorar próximas tasks
+- Metrics CTE performance em fase com >1000 tasks — não testado com volume extremo; guardrail depth=20 mitigador
+
+**Plan:** [`workspace/plans/plan-adr-v2-047-fases-mcp-expansion.md`](../workspace/plans/plan-adr-v2-047-fases-mcp-expansion.md) § F7 Tools
+**Implementation:** [`workspace/implementations/impl-adr-v2-047-fase7-mcp-tools.md`]
+**Review:** APPROVED 9.0/10
+**Memory:** [[mcp-phase-tools-patterns]] — CTE guards (defense-in-depth findOne), polimorfismo idClasse em list_tasks
+
+**Agents Performance:**
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan ADR-V2-047 Fase 7 (MCP tools) |
+| Implementer | ~2h | 100% PASS: 2 tools + 25 testes + schema +16 tools total |
+| Reviewer | ~30min | 9.0/10 APPROVED (tenant isolation robusto, metrics CTE verificado) |
+| Documenter | ~30min | JSDoc, ROADMAP, CHANGELOG, STATUS, commit Conventional |
+
+**Continuação:** ADR-V2-047 Fase 8+ (workflow statuses, agenda auto-filter, etc.) — planejado para F12+
+
 ---
 
 ## F13 — VPS Provision Milestone 1 — ✅ COMPLETA

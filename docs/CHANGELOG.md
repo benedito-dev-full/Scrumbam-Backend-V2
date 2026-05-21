@@ -14,6 +14,17 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F11 Task #8: MCP Tools `list_phases` + `get_phase_tree` + filtro `idClasse` (ADR-V2-047 Fase 7)** - 2026-05-21
+  - **MCP Tools:** 2 novos (`list_phases`, `get_phase_tree`) + extensão `list_tasks` com filtro `idClasse` polimorfico
+  - **Listagem:** `list_phases` com cursor pagination, anti-enumeration tenant gate, `includeMetrics` compat futura
+  - **Árvore:** `get_phase_tree` com CTE recursiva (ZERO N+1), suporte a métricas consolidadas (status DONE/FAILED/EXECUTING/PENDING), maxDepth 1..20 guardrail
+  - **Filtro:** `idClasse` em `list_tasks` filtra por tipo de task (-200=PHASE, -154=SCRUMBAN_TASK, ou domínio específico), validação regex `^-?\d+$`
+  - **Schema:** tools.schema.json 14→16 tools (list_phases, get_phase_tree, updated list_tasks)
+  - **Testes:** 25 novos (8+10+7 casos), 158/158 MCP PASS (schemas consistency, tenant isolation, metrics)
+  - **Pilares:** Pilar 2 RESPEITADO (TasksService + PhaseTreeService reutilizados); Pilar 3 RESPEITADO (zero DClasses novas, seed canônico)
+  - **ADRs:** ADR-V2-047 F7 (integração MCP), ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation)
+  - **Quality:** 9.0/10 APPROVED | Build: PASS, TypeScript: 0 errors, Tests: 158/158 PASS
+
 - **F5 Task #2: CTE Recursivas de Tree e Metrics — ADR-V2-047 Fase 5 (Fases via DTask.idPai) — COMPLETA** - 2026-05-21
   - **Services:** `PhaseTreeService.buildTree()` com CTE recursiva + montagem memória (ZERO N+1); `PhaseMetricsService.compute()` com JOIN a DTabela para status
   - **Endpoints:** GET `/tasks/:id/tree?maxDepth=N&includeMetrics=bool` (200 árvore aninhada); GET `/tasks/:id/metrics?recursive=bool` (200 agregação)

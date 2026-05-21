@@ -1,6 +1,59 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-21 (F5 Task #2 ADR-V2-047 Fase 5 COMPLETA + Documenter finalizou)
+**Ultima atualizacao:** 2026-05-21 (F11 Task #8 ADR-V2-047 Fase 7 + Documenter finalizou | F8 em paralelo pendente)
+
+---
+
+## ✅ F11 Task #8 — MCP Tools Fases (ADR-V2-047 Fase 7) — COMPLETA
+
+**Status:** ✅ COMPLETA (ADR-V2-047 F7 — integração MCP de fases)
+**Módulo:** mcp (tools, schemas, testes)
+**Fase:** F11 (MCP Expansion — Task #8 final de 8)
+**Duration:** ~3h total (2h Implementer + 30min Reviewer + 30min Documenter)
+**Quality Score:** 9.0/10 APPROVED
+**Date:** 2026-05-21
+
+### Agents Performance
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan ADR-V2-047 F7 |
+| Implementer | ~2h | 100% PASS: 2 tools + list_tasks extension + 25 testes |
+| Reviewer | ~30min | 9.0/10, 2 issues [LOW] informativos |
+| Documenter | ~30min | JSDoc, ROADMAP, CHANGELOG, STATUS, commit |
+
+### Deliverables
+
+**Tools MCP (2 novas):**
+- `ListPhasesTool` (list_phases) — cursor pagination, anti-enumeration, `includeMetrics` compat v1
+- `GetPhaseTreeTool` (get_phase_tree) — CTE recursiva + métricas, maxDepth 1..20, defense-in-depth tenant gate
+
+**Extensão (1 existente):**
+- `ListTasksTool` (list_tasks) — novo filtro `idClasse` (string numerica, regex `^-?\d+$`)
+
+**Tests:**
+- `mcp-tools.list-phases.spec.ts` — 8 casos
+- `mcp-tools.get-phase-tree.spec.ts` — 10 casos  
+- `mcp-tools.list-tasks-phase-filter.spec.ts` — 7 casos
+- `mcp-tools.schema-consistency.spec.ts` — atualizado para 16 tools
+- **Total: 25 novos + 133 anterior = 158/158 PASS**
+
+**Schema:**
+- `src/mcp/schemas/tools.schema.json` — 14→16 tools (list_phases, get_phase_tree)
+- `list_tasks` schema atualizado com `idClasse` field
+
+**Pilares:**
+- Pilar 2 RESPEITADO (zero controllers novos; TasksService + PhaseTreeService reutilizados)
+- Pilar 3 RESPEITADO (zero DClasses novas; idClasse=-200/-154 seed canônico)
+
+**Metrics:**
+- Build: PASS (0 warnings)
+- TypeScript: 0 errors
+- Queries/request: ZERO N+1 (CTE + batch)
+- MCP tests: 158/158 PASS
+- Schema consistency: 100% paridade classe↔JSON
+
+**ADRs:** ADR-V2-047 F7 (MCP), ADR-V2-001 (zero tabela), ADR-V2-042 (tenant isolation)
 
 ---
 

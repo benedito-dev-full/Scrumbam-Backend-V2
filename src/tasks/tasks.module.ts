@@ -43,6 +43,6 @@ import { PhaseMetricsService } from './services/phase-metrics.service';
     PhaseTreeService,
     PhaseMetricsService,
   ],
-  exports: [TasksService],
+  exports: [TasksService, PhaseTreeService],
 })
 export class TasksModule {}
