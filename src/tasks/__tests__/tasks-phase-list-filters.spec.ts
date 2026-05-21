@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { TasksService } from '../tasks.service';
 import { TasksIdentifierService } from '../tasks-identifier.service';
 import { PhaseHierarchyService } from '../services/phase-hierarchy.service';
+import { PhaseMetricsService } from '../services/phase-metrics.service';
 import { PrismaService } from '../../prisma.service';
 import { EventProducerService } from '../../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../../common/services/correlation-id.service';
@@ -137,6 +138,10 @@ describe('Tasks Fase 4 — filtros hierárquicos (ADR-V2-047)', () => {
               softDeleteCascade: jest.fn(),
             },
           },
+          {
+            provide: PhaseMetricsService,
+            useValue: { compute: jest.fn() },
+          },
         ],
       }).compile();
 
@@ -200,7 +205,9 @@ describe('Tasks Fase 4 — filtros hierárquicos (ADR-V2-047)', () => {
 
       expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
       const calledWith = prisma.dTask.findMany.mock.calls[0][0];
-      expect(calledWith.where.chave).toEqual({ in: [BigInt(10), BigInt(11), BigInt(12), BigInt(13)] });
+      expect(calledWith.where.chave).toEqual({
+        in: [BigInt(10), BigInt(11), BigInt(12), BigInt(13)],
+      });
     });
 
     it('depth=2 sem descendentes → retorna items=[] sem chamar dTask.findMany', async () => {

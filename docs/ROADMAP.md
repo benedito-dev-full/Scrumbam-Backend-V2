@@ -8,6 +8,62 @@
 
 ---
 
+## F8 — Backend: Event Layer Phase.* + Detector Idempotente (ADR-V2-047 Fase 8) — ✅ COMPLETA
+
+### Task: ADR-V2-047 Fase 8 — Event Layer fase.* + Detector Idempotente — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (F8 de ADR-V2-047)
+**Módulo V2:** eventos, tasks
+**Fase V2:** F8 (Event Layer Phase Completion Detection)
+**Tempo Real:** ~1.5h Implementer (F7 + F8) + ~0.5h Reviewer + ~0.25h Documenter
+**Completado em:** 2026-05-21
+**Quality Score:** 8.2/10 APPROVED
+
+**O Que Foi Feito:**
+- **Suporte de eventos `phase.*`:** 4 event types registrados
+  - `phase.created` — nova fase criada (idClasse=-200)
+  - `phase.updated` — fase atualizada
+  - `phase.deleted` — fase removida (soft-delete)
+  - `phase.completed` — fase alcançou 100% DONE
+
+- **Registros em 4 arquivos:**
+  - `src/webhooks/constants/supported-events.ts`
+  - `src/eventos/core/event-types.ts`
+  - `src/eventos/consumers/webhook-triggers.const.ts`
+  - `src/eventos/consumers/audit-log.consumer.ts`
+
+- **Detector idempotente `detectPhaseCompletion`:**
+  - Fire-and-forget no `updateStatus` (void .catch)
+  - Emite `phase.completed` quando fase pai atinge 100%
+  - Idempotência via snapshot em `dados._meta.phaseSnapshotPercent`
+  - Cobertura v1: pai DIRETO apenas (cadeia ancestral fica para v2)
+  - Performance: ~4 queries (findFirst + compute CTE ~2 + update opcional)
+
+- **Snapshot em DTask.dados._meta:**
+  - Campo novo: `phaseSnapshotPercent` (número)
+  - Gravado ao cada cálculo do detector
+  - Permite skip de re-emissão em DONE→READY→DONE
+
+- **Tests:**
+  - 11 testes novos em F8 describe (tasks.service.spec.ts)
+  - 1 spec corrigido (PhaseMetricsService mock injetado em tasks-phase-list-filters.spec.ts)
+  - Total: 24 novos / corrigidos em tests/core; baseline 24 falhas pré-existentes em tasks.service.spec.ts mantido
+
+**Pilares:**
+- Pilar 2 (Endpoints): Sem controller novo; reusa TasksService existente com novo método
+- Pilar 7 (Eventos Pós-Persistência): Emissão de `phase.*` APÓS update DTask bem-sucedido
+- Pilar 1: Não ativado (não é Engine) — uso de PhaseMetricsService para cálculo
+
+**ADRs vinculados:**
+- ADR-V2-047 (implementação fase 8 completa)
+- ADR-V2-001 (zero tabela nova — dados._meta é Json)
+- ADR-V2-042 (tenant isolation respeitada em PhaseMetricsService.compute)
+
+**Build:** PASS (TypeScript 0 errors, lint PASS)
+**Tests:** 11 novos PASS; sem regressão vs baseline
+
+---
+
 ## F13 — Backend: Task #4 Agente Standalone + Multi-Project Linking
 
 ### Task #4: Agente Standalone + Multi-Project Linking (Hotfix arquitetural) — ✅ SUB-TAREFA 4.1 COMPLETA

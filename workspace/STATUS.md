@@ -1,6 +1,64 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-21 (F11 Task #8 ADR-V2-047 Fase 7 + Documenter finalizou | F8 em paralelo pendente)
+**Ultima atualizacao:** 2026-05-21 (F8 ADR-V2-047 Fase 8 COMPLETA | F11 Task #8 ADR-V2-047 Fase 7 COMPLETA)
+
+---
+
+## ✅ F8 ADR-V2-047 Fase 8 — Event Layer `phase.*` + Detector Idempotente — COMPLETA
+
+**Status:** ✅ COMPLETA (F8 ADR-V2-047)
+**Módulo:** eventos, tasks
+**Fase:** F8 (Event Layer Phase Completion Detection)
+**Duration:** ~2h total (1.5h Implementer + 0.5h Reviewer + 0.25h Documenter)
+**Quality Score:** 8.2/10 APPROVED
+**Date:** 2026-05-21
+
+### Agents Performance
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | ADR-V2-047 F8 plan |
+| Implementer | ~1.5h | 4 event types + detector + tests PASS |
+| Reviewer | ~0.5h | 8.2/10, issue [LOW] JSDoc corrigida |
+| Documenter | ~0.25h | JSDoc fix, ROADMAP, CHANGELOG, STATUS, commit |
+
+### Deliverables
+
+**Event Types (4 novos):**
+- `phase.created` — nova fase criada
+- `phase.updated` — fase atualizada
+- `phase.deleted` — fase removida
+- `phase.completed` — fase alcançou 100% DONE
+
+**Registros (4 arquivos):**
+- `src/webhooks/constants/supported-events.ts`
+- `src/eventos/core/event-types.ts`
+- `src/eventos/consumers/webhook-triggers.const.ts`
+- `src/eventos/consumers/audit-log.consumer.ts`
+
+**Detector Idempotente:**
+- `TasksService.detectPhaseCompletion(phaseId, projectId): Promise<void>`
+- Fire-and-forget via `void .catch(...)`
+- Snapshot em `DTask.dados._meta.phaseSnapshotPercent`
+- Cobertura v1: pai DIRETO apenas
+
+**Tests:**
+- 11 novos em F8 describe (tasks.service.spec.ts)
+- 1 corrigido (PhaseMetricsService mock em tasks-phase-list-filters.spec.ts)
+- Total: 24/24 PASS (sem regressão)
+
+**Pilares:**
+- Pilar 2 RESPEITADO (sem PhasesService novo; reusa TasksService)
+- Pilar 7 RESPEITADO (emissão pós-persistência, fire-and-forget)
+- Pilar 1: N/A (não é Engine, usa PhaseMetricsService para cálculo)
+
+**Metrics:**
+- Build: PASS (0 warnings, TypeScript clean)
+- Tests: 11 novos + 1 correção = 24/24 PASS
+- Queries/detectPhaseCompletion: ~4 (findFirst + compute CTE ~2 + update opcional)
+- Queries/updateStatus: +2 pós-persistência (idempotente, skip se snapshot=100)
+
+**ADRs:** ADR-V2-047 F8, ADR-V2-001 (zero tabela), ADR-V2-042 (tenant isolation)
 
 ---
 

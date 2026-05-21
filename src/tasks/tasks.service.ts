@@ -7,6 +7,7 @@ import { TasksIdentifierService } from './tasks-identifier.service';
 import { PhaseHierarchyService } from './services/phase-hierarchy.service';
 import { validateTransition, isValidState } from './tasks-state-machine';
 import { TaskStatus, buildInitialTaskDados } from './schemas/task-dados.schema';
+import { PhaseMetricsService } from './services/phase-metrics.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { UpdateTaskStatusDto } from './dto/update-task-status.dto';
@@ -79,6 +80,7 @@ export class TasksService {
     private readonly eventProducer: EventProducerService,
     private readonly correlationIdService: CorrelationIdService,
     private readonly phaseHierarchy: PhaseHierarchyService,
+    private readonly phaseMetrics: PhaseMetricsService,
   ) {}
 
   /**
@@ -241,6 +243,27 @@ export class TasksService {
       this.correlationIdService.getOrGenerate(),
       { source: TasksService.name },
     );
+
+    // ADR-V2-047 Fase 8: phase.created — emite ADICIONAL ao task.created quando
+    // a entidade criada é uma fase (idClasse=-200). Webhook trigger separado:
+    // assinantes de `task.*` continuam recebendo task.created; assinantes de
+    // `phase.*` recebem phase.created.
+    if (task.idClasse === ID_CLASSE_PHASE) {
+      await this.eventProducer.addInternalEvent(
+        'phase.created',
+        {
+          phaseId: task.chave.toString(),
+          nome: dto.nome,
+          identifier: createdIdentifier,
+          projectId: dto.projectId,
+          idPai: task.idPai?.toString() ?? null,
+          userId: creatorId.toString(),
+          userName: creator?.nome ?? null,
+        },
+        this.correlationIdService.getOrGenerate(),
+        { source: TasksService.name },
+      );
+    }
 
     const priorityMap = await this.buildPriorityMap([task.idPriority]);
     return this.buildResponse(task, priorityMap);
@@ -578,6 +601,22 @@ export class TasksService {
       },
     });
 
+    // ADR-V2-047 Fase 8: phase.updated. Emite quando a task é uma fase
+    // (idClasse=-200). Pós-commit (Pilar 7).
+    if (updated.idClasse === ID_CLASSE_PHASE) {
+      await this.eventProducer.addInternalEvent(
+        'phase.updated',
+        {
+          phaseId: updated.chave.toString(),
+          nome: updated.nome,
+          projectId: updated.idProject?.toString() ?? null,
+          idPai: updated.idPai?.toString() ?? null,
+        },
+        this.correlationIdService.getOrGenerate(),
+        { source: TasksService.name },
+      );
+    }
+
     const priorityMap = await this.buildPriorityMap([updated.idPriority]);
     return this.buildResponse(updated, priorityMap);
   }
@@ -746,6 +785,19 @@ export class TasksService {
       { source: TasksService.name },
     );
 
+    // ADR-V2-047 Fase 8: detector de phase.completed.
+    // Disparado quando uma TASK FOLHA (não PHASE) muda para DONE e o pai
+    // direto cruza 100% de conclusão. Idempotência via snapshot em
+    // dados._meta.phaseSnapshotPercent. Falha NÃO propaga (try/catch isolado).
+    if (toStatus === 'DONE' && task.idClasse !== ID_CLASSE_PHASE && task.idPai !== null) {
+      void this.detectPhaseCompletion(task.idPai, task.idProject).catch((err) => {
+        this.logger.warn(
+          `phase.completed detector falhou para parent=${task.idPai?.toString()} ` +
+            `taskId=${taskId.toString()}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+    }
+
     const priorityMap = await this.buildPriorityMap([updated.idPriority]);
     return this.buildResponse(updated, priorityMap);
   }
@@ -860,6 +912,23 @@ export class TasksService {
       this.logger.log(
         `Task ${taskId} deletada com cascade (isPhase=${isPhase}); afetados=${result.affected}`,
       );
+
+      // ADR-V2-047 Fase 8: phase.deleted. Emite quando a raiz da árvore
+      // deletada é uma fase (cascade=true && isPhase é o caso padrão).
+      if (isPhase) {
+        await this.eventProducer.addInternalEvent(
+          'phase.deleted',
+          {
+            phaseId: taskId.toString(),
+            projectId: existing.idProject?.toString() ?? null,
+            cascade: true,
+            affected: result.affected,
+          },
+          this.correlationIdService.getOrGenerate(),
+          { source: TasksService.name },
+        );
+      }
+
       return result;
     }
 
@@ -869,10 +938,129 @@ export class TasksService {
     });
 
     this.logger.log(`Task ${taskId} deletada (soft delete sem cascade)`);
+
+    // ADR-V2-047 Fase 8: phase.deleted sem cascade — ainda emite se a task
+    // deletada é uma fase. cascade=false signaliza que descendentes ficaram.
+    if (isPhase) {
+      await this.eventProducer.addInternalEvent(
+        'phase.deleted',
+        {
+          phaseId: taskId.toString(),
+          projectId: existing.idProject?.toString() ?? null,
+          cascade: false,
+          affected: 1,
+        },
+        this.correlationIdService.getOrGenerate(),
+        { source: TasksService.name },
+      );
+    }
+
     return { affected: 1 };
   }
 
   // ─── Helpers privados ─────────────────────────────────────────────────────
+
+  /**
+   * Detector de transição "fase concluída" (ADR-V2-047 — Fase 8).
+   *
+   * Disparado pelo `updateStatus` quando uma task FOLHA (não PHASE) muda para
+   * DONE e tem pai direto. Calcula o `percent` da fase pai (recursivo) e, se
+   * cruzou para 100% (não estava em 100% antes), emite `phase.completed`.
+   *
+   * **Cobertura v1 (limitação conhecida):** apenas o PAI DIRETO da task que
+   * mudou. Cadeia ancestral completa (avô, bisavô) não é coberta. Em uma
+   * cascata de fases aninhadas, somente o pai mais próximo é avaliado.
+   * Cobertura ancestral completa fica para iteração futura.
+   *
+   * **Idempotência:** o último `percent` calculado para a fase é gravado em
+   * `DTask.dados._meta.phaseSnapshotPercent`. Antes de emitir, comparamos o
+   * snapshot anterior: se já era 100, NÃO re-emite (evita ruído em
+   * transições DONE→READY→DONE). Deep-merge preserva outros campos de `dados`.
+   *
+   * **Resiliência:** caller invoca via `void this.detectPhaseCompletion(...)
+   *   .catch(...)`. Falha aqui NÃO bloqueia o `updateStatus` da task original
+   *   (Pilar 7 — eventos pós-persistência; consistência eventual aceitável).
+   *
+   * **N+1 budget:** ~4 queries no total — (1) findFirst do pai, (2) PhaseMetricsService.compute
+   * (que faz sua própria CTE recursiva — ~2 queries internas: pré-query de idProject +
+   * CTE), (3) update opcional do snapshot. Performance controlada, sem N+1.
+   *
+   * @param phaseId - chave do pai direto da task que mudou (`task.idPai`)
+   * @param projectId - `task.idProject` da task filha (para payload do evento)
+   */
+  private async detectPhaseCompletion(phaseId: bigint, projectId: bigint | null): Promise<void> {
+    // 1. Buscar snapshot anterior + idClasse do pai (1 query — sem N+1)
+    const parent = await this.prisma.dTask.findFirst({
+      where: { chave: phaseId, excluido: false },
+      select: { chave: true, idClasse: true, dados: true, idProject: true },
+    });
+
+    if (!parent) {
+      this.logger.debug(`detectPhaseCompletion: pai ${phaseId} não encontrado (soft-deleted?).`);
+      return;
+    }
+
+    // Cobertura v1: só detecta se o pai direto for uma fase.
+    // Se não for, nada a fazer (cadeia ancestral fica fora do escopo).
+    if (parent.idClasse !== ID_CLASSE_PHASE) {
+      return;
+    }
+
+    // 2. Snapshot anterior (idempotência)
+    const dadosAtuais = (parent.dados as Record<string, unknown> | null) ?? {};
+    const metaAtual = (dadosAtuais._meta as Record<string, unknown> | undefined) ?? {};
+    const lastSnapshot = (metaAtual.phaseSnapshotPercent as number | undefined) ?? null;
+
+    if (lastSnapshot === 100) {
+      // Já estava em 100 — não re-emite (evita ruído em DONE→READY→DONE).
+      this.logger.debug(
+        `detectPhaseCompletion: fase ${phaseId} já estava em 100% (snapshot=${lastSnapshot}). Skip.`,
+      );
+      return;
+    }
+
+    // 3. Calcular percent atual via PhaseMetricsService
+    const metrics = await this.phaseMetrics.compute(phaseId, { recursive: true });
+    const currentPercent = metrics.percent;
+
+    // 4. Atualizar snapshot opportunisticamente (1 query — só quando vale a pena)
+    if (currentPercent !== lastSnapshot) {
+      const novosDados = {
+        ...dadosAtuais,
+        _meta: {
+          ...metaAtual,
+          phaseSnapshotPercent: currentPercent,
+          phaseSnapshotAt: new Date().toISOString(),
+        },
+      };
+      await this.prisma.dTask.update({
+        where: { chave: phaseId },
+        data: { dados: novosDados as Prisma.InputJsonValue },
+      });
+    }
+
+    // 5. Emitir phase.completed se cruzou para 100% agora
+    if (currentPercent === 100) {
+      await this.eventProducer.addInternalEvent(
+        'phase.completed',
+        {
+          phaseId: phaseId.toString(),
+          projectId: (parent.idProject ?? projectId)?.toString() ?? null,
+          percent: 100,
+          completedAt: new Date().toISOString(),
+          total: metrics.total,
+          done: metrics.done,
+        },
+        this.correlationIdService.getOrGenerate(),
+        { source: TasksService.name },
+      );
+
+      this.logger.log(
+        `phase.completed emitido para fase=${phaseId.toString()} ` +
+          `(total=${metrics.total}, done=${metrics.done})`,
+      );
+    }
+  }
 
   /**
    * Resolve enum de priority (HIGH/MEDIUM/LOW/URGENT) → chave BigInt

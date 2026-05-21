@@ -191,6 +191,7 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 | Task#1 Fase1 | fases-via-dtask-idpai (Seed PHASE) | pós-F5 | **8.8** | **APPROVED** | Seed-only; gate CEO 8.0; PHASE(-200) correto; 5 COUNTS atualizados; H1/M1/M2 todos corrigidos no ADR; L1: cast bigint explícito na CTE (cosmético); L2: ref §4 do plano imprecisa |
 | Task#1 Fase3 | fases-via-dtask-idpai (Service Layer) | pós-F5 | **8.7** | **APPROVED** | 24/24 specs OK; build verde; M1: query redundante no create (findFirst+validateNoCycle re-busca pai); M2: cobertura integracao create->validateNoCycle ausente; M3: 24 falhas pre-existentes no tasks.service.spec.ts (debito state-machine) |
 | Task#1 Fase4 | fases-via-dtask-idpai (Endpoints REST) | pós-F5 | **8.5** | **APPROVED** | 28/28 specs; tenant gate ANTES dos stubs (anti-enumeration); CTE 1 query; M1: `BigInt("abc")` sem @Matches em CreateTaskDto/UpdateTaskDto.idPai → 500 em vez de 400; disciplina escopo exemplar |
+| Task#1 Fase7 | fases-via-dtask-idpai (MCP tools) | pós-F5 | **9.0** | **APPROVED** | 158/158 specs (+25 novos); Pilar 2 DRY perfeito (list_phases delega 100% findMany); zero N+1 (includeMetrics ignorado + CTE F5 sem loop); tenant gate dupla OK; schema consistency spec passa; constructor order OK; BigInt→string via PhaseTreeService+buildResponse; textResult uniforme |
 
 ## PADRÕES APRENDIDOS F13 TASK1 SUB4 (Agente V2 — RUN_CLAUDE_CODE + session extraction)
 

@@ -14,6 +14,17 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F8 ADR-V2-047 Fase 8: Webhooks/Eventos — registro de 4 event types `phase.created/updated/deleted/completed` + detector idempotente `phase.completed` no `TasksService.updateStatus`** - 2026-05-21
+  - **Event Types:** 4 novos (`phase.created`, `phase.updated`, `phase.deleted`, `phase.completed`) registrados em supported-events + event-types + webhook-triggers + audit-log
+  - **Detector:** `private detectPhaseCompletion(phaseId, projectId)` — fire-and-forget em `updateStatus`
+  - **Idempotência:** snapshot em `DTask.dados._meta.phaseSnapshotPercent`; skip re-emissão em DONE→READY→DONE
+  - **Cobertura v1:** pai DIRETO apenas; cadeia ancestral para v2
+  - **Pilares:** Pilar 2 RESPEITADO (sem PhasesService novo), Pilar 7 RESPEITADO (emissão pós-persistência)
+  - **Performance:** ~4 queries: findFirst + compute CTE (~2) + update opcional
+  - **Testes:** 11 novos + 1 correção (PhaseMetricsService mock) = todos PASS
+  - **ADRs:** ADR-V2-047 F8, ADR-V2-001 (zero tabela), ADR-V2-042 (tenant isolation)
+  - **Quality Score:** 8.2/10 APPROVED
+
 - **F11 Task #8: MCP Tools `list_phases` + `get_phase_tree` + filtro `idClasse` (ADR-V2-047 Fase 7)** - 2026-05-21
   - **MCP Tools:** 2 novos (`list_phases`, `get_phase_tree`) + extensão `list_tasks` com filtro `idClasse` polimorfico
   - **Listagem:** `list_phases` com cursor pagination, anti-enumeration tenant gate, `includeMetrics` compat futura

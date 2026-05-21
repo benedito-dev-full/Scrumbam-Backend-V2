@@ -123,7 +123,14 @@ describe('Tenant Isolation — Adversarial Scenarios (ADR-V2-042)', () => {
   describe('Cenario 3: GET /tasks?projectId=PB com JWT(orgId=A) → lista vazia', () => {
     it('projectId fora do scope autorizado retorna vazio', async () => {
       const prisma = makePrisma();
-      const svc = new TasksService(prisma as never, {} as never, {} as never, {} as never, {} as never);
+      const svc = new TasksService(
+        prisma as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+      );
 
       // accessibleProjectIds = [PA] (scope JWT(orgId=A))
       const result = await svc.findMany({ projectId: PB.toString() }, [PA.toString()]);
@@ -156,7 +163,14 @@ describe('Tenant Isolation — Adversarial Scenarios (ADR-V2-042)', () => {
       ]);
       prisma.dTabela.findMany.mockResolvedValue([]);
 
-      const svc = new TasksService(prisma as never, {} as never, {} as never, {} as never, {} as never);
+      const svc = new TasksService(
+        prisma as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+      );
 
       const result = await svc.findMany({}, [PA.toString()]);
 
@@ -170,7 +184,14 @@ describe('Tenant Isolation — Adversarial Scenarios (ADR-V2-042)', () => {
   describe('Cenario 5: Usuario orfao (sem orgs) faz GET /projects → vazio', () => {
     it('accessibleProjectIds=[] resulta em lista vazia sem hit no banco', async () => {
       const prisma = makePrisma();
-      const svc = new TasksService(prisma as never, {} as never, {} as never, {} as never, {} as never);
+      const svc = new TasksService(
+        prisma as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+      );
 
       const result = await svc.findMany({}, []);
       expect(result.items).toEqual([]);
@@ -220,7 +241,14 @@ describe('Tenant Isolation — Adversarial Scenarios (ADR-V2-042)', () => {
   describe('Cenario 7: MCP list_tasks sem filtro respeita scope', () => {
     it('TasksService.findMany ignora tasks fora de accessibleProjectIds', async () => {
       const prisma = makePrisma();
-      const svc = new TasksService(prisma as never, {} as never, {} as never, {} as never, {} as never);
+      const svc = new TasksService(
+        prisma as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+      );
 
       prisma.dTask.findMany.mockResolvedValue([]);
       prisma.dTabela.findMany.mockResolvedValue([]);
@@ -314,7 +342,14 @@ describe('Tenant Isolation — Adversarial Scenarios (ADR-V2-042)', () => {
   describe('Cenario 11 (extra): TasksService create cross-tenant', () => {
     it('JWT(orgId=A) cria task em projectId=PB → 404', async () => {
       const prisma = makePrisma();
-      const svc = new TasksService(prisma as never, {} as never, {} as never, {} as never, {} as never);
+      const svc = new TasksService(
+        prisma as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+      );
 
       await expect(
         svc.create(
@@ -354,7 +389,14 @@ describe('Tenant Isolation — Adversarial Scenarios (ADR-V2-042)', () => {
         atualizadoEm: new Date(),
       });
 
-      const svc = new TasksService(prisma as never, {} as never, {} as never, {} as never, {} as never);
+      const svc = new TasksService(
+        prisma as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+      );
 
       await expect(svc.findOne('700', [PA.toString()])).rejects.toThrow(NotFoundException);
     });
