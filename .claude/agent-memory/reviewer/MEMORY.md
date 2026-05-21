@@ -1,7 +1,7 @@
 # Reviewer Agent Memory — Scrumban-Backend-V2
 
-**Versão:** 1.1
-**Última atualização:** 2026-05-09
+**Versão:** 1.2
+**Última atualização:** 2026-05-21
 
 ---
 
@@ -187,6 +187,8 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 | Task#1 sub4 | automation-agent (cliente VPS) | F13 | **9.0** | **APPROVED** | 6 críticos segurança OK; session_id snake_case; execFile sem shell; realpathSync+prefix check; mutex try/finally; ACK async+.catch; 67/67 specs; M1: is_error não entra no success |
 | Task#1 (hmac-alignment) | automation-hmac-guard | F13 | **8.8** | **APPROVED** | timingSafeEqual OK; rawBody ok; secret nunca vaza; 13/13 specs; M1: regex /api/v\d+ fragil se API_PREFIX não for padrão; M2: sem spec para decryptCommandSecret que lança |
 | Task#1 | folders-mvp | pós-F5 | **8.3** | **APPROVED** | Pilar 2 OK (zero FolderController); seed -155/-183 corretos; 30/30 specs; M1: comentário seed desatualizado (95→97); M2: ADR-V2-FOLDERS-001 não criado (Documenter); M5: DRY duplicate resolveFolderIds |
+| Task#1 Fase0 | fases-via-dtask-idpai (ADR-V2-047) | pós-F5 | **8.5** | **APPROVED** | ADR doc-only; gate CEO 8.0; H1: CTE métricas referencia d.depth sem propagar coluna depth (SQL inválido); M1: decisão anti-trigger DB ausente; M2: §3.1 citado como §3.2 |
+| Task#1 Fase1 | fases-via-dtask-idpai (Seed PHASE) | pós-F5 | **8.8** | **APPROVED** | Seed-only; gate CEO 8.0; PHASE(-200) correto; 5 COUNTS atualizados; H1/M1/M2 todos corrigidos no ADR; L1: cast bigint explícito na CTE (cosmético); L2: ref §4 do plano imprecisa |
 
 ## PADRÕES APRENDIDOS F13 TASK1 SUB4 (Agente V2 — RUN_CLAUDE_CODE + session extraction)
 
@@ -198,6 +200,14 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 - **`is_error:true` no output JSON do Claude Code não entra automaticamente no campo `success`**: a lógica `success = exitCode === 0 && parsedSuccess && !timedOut` não considera `isError`. Isso é decisão de design aceitável para MVP (log de warn presente, comportamento detectável), mas gera débito semântico: o backend pode registrar `success:true` em execuções que o Claude Code reportou como erro. Verificar se a intenção foi explicitamente documentada — se ausente, pontuar como M1.
 - **Teste com título prometendo comportamento que o assert não verifica**: quando um teste diz "X → Y" no título mas o assert não verifica Y explicitamente (apenas um comportamento diferente relacionado), é MEDIUM — não CRITICAL. Não bloqueia aprovação se o comportamento documentado em comentário é razoável para MVP, mas registrar como débito de qualidade.
 - **Slug sanitização como defesa em profundidade contra injection em parsers de texto**: `projectSlug` deve ser validado com regex estrita (`/^[a-zA-Z0-9._-]+$/`) ANTES de ser usado para buscar seção em arquivo de texto. Sem essa sanitização, um slug como `## evil\n- Caminho: /etc` poderia manipular o parser line-by-line. Verificar presença no `validatePayload`.
+
+## PADRÕES APRENDIDOS — ADR REVIEWS (task fases-via-dtask-idpai, 2026-05-21)
+
+- **CTE recursiva com guardrail de profundidade exige propagar coluna `depth`**: a âncora deve selecionar `0 AS depth`; o membro recursivo deve selecionar `d.depth + 1`. Sem isso, `d.depth < 20` na cláusula WHERE é inválido em PostgreSQL. Ao revisar ADRs com exemplos SQL de CTE recursiva, verificar explicitamente que a coluna de controle de profundidade está em AMBOS os branches da CTE.
+- **Plano e ADR como par normativo**: decisões do plano (ex: "Trigger DB NAO recomendada") devem aparecer também no ADR — o ADR é o único documento normativo que chega ao Implementer das fases posteriores. Omissões no ADR = risco de retrabalho mesmo que o plano esteja correto.
+- **Referências a seções do plano-mestre exigem verificação cruzada**: §3.1 (faixas reservadas) vs §3.2 (seed canônico definitivo) são distintos. Verificar via leitura do plano antes de aprovar citação.
+- **Reviews de ADR-only (sem código)**: os critérios mudam. Não há build, lint, testes. O foco é: (1) completude estrutural, (2) decisão única não-ambígua, (3) anti-padrões ausentes, (4) exemplos técnicos corretos, (5) rastreabilidade com plano. Um bug em snippet SQL de ADR tem peso HIGH — é referência normativa, não ilustração.
+- **Gate CEO elevado (>7.0) em ADRs fundacionais**: iniciar a feature com débito técnico em ADR propaga erro para N fases. Gate 8.0 para ADR de hierarquia com 10 fases sequenciais é correto e calibrado.
 
 ## PADRÕES APRENDIDOS F13 TASK hmac-alignment (AgentAuthGuard rewrite)
 
