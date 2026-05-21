@@ -14,6 +14,16 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F9 ADR-V2-047 Fase 9: V3 Guard + Flow Metrics by-Phase + Telegram Listener** - 2026-05-21
+  - **F9a V3 Guard:** Guard `BadRequestException` em `TasksService.updateStatus()` validando `idClasse == -200` (PHASE); impede update em classes não-fases (Pilar 2 DRY)
+  - **F9b Flow Metrics by-Phase:** 6 rotas GET `/flow-metrics/by-phase/:phaseId/<metric>` reusando 6 services com novo `taskIdsFilter?` retrocompatível; novo `PhaseDescendantsService` (CTE recursiva, depth<20); novo `ByPhaseResolverService` (resolve + tenant scope); 39 tests novos
+  - **F9c Telegram Listener:** Novo `TelegramNotificationConsumer` em `src/channels/telegram/` consumindo `phase.completed` (F8) com idempotência via DEvento `-494 TELEGRAM_MSG_OUT` REUTILIZADA (ADR-V2-008); destinatários v1 = idCreator + assignees diretos; tenant scope 2 camadas; timeout 3s via Promise.race; token ausente = skip silencioso; novo `AccountLinkService.findChatByUser()` para lookup; 47 tests novos
+  - **Decisões Críticas:** Reuso de `-494 TELEGRAM_MSG_OUT` evita sequestro de chave, mudança em seed (Pilar 3 inviolado), novo DClasse; ADR-V2-048 (fases fora board V3) e ADR-V2-049 (Telegram pattern replicável) redigidas
+  - **Pilares:** Pilar 2 (sem controller novo; reusa `/flow-metrics` + EventRouterService); Pilar 3 (ZERO mudança seed — reutiliza `-494`)
+  - **Tests:** 91 novos PASS (5+39+47); retrocompat preservada nos 6 flow-metrics services; baseline 24 falhas pré-existentes mantida
+  - **ADRs:** ADR-V2-047 F9 (completa), ADR-V2-048 (fases fora V3), ADR-V2-049 (listener Telegram), ADR-V2-001 (zero tabela), ADR-V2-008 (DEvento), ADR-V2-042 (tenant isolation)
+  - **Quality Score:** 8.7/10 APPROVED | Build: PASS, TypeScript: 0 errors | Reviewer: Sonnet
+
 - **F8 ADR-V2-047 Fase 8: Webhooks/Eventos — registro de 4 event types `phase.created/updated/deleted/completed` + detector idempotente `phase.completed` no `TasksService.updateStatus`** - 2026-05-21
   - **Event Types:** 4 novos (`phase.created`, `phase.updated`, `phase.deleted`, `phase.completed`) registrados em supported-events + event-types + webhook-triggers + audit-log
   - **Detector:** `private detectPhaseCompletion(phaseId, projectId)` — fire-and-forget em `updateStatus`

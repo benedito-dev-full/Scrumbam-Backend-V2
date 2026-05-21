@@ -41,8 +41,16 @@ export class CycleTimeService {
    * preenchido dentro do período especificado. Tasks sem telemetria são
    * excluídas do cálculo (`samples` reflete apenas as com dados).
    *
+   * **F9b (ADR-V2-047):** quando `taskIdsFilter` é passado E não-vazio, o
+   * cálculo restringe ao subconjunto (usado por `/flow-metrics/by-phase/:phaseId/cycle-time`).
+   * Quando `taskIdsFilter === []` (array vazio explícito), retorna resposta
+   * zerada SEM bater no banco (fase sem descendentes). Quando `undefined`,
+   * comportamento retro-compatível (cálculo por projeto inteiro).
+   *
    * @param projectId - Chave BigInt do DProject
    * @param period - Filtros de período (periodFrom/periodTo ou period pré-definido)
+   * @param taskIdsFilter - (Opcional, F9b) Restringe a estes IDs de tasks.
+   *                        `[]` = resposta zerada; `undefined` = sem filtro.
    * @returns CycleTimeResponseDto com percentis, média e amostras
    *
    * @throws {BadRequestException} Se periodFrom > periodTo
@@ -52,15 +60,26 @@ export class CycleTimeService {
    * const result = await service.calculate(BigInt(123), { period: 'month' });
    * // { p50: 4.5, p75: 8.0, p90: 16.2, avg: 6.1, samples: 42, unit: 'hours' }
    *
-   * // Sem dados
-   * const empty = await service.calculate(BigInt(999), {});
-   * // { p50: null, p75: null, p90: null, avg: null, samples: 0, unit: 'hours' }
+   * // F9b: cycle time só das tasks da fase X
+   * const phase = await service.calculate(BigInt(123), {}, [BigInt(10), BigInt(11)]);
    * ```
    *
    * @see CycleTimeResponseDto — estrutura de retorno
    */
-  async calculate(projectId: bigint, period: PeriodInput): Promise<CycleTimeResponseDto> {
-    this.logger.debug(`Calculando cycle time projeto=${projectId}`);
+  async calculate(
+    projectId: bigint,
+    period: PeriodInput,
+    taskIdsFilter?: bigint[],
+  ): Promise<CycleTimeResponseDto> {
+    this.logger.debug(
+      `Calculando cycle time projeto=${projectId}` +
+        (taskIdsFilter !== undefined ? ` (filtro ${taskIdsFilter.length} tasks)` : ''),
+    );
+
+    // F9b: fase sem descendentes → resposta zerada sem ir ao banco
+    if (taskIdsFilter !== undefined && taskIdsFilter.length === 0) {
+      return { p50: null, p75: null, p90: null, avg: null, samples: 0, unit: 'hours' };
+    }
 
     const dateRange = this.periodResolver.resolve(period);
 
@@ -73,6 +92,7 @@ export class CycleTimeService {
         idProject: projectId,
         excluido: false,
         idStatus: { in: DONE_STATUS_IDS },
+        ...(taskIdsFilter !== undefined && { chave: { in: taskIdsFilter } }),
       },
       select: { dados: true },
     });

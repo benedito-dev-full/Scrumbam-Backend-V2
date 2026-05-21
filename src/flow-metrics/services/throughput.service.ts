@@ -44,9 +44,14 @@ export class ThroughputService {
    * Agrupa tasks concluídas por dia ou semana dentro do período.
    * Usa SQL raw parametrizado com date_trunc sobre o campo JSON `doneAt`.
    *
+   * **F9b (ADR-V2-047):** `taskIdsFilter` opcional restringe ao subconjunto
+   * (usado por `/flow-metrics/by-phase/:phaseId/throughput`). Array vazio
+   * retorna série vazia sem hit no banco. Undefined = retro-compat.
+   *
    * @param projectId - Chave BigInt do DProject
    * @param granularity - Agrupamento temporal ('day' ou 'week')
    * @param period - Filtros de período
+   * @param taskIdsFilter - (Opcional, F9b) Restringe a estes IDs de tasks.
    * @returns ThroughputResponseDto com série temporal e total
    *
    * @throws {BadRequestException} Se periodFrom > periodTo
@@ -67,12 +72,21 @@ export class ThroughputService {
     projectId: bigint,
     granularity: 'day' | 'week',
     period: PeriodInput,
+    taskIdsFilter?: bigint[],
   ): Promise<ThroughputResponseDto> {
-    this.logger.debug(`Calculando throughput projeto=${projectId} granularity=${granularity}`);
+    this.logger.debug(
+      `Calculando throughput projeto=${projectId} granularity=${granularity}` +
+        (taskIdsFilter !== undefined ? ` (filtro ${taskIdsFilter.length} tasks)` : ''),
+    );
+
+    // F9b: fase sem descendentes → série vazia sem ir ao banco
+    if (taskIdsFilter !== undefined && taskIdsFilter.length === 0) {
+      return { series: [], total: 0, granularity };
+    }
 
     const dateRange = this.periodResolver.resolve(period);
 
-    const rows = await this.queryThroughput(projectId, granularity, dateRange);
+    const rows = await this.queryThroughput(projectId, granularity, dateRange, taskIdsFilter);
 
     const series: ThroughputDataPointDto[] = rows.map((row) => ({
       date: this.formatDate(row.d),
@@ -103,50 +117,42 @@ export class ThroughputService {
     projectId: bigint,
     granularity: 'day' | 'week',
     dateRange: DateRange,
+    taskIdsFilter?: bigint[],
   ): Promise<ThroughputRawRow[]> {
     // idClasse para DONE(-444) e VALIDATED(-449) como BigInt
     const doneIds = [BigInt(-444), BigInt(-449)];
 
+    // F9b: cláusula AND chave IN (...) só quando filtro presente e não-vazio.
+    // Prisma.join produz lista parametrizada (sem SQL injection).
+    const taskIdsClause =
+      taskIdsFilter !== undefined && taskIdsFilter.length > 0
+        ? Prisma.sql`AND chave IN (${Prisma.join(taskIdsFilter)})`
+        : Prisma.empty;
+
+    const truncUnit = granularity === 'day' ? 'day' : 'week';
+
     try {
-      if (granularity === 'day') {
-        return await this.prisma.$queryRaw<ThroughputRawRow[]>(
-          Prisma.sql`
-            SELECT
-              date_trunc('day', (dados->'telemetry'->>'doneAt')::timestamptz) AS d,
-              COUNT(*)::int AS c
-            FROM "DTask"
-            WHERE "idProject" = ${projectId}::bigint
-              AND "excluido" = false
-              AND "idStatus" IN (${doneIds[0]}::bigint, ${doneIds[1]}::bigint)
-              AND (dados->'telemetry'->>'doneAt') IS NOT NULL
-              AND (dados->'telemetry'->>'doneAt')::timestamptz >= ${dateRange.gte}::timestamptz
-              AND (dados->'telemetry'->>'doneAt')::timestamptz <= ${dateRange.lte}::timestamptz
-            GROUP BY 1
-            ORDER BY 1 ASC
-          `,
-        );
-      } else {
-        return await this.prisma.$queryRaw<ThroughputRawRow[]>(
-          Prisma.sql`
-            SELECT
-              date_trunc('week', (dados->'telemetry'->>'doneAt')::timestamptz) AS d,
-              COUNT(*)::int AS c
-            FROM "DTask"
-            WHERE "idProject" = ${projectId}::bigint
-              AND "excluido" = false
-              AND "idStatus" IN (${doneIds[0]}::bigint, ${doneIds[1]}::bigint)
-              AND (dados->'telemetry'->>'doneAt') IS NOT NULL
-              AND (dados->'telemetry'->>'doneAt')::timestamptz >= ${dateRange.gte}::timestamptz
-              AND (dados->'telemetry'->>'doneAt')::timestamptz <= ${dateRange.lte}::timestamptz
-            GROUP BY 1
-            ORDER BY 1 ASC
-          `,
-        );
-      }
+      return await this.prisma.$queryRaw<ThroughputRawRow[]>(
+        Prisma.sql`
+          SELECT
+            date_trunc(${truncUnit}, (dados->'telemetry'->>'doneAt')::timestamptz) AS d,
+            COUNT(*)::int AS c
+          FROM "DTask"
+          WHERE "idProject" = ${projectId}::bigint
+            AND "excluido" = false
+            AND "idStatus" IN (${doneIds[0]}::bigint, ${doneIds[1]}::bigint)
+            AND (dados->'telemetry'->>'doneAt') IS NOT NULL
+            AND (dados->'telemetry'->>'doneAt')::timestamptz >= ${dateRange.gte}::timestamptz
+            AND (dados->'telemetry'->>'doneAt')::timestamptz <= ${dateRange.lte}::timestamptz
+            ${taskIdsClause}
+          GROUP BY 1
+          ORDER BY 1 ASC
+        `,
+      );
     } catch (err) {
       // Fallback: busca simples e agrega em JS
       this.logger.warn(`$queryRaw falhou, usando fallback JS: ${String(err)}`);
-      return this.fallbackQuery(projectId, granularity, dateRange);
+      return this.fallbackQuery(projectId, granularity, dateRange, taskIdsFilter);
     }
   }
 
@@ -163,12 +169,17 @@ export class ThroughputService {
     projectId: bigint,
     granularity: 'day' | 'week',
     dateRange: DateRange,
+    taskIdsFilter?: bigint[],
   ): Promise<ThroughputRawRow[]> {
     const tasks = await this.prisma.dTask.findMany({
       where: {
         idProject: projectId,
         excluido: false,
         idStatus: { in: [BigInt(-444), BigInt(-449)] },
+        ...(taskIdsFilter !== undefined &&
+          taskIdsFilter.length > 0 && {
+            chave: { in: taskIdsFilter },
+          }),
       },
       select: { dados: true },
     });
@@ -205,7 +216,7 @@ export class ThroughputService {
     // Início da semana (segunda-feira)
     const d = new Date(date);
     const day = d.getUTCDay(); // 0=sun, 1=mon, ...
-    const diff = (day === 0 ? -6 : 1 - day);
+    const diff = day === 0 ? -6 : 1 - day;
     d.setUTCDate(d.getUTCDate() + diff);
     return d.toISOString().slice(0, 10);
   }

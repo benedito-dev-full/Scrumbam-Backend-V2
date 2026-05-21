@@ -671,6 +671,19 @@ export class TasksService {
       }
     }
 
+    // ADR-V2-048: Fases (idClasse=-200) NÃO têm status próprio — o status é
+    // derivado da agregação de tasks-folha descendentes (percent via
+    // PhaseMetricsService.compute, F5 do ADR-V2-047). Bloqueamos a tentativa
+    // de mover uma fase no board V3 antes de qualquer mutação para evitar:
+    //   1. Inconsistência semântica entre `dados.v3.state` e `percent`;
+    //   2. Emissão indevida de `phase.completed` sem agregação;
+    //   3. Confusão do frontend recursivo que renderiza Fase + Task polimorficamente.
+    if (task.idClasse === ID_CLASSE_PHASE) {
+      throw new BadRequestException(
+        'Fase não tem status próprio — use GET /tasks/:id/metrics para consultar percent agregado.',
+      );
+    }
+
     // Ler estado atual dos dados
     const dadosAtuais = (task.dados as Record<string, unknown>) ?? {};
     const v3Atual = dadosAtuais.v3 as { state?: string } | null;

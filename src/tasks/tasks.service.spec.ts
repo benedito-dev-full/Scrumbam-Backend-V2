@@ -565,6 +565,23 @@ describe('TasksService', () => {
       );
     });
 
+    // ADR-V2-048 (F9a) — Fases não têm status próprio: PHASE no PATCH deve 400.
+    it('deve lançar BadRequestException ao tentar mover uma Fase (idClasse=-200)', async () => {
+      const phase = makeTask({
+        chave: BigInt(42),
+        dados: { identifier: 'DEV-42', v3: { state: 'INBOX' } },
+      });
+      (phase as { idClasse?: bigint }).idClasse = BigInt(-200); // PHASE
+
+      prisma.dTask.findFirst.mockResolvedValue(phase);
+
+      await expect(service.updateStatus('42', { status: 'READY' })).rejects.toThrow(
+        BadRequestException,
+      );
+      // E NÃO deve disparar nenhum update no banco
+      expect(prisma.dTask.update).not.toHaveBeenCalled();
+    });
+
     it('deve setar telemetry.readyAt ao mover para READY', async () => {
       const task = makeTask();
       prisma.dTask.findFirst.mockResolvedValue(task);
@@ -840,7 +857,9 @@ describe('TasksService', () => {
       });
 
       it('NÃO deve emitir phase.completed se a task que mudou é ela mesma uma PHASE', async () => {
-        // Edge case: tarefa folha-do-pai mas é PHASE — detector skip por design.
+        // Edge case: tarefa folha-do-pai mas é PHASE.
+        // Após ADR-V2-048 (F9a), updateStatus em PHASE lança 400 ANTES de
+        // qualquer cálculo — defesa mais forte que o skip silencioso anterior.
         const phaseTask = makeTask({
           chave: BigInt(7),
           dados: { identifier: 'DEV-7', v3: { state: 'READY' } },
@@ -849,16 +868,14 @@ describe('TasksService', () => {
         (phaseTask as { idPai?: bigint | null }).idPai = BigInt(42);
 
         prisma.dTask.findFirst.mockResolvedValue(phaseTask);
-        prisma.dTabela.findFirst.mockResolvedValue(null);
-        prisma.dTask.update.mockResolvedValue({
-          ...phaseTask,
-          dados: { ...phaseTask.dados, v3: { state: 'DONE' } },
-        });
 
-        await service.updateStatus('7', { status: 'DONE' });
+        await expect(service.updateStatus('7', { status: 'DONE' })).rejects.toThrow(
+          BadRequestException,
+        );
         await flush();
 
         expect(phaseMetrics.compute).not.toHaveBeenCalled();
+        expect(prisma.dTask.update).not.toHaveBeenCalled();
         const emitted = eventProducer.addInternalEvent.mock.calls.map((c) => c[0]);
         expect(emitted).not.toContain('phase.completed');
       });

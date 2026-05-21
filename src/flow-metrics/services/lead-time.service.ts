@@ -40,8 +40,13 @@ export class LeadTimeService {
    * preenchido dentro do período. Tasks sem telemetria são excluídas
    * do cálculo (`samples` reflete apenas as com dados disponíveis).
    *
+   * **F9b (ADR-V2-047):** `taskIdsFilter` opcional restringe ao subconjunto
+   * (usado por `/flow-metrics/by-phase/:phaseId/lead-time`). Array vazio
+   * retorna resposta zerada sem hit no banco. Undefined = retro-compat.
+   *
    * @param projectId - Chave BigInt do DProject
    * @param period - Filtros de período (periodFrom/periodTo ou period pré-definido)
+   * @param taskIdsFilter - (Opcional, F9b) Restringe a estes IDs de tasks.
    * @returns LeadTimeResponseDto com percentis, média e amostras
    *
    * @throws {BadRequestException} Se periodFrom > periodTo
@@ -58,8 +63,20 @@ export class LeadTimeService {
    *
    * @see LeadTimeResponseDto — estrutura de retorno
    */
-  async calculate(projectId: bigint, period: PeriodInput): Promise<LeadTimeResponseDto> {
-    this.logger.debug(`Calculando lead time projeto=${projectId}`);
+  async calculate(
+    projectId: bigint,
+    period: PeriodInput,
+    taskIdsFilter?: bigint[],
+  ): Promise<LeadTimeResponseDto> {
+    this.logger.debug(
+      `Calculando lead time projeto=${projectId}` +
+        (taskIdsFilter !== undefined ? ` (filtro ${taskIdsFilter.length} tasks)` : ''),
+    );
+
+    // F9b: fase sem descendentes → resposta zerada sem ir ao banco
+    if (taskIdsFilter !== undefined && taskIdsFilter.length === 0) {
+      return { p50: null, p75: null, p90: null, avg: null, samples: 0, unit: 'hours' };
+    }
 
     const dateRange = this.periodResolver.resolve(period);
 
@@ -70,6 +87,7 @@ export class LeadTimeService {
         idProject: projectId,
         excluido: false,
         idStatus: { in: DONE_STATUS_IDS },
+        ...(taskIdsFilter !== undefined && { chave: { in: taskIdsFilter } }),
       },
       select: { dados: true },
     });

@@ -144,8 +144,7 @@ export class TasksController {
   @ApiQuery({
     name: 'idPai',
     required: false,
-    description:
-      'Filtra por pai na hierarquia. String numérica = filhas; "null" = raízes.',
+    description: 'Filtra por pai na hierarquia. String numérica = filhas; "null" = raízes.',
     example: '5',
   })
   @ApiQuery({
@@ -348,7 +347,11 @@ export class TasksController {
   @ApiOperation({ summary: 'Mover task entre estados V3 (state machine)' })
   @ApiParam({ name: 'id', description: 'ID da task' })
   @ApiResponse({ status: 200, description: 'Task com novo estado', type: TaskResponseDto })
-  @ApiResponse({ status: 400, description: 'Transição inválida' })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Transição inválida OU task é uma Fase (idClasse=-200) — use GET /tasks/:id/metrics (ADR-V2-048).',
+  })
   @ApiResponse({ status: 404, description: 'Task não encontrada ou fora do scope' })
   async updateStatus(
     @Param('id') id: string,

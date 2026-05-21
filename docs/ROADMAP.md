@@ -64,6 +64,72 @@
 
 ---
 
+## F9 — Backend: V3 Guard + Flow Metrics by-Phase + Telegram Listener (ADR-V2-047 Fase 9) — ✅ COMPLETA
+
+### Task: ADR-V2-047 Fase 9 — V3 Guard + Flow Metrics by-Phase + Telegram Listener — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (F9 de ADR-V2-047 — 3 subpartes integradas)
+**Módulo V2:** tasks, flow-metrics, channels/telegram
+**Fase V2:** F9 (V3 Guard + Flow Metrics Reporting + Event-driven Notifications)
+**Tempo Real:** ~3h Implementer + ~1h Reviewer + ~0.5h Documenter
+**Completado em:** 2026-05-21
+**Quality Score:** 8.7/10 APPROVED
+
+**O Que Foi Feito:**
+
+**F9a — V3 Guard:**
+- Novo guard `BadRequestException` em `TasksService.updateStatus()` linha 82 validando `idClasse == -200` (PHASE)
+- Impede update de status em classes que não são fases (Pilar 2 — DRY, sem controller novo)
+- ADR-V2-048 redigido (fases não aparecem no board V3, derivadas de tarefas-folha)
+- Tests: 5 novos unit tests validando guard em updateStatus
+
+**F9b — Flow Metrics by-Phase:**
+- 6 novas rotas GET `/flow-metrics/by-phase/:phaseId/<metric>` reusando services existentes
+  - `/by-phase/:phaseId/lead-time`
+  - `/by-phase/:phaseId/cycle-time`
+  - `/by-phase/:phaseId/throughput`
+  - `/by-phase/:phaseId/wip-age`
+  - `/by-phase/:phaseId/cfd`
+  - `/by-phase/:phaseId/dashboard`
+- Novo `PhaseDescendantsService` (CTE recursiva, depth guardrail < 20)
+- Novo `ByPhaseResolverService` (resolve phase + tenant scope + task leaves)
+- 6 flow-metrics services modificados com `taskIdsFilter?` parâmetro retrocompatível
+- Tests: 39 novos (20 ByPhaseResolverService, 19 PhaseDescendantsService)
+- Queries: 2 totais por request (findUnique + CTE)
+
+**F9c — Telegram Listener (Event-driven):**
+- Novo `TelegramNotificationConsumer` em `src/channels/telegram/`
+- Implementa `IEventConsumer`, registrado em `EventRouterService.registerConsumer(match, this)`
+- Consome `phase.completed` (F8), envia mensagem Markdown via Telegram
+- Idempotência via DEvento `-494 TELEGRAM_MSG_OUT` (REUTILIZADA per ADR-V2-008)
+- Destinatários v1: `idCreator` da fase + assignees diretos (sem recursão)
+- Tenant scope: validação em 2 camadas (fase + DVincula org-membership)
+- Timeout 3s via `Promise.race` (não bloqueia router)
+- Token ausente = skip silencioso (ADR-V2-010)
+- Tests: 47 novos (consumer + integration)
+- ADR-V2-049 redigido (pattern replicável para WhatsApp/Slack)
+- Novo `AccountLinkService.findChatByUser()` para lookup Telegram ID
+
+**Pilares Aplicados:**
+- Pilar 1 (Engine): N/A — consumer é reativo, sem INSERT em transacionais
+- Pilar 2 (Endpoints): Sem controller novo; reusa `/flow-metrics` existente + EventRouterService existente
+- Pilar 3 (Seed): ZERO mudança — reutiliza `-494 TELEGRAM_MSG_OUT`, `EventRouterService.registerConsumer`
+
+**Decisão Crítica: Reuso de `-494 TELEGRAM_MSG_OUT`**
+- ADR-V2-048 define que `-494` já existe no seed (`prisma/seeds/classes.seed.ts:209`)
+- ADR-V2-008 justifica (DEvento substitui DNotification) — não criar nova DClasse se equivalente existe
+- Evita: sequestro acidental de chave canônica, mudança em seed (Pilar 3 inviolado), aumento em `EXPECTED_TOTAL_COUNT`
+
+**Commits Inline Associados:**
+- Reviewer validou zero drift vs ADR-V2-001 (17 tabelas canônicas)
+- ADR-V2-042 tenant isolation aplicado em 2 camadas (fase + recipients)
+- ADR-V2-047 agora com F0–F9 entregues, próxima: F10 (E2E)
+
+**Build:** PASS (TypeScript 0 errors, lint PASS)
+**Tests:** 91 novos PASS (5+39+47); retrocompat preservada nos 6 flow-metrics services; baseline 24 falhas pré-existentes em tasks.service.spec mantida
+
+---
+
 ## F13 — Backend: Task #4 Agente Standalone + Multi-Project Linking
 
 ### Task #4: Agente Standalone + Multi-Project Linking (Hotfix arquitetural) — ✅ SUB-TAREFA 4.1 COMPLETA

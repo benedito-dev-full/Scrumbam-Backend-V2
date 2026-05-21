@@ -8,6 +8,8 @@ import { ThroughputService } from './services/throughput.service';
 import { WipAgeService } from './services/wip-age.service';
 import { CfdService } from './services/cfd.service';
 import { DashboardService } from './services/dashboard.service';
+import { PhaseDescendantsService } from './services/phase-descendants.service';
+import { ByPhaseResolverService } from './services/by-phase-resolver.service';
 import { PeriodResolver } from './helpers/period-resolver';
 
 /**
@@ -40,6 +42,9 @@ import { PeriodResolver } from './helpers/period-resolver';
     WipAgeService,
     CfdService,
     DashboardService,
+    // F9b (ADR-V2-047) — Flow Metrics by Phase
+    PhaseDescendantsService,
+    ByPhaseResolverService,
   ],
   exports: [
     CycleTimeService,
@@ -48,6 +53,8 @@ import { PeriodResolver } from './helpers/period-resolver';
     WipAgeService,
     CfdService,
     DashboardService,
+    PhaseDescendantsService,
+    ByPhaseResolverService,
   ],
 })
 export class FlowMetricsModule {}

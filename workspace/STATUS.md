@@ -1,6 +1,83 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-21 (F8 ADR-V2-047 Fase 8 COMPLETA | F11 Task #8 ADR-V2-047 Fase 7 COMPLETA)
+**Ultima atualizacao:** 2026-05-21 (F9 ADR-V2-047 Fase 9 COMPLETA | F8 COMPLETA | F11 Task #8 COMPLETA)
+
+---
+
+## ✅ F9 ADR-V2-047 Fase 9 — V3 Guard + Flow Metrics by-Phase + Telegram Listener — COMPLETA
+
+**Status:** ✅ COMPLETA (F9 ADR-V2-047 — 3 subpartes integradas)
+**Módulo:** tasks, flow-metrics, channels/telegram
+**Fase:** F9 (V3 Guard + Flow Metrics Reporting + Event-driven Notifications)
+**Duration:** ~4.5h total (3h Implementer + 1h Reviewer + 0.5h Documenter)
+**Quality Score:** 8.7/10 APPROVED
+**Date:** 2026-05-21
+
+### Agents Performance
+
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan ADR-V2-047 F9 (3 subpartes) |
+| Implementer | ~3h | V3 guard + Flow by-Phase CTE + Telegram listener; 91 tests PASS |
+| Reviewer | ~1h | 8.7/10, 3 issues [LOW] (JSDoc, DVincula filter, worker force exit) |
+| Documenter | ~0.5h | JSDoc fix, ADRs validate, ROADMAP, CHANGELOG, STATUS, commit |
+
+### Deliverables
+
+**F9a — V3 Guard (5 tests novos):**
+- Guard `BadRequestException` em `TasksService.updateStatus()` linha 82
+- Valida `idClasse == -200` (PHASE); impede update em classes não-fases
+- Pilar 2 RESPEITADO — sem controller novo; reutiliza TasksService existente
+- ADR-V2-048 redigida (fases não em board V3, derivadas de folhas)
+
+**F9b — Flow Metrics by-Phase (39 tests novos):**
+- 6 rotas GET `/flow-metrics/by-phase/:phaseId/<metric>` reusando 6 services
+  - `lead-time`, `cycle-time`, `throughput`, `wip-age`, `cfd`, `dashboard`
+- Novo `PhaseDescendantsService` — CTE recursiva, depth guardrail < 20
+- Novo `ByPhaseResolverService` — resolve phase + tenant scope + task leaves
+- 6 flow-metrics services mod com `taskIdsFilter?` param retrocompatível
+- Queries: 2 totais per request (findUnique + CTE)
+- ZERO N+1
+
+**F9c — Telegram Listener (47 tests novos):**
+- Novo `TelegramNotificationConsumer` em `src/channels/telegram/`
+- Implementa `IEventConsumer`; registrado em `EventRouterService.registerConsumer`
+- Consome `phase.completed` (F8); envia mensagem Markdown via Telegram
+- Idempotência via DEvento `-494 TELEGRAM_MSG_OUT` REUTILIZADA (ADR-V2-008)
+- Destinatários v1: `idCreator` + assignees diretos (sem recursão)
+- Tenant scope: 2 camadas (fase + DVincula org-membership)
+- Timeout 3s via `Promise.race` (não bloqueia router)
+- Token ausente = skip silencioso (ADR-V2-010)
+- Novo `AccountLinkService.findChatByUser()` para lookup Telegram ID
+
+**Decisões Críticas:**
+- Reuso de `-494 TELEGRAM_MSG_OUT` evita sequestro de chave canônica, mudança em seed (Pilar 3 inviolado), novo DClasse
+- ADR-V2-048 (fases fora board V3) redigida
+- ADR-V2-049 (Telegram listener pattern replicável para WhatsApp/Slack) redigida
+- Limitação v1 deixada para v2: filtro DVincula sem restrição `idClasse` de role (registrado em ADR-V2-049 "Limitações conhecidas")
+
+**Tests:**
+- F9a: 5 novos (guard validação)
+- F9b: 39 novos (20 ByPhaseResolverService + 19 PhaseDescendantsService)
+- F9c: 47 novos (consumer + integration)
+- **Total: 91 novos PASS**
+- Retrocompat preservada nos 6 flow-metrics services
+- Baseline 24 falhas pré-existentes em tasks.service.spec mantida
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — consumer é reativo, sem INSERT em transacionais
+- Pilar 2 (Endpoints): Sem controller novo; reusa `/flow-metrics` + EventRouterService
+- Pilar 3 (Seed): ZERO mudança — reutiliza `-494 TELEGRAM_MSG_OUT`
+
+**Metrics:**
+- Build: PASS (TypeScript 0 errors)
+- Tests: 91/91 PASS (sem regressão)
+- Queries/by-phase route: 2 totais (findUnique + CTE)
+- ADRs: ADR-V2-047 F9, ADR-V2-048, ADR-V2-049, ADR-V2-001, ADR-V2-008, ADR-V2-042
+
+**Known Debt (pré-existente F9, não regressão):**
+- Worker force exit nos testes (background cleanup); mitigado com timeout 3s
+- DVincula filter sem validação `idClasse` de role (deixado para v2 per ADR-V2-049)
 
 ---
 

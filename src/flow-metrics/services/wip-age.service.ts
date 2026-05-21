@@ -134,10 +134,18 @@ export class WipAgeService implements OnModuleInit {
    *
    * @see WipAgeResponseDto — estrutura de retorno
    */
-  async calculate(projectId: bigint): Promise<WipAgeResponseDto> {
-    this.logger.debug(`Calculando WIP age projeto=${projectId}`);
+  async calculate(projectId: bigint, taskIdsFilter?: bigint[]): Promise<WipAgeResponseDto> {
+    this.logger.debug(
+      `Calculando WIP age projeto=${projectId}` +
+        (taskIdsFilter !== undefined ? ` (filtro ${taskIdsFilter.length} tasks)` : ''),
+    );
 
     const now = new Date();
+
+    // F9b: fase sem descendentes → resposta zerada sem ir ao banco
+    if (taskIdsFilter !== undefined && taskIdsFilter.length === 0) {
+      return { byStatus: [], total: 0, calculatedAt: now.toISOString() };
+    }
 
     // Buscar tasks não-DONE (excluir DONE e VALIDATED)
     const tasks = await this.prisma.dTask.findMany({
@@ -147,6 +155,7 @@ export class WipAgeService implements OnModuleInit {
         NOT: {
           idStatus: { in: Array.from(DONE_STATUS_IDS) },
         },
+        ...(taskIdsFilter !== undefined && { chave: { in: taskIdsFilter } }),
       },
       select: {
         idStatus: true,

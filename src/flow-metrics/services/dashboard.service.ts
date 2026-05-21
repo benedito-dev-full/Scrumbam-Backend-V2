@@ -68,17 +68,26 @@ export class DashboardService {
    *
    * @see DashboardResponseDto — estrutura de retorno
    */
-  async getDashboard(projectId: bigint, period: PeriodInput): Promise<DashboardResponseDto> {
-    this.logger.log(`Dashboard projeto=${projectId}`);
+  async getDashboard(
+    projectId: bigint,
+    period: PeriodInput,
+    taskIdsFilter?: bigint[],
+  ): Promise<DashboardResponseDto> {
+    this.logger.log(
+      `Dashboard projeto=${projectId}` +
+        (taskIdsFilter !== undefined ? ` (filtro ${taskIdsFilter.length} tasks)` : ''),
+    );
 
     const start = Date.now();
 
+    // F9b: fase sem descendentes → dashboard zerado paralelo (cada service decide).
+    // automationMetricsService.getOverview() é projeto-wide e não muda com phase scope.
     const [cycleTime, leadTime, throughput, wipAge, cfd, automation] = await Promise.all([
-      this.cycleTimeService.calculate(projectId, period),
-      this.leadTimeService.calculate(projectId, period),
-      this.throughputService.calculate(projectId, 'day', period),
-      this.wipAgeService.calculate(projectId),
-      this.cfdService.calculate(projectId, period),
+      this.cycleTimeService.calculate(projectId, period, taskIdsFilter),
+      this.leadTimeService.calculate(projectId, period, taskIdsFilter),
+      this.throughputService.calculate(projectId, 'day', period, taskIdsFilter),
+      this.wipAgeService.calculate(projectId, taskIdsFilter),
+      this.cfdService.calculate(projectId, period, taskIdsFilter),
       this.automationMetricsService.getOverview(),
     ]);
 

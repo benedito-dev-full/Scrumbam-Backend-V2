@@ -8,13 +8,7 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
-import {
-  ApiOperation,
-  ApiParam,
-  ApiQuery,
-  ApiResponse,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrgTenantGuard } from '../auth/guards/org-tenant.guard';
 import { TenantConfig } from '../auth/decorators/tenant-config.decorator';
@@ -26,6 +20,7 @@ import { ThroughputService } from './services/throughput.service';
 import { WipAgeService } from './services/wip-age.service';
 import { CfdService } from './services/cfd.service';
 import { DashboardService } from './services/dashboard.service';
+import { ByPhaseResolverService } from './services/by-phase-resolver.service';
 import { PeriodQueryDto } from './dto/period-query.dto';
 import { GranularityQueryDto } from './dto/granularity-query.dto';
 import { CycleTimeResponseDto } from './dto/cycle-time-response.dto';
@@ -69,7 +64,191 @@ export class FlowMetricsController {
     private readonly wipAgeService: WipAgeService,
     private readonly cfdService: CfdService,
     private readonly dashboardService: DashboardService,
+    private readonly byPhaseResolver: ByPhaseResolverService,
   ) {}
+
+  // ─── F9b (ADR-V2-047) — Flow Metrics by Phase ─────────────────────────────
+  // 6 rotas espelho de `/flow-metrics/:projectId/*` restringindo às tasks-folha
+  // descendentes da fase (`DTask idClasse=-200`). Tenant scope resolvido pelo
+  // `ByPhaseResolverService` (NotFound anti-enumeration). Sem `@TenantConfig`
+  // explícito por rota porque o decorator de classe (`PROJECT_ESTAB`) faz
+  // pass-through quando não há `:projectId`/`:id` no path (org-tenant.guard:134).
+
+  /**
+   * Cycle time restrito às tasks-folha descendentes de uma fase.
+   *
+   * @param phaseId - Chave BigInt da fase (`DTask idClasse=-200`) em string.
+   * @param query - Filtros de período.
+   * @param user - Usuário autenticado (extraído do JWT).
+   * @returns CycleTimeResponseDto restrito ao escopo da fase.
+   *
+   * @throws {NotFoundException} Se fase inexistente, soft-deleted, idClasse != -200
+   *                             ou pertencer a outra organização (anti-enumeration).
+   *
+   * @example
+   * ```bash
+   * curl -X GET "http://localhost:3000/flow-metrics/by-phase/7/cycle-time?period=month" \
+   *   -H "Authorization: Bearer {token}"
+   * ```
+   */
+  @Get('by-phase/:phaseId/cycle-time')
+  @ApiOperation({
+    summary: 'Cycle time da fase',
+    description: 'Cycle time de tasks-folha descendentes (recursivo via CTE) — ADR-V2-047 F9b.',
+  })
+  @ApiParam({ name: 'phaseId', description: 'ID da fase (DTask idClasse=-200)', example: '7' })
+  @ApiQuery({ name: 'period', required: false, enum: ['today', 'week', 'month'] })
+  @ApiQuery({ name: 'periodFrom', required: false, description: 'Data inicial YYYY-MM-DD' })
+  @ApiQuery({ name: 'periodTo', required: false, description: 'Data final YYYY-MM-DD' })
+  @ApiResponse({ status: 200, type: CycleTimeResponseDto, description: 'Cycle time da fase' })
+  @ApiResponse({ status: 401, description: 'Não autenticado' })
+  @ApiResponse({ status: 403, description: 'Fase pertence a outra organização' })
+  @ApiResponse({ status: 404, description: 'Fase não encontrada ou não é PHASE' })
+  async getByPhaseCycleTime(
+    @Param('phaseId') phaseId: string,
+    @Query() query: PeriodQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<CycleTimeResponseDto> {
+    this.logger.log(`Cycle time by-phase phase=${phaseId} user=${user.sub}`);
+    const { projectId, taskIds } = await this.byPhaseResolver.resolve(phaseId, user);
+    return this.cycleTimeService.calculate(projectId, query, taskIds);
+  }
+
+  /**
+   * Lead time restrito às tasks-folha descendentes de uma fase.
+   */
+  @Get('by-phase/:phaseId/lead-time')
+  @ApiOperation({
+    summary: 'Lead time da fase',
+    description: 'Lead time de tasks-folha descendentes (recursivo via CTE) — ADR-V2-047 F9b.',
+  })
+  @ApiParam({ name: 'phaseId', description: 'ID da fase (DTask idClasse=-200)', example: '7' })
+  @ApiQuery({ name: 'period', required: false, enum: ['today', 'week', 'month'] })
+  @ApiQuery({ name: 'periodFrom', required: false, description: 'Data inicial YYYY-MM-DD' })
+  @ApiQuery({ name: 'periodTo', required: false, description: 'Data final YYYY-MM-DD' })
+  @ApiResponse({ status: 200, type: LeadTimeResponseDto, description: 'Lead time da fase' })
+  @ApiResponse({ status: 401, description: 'Não autenticado' })
+  @ApiResponse({ status: 403, description: 'Fase pertence a outra organização' })
+  @ApiResponse({ status: 404, description: 'Fase não encontrada ou não é PHASE' })
+  async getByPhaseLeadTime(
+    @Param('phaseId') phaseId: string,
+    @Query() query: PeriodQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<LeadTimeResponseDto> {
+    this.logger.log(`Lead time by-phase phase=${phaseId} user=${user.sub}`);
+    const { projectId, taskIds } = await this.byPhaseResolver.resolve(phaseId, user);
+    return this.leadTimeService.calculate(projectId, query, taskIds);
+  }
+
+  /**
+   * Throughput restrito às tasks-folha descendentes de uma fase.
+   */
+  @Get('by-phase/:phaseId/throughput')
+  @ApiOperation({
+    summary: 'Throughput da fase',
+    description: 'Throughput de tasks-folha descendentes (recursivo via CTE) — ADR-V2-047 F9b.',
+  })
+  @ApiParam({ name: 'phaseId', description: 'ID da fase (DTask idClasse=-200)', example: '7' })
+  @ApiQuery({ name: 'granularity', required: false, enum: ['day', 'week'] })
+  @ApiQuery({ name: 'period', required: false, enum: ['today', 'week', 'month'] })
+  @ApiQuery({ name: 'periodFrom', required: false, description: 'Data inicial YYYY-MM-DD' })
+  @ApiQuery({ name: 'periodTo', required: false, description: 'Data final YYYY-MM-DD' })
+  @ApiResponse({ status: 200, type: ThroughputResponseDto, description: 'Throughput da fase' })
+  @ApiResponse({ status: 401, description: 'Não autenticado' })
+  @ApiResponse({ status: 403, description: 'Fase pertence a outra organização' })
+  @ApiResponse({ status: 404, description: 'Fase não encontrada ou não é PHASE' })
+  async getByPhaseThroughput(
+    @Param('phaseId') phaseId: string,
+    @Query() query: PeriodQueryDto,
+    @Query() granularityQuery: GranularityQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<ThroughputResponseDto> {
+    this.logger.log(`Throughput by-phase phase=${phaseId} user=${user.sub}`);
+    const { projectId, taskIds } = await this.byPhaseResolver.resolve(phaseId, user);
+    return this.throughputService.calculate(
+      projectId,
+      granularityQuery.granularity ?? 'day',
+      query,
+      taskIds,
+    );
+  }
+
+  /**
+   * WIP age restrito às tasks-folha descendentes de uma fase.
+   */
+  @Get('by-phase/:phaseId/wip-age')
+  @ApiOperation({
+    summary: 'WIP age da fase',
+    description: 'WIP age de tasks-folha descendentes (recursivo via CTE) — ADR-V2-047 F9b.',
+  })
+  @ApiParam({ name: 'phaseId', description: 'ID da fase (DTask idClasse=-200)', example: '7' })
+  @ApiResponse({ status: 200, type: WipAgeResponseDto, description: 'WIP age da fase' })
+  @ApiResponse({ status: 401, description: 'Não autenticado' })
+  @ApiResponse({ status: 403, description: 'Fase pertence a outra organização' })
+  @ApiResponse({ status: 404, description: 'Fase não encontrada ou não é PHASE' })
+  async getByPhaseWipAge(
+    @Param('phaseId') phaseId: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<WipAgeResponseDto> {
+    this.logger.log(`WIP age by-phase phase=${phaseId} user=${user.sub}`);
+    const { projectId, taskIds } = await this.byPhaseResolver.resolve(phaseId, user);
+    return this.wipAgeService.calculate(projectId, taskIds);
+  }
+
+  /**
+   * CFD restrito às tasks-folha descendentes de uma fase.
+   */
+  @Get('by-phase/:phaseId/cfd')
+  @ApiOperation({
+    summary: 'CFD da fase',
+    description: 'CFD de tasks-folha descendentes (recursivo via CTE) — ADR-V2-047 F9b.',
+  })
+  @ApiParam({ name: 'phaseId', description: 'ID da fase (DTask idClasse=-200)', example: '7' })
+  @ApiQuery({ name: 'period', required: false, enum: ['today', 'week', 'month'] })
+  @ApiQuery({ name: 'periodFrom', required: false, description: 'Data inicial YYYY-MM-DD' })
+  @ApiQuery({ name: 'periodTo', required: false, description: 'Data final YYYY-MM-DD' })
+  @ApiResponse({ status: 200, type: CfdResponseDto, description: 'CFD da fase' })
+  @ApiResponse({ status: 401, description: 'Não autenticado' })
+  @ApiResponse({ status: 403, description: 'Fase pertence a outra organização' })
+  @ApiResponse({ status: 404, description: 'Fase não encontrada ou não é PHASE' })
+  async getByPhaseCfd(
+    @Param('phaseId') phaseId: string,
+    @Query() query: PeriodQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<CfdResponseDto> {
+    this.logger.log(`CFD by-phase phase=${phaseId} user=${user.sub}`);
+    const { projectId, taskIds } = await this.byPhaseResolver.resolve(phaseId, user);
+    return this.cfdService.calculate(projectId, query, taskIds);
+  }
+
+  /**
+   * Dashboard restrito às tasks-folha descendentes de uma fase.
+   *
+   * Promise.all interno paraleliza os 5 services. N+1 budget: 2 (CTE+resolver)
+   * + ~5 (queries internas dos services) = ~7 queries no total.
+   */
+  @Get('by-phase/:phaseId/dashboard')
+  @ApiOperation({
+    summary: 'Dashboard consolidado da fase',
+    description: 'Dashboard de tasks-folha descendentes (recursivo via CTE) — ADR-V2-047 F9b.',
+  })
+  @ApiParam({ name: 'phaseId', description: 'ID da fase (DTask idClasse=-200)', example: '7' })
+  @ApiQuery({ name: 'period', required: false, enum: ['today', 'week', 'month'] })
+  @ApiQuery({ name: 'periodFrom', required: false, description: 'Data inicial YYYY-MM-DD' })
+  @ApiQuery({ name: 'periodTo', required: false, description: 'Data final YYYY-MM-DD' })
+  @ApiResponse({ status: 200, type: DashboardResponseDto, description: 'Dashboard da fase' })
+  @ApiResponse({ status: 401, description: 'Não autenticado' })
+  @ApiResponse({ status: 403, description: 'Fase pertence a outra organização' })
+  @ApiResponse({ status: 404, description: 'Fase não encontrada ou não é PHASE' })
+  async getByPhaseDashboard(
+    @Param('phaseId') phaseId: string,
+    @Query() query: PeriodQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<DashboardResponseDto> {
+    this.logger.log(`Dashboard by-phase phase=${phaseId} user=${user.sub}`);
+    const { projectId, taskIds } = await this.byPhaseResolver.resolve(phaseId, user);
+    return this.dashboardService.getDashboard(projectId, query, taskIds);
+  }
 
   /**
    * Retorna as métricas de cycle time de um projeto.
@@ -102,10 +281,16 @@ export class FlowMetricsController {
   @Get(':projectId/cycle-time')
   @ApiOperation({
     summary: 'Cycle time do projeto',
-    description: 'Retorna p50/p75/p90/avg de cycle time (horas) baseado em dados de telemetria das tasks concluídas',
+    description:
+      'Retorna p50/p75/p90/avg de cycle time (horas) baseado em dados de telemetria das tasks concluídas',
   })
   @ApiParam({ name: 'projectId', description: 'ID do projeto', example: '123' })
-  @ApiQuery({ name: 'period', required: false, enum: ['today', 'week', 'month'], description: 'Período pré-definido' })
+  @ApiQuery({
+    name: 'period',
+    required: false,
+    enum: ['today', 'week', 'month'],
+    description: 'Período pré-definido',
+  })
   @ApiQuery({ name: 'periodFrom', required: false, description: 'Data inicial YYYY-MM-DD' })
   @ApiQuery({ name: 'periodTo', required: false, description: 'Data final YYYY-MM-DD' })
   @ApiResponse({ status: 200, type: CycleTimeResponseDto, description: 'Cycle time calculado' })
@@ -194,7 +379,12 @@ export class FlowMetricsController {
     description: 'Série temporal de tasks concluídas por dia ou semana',
   })
   @ApiParam({ name: 'projectId', description: 'ID do projeto', example: '123' })
-  @ApiQuery({ name: 'granularity', required: false, enum: ['day', 'week'], description: 'Granularidade temporal' })
+  @ApiQuery({
+    name: 'granularity',
+    required: false,
+    enum: ['day', 'week'],
+    description: 'Granularidade temporal',
+  })
   @ApiQuery({ name: 'period', required: false, enum: ['today', 'week', 'month'] })
   @ApiQuery({ name: 'periodFrom', required: false, description: 'Data inicial YYYY-MM-DD' })
   @ApiQuery({ name: 'periodTo', required: false, description: 'Data final YYYY-MM-DD' })

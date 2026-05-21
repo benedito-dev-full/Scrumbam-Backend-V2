@@ -374,6 +374,8 @@ Em caso de NEEDS_CHANGES ou REJECTED do Reviewer:
 - [ADR-V2-026 — AUDIT_GENERIC -489](./ADR-V2-026-audit-generic-dclass.md) — eventos reutilizados
 - [ADR-V2-027 — Project lifecycle via `metaDados._meta.action`](./ADR-V2-027-project-org-lifecycle.md) — pattern para cascade audit
 - [ADR-V2-FOLDERS-001 — Folders via DEntidade + DVincula](./ADR-V2-FOLDERS-001-folder-via-dentidade-dvincula.md) — precedente de modelagem polimórfica sem tabela nova
+- [ADR-V2-048 — Fases fora do board V3 (status derivado)](./ADR-V2-048-fases-fora-board-v3.md) — consequência operacional F9a desta ADR
+- [ADR-V2-049 — Telegram listener para eventos de domínio](./ADR-V2-049-telegram-listener-eventos-dominio.md) — consumer canal externo que reage a `phase.completed`
 - [Plano detalhado da iniciativa](../../workspace/plans/plan-entidades-fases-via-dtask-idpai-task1.md)
 
 ---

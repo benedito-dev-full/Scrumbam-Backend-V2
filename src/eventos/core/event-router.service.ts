@@ -21,6 +21,17 @@ export class EventRouterService {
     handler: (event: IEvent) => Promise<void>;
   }> = [];
 
+  /**
+   * Consumers extras registrados dinamicamente em runtime via
+   * `registerConsumer`. Permite que módulos externos (ex: `TelegramModule`,
+   * ADR-V2-049) anexem consumers sem criar import circular Eventos ↔ Channels.
+   * Cada entrada filtra por uma função `match(type) → boolean`.
+   */
+  private dynamicConsumers: Array<{
+    match: (type: string) => boolean;
+    consumer: IEventConsumer;
+  }> = [];
+
   constructor(
     private readonly auditConsumer: AuditLogConsumer,
     private readonly notificationConsumer: NotificationConsumer,
@@ -39,6 +50,19 @@ export class EventRouterService {
   ): void {
     this.webhookListeners.push({ events, handler });
     this.logger.log(`Webhook listener registered for ${events.length} event types`);
+  }
+
+  /**
+   * Registra um `IEventConsumer` que reage a eventos cujo `type` satisfaça
+   * `match`. Usado por módulos de canais externos (ex: Telegram, ADR-V2-049)
+   * para acoplar consumers de saída sem dependência cíclica.
+   *
+   * @param match - Função de filtro sobre `event.type` (ex: `t => t === 'phase.completed'`).
+   * @param consumer - Implementação de `IEventConsumer`.
+   */
+  registerConsumer(match: (type: string) => boolean, consumer: IEventConsumer): void {
+    this.dynamicConsumers.push({ match, consumer });
+    this.logger.log(`Dynamic consumer registered: ${consumer.name}`);
   }
 
   /**
@@ -64,6 +88,13 @@ export class EventRouterService {
           name: 'webhook-dynamic',
           handle: (e) => listener.handler(e),
         });
+      }
+    }
+
+    // Consumers extras (ADR-V2-049 — ex: TelegramNotificationConsumer)
+    for (const entry of this.dynamicConsumers) {
+      if (entry.match(event.type)) {
+        consumers.push(entry.consumer);
       }
     }
 
