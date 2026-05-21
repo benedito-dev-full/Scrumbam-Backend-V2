@@ -94,4 +94,14 @@ export class CreateTaskDto {
   @IsOptional()
   @IsIn(['FEATURE', 'BUG', 'IMPROVEMENT', 'REVIEW', 'EXPLAIN'])
   taskType?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'ID da task pai (DTask.chave) — hierarquia de fases (ADR-V2-047). ' +
+      'Quando omitido, a task fica na raiz (sem pai).',
+    example: '5',
+  })
+  @IsOptional()
+  @IsString()
+  idPai?: string;
 }

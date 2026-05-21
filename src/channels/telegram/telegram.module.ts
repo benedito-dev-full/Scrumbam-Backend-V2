@@ -14,6 +14,7 @@ import { TelegramFileDownloadService } from './telegram-file-download.service';
 import { TelegramMetricsService } from './telegram-metrics.service';
 import { TelegramRateLimitService } from './telegram-rate-limit.service';
 import { TelegramSecretGuard } from './telegram-secret.guard';
+import { TelegramNotificationConsumer } from './telegram-notification.consumer';
 // Commands (F10 Bloco C)
 import { StartHandler } from './commands/start.handler';
 import { PairHandler } from './commands/pair.handler';
@@ -60,12 +61,7 @@ import { CreateTaskFromTextIntent } from './intents/create-task-from-text.intent
  * @see CreateTaskFromTextIntent — intent para texto livre
  */
 @Module({
-  imports: [
-    EntidadesModule,
-    GroqModule,
-    ProjectsModule,
-    TasksModule,
-  ],
+  imports: [EntidadesModule, GroqModule, ProjectsModule, TasksModule],
   controllers: [TelegramWebhookController],
   providers: [
     TelegramWebhookService,
@@ -87,6 +83,9 @@ import { CreateTaskFromTextIntent } from './intents/create-task-from-text.intent
     StatusHandler,
     // Intent handlers (F10 Bloco C) — se autorregistram em onModuleInit
     CreateTaskFromTextIntent,
+    // F9c (ADR-V2-049) — listener Telegram para eventos de domínio.
+    // Auto-registra no EventRouterService via OnModuleInit.
+    TelegramNotificationConsumer,
   ],
 })
 export class TelegramModule {}

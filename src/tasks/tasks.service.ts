@@ -4,8 +4,10 @@ import { PrismaService } from '../prisma.service';
 import { EventProducerService } from '../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../common/services/correlation-id.service';
 import { TasksIdentifierService } from './tasks-identifier.service';
+import { PhaseHierarchyService } from './services/phase-hierarchy.service';
 import { validateTransition, isValidState } from './tasks-state-machine';
 import { TaskStatus, buildInitialTaskDados } from './schemas/task-dados.schema';
+import { PhaseMetricsService } from './services/phase-metrics.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { UpdateTaskStatusDto } from './dto/update-task-status.dto';
@@ -15,6 +17,9 @@ import { TaskResponseDto, ListTasksResponseDto } from './dto/task-response.dto';
 
 /** idClasse de DTask no seed F1 (classes canônicas V2). */
 const ID_CLASSE_TASK = BigInt(-154); // SCRUMBAN_TASK (seed classes.seed.ts)
+
+/** idClasse PHASE (-200) — agrupador hierárquico de tasks (ADR-V2-047). */
+const ID_CLASSE_PHASE = BigInt(-200);
 
 /** Mapa de status string → idClasse DTabela (seed F1). */
 const STATUS_TO_TABELA_CLASSE: Record<string, bigint> = {
@@ -74,6 +79,8 @@ export class TasksService {
     private readonly identifierService: TasksIdentifierService,
     private readonly eventProducer: EventProducerService,
     private readonly correlationIdService: CorrelationIdService,
+    private readonly phaseHierarchy: PhaseHierarchyService,
+    private readonly phaseMetrics: PhaseMetricsService,
   ) {}
 
   /**
@@ -125,6 +132,34 @@ export class TasksService {
 
     if (!project) {
       throw new NotFoundException(`Projeto ${dto.projectId} não encontrado`);
+    }
+
+    // Validar idPai (ADR-V2-047): pai deve existir, mesmo projeto, sem ciclo.
+    // No create taskId ainda nao existe, entao usamos newParentId apenas
+    // para descer a cadeia ascendente e validar profundidade.
+    let idPaiBigInt: bigint | null = null;
+    if (dto.idPai !== undefined && dto.idPai !== null) {
+      idPaiBigInt = BigInt(dto.idPai);
+
+      const paiExiste = await this.prisma.dTask.findFirst({
+        where: { chave: idPaiBigInt, excluido: false },
+        select: { idProject: true },
+      });
+      if (!paiExiste) {
+        throw new NotFoundException(`Pai ${dto.idPai} nao encontrado`);
+      }
+
+      const paiProjectId = paiExiste.idProject?.toString() ?? null;
+      if (paiProjectId !== projectId.toString()) {
+        throw new BadRequestException(
+          `Cross-project parent nao permitido: task.idProject=${projectId} vs pai.idProject=${paiProjectId}`,
+        );
+      }
+
+      // Profundidade: validateNoCycle aceita newParentId arbitrario e sobe
+      // a cadeia ascendente — taskId sentinela aqui e BigInt(0) (nao existe
+      // como chave real, portanto nunca colide). Garante MAX_DEPTH.
+      await this.phaseHierarchy.validateNoCycle(BigInt(0), idPaiBigInt);
     }
 
     const projectDados = project.dados as Record<string, unknown> | null;
@@ -182,6 +217,7 @@ export class TasksService {
           idAssignee: dto.assigneeId ? BigInt(dto.assigneeId) : null,
           idSprint: dto.sprintId ? BigInt(dto.sprintId) : null,
           idCreator: creatorId,
+          idPai: idPaiBigInt,
           dados: dadosPayload as Prisma.InputJsonValue,
         },
       });
@@ -207,6 +243,27 @@ export class TasksService {
       this.correlationIdService.getOrGenerate(),
       { source: TasksService.name },
     );
+
+    // ADR-V2-047 Fase 8: phase.created — emite ADICIONAL ao task.created quando
+    // a entidade criada é uma fase (idClasse=-200). Webhook trigger separado:
+    // assinantes de `task.*` continuam recebendo task.created; assinantes de
+    // `phase.*` recebem phase.created.
+    if (task.idClasse === ID_CLASSE_PHASE) {
+      await this.eventProducer.addInternalEvent(
+        'phase.created',
+        {
+          phaseId: task.chave.toString(),
+          nome: dto.nome,
+          identifier: createdIdentifier,
+          projectId: dto.projectId,
+          idPai: task.idPai?.toString() ?? null,
+          userId: creatorId.toString(),
+          userName: creator?.nome ?? null,
+        },
+        this.correlationIdService.getOrGenerate(),
+        { source: TasksService.name },
+      );
+    }
 
     const priorityMap = await this.buildPriorityMap([task.idPriority]);
     return this.buildResponse(task, priorityMap);
@@ -287,6 +344,73 @@ export class TasksService {
       ...(query.sprintId ? { idSprint: BigInt(query.sprintId) } : {}),
       ...(query.cursor ? { chave: { lt: BigInt(query.cursor) } } : {}),
     };
+
+    // ADR-V2-047 — Fase 4: filtros hierárquicos.
+    // `idClasse` (polimórfico) — string negativa → BigInt.
+    if (query.idClasse) {
+      where.idClasse = BigInt(query.idClasse);
+    }
+
+    // `idPai` — aceita string numérica OU literal "null" (raiz).
+    // Quando combinado com `depth >= 2`, expande via CTE recursiva
+    // (1 query extra para descobrir os chaves descendentes; nunca em loop).
+    if (query.idPai !== undefined) {
+      if (query.idPai === 'null') {
+        where.idPai = null;
+      } else {
+        const rootId = BigInt(query.idPai);
+        // depth=0 → apenas a própria raiz
+        // depth=1 (default quando idPai presente) → filhas diretas
+        // depth>=2 → descendentes recursivos limitados por `depth`
+        const depth = query.depth ?? 1;
+
+        if (depth === 0) {
+          // Combinar com cursor (chave: { lt: cursor }) se já presente.
+          if (where.chave && typeof where.chave === 'object') {
+            where.chave = { ...(where.chave as Prisma.BigIntFilter), equals: rootId };
+          } else {
+            where.chave = rootId;
+          }
+        } else if (depth === 1) {
+          where.idPai = rootId;
+        } else {
+          // CTE recursiva PostgreSQL — descobre todos os descendentes até
+          // `depth` níveis e usa o resultado em `chave IN (...)`. Guardrail
+          // hardcoded 20 também na CTE (defense-in-depth com MAX_PHASE_DEPTH).
+          const cappedDepth = Math.min(depth, 20);
+          const descendants = await this.prisma.$queryRaw<Array<{ chave: bigint }>>`
+            WITH RECURSIVE descendants AS (
+              SELECT chave, 0 AS depth
+              FROM "DTask"
+              WHERE "idPai" = ${rootId} AND excluido = false
+
+              UNION ALL
+
+              SELECT t.chave, d.depth + 1
+              FROM "DTask" t
+              INNER JOIN descendants d ON t."idPai" = d.chave
+              WHERE t.excluido = false AND d.depth < ${cappedDepth - 1} AND d.depth < 20
+            )
+            SELECT chave FROM descendants
+          `;
+
+          if (descendants.length === 0) {
+            return { items: [], pagination: { hasMore: false, nextCursor: null } };
+          }
+
+          const descendantIds = descendants.map((d) => d.chave);
+          // Combinar com cursor (chave: { lt: cursor }) se já presente.
+          if (where.chave && typeof where.chave === 'object') {
+            where.chave = {
+              ...(where.chave as Prisma.BigIntFilter),
+              in: descendantIds,
+            };
+          } else {
+            where.chave = { in: descendantIds };
+          }
+        }
+      }
+    }
 
     // Filtro por status: buscar idStatus das DTabelas correspondentes
     const statuses = query.statuses?.length ? query.statuses : query.status ? [query.status] : [];
@@ -448,6 +572,21 @@ export class TasksService {
       }
     }
 
+    // Mover na hierarquia de fases (ADR-V2-047) — semantica:
+    //   undefined → nao tocar
+    //   null      → mover para raiz (idPai=null)
+    //   string    → setar novo pai; valida ciclo + project-consistency
+    let idPaiUpdate: bigint | null | undefined = undefined;
+    if (dto.idPai !== undefined) {
+      if (dto.idPai === null) {
+        idPaiUpdate = null;
+      } else {
+        idPaiUpdate = BigInt(dto.idPai);
+        await this.phaseHierarchy.validateNoCycle(taskId, idPaiUpdate);
+        await this.phaseHierarchy.validateProjectConsistency(taskId, idPaiUpdate);
+      }
+    }
+
     const updated = await this.prisma.dTask.update({
       where: { chave: taskId },
       data: {
@@ -457,9 +596,26 @@ export class TasksService {
           ? { idAssignee: dto.assigneeId ? BigInt(dto.assigneeId) : null }
           : {}),
         ...(idPriorityUpdate !== undefined ? { idPriority: idPriorityUpdate } : {}),
+        ...(idPaiUpdate !== undefined ? { idPai: idPaiUpdate } : {}),
         ...(novosDados !== undefined ? { dados: novosDados as Prisma.InputJsonValue } : {}),
       },
     });
+
+    // ADR-V2-047 Fase 8: phase.updated. Emite quando a task é uma fase
+    // (idClasse=-200). Pós-commit (Pilar 7).
+    if (updated.idClasse === ID_CLASSE_PHASE) {
+      await this.eventProducer.addInternalEvent(
+        'phase.updated',
+        {
+          phaseId: updated.chave.toString(),
+          nome: updated.nome,
+          projectId: updated.idProject?.toString() ?? null,
+          idPai: updated.idPai?.toString() ?? null,
+        },
+        this.correlationIdService.getOrGenerate(),
+        { source: TasksService.name },
+      );
+    }
 
     const priorityMap = await this.buildPriorityMap([updated.idPriority]);
     return this.buildResponse(updated, priorityMap);
@@ -513,6 +669,19 @@ export class TasksService {
       if (!pid || !accessibleProjectIds.includes(pid)) {
         throw new NotFoundException(`Task ${id} não encontrada`);
       }
+    }
+
+    // ADR-V2-048: Fases (idClasse=-200) NÃO têm status próprio — o status é
+    // derivado da agregação de tasks-folha descendentes (percent via
+    // PhaseMetricsService.compute, F5 do ADR-V2-047). Bloqueamos a tentativa
+    // de mover uma fase no board V3 antes de qualquer mutação para evitar:
+    //   1. Inconsistência semântica entre `dados.v3.state` e `percent`;
+    //   2. Emissão indevida de `phase.completed` sem agregação;
+    //   3. Confusão do frontend recursivo que renderiza Fase + Task polimorficamente.
+    if (task.idClasse === ID_CLASSE_PHASE) {
+      throw new BadRequestException(
+        'Fase não tem status próprio — use GET /tasks/:id/metrics para consultar percent agregado.',
+      );
     }
 
     // Ler estado atual dos dados
@@ -629,6 +798,19 @@ export class TasksService {
       { source: TasksService.name },
     );
 
+    // ADR-V2-047 Fase 8: detector de phase.completed.
+    // Disparado quando uma TASK FOLHA (não PHASE) muda para DONE e o pai
+    // direto cruza 100% de conclusão. Idempotência via snapshot em
+    // dados._meta.phaseSnapshotPercent. Falha NÃO propaga (try/catch isolado).
+    if (toStatus === 'DONE' && task.idClasse !== ID_CLASSE_PHASE && task.idPai !== null) {
+      void this.detectPhaseCompletion(task.idPai, task.idProject).catch((err) => {
+        this.logger.warn(
+          `phase.completed detector falhou para parent=${task.idPai?.toString()} ` +
+            `taskId=${taskId.toString()}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+    }
+
     const priorityMap = await this.buildPriorityMap([updated.idPriority]);
     return this.buildResponse(updated, priorityMap);
   }
@@ -681,23 +863,43 @@ export class TasksService {
   }
 
   /**
-   * Soft-delete de task.
+   * Soft-delete de task. Cascade opcional para fases (ADR-V2-047).
+   *
+   * Comportamento de `cascade`:
+   * - `undefined` (default): cascade = true se task eh PHASE (idClasse=-200);
+   *   false caso contrario.
+   * - `true`: cascade explicito — usa `PhaseHierarchyService.softDeleteCascade`
+   *   (CTE recursiva — 1 statement marca task + descendentes como `excluido=true`).
+   * - `false`: soft-delete somente da task; descendentes ficam orfaos
+   *   (`idPai` aponta para task deletada — comportamento intencional para
+   *   cenarios de "desvincular" sem destruir).
    *
    * @param id - Chave BigInt da task (string)
+   * @param accessibleProjectIds - Scope tenant (ADR-V2-042)
+   * @param options - Opcoes (cascade)
+   * @returns objeto com contagem de afetados (raiz + descendentes em cascade)
    *
    * @throws {NotFoundException} Se task não encontrada
    *
    * @example
    * ```typescript
+   * // Default: cascade ligado se for PHASE
    * await service.delete('7');
+   *
+   * // Cascade explicito
+   * await service.delete('7', undefined, { cascade: true });
    * ```
    */
-  async delete(id: string, accessibleProjectIds?: string[]): Promise<void> {
+  async delete(
+    id: string,
+    accessibleProjectIds?: string[],
+    options?: { cascade?: boolean },
+  ): Promise<{ affected: number }> {
     const taskId = BigInt(id);
 
     const existing = await this.prisma.dTask.findFirst({
       where: { chave: taskId, excluido: false },
-      select: { chave: true, idProject: true },
+      select: { chave: true, idProject: true, idClasse: true },
     });
 
     if (!existing) {
@@ -712,15 +914,166 @@ export class TasksService {
       }
     }
 
+    // Decisao de cascade:
+    //   options.cascade definido → respeitar valor explicito
+    //   omitido → default = true se task eh PHASE, false caso contrario
+    const isPhase = existing.idClasse === ID_CLASSE_PHASE;
+    const cascade = options?.cascade !== undefined ? options.cascade : isPhase;
+
+    if (cascade) {
+      const result = await this.phaseHierarchy.softDeleteCascade(taskId);
+      this.logger.log(
+        `Task ${taskId} deletada com cascade (isPhase=${isPhase}); afetados=${result.affected}`,
+      );
+
+      // ADR-V2-047 Fase 8: phase.deleted. Emite quando a raiz da árvore
+      // deletada é uma fase (cascade=true && isPhase é o caso padrão).
+      if (isPhase) {
+        await this.eventProducer.addInternalEvent(
+          'phase.deleted',
+          {
+            phaseId: taskId.toString(),
+            projectId: existing.idProject?.toString() ?? null,
+            cascade: true,
+            affected: result.affected,
+          },
+          this.correlationIdService.getOrGenerate(),
+          { source: TasksService.name },
+        );
+      }
+
+      return result;
+    }
+
     await this.prisma.dTask.update({
       where: { chave: taskId },
       data: { excluido: true },
     });
 
-    this.logger.log(`Task ${taskId} deletada (soft delete)`);
+    this.logger.log(`Task ${taskId} deletada (soft delete sem cascade)`);
+
+    // ADR-V2-047 Fase 8: phase.deleted sem cascade — ainda emite se a task
+    // deletada é uma fase. cascade=false signaliza que descendentes ficaram.
+    if (isPhase) {
+      await this.eventProducer.addInternalEvent(
+        'phase.deleted',
+        {
+          phaseId: taskId.toString(),
+          projectId: existing.idProject?.toString() ?? null,
+          cascade: false,
+          affected: 1,
+        },
+        this.correlationIdService.getOrGenerate(),
+        { source: TasksService.name },
+      );
+    }
+
+    return { affected: 1 };
   }
 
   // ─── Helpers privados ─────────────────────────────────────────────────────
+
+  /**
+   * Detector de transição "fase concluída" (ADR-V2-047 — Fase 8).
+   *
+   * Disparado pelo `updateStatus` quando uma task FOLHA (não PHASE) muda para
+   * DONE e tem pai direto. Calcula o `percent` da fase pai (recursivo) e, se
+   * cruzou para 100% (não estava em 100% antes), emite `phase.completed`.
+   *
+   * **Cobertura v1 (limitação conhecida):** apenas o PAI DIRETO da task que
+   * mudou. Cadeia ancestral completa (avô, bisavô) não é coberta. Em uma
+   * cascata de fases aninhadas, somente o pai mais próximo é avaliado.
+   * Cobertura ancestral completa fica para iteração futura.
+   *
+   * **Idempotência:** o último `percent` calculado para a fase é gravado em
+   * `DTask.dados._meta.phaseSnapshotPercent`. Antes de emitir, comparamos o
+   * snapshot anterior: se já era 100, NÃO re-emite (evita ruído em
+   * transições DONE→READY→DONE). Deep-merge preserva outros campos de `dados`.
+   *
+   * **Resiliência:** caller invoca via `void this.detectPhaseCompletion(...)
+   *   .catch(...)`. Falha aqui NÃO bloqueia o `updateStatus` da task original
+   *   (Pilar 7 — eventos pós-persistência; consistência eventual aceitável).
+   *
+   * **N+1 budget:** ~4 queries no total — (1) findFirst do pai, (2) PhaseMetricsService.compute
+   * (que faz sua própria CTE recursiva — ~2 queries internas: pré-query de idProject +
+   * CTE), (3) update opcional do snapshot. Performance controlada, sem N+1.
+   *
+   * @param phaseId - chave do pai direto da task que mudou (`task.idPai`)
+   * @param projectId - `task.idProject` da task filha (para payload do evento)
+   */
+  private async detectPhaseCompletion(phaseId: bigint, projectId: bigint | null): Promise<void> {
+    // 1. Buscar snapshot anterior + idClasse do pai (1 query — sem N+1)
+    const parent = await this.prisma.dTask.findFirst({
+      where: { chave: phaseId, excluido: false },
+      select: { chave: true, idClasse: true, dados: true, idProject: true },
+    });
+
+    if (!parent) {
+      this.logger.debug(`detectPhaseCompletion: pai ${phaseId} não encontrado (soft-deleted?).`);
+      return;
+    }
+
+    // Cobertura v1: só detecta se o pai direto for uma fase.
+    // Se não for, nada a fazer (cadeia ancestral fica fora do escopo).
+    if (parent.idClasse !== ID_CLASSE_PHASE) {
+      return;
+    }
+
+    // 2. Snapshot anterior (idempotência)
+    const dadosAtuais = (parent.dados as Record<string, unknown> | null) ?? {};
+    const metaAtual = (dadosAtuais._meta as Record<string, unknown> | undefined) ?? {};
+    const lastSnapshot = (metaAtual.phaseSnapshotPercent as number | undefined) ?? null;
+
+    if (lastSnapshot === 100) {
+      // Já estava em 100 — não re-emite (evita ruído em DONE→READY→DONE).
+      this.logger.debug(
+        `detectPhaseCompletion: fase ${phaseId} já estava em 100% (snapshot=${lastSnapshot}). Skip.`,
+      );
+      return;
+    }
+
+    // 3. Calcular percent atual via PhaseMetricsService
+    const metrics = await this.phaseMetrics.compute(phaseId, { recursive: true });
+    const currentPercent = metrics.percent;
+
+    // 4. Atualizar snapshot opportunisticamente (1 query — só quando vale a pena)
+    if (currentPercent !== lastSnapshot) {
+      const novosDados = {
+        ...dadosAtuais,
+        _meta: {
+          ...metaAtual,
+          phaseSnapshotPercent: currentPercent,
+          phaseSnapshotAt: new Date().toISOString(),
+        },
+      };
+      await this.prisma.dTask.update({
+        where: { chave: phaseId },
+        data: { dados: novosDados as Prisma.InputJsonValue },
+      });
+    }
+
+    // 5. Emitir phase.completed se cruzou para 100% agora
+    if (currentPercent === 100) {
+      await this.eventProducer.addInternalEvent(
+        'phase.completed',
+        {
+          phaseId: phaseId.toString(),
+          projectId: (parent.idProject ?? projectId)?.toString() ?? null,
+          percent: 100,
+          completedAt: new Date().toISOString(),
+          total: metrics.total,
+          done: metrics.done,
+        },
+        this.correlationIdService.getOrGenerate(),
+        { source: TasksService.name },
+      );
+
+      this.logger.log(
+        `phase.completed emitido para fase=${phaseId.toString()} ` +
+          `(total=${metrics.total}, done=${metrics.done})`,
+      );
+    }
+  }
 
   /**
    * Resolve enum de priority (HIGH/MEDIUM/LOW/URGENT) → chave BigInt

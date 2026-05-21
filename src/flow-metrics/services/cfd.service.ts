@@ -97,14 +97,30 @@ export class CfdService {
    *
    * @see CfdResponseDto — estrutura de retorno
    */
-  async calculate(projectId: bigint, period: PeriodInput): Promise<CfdResponseDto> {
-    this.logger.debug(`Calculando CFD projeto=${projectId}`);
+  async calculate(
+    projectId: bigint,
+    period: PeriodInput,
+    taskIdsFilter?: bigint[],
+  ): Promise<CfdResponseDto> {
+    this.logger.debug(
+      `Calculando CFD projeto=${projectId}` +
+        (taskIdsFilter !== undefined ? ` (filtro ${taskIdsFilter.length} tasks)` : ''),
+    );
+
+    // F9b: fase sem descendentes → série vazia sem ir ao banco
+    if (taskIdsFilter !== undefined && taskIdsFilter.length === 0) {
+      return { series: [] };
+    }
 
     const dateRange = this.periodResolver.resolve(period);
 
     // 1. Buscar IDs de todas as tasks do projeto (não excluídas)
     const taskRows = await this.prisma.dTask.findMany({
-      where: { idProject: projectId, excluido: false },
+      where: {
+        idProject: projectId,
+        excluido: false,
+        ...(taskIdsFilter !== undefined && { chave: { in: taskIdsFilter } }),
+      },
       select: { chave: true, idStatus: true, criadoEm: true },
     });
 

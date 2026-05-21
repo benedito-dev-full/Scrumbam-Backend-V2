@@ -9,6 +9,8 @@ export const NOTIFICATION_TRIGGERS: ReadonlySet<string> = new Set<string>([
   EVENT_TYPES.EXECUTION_AWAITING_APPROVAL,
   EVENT_TYPES.EXECUTION_COMPLETED,
   EVENT_TYPES.EXECUTION_FAILED,
+  // ADR-V2-049 (F9c) — fase concluída gera notificação in-app além do Telegram
+  EVENT_TYPES.PHASE_COMPLETED,
 ]);
 
 /**

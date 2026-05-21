@@ -18,11 +18,13 @@ import { McpKeyService } from './services/mcp-key.service';
 import { McpRateLimitService } from './services/mcp-rate-limit.service';
 import { McpRouterService } from './services/mcp-router.service';
 import { CreateTaskTool } from './tools/create-task.tool';
+import { GetPhaseTreeTool } from './tools/get-phase-tree.tool';
 import { GetProjectTool } from './tools/get-project.tool';
 import { GetTaskTool } from './tools/get-task.tool';
 import { GetUnreadCountTool } from './tools/get-unread-count.tool';
 import { ListMembersTool } from './tools/list-members.tool';
 import { ListNotificationsTool } from './tools/list-notifications.tool';
+import { ListPhasesTool } from './tools/list-phases.tool';
 import { ListProjectsTool } from './tools/list-projects.tool';
 import { ListSprintsTool } from './tools/list-sprints.tool';
 import { ListTasksTool } from './tools/list-tasks.tool';
@@ -33,7 +35,15 @@ import { UpdateStatusTool } from './tools/update-status.tool';
 import { UpdateTaskTool } from './tools/update-task.tool';
 
 @Module({
-  imports: [AuthModule, EntidadesModule, TasksModule, ProjectsModule, TabelasModule, NotificationsModule, SearchModule],
+  imports: [
+    AuthModule,
+    EntidadesModule,
+    TasksModule,
+    ProjectsModule,
+    TabelasModule,
+    NotificationsModule,
+    SearchModule,
+  ],
   controllers: [McpController, McpKeysController],
   providers: [
     McpJsonRpcService,
@@ -57,6 +67,8 @@ import { UpdateTaskTool } from './tools/update-task.tool';
     UpdateNotificationTool,
     GetUnreadCountTool,
     SearchTasksTool,
+    ListPhasesTool,
+    GetPhaseTreeTool,
   ],
   exports: [McpKeyService, McpRouterService, McpRateLimitService, McpAuditService],
 })

@@ -29,6 +29,13 @@ const TYPE_TO_CLASSE: Readonly<Record<string, bigint>> = Object.freeze({
   'task.assigned': BigInt(-498), // reusa via metaDados._meta.action
   'task.deleted': BigInt(-498), // reusa via metaDados._meta.action
 
+  // Phases (ADR-V2-047 — Fase 8). Reusa -489 AUDIT_GENERIC (padrão ADR-V2-027 —
+  // sem DClasse semântica dedicada). Distinção via metaDados._meta.action.
+  'phase.created': BigInt(-489),
+  'phase.updated': BigInt(-489),
+  'phase.deleted': BigInt(-489),
+  'phase.completed': BigInt(-489),
+
   // Project lifecycle (ADR-V2-027)
   'project.created': BigInt(-499), // PROJECT_LIFECYCLE
   'project.updated': BigInt(-499),

@@ -45,7 +45,7 @@ describe('MCP Bloco D - compatibilidade, timeout, metricas e doc', () => {
     });
   });
 
-  it('tools/list retorna 5 tools com schemas completos do schema estatico cacheado', async () => {
+  it('tools/list retorna 16 tools com schemas completos do schema estatico cacheado', async () => {
     const controller = new McpController(new McpJsonRpcService(), new McpRouterService());
 
     const result = await controller.handle({ jsonrpc: '2.0', method: 'tools/list', id: 'tools' }, {
@@ -57,7 +57,7 @@ describe('MCP Bloco D - compatibilidade, timeout, metricas e doc', () => {
       id: 'tools',
       result: { tools: toolsSchema.tools },
     });
-    expect(toolsSchema.tools).toHaveLength(14);
+    expect(toolsSchema.tools).toHaveLength(16);
     expect(toolsSchema.tools.map((tool) => tool.name)).toEqual([
       'list_tasks',
       'create_task',
@@ -73,6 +73,8 @@ describe('MCP Bloco D - compatibilidade, timeout, metricas e doc', () => {
       'update_notification',
       'get_unread_count',
       'search_tasks',
+      'list_phases',
+      'get_phase_tree',
     ]);
     for (const tool of toolsSchema.tools) {
       expect(tool.inputSchema).toEqual(expect.objectContaining({ type: 'object' }));
@@ -88,6 +90,8 @@ describe('MCP Bloco D - compatibilidade, timeout, metricas e doc', () => {
     );
     const router = new McpRouterService(
       slowTool as never,
+      undefined,
+      undefined,
       undefined,
       undefined,
       undefined,
@@ -125,6 +129,8 @@ describe('MCP Bloco D - compatibilidade, timeout, metricas e doc', () => {
 
   it('timeout nao se aplica a initialize nem tools/list', async () => {
     const router = new McpRouterService(
+      undefined,
+      undefined,
       undefined,
       undefined,
       undefined,

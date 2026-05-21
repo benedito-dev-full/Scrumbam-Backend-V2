@@ -53,12 +53,65 @@ export class AccountLinkService {
     });
 
     if (!link || !link.idLocEscritu) {
-      this.logger.debug(
-        `Vinculo nao encontrado para channel=${channelName} chatId=${chatId}`,
-      );
+      this.logger.debug(`Vinculo nao encontrado para channel=${channelName} chatId=${chatId}`);
       return null;
     }
 
     return link.idLocEscritu;
+  }
+
+  /**
+   * Resolve o chatId externo a partir de um userId (DEntidade.chave) e nome de canal.
+   *
+   * Query inversa de `findByChat`. Usada por `TelegramNotificationConsumer`
+   * (F9c, ADR-V2-049) para descobrir o `chatId` de cada destinatário antes
+   * de chamar `telegram.sendMessage`. Se o usuário não pareou o canal,
+   * retorna `null` — o consumer faz skip silencioso (não é erro).
+   *
+   * Mesma topologia do `findByChat`:
+   *  - `DVincula idClasse=-483` (CHANNEL_LINK)
+   *  - `idLocEscritu = userEntidadeId` (DEntidade.chave do usuário)
+   *  - `metaDados.channelName` filtra o canal
+   *  - `metaDados.chatId` é a string a retornar (parse para BigInt).
+   *
+   * @param channelName - Nome do canal (ex: `'telegram'`).
+   * @param userEntidadeId - Chave BigInt do `DEntidade` do usuário.
+   * @returns ChatId do canal como BigInt, ou `null` se não houver vínculo.
+   *
+   * @example
+   * ```typescript
+   * const chatId = await service.findChatByUser('telegram', BigInt(42));
+   * if (chatId) {
+   *   await telegram.sendMessage(chatId, 'Fase concluída!');
+   * }
+   * ```
+   */
+  async findChatByUser(channelName: string, userEntidadeId: bigint): Promise<bigint | null> {
+    const link = await this.prisma.dVincula.findFirst({
+      where: {
+        idClasse: AccountLinkService.CHANNEL_LINK_CLASS,
+        excluido: false,
+        idLocEscritu: userEntidadeId,
+        AND: [{ metaDados: { path: ['channelName'], equals: channelName } }],
+      },
+      select: { metaDados: true },
+    });
+
+    if (!link) {
+      this.logger.debug(`Chat nao encontrado para channel=${channelName} userId=${userEntidadeId}`);
+      return null;
+    }
+
+    const meta = (link.metaDados as Record<string, unknown> | null) ?? null;
+    const rawChatId = meta?.['chatId'];
+
+    if (typeof rawChatId !== 'string' || !/^-?\d+$/.test(rawChatId)) {
+      this.logger.warn(
+        `chatId invalido em vinculo channel=${channelName} userId=${userEntidadeId}`,
+      );
+      return null;
+    }
+
+    return BigInt(rawChatId);
   }
 }

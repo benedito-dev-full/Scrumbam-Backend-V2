@@ -14,6 +14,64 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F10 ADR-V2-047 Fase 10: Testes End-to-End Controller-Level (Fechamento de ADR-V2-047)** - 2026-05-21
+  - **E2E Tests:** 4 testes controller-level em `tasks-phase-flow.e2e.spec.ts`
+    - Cenario 1 (Happy Path): criar fase → 3 filhas → tree → metrics; validação contrato HTTP completo (79/79 PASS)
+    - Cenarios 2-4 (Smoke Tests): propagação HTTP de BadRequestException (depth guard, ciclo, cross-project); lógica adversarial em F3 `phase-hierarchy.service.spec.ts` não duplicada
+  - **Filosofia Anti-duplicação:** cenários adversariais (depth>20, ciclo, cross-project) já cobertos em F3; F10 valida APENAS a camada controller
+  - **Mocks:** PrismaService, TasksService, PhaseTreeService, PhaseMetricsService via TestingModule; ZERO banco real, ZERO testcontainers (CEO 2026-05-21)
+  - **Melhorias Cosméticas:** comentário clareza (linha 242), factory `buildTaskResponse` com campos opcionais (`priority`, `taskType`, `assigneeId`, `sprintId`), JSDoc Cenario 3 menciona "criar ou mover"
+  - **Tests:** 4 novos (PASS); baseline 75 (F0–F9) preservada; total suite 179/24 testes scope `tasks`
+  - **Pilares:** Pilar 2 RESPEITADO (TasksController genérico); Pilar 3 RESPEITADO (zero seed change)
+  - **ADRs:** ADR-V2-047 F10 (completa, ADR FECHADO F0–F10), ADR-V2-001, ADR-V2-042
+  - **Quality Score:** 9.0/10 APPROVED | Build: PASS, TypeScript: 0 errors | Reviewer: Haiku
+
+- **ADR-V2-047 FECHAMENTO COMPLETO:** F0–F10 entregues (F2, F6 adiados v2); scores médio 8.7/10; branch `feature/dtask-fases-via-idpai` pronta merge (6 commits ahead origin)
+
+- **F9 ADR-V2-047 Fase 9: V3 Guard + Flow Metrics by-Phase + Telegram Listener** - 2026-05-21
+  - **F9a V3 Guard:** Guard `BadRequestException` em `TasksService.updateStatus()` validando `idClasse == -200` (PHASE); impede update em classes não-fases (Pilar 2 DRY)
+  - **F9b Flow Metrics by-Phase:** 6 rotas GET `/flow-metrics/by-phase/:phaseId/<metric>` reusando 6 services com novo `taskIdsFilter?` retrocompatível; novo `PhaseDescendantsService` (CTE recursiva, depth<20); novo `ByPhaseResolverService` (resolve + tenant scope); 39 tests novos
+  - **F9c Telegram Listener:** Novo `TelegramNotificationConsumer` em `src/channels/telegram/` consumindo `phase.completed` (F8) com idempotência via DEvento `-494 TELEGRAM_MSG_OUT` REUTILIZADA (ADR-V2-008); destinatários v1 = idCreator + assignees diretos; tenant scope 2 camadas; timeout 3s via Promise.race; token ausente = skip silencioso; novo `AccountLinkService.findChatByUser()` para lookup; 47 tests novos
+  - **Decisões Críticas:** Reuso de `-494 TELEGRAM_MSG_OUT` evita sequestro de chave, mudança em seed (Pilar 3 inviolado), novo DClasse; ADR-V2-048 (fases fora board V3) e ADR-V2-049 (Telegram pattern replicável) redigidas
+  - **Pilares:** Pilar 2 (sem controller novo; reusa `/flow-metrics` + EventRouterService); Pilar 3 (ZERO mudança seed — reutiliza `-494`)
+  - **Tests:** 91 novos PASS (5+39+47); retrocompat preservada nos 6 flow-metrics services; baseline 24 falhas pré-existentes mantida
+  - **ADRs:** ADR-V2-047 F9 (completa), ADR-V2-048 (fases fora V3), ADR-V2-049 (listener Telegram), ADR-V2-001 (zero tabela), ADR-V2-008 (DEvento), ADR-V2-042 (tenant isolation)
+  - **Quality Score:** 8.7/10 APPROVED | Build: PASS, TypeScript: 0 errors | Reviewer: Sonnet
+
+- **F8 ADR-V2-047 Fase 8: Webhooks/Eventos — registro de 4 event types `phase.created/updated/deleted/completed` + detector idempotente `phase.completed` no `TasksService.updateStatus`** - 2026-05-21
+  - **Event Types:** 4 novos (`phase.created`, `phase.updated`, `phase.deleted`, `phase.completed`) registrados em supported-events + event-types + webhook-triggers + audit-log
+  - **Detector:** `private detectPhaseCompletion(phaseId, projectId)` — fire-and-forget em `updateStatus`
+  - **Idempotência:** snapshot em `DTask.dados._meta.phaseSnapshotPercent`; skip re-emissão em DONE→READY→DONE
+  - **Cobertura v1:** pai DIRETO apenas; cadeia ancestral para v2
+  - **Pilares:** Pilar 2 RESPEITADO (sem PhasesService novo), Pilar 7 RESPEITADO (emissão pós-persistência)
+  - **Performance:** ~4 queries: findFirst + compute CTE (~2) + update opcional
+  - **Testes:** 11 novos + 1 correção (PhaseMetricsService mock) = todos PASS
+  - **ADRs:** ADR-V2-047 F8, ADR-V2-001 (zero tabela), ADR-V2-042 (tenant isolation)
+  - **Quality Score:** 8.2/10 APPROVED
+
+- **F11 Task #8: MCP Tools `list_phases` + `get_phase_tree` + filtro `idClasse` (ADR-V2-047 Fase 7)** - 2026-05-21
+  - **MCP Tools:** 2 novos (`list_phases`, `get_phase_tree`) + extensão `list_tasks` com filtro `idClasse` polimorfico
+  - **Listagem:** `list_phases` com cursor pagination, anti-enumeration tenant gate, `includeMetrics` compat futura
+  - **Árvore:** `get_phase_tree` com CTE recursiva (ZERO N+1), suporte a métricas consolidadas (status DONE/FAILED/EXECUTING/PENDING), maxDepth 1..20 guardrail
+  - **Filtro:** `idClasse` em `list_tasks` filtra por tipo de task (-200=PHASE, -154=SCRUMBAN_TASK, ou domínio específico), validação regex `^-?\d+$`
+  - **Schema:** tools.schema.json 14→16 tools (list_phases, get_phase_tree, updated list_tasks)
+  - **Testes:** 25 novos (8+10+7 casos), 158/158 MCP PASS (schemas consistency, tenant isolation, metrics)
+  - **Pilares:** Pilar 2 RESPEITADO (TasksService + PhaseTreeService reutilizados); Pilar 3 RESPEITADO (zero DClasses novas, seed canônico)
+  - **ADRs:** ADR-V2-047 F7 (integração MCP), ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant isolation)
+  - **Quality:** 9.0/10 APPROVED | Build: PASS, TypeScript: 0 errors, Tests: 158/158 PASS
+
+- **F5 Task #2: CTE Recursivas de Tree e Metrics — ADR-V2-047 Fase 5 (Fases via DTask.idPai) — COMPLETA** - 2026-05-21
+  - **Services:** `PhaseTreeService.buildTree()` com CTE recursiva + montagem memória (ZERO N+1); `PhaseMetricsService.compute()` com JOIN a DTabela para status
+  - **Endpoints:** GET `/tasks/:id/tree?maxDepth=N&includeMetrics=bool` (200 árvore aninhada); GET `/tasks/:id/metrics?recursive=bool` (200 agregação)
+  - **Testes:** 25 novos unit (tree + metrics) + 9 atualizados (controller) = 52/52 PASS
+  - **Pilares:** Pilar 2 RESPEITADO (endpoints genéricos TasksController); Pilar 3 RESPEITADO (zero DClasses novas)
+  - **DTOs:** PhaseTreeResponseDto, PhaseMetricsResponseDto com tipagem completa
+  - **JSDoc:** Documentação de literais SQL hardcoded (-200 PHASE, -444/-445/-443 status) + padrão seguro (seed canônico)
+  - **Decisões:** CTE JOIN com DTabela.idClasse para resolução de status (estável vs runtime lookup); max depth 20 guardrail hardcoded
+  - **Performance:** 2-3 queries total (sem/com métricas), ~45-120ms latência, queries/request ZERO N+1
+  - **ADRs:** ADR-V2-047 (implementação 100% Fases 0-5 COMPLETA), ADR-V2-001 (zero tabela nova), ADR-V2-042 (tenant gate)
+  - **Quality Score:** 8.8/10 APPROVED | Build: PASS, TypeScript: 0 errors, Tests: 52/52 PASS
+
 - **Folders MVP: Agrupamento de Projetos por Organização (Pós-F5, ADR-V2-FOLDERS-001)** - 2026-05-18
   - **DClasses novas (Pilar 3):** -155 FOLDER + -183 FOLDER_PROJECT_LINK (sem tabela ou coluna nova — ADR-V2-001 respeitado)
   - **Service `FoldersService`:** 9 métodos (create, findAllByOrg, listUnassigned, listProjects, update, delete, moveProject + helpers)

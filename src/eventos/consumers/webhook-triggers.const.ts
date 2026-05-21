@@ -1,4 +1,11 @@
-const WEBHOOK_ALLOWED_PREFIXES = ['task.', 'project.', 'org.', 'execution.'] as const;
+const WEBHOOK_ALLOWED_PREFIXES = [
+  'task.',
+  'project.',
+  'org.',
+  'execution.',
+  // ADR-V2-047 — Fase 8: phase.created/updated/deleted/completed
+  'phase.',
+] as const;
 
 const WEBHOOK_BLOCKED_PREFIXES = [
   'system.',

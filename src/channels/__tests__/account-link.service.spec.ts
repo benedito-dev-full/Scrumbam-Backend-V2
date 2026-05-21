@@ -22,10 +22,7 @@ describe('AccountLinkService', () => {
     };
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        AccountLinkService,
-        { provide: PrismaService, useValue: prisma },
-      ],
+      providers: [AccountLinkService, { provide: PrismaService, useValue: prisma }],
     }).compile();
 
     service = module.get<AccountLinkService>(AccountLinkService);
@@ -102,6 +99,63 @@ describe('AccountLinkService', () => {
       expect(callArgs.where.AND).toEqual([
         { metaDados: { path: ['channelName'], equals: 'telegram' } },
         { metaDados: { path: ['chatId'], equals: chatId.toString() } },
+      ]);
+    });
+  });
+
+  // ─── F9c (ADR-V2-049) — query inversa: user → chatId ────────────────────
+  describe('findChatByUser', () => {
+    it('deve retornar chatId BigInt quando vínculo existe', async () => {
+      prisma.dVincula.findFirst.mockResolvedValue({
+        metaDados: { channelName: 'telegram', chatId: '123456789' },
+      });
+
+      const result = await service.findChatByUser('telegram', userId);
+
+      expect(result).toBe(BigInt(123456789));
+    });
+
+    it('deve retornar null quando vínculo não existe', async () => {
+      prisma.dVincula.findFirst.mockResolvedValue(null);
+
+      const result = await service.findChatByUser('telegram', userId);
+
+      expect(result).toBeNull();
+    });
+
+    it('deve retornar null quando metaDados não tem chatId', async () => {
+      prisma.dVincula.findFirst.mockResolvedValue({
+        metaDados: { channelName: 'telegram' }, // sem chatId
+      });
+
+      const result = await service.findChatByUser('telegram', userId);
+
+      expect(result).toBeNull();
+    });
+
+    it('deve retornar null quando chatId está em formato inválido', async () => {
+      prisma.dVincula.findFirst.mockResolvedValue({
+        metaDados: { channelName: 'telegram', chatId: 'abc-invalid' },
+      });
+
+      const result = await service.findChatByUser('telegram', userId);
+
+      expect(result).toBeNull();
+    });
+
+    it('deve filtrar idClasse=-483, idLocEscritu=userId e channelName', async () => {
+      prisma.dVincula.findFirst.mockResolvedValue(null);
+
+      await service.findChatByUser('telegram', userId);
+
+      const callArgs = prisma.dVincula.findFirst.mock.calls[0][0];
+      expect(callArgs.where).toMatchObject({
+        idClasse: BigInt(-483),
+        excluido: false,
+        idLocEscritu: userId,
+      });
+      expect(callArgs.where.AND).toEqual([
+        { metaDados: { path: ['channelName'], equals: 'telegram' } },
       ]);
     });
   });

@@ -21,6 +21,17 @@ export const EVENT_TYPES = {
   TASK_ASSIGNED: 'task.assigned',
   TASK_DELETED: 'task.deleted',
 
+  // ============== PHASES (ADR-V2-047 — Fase 8: webhooks phase.*) ==============
+  // Fases são DTask com idClasse=-200 (PHASE) — não tabela própria.
+  // `phase.completed` é emitido pelo detector em TasksService.updateStatus
+  // quando o pai direto de uma folha que vira DONE cruza 100% de conclusão
+  // (snapshot idempotente em DTask.dados._meta.phaseSnapshotPercent).
+  // Persistem em DEvento -489 AUDIT_GENERIC; action vai em metaDados._meta.
+  PHASE_CREATED: 'phase.created',
+  PHASE_UPDATED: 'phase.updated',
+  PHASE_DELETED: 'phase.deleted',
+  PHASE_COMPLETED: 'phase.completed',
+
   // ============== PROJECTS (lifecycle — ADR-V2-027) ==============
   PROJECT_CREATED: 'project.created',
   PROJECT_UPDATED: 'project.updated',

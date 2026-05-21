@@ -2,6 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import { TasksIdentifierService } from './tasks-identifier.service';
+import { PhaseHierarchyService } from './services/phase-hierarchy.service';
+import { PhaseMetricsService } from './services/phase-metrics.service';
 import { PrismaService } from '../prisma.service';
 import { EventProducerService } from '../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../common/services/correlation-id.service';
@@ -64,6 +66,7 @@ describe('TasksService', () => {
   };
   let identifierService: { getNextIdentifier: jest.Mock };
   let eventProducer: { addInternalEvent: jest.Mock };
+  let phaseMetrics: { compute: jest.Mock };
 
   beforeEach(async () => {
     const prismaMock = {
@@ -88,6 +91,25 @@ describe('TasksService', () => {
     const identifierMock = { getNextIdentifier: jest.fn() };
     const eventProducerMock = { addInternalEvent: jest.fn().mockResolvedValue(undefined) };
     const correlationIdMock = { getOrGenerate: jest.fn().mockReturnValue('test-corr-id') };
+    const phaseHierarchyMock = {
+      maxDepth: 20,
+      validateNoCycle: jest.fn().mockResolvedValue(undefined),
+      validateProjectConsistency: jest.fn().mockResolvedValue(undefined),
+      softDeleteCascade: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
+    const phaseMetricsMock = {
+      compute: jest.fn().mockResolvedValue({
+        phaseId: '0',
+        total: 0,
+        done: 0,
+        failed: 0,
+        inProgress: 0,
+        pending: 0,
+        percent: 0,
+        recursive: true,
+        computedAt: new Date().toISOString(),
+      }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -96,6 +118,8 @@ describe('TasksService', () => {
         { provide: TasksIdentifierService, useValue: identifierMock },
         { provide: EventProducerService, useValue: eventProducerMock },
         { provide: CorrelationIdService, useValue: correlationIdMock },
+        { provide: PhaseHierarchyService, useValue: phaseHierarchyMock },
+        { provide: PhaseMetricsService, useValue: phaseMetricsMock },
       ],
     }).compile();
 
@@ -103,7 +127,9 @@ describe('TasksService', () => {
     prisma = module.get(PrismaService) as typeof prisma;
     identifierService = module.get(TasksIdentifierService) as typeof identifierService;
     eventProducer = module.get(EventProducerService) as typeof eventProducer;
+    phaseMetrics = module.get(PhaseMetricsService) as typeof phaseMetrics;
     void eventProducer; // referenciado para silenciar warns sem strict
+    void phaseMetrics; // usado nos testes de phase.completed detector
   });
 
   afterEach(() => {
@@ -539,6 +565,23 @@ describe('TasksService', () => {
       );
     });
 
+    // ADR-V2-048 (F9a) — Fases não têm status próprio: PHASE no PATCH deve 400.
+    it('deve lançar BadRequestException ao tentar mover uma Fase (idClasse=-200)', async () => {
+      const phase = makeTask({
+        chave: BigInt(42),
+        dados: { identifier: 'DEV-42', v3: { state: 'INBOX' } },
+      });
+      (phase as { idClasse?: bigint }).idClasse = BigInt(-200); // PHASE
+
+      prisma.dTask.findFirst.mockResolvedValue(phase);
+
+      await expect(service.updateStatus('42', { status: 'READY' })).rejects.toThrow(
+        BadRequestException,
+      );
+      // E NÃO deve disparar nenhum update no banco
+      expect(prisma.dTask.update).not.toHaveBeenCalled();
+    });
+
     it('deve setar telemetry.readyAt ao mover para READY', async () => {
       const task = makeTask();
       prisma.dTask.findFirst.mockResolvedValue(task);
@@ -612,6 +655,360 @@ describe('TasksService', () => {
     });
   });
 
+  // ─── F8 — Webhooks phase.* (ADR-V2-047) ───────────────────────────────────
+
+  describe('F8 — phase.* events (ADR-V2-047)', () => {
+    /** Flush microtasks (detector é fire-and-forget via .catch). */
+    const flush = async () => {
+      await new Promise((r) => setImmediate(r));
+      await new Promise((r) => setImmediate(r));
+    };
+
+    describe('create() — phase.created', () => {
+      it('deve emitir phase.created + task.created quando idClasse=-200 (PHASE)', async () => {
+        const taskRow = makeTask({
+          chave: BigInt(50),
+          dados: { identifier: 'DEV-50', v3: { state: 'INBOX' } },
+        });
+        // Forçar idClasse=-200 no row retornado pelo create
+        (taskRow as { idClasse?: bigint }).idClasse = BigInt(-200);
+
+        prisma.dProject.findFirst.mockResolvedValue({ dados: { prefix: 'DEV' } });
+        prisma.$transaction.mockImplementation(async (cb: (tx: typeof prisma) => unknown) => {
+          identifierService.getNextIdentifier.mockResolvedValue('DEV-50');
+          prisma.dTabela.findFirst.mockResolvedValue(null);
+          prisma.dTask.create.mockResolvedValue(taskRow);
+          return cb(prisma);
+        });
+
+        await service.create({ nome: 'Fase X', projectId: '1' }, BigInt(100));
+
+        const emitted = eventProducer.addInternalEvent.mock.calls.map((c) => c[0]);
+        expect(emitted).toContain('task.created');
+        expect(emitted).toContain('phase.created');
+
+        const phaseCall = eventProducer.addInternalEvent.mock.calls.find(
+          (c) => c[0] === 'phase.created',
+        );
+        expect(phaseCall?.[1]).toMatchObject({
+          phaseId: '50',
+          identifier: 'DEV-50',
+          projectId: '1',
+        });
+      });
+
+      it('NÃO deve emitir phase.created quando idClasse != -200 (task normal)', async () => {
+        const taskRow = makeTask({ chave: BigInt(51) });
+        prisma.dProject.findFirst.mockResolvedValue({ dados: { prefix: 'DEV' } });
+        prisma.$transaction.mockImplementation(async (cb: (tx: typeof prisma) => unknown) => {
+          identifierService.getNextIdentifier.mockResolvedValue('DEV-51');
+          prisma.dTabela.findFirst.mockResolvedValue(null);
+          prisma.dTask.create.mockResolvedValue(taskRow);
+          return cb(prisma);
+        });
+
+        await service.create({ nome: 'Task', projectId: '1' }, BigInt(100));
+
+        const emitted = eventProducer.addInternalEvent.mock.calls.map((c) => c[0]);
+        expect(emitted).toContain('task.created');
+        expect(emitted).not.toContain('phase.created');
+      });
+    });
+
+    describe('updateStatus() — phase.completed detector', () => {
+      it('deve emitir phase.completed quando pai cruza 100%', async () => {
+        // Task folha com idPai=42 e status atual READY → muda para DONE
+        const leafTask = makeTask({
+          chave: BigInt(7),
+          dados: { identifier: 'DEV-7', v3: { state: 'READY' } },
+        });
+        (leafTask as { idClasse?: bigint }).idClasse = BigInt(-154); // task normal
+        (leafTask as { idPai?: bigint | null }).idPai = BigInt(42);
+
+        prisma.dTask.findFirst.mockImplementation((arg: { where: { chave: bigint } }) => {
+          // Primeira chamada: findFirst da task; Segunda: detectPhaseCompletion busca o pai
+          if (arg.where.chave === BigInt(7)) return Promise.resolve(leafTask);
+          if (arg.where.chave === BigInt(42)) {
+            return Promise.resolve({
+              chave: BigInt(42),
+              idClasse: BigInt(-200), // pai é PHASE
+              idProject: BigInt(1),
+              dados: null,
+            });
+          }
+          return Promise.resolve(null);
+        });
+        prisma.dTabela.findFirst.mockResolvedValue(null);
+        prisma.dTask.update.mockResolvedValue({
+          ...leafTask,
+          dados: { ...leafTask.dados, v3: { state: 'DONE' } },
+        });
+        phaseMetrics.compute.mockResolvedValue({
+          phaseId: '42',
+          total: 5,
+          done: 5,
+          failed: 0,
+          inProgress: 0,
+          pending: 0,
+          percent: 100,
+          recursive: true,
+          computedAt: '2026-05-21T00:00:00.000Z',
+        });
+
+        await service.updateStatus('7', { status: 'DONE' });
+        await flush();
+
+        const emitted = eventProducer.addInternalEvent.mock.calls.map((c) => c[0]);
+        expect(emitted).toContain('phase.completed');
+
+        const phaseCall = eventProducer.addInternalEvent.mock.calls.find(
+          (c) => c[0] === 'phase.completed',
+        );
+        expect(phaseCall?.[1]).toMatchObject({
+          phaseId: '42',
+          percent: 100,
+          total: 5,
+          done: 5,
+        });
+      });
+
+      it('NÃO deve emitir phase.completed se snapshot anterior já era 100', async () => {
+        const leafTask = makeTask({
+          chave: BigInt(7),
+          dados: { identifier: 'DEV-7', v3: { state: 'READY' } },
+        });
+        (leafTask as { idClasse?: bigint }).idClasse = BigInt(-154);
+        (leafTask as { idPai?: bigint | null }).idPai = BigInt(42);
+
+        prisma.dTask.findFirst.mockImplementation((arg: { where: { chave: bigint } }) => {
+          if (arg.where.chave === BigInt(7)) return Promise.resolve(leafTask);
+          if (arg.where.chave === BigInt(42)) {
+            return Promise.resolve({
+              chave: BigInt(42),
+              idClasse: BigInt(-200),
+              idProject: BigInt(1),
+              dados: { _meta: { phaseSnapshotPercent: 100 } },
+            });
+          }
+          return Promise.resolve(null);
+        });
+        prisma.dTabela.findFirst.mockResolvedValue(null);
+        prisma.dTask.update.mockResolvedValue({
+          ...leafTask,
+          dados: { ...leafTask.dados, v3: { state: 'DONE' } },
+        });
+
+        await service.updateStatus('7', { status: 'DONE' });
+        await flush();
+
+        const emitted = eventProducer.addInternalEvent.mock.calls.map((c) => c[0]);
+        expect(emitted).not.toContain('phase.completed');
+        expect(phaseMetrics.compute).not.toHaveBeenCalled();
+      });
+
+      it('NÃO deve emitir phase.completed se pai não cruzou 100% (percent < 100)', async () => {
+        const leafTask = makeTask({
+          chave: BigInt(7),
+          dados: { identifier: 'DEV-7', v3: { state: 'READY' } },
+        });
+        (leafTask as { idClasse?: bigint }).idClasse = BigInt(-154);
+        (leafTask as { idPai?: bigint | null }).idPai = BigInt(42);
+
+        prisma.dTask.findFirst.mockImplementation((arg: { where: { chave: bigint } }) => {
+          if (arg.where.chave === BigInt(7)) return Promise.resolve(leafTask);
+          if (arg.where.chave === BigInt(42)) {
+            return Promise.resolve({
+              chave: BigInt(42),
+              idClasse: BigInt(-200),
+              idProject: BigInt(1),
+              dados: null,
+            });
+          }
+          return Promise.resolve(null);
+        });
+        prisma.dTabela.findFirst.mockResolvedValue(null);
+        prisma.dTask.update.mockResolvedValue({
+          ...leafTask,
+          dados: { ...leafTask.dados, v3: { state: 'DONE' } },
+        });
+        phaseMetrics.compute.mockResolvedValue({
+          phaseId: '42',
+          total: 5,
+          done: 3,
+          failed: 0,
+          inProgress: 1,
+          pending: 1,
+          percent: 60,
+          recursive: true,
+          computedAt: '2026-05-21T00:00:00.000Z',
+        });
+
+        await service.updateStatus('7', { status: 'DONE' });
+        await flush();
+
+        const emitted = eventProducer.addInternalEvent.mock.calls.map((c) => c[0]);
+        expect(emitted).not.toContain('phase.completed');
+        // Snapshot foi atualizado para 60 (1 query opportunistic)
+        expect(prisma.dTask.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { chave: BigInt(42) },
+          }),
+        );
+      });
+
+      it('NÃO deve emitir phase.completed se a task que mudou é ela mesma uma PHASE', async () => {
+        // Edge case: tarefa folha-do-pai mas é PHASE.
+        // Após ADR-V2-048 (F9a), updateStatus em PHASE lança 400 ANTES de
+        // qualquer cálculo — defesa mais forte que o skip silencioso anterior.
+        const phaseTask = makeTask({
+          chave: BigInt(7),
+          dados: { identifier: 'DEV-7', v3: { state: 'READY' } },
+        });
+        (phaseTask as { idClasse?: bigint }).idClasse = BigInt(-200); // é PHASE
+        (phaseTask as { idPai?: bigint | null }).idPai = BigInt(42);
+
+        prisma.dTask.findFirst.mockResolvedValue(phaseTask);
+
+        await expect(service.updateStatus('7', { status: 'DONE' })).rejects.toThrow(
+          BadRequestException,
+        );
+        await flush();
+
+        expect(phaseMetrics.compute).not.toHaveBeenCalled();
+        expect(prisma.dTask.update).not.toHaveBeenCalled();
+        const emitted = eventProducer.addInternalEvent.mock.calls.map((c) => c[0]);
+        expect(emitted).not.toContain('phase.completed');
+      });
+
+      it('detector falhando NÃO bloqueia updateStatus (resiliência)', async () => {
+        const leafTask = makeTask({
+          chave: BigInt(7),
+          dados: { identifier: 'DEV-7', v3: { state: 'READY' } },
+        });
+        (leafTask as { idClasse?: bigint }).idClasse = BigInt(-154);
+        (leafTask as { idPai?: bigint | null }).idPai = BigInt(42);
+
+        prisma.dTask.findFirst.mockImplementation((arg: { where: { chave: bigint } }) => {
+          if (arg.where.chave === BigInt(7)) return Promise.resolve(leafTask);
+          // Detector falha ao buscar pai
+          return Promise.reject(new Error('db down'));
+        });
+        prisma.dTabela.findFirst.mockResolvedValue(null);
+        prisma.dTask.update.mockResolvedValue({
+          ...leafTask,
+          dados: { ...leafTask.dados, v3: { state: 'DONE' } },
+        });
+
+        // updateStatus retorna normalmente apesar do erro do detector
+        const result = await service.updateStatus('7', { status: 'DONE' });
+        expect(result.status).toBe('DONE');
+        await flush();
+      });
+    });
+
+    describe('delete() — phase.deleted', () => {
+      it('deve emitir phase.deleted quando task é PHASE (default cascade)', async () => {
+        prisma.dTask.findFirst.mockResolvedValue({
+          chave: BigInt(42),
+          idProject: BigInt(1),
+          idClasse: BigInt(-200),
+        });
+
+        await service.delete('42');
+
+        const emitted = eventProducer.addInternalEvent.mock.calls.map((c) => c[0]);
+        expect(emitted).toContain('phase.deleted');
+
+        const call = eventProducer.addInternalEvent.mock.calls.find(
+          (c) => c[0] === 'phase.deleted',
+        );
+        expect(call?.[1]).toMatchObject({
+          phaseId: '42',
+          projectId: '1',
+          cascade: true,
+        });
+      });
+
+      it('NÃO deve emitir phase.deleted quando task não é PHASE', async () => {
+        prisma.dTask.findFirst.mockResolvedValue({
+          chave: BigInt(7),
+          idProject: BigInt(1),
+          idClasse: BigInt(-154),
+        });
+        prisma.dTask.update.mockResolvedValue({ chave: BigInt(7), excluido: true });
+
+        await service.delete('7');
+
+        const emitted = eventProducer.addInternalEvent.mock.calls.map((c) => c[0]);
+        expect(emitted).not.toContain('phase.deleted');
+      });
+    });
+
+    describe('update() — phase.updated', () => {
+      it('deve emitir phase.updated quando idClasse=-200', async () => {
+        const existing = {
+          chave: BigInt(42),
+          dados: { v3: { state: 'INBOX' } },
+          idProject: BigInt(1),
+        };
+        const updated = {
+          chave: BigInt(42),
+          nome: 'Fase Renomeada',
+          idProject: BigInt(1),
+          idClasse: BigInt(-200),
+          idPai: null,
+          idPriority: null,
+          idAssignee: null,
+          idSprint: null,
+          idStatus: null,
+          descricao: null,
+          dados: existing.dados,
+          excluido: false,
+          criadoEm: new Date(),
+          atualizadoEm: new Date(),
+        };
+        prisma.dTask.findFirst.mockResolvedValue(existing);
+        prisma.dTask.update.mockResolvedValue(updated);
+
+        await service.update('42', { nome: 'Fase Renomeada' });
+
+        const emitted = eventProducer.addInternalEvent.mock.calls.map((c) => c[0]);
+        expect(emitted).toContain('phase.updated');
+      });
+
+      it('NÃO deve emitir phase.updated quando idClasse != -200', async () => {
+        const existing = {
+          chave: BigInt(7),
+          dados: {},
+          idProject: BigInt(1),
+        };
+        const updated = {
+          chave: BigInt(7),
+          nome: 'Task X',
+          idProject: BigInt(1),
+          idClasse: BigInt(-154),
+          idPai: null,
+          idPriority: null,
+          idAssignee: null,
+          idSprint: null,
+          idStatus: null,
+          descricao: null,
+          dados: {},
+          excluido: false,
+          criadoEm: new Date(),
+          atualizadoEm: new Date(),
+        };
+        prisma.dTask.findFirst.mockResolvedValue(existing);
+        prisma.dTask.update.mockResolvedValue(updated);
+
+        await service.update('7', { nome: 'Task X' });
+
+        const emitted = eventProducer.addInternalEvent.mock.calls.map((c) => c[0]);
+        expect(emitted).not.toContain('phase.updated');
+      });
+    });
+  });
+
   // ─── findOne() ─────────────────────────────────────────────────────────────
 
   describe('findOne()', () => {
@@ -668,6 +1065,19 @@ describe('TasksService', () => {
           {
             provide: CorrelationIdService,
             useValue: { getOrGenerate: jest.fn().mockReturnValue('cid') },
+          },
+          {
+            provide: PhaseHierarchyService,
+            useValue: {
+              maxDepth: 20,
+              validateNoCycle: jest.fn().mockResolvedValue(undefined),
+              validateProjectConsistency: jest.fn().mockResolvedValue(undefined),
+              softDeleteCascade: jest.fn().mockResolvedValue({ affected: 1 }),
+            },
+          },
+          {
+            provide: PhaseMetricsService,
+            useValue: { compute: jest.fn() },
           },
         ],
       }).compile();

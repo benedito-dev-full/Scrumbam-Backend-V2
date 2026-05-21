@@ -73,4 +73,16 @@ export class UpdateTaskDto {
   @IsOptional()
   @IsIn(['FEATURE', 'BUG', 'IMPROVEMENT', 'REVIEW', 'EXPLAIN'])
   taskType?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Mover task na hierarquia de fases (ADR-V2-047). ' +
+      'string=novo pai; null=move para raiz; ausente=nao toca.',
+    example: '5',
+    nullable: true,
+  })
+  @IsOptional()
+  @ValidateIf((o: UpdateTaskDto) => o.idPai !== null)
+  @IsString()
+  idPai?: string | null;
 }
