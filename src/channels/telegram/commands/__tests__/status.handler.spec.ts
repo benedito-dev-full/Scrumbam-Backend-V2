@@ -17,6 +17,7 @@ const makeResultWith = (count: number, hasMore = false) => ({
     nome: `Task ${i + 1}`,
     status: 'INBOX',
     projectId: '1',
+    idClasse: '-154', // ADR-V2-050: campo obrigatório no TaskResponseDto
     descricao: null,
     priority: null,
     taskType: null,

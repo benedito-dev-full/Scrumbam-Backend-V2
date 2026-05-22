@@ -19,6 +19,7 @@ const makeTask = (
   nome: 'Task de teste',
   status: 'INBOX',
   projectId: '1',
+  idClasse: '-154', // ADR-V2-050: campo obrigatório no TaskResponseDto
   descricao: null,
   priority: null,
   taskType: null,

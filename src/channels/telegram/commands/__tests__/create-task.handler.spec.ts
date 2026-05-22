@@ -10,6 +10,7 @@ const makeTaskResponse = () => ({
   nome: 'Revisar documentacao',
   status: 'INBOX',
   projectId: '10',
+  idClasse: '-154', // ADR-V2-050: campo obrigatório no TaskResponseDto
   descricao: null,
   priority: null,
   taskType: null,
