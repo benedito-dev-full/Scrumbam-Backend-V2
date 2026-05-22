@@ -1,6 +1,50 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-21 (ADR-V2-047 FECHADO F0–F10 | F10 COMPLETA)
+**Ultima atualizacao:** 2026-05-22 (Task 2 COMPLETA — ADR-V2-050 APPROVED 8.6/10)
+
+---
+
+## ✅ Task 2 — COMPLETE (V2 Pós-F5 — ADR-V2-050)
+
+**Module:** tasks (DTask)
+**Task:** Criar Fase via HTTP `POST /tasks` com `idClasse=-200`
+**Status:** COMPLETA
+**Duration:** ~3.75h total (2h30 Implementer + 45min Reviewer + 30min Documenter)
+**Quality Score:** 8.6/10 APPROVED
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | Plan Task 2 |
+| Implementer | ~2h30 | 8 arquivos touchados, 16 testes novos, PASS 487/511 sweep |
+| Reviewer | ~45min | 8.6/10, 2 issues [MINOR] (M1 JSDoc clarity `_ID_CLASSE_TASK`, M2 TaskResponseDto.idClasse semantic) |
+| Documenter | ~30min | JSDoc fix, ROADMAP, CHANGELOG, STATUS, commit |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DTask é estrutural (Prisma direto)
+- Pilar 2 (Endpoints): ATIVO — reusa POST /tasks genérico (zero novo controller)
+- Pilar 3 (Seed): PRESERVADO — zero mudança; idClasse=-200 canônico desde F1
+
+**Deliverables:**
+- [x] CreateTaskDto.idClasse opcional com @IsIn(['-154','-200'])
+- [x] TasksService.create() ramificação PHASE: pula identifier/INBOX/priority
+- [x] TaskResponseDto.idClasse obrigatório (frontend distingue TASK vs PHASE)
+- [x] buildPhaseDados() helper isolado de buildInitialTaskDados
+- [x] Sub-fase valida: pai com idClasse=-200 obrigatório
+- [x] TASK filha de PHASE permitida (não-recíproco)
+- [x] Campos PHASE ignorados (assigneeId/sprintId/priority/taskType) com logger.warn
+- [x] Evento phase.created emitido pós-persistência
+- [x] 10 unit tests (ramo PHASE)
+- [x] 6 e2e tests (contrato HTTP)
+- [x] 3 Telegram specs drift fix (TaskResponseDto.idClasse obrigatório)
+
+**Metrics:**
+- Build: PASS (npm run build, TypeScript 0 new errors, ESLint 0 warnings)
+- Tests: 16 novos PASS (10 unit + 6 e2e); sweep 487/511 PASS (24 pre-existentes mantidos)
+- Queries: ZERO nova (validação idPai reusa select + 1 field)
+- N+1: ZERO (ramo PHASE evita 2 queries vs TASK)
+
+**ADRs:** ADR-V2-050 (novo), ADR-V2-047 (pai), ADR-V2-048, ADR-V2-001, ADR-V2-042
 
 ---
 

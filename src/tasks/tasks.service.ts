@@ -15,11 +15,41 @@ import { UpdateTaskSprintDto } from './dto/update-task-sprint.dto';
 import { ListTasksQueryDto } from './dto/list-tasks-query.dto';
 import { TaskResponseDto, ListTasksResponseDto } from './dto/task-response.dto';
 
-/** idClasse de DTask no seed F1 (classes canônicas V2). */
-const ID_CLASSE_TASK = BigInt(-154); // SCRUMBAN_TASK (seed classes.seed.ts)
+/**
+ * idClasse de DTask no seed F1 (classes canônicas V2).
+ *
+ * ADR-V2-050: deixou de ser usado diretamente no `create()` (substituído pelo
+ * `idClasseBigInt` resolvido a partir de `dto.idClasse ?? '-154'`). Mantida
+ * como constante semântica de referência — descrita pelo prefixo `_` para
+ * evitar TS6133 sem perder a documentação canônica do valor (-154 = SCRUMBAN_TASK
+ * no seed F1).
+ */
+const _ID_CLASSE_TASK = BigInt(-154); // SCRUMBAN_TASK (seed classes.seed.ts)
+void _ID_CLASSE_TASK;
 
 /** idClasse PHASE (-200) — agrupador hierárquico de tasks (ADR-V2-047). */
 const ID_CLASSE_PHASE = BigInt(-200);
+
+/**
+ * Constrói o payload mínimo de `DTask.dados` para uma FASE (idClasse=-200).
+ *
+ * ADR-V2-050: fase é agrupador hierárquico sem intention própria. Não recebe
+ * identifier DEV-N (sequence intacta), não inicializa `v3.state` (sem state
+ * machine — status agregado via PhaseMetricsService) e não recebe telemetry
+ * ou capture. Apenas `kind` (discriminador) e `createdBy` para audit barato.
+ *
+ * Mantido como função top-level (não método) para isolar dos helpers de TASK
+ * (`buildInitialTaskDados`) e facilitar evolução independente.
+ *
+ * @param creatorId - chave (string) da DEntidade do criador
+ * @returns objeto mínimo a ser serializado em `DTask.dados` (Json)
+ */
+function buildPhaseDados(creatorId: string): Record<string, unknown> {
+  return {
+    kind: 'phase',
+    createdBy: creatorId,
+  };
+}
 
 /** Mapa de status string → idClasse DTabela (seed F1). */
 const STATUS_TO_TABELA_CLASSE: Record<string, bigint> = {
@@ -111,7 +141,21 @@ export class TasksService {
     creatorId: bigint,
     accessibleProjectIds?: string[],
   ): Promise<TaskResponseDto> {
-    this.logger.log(`Criando task nome="${dto.nome}" no projeto=${dto.projectId}`);
+    // ADR-V2-050: idClasse opcional no DTO, default -154 (TASK). Whitelist no
+    // DTO (`@IsIn(['-154','-200'])`) já bloqueia valores fora do range; aqui
+    // resolvemos para BigInt e ramificamos comportamento (PHASE pula identifier,
+    // status INBOX e priority; ignora silenciosamente assignee/sprint/taskType).
+    const idClasseRequested = dto.idClasse ?? '-154';
+    const idClasseBigInt = BigInt(idClasseRequested);
+    const isPhase = idClasseBigInt === ID_CLASSE_PHASE;
+
+    if (isPhase) {
+      this.logger.log(
+        `Criando FASE nome="${dto.nome}" projeto=${dto.projectId} idPai=${dto.idPai ?? 'raiz'}`,
+      );
+    } else {
+      this.logger.log(`Criando task nome="${dto.nome}" no projeto=${dto.projectId}`);
+    }
 
     // ADR-V2-042: validar que o projectId esta no scope autorizado
     // ANTES de qualquer query — anti enumeration.
@@ -135,6 +179,7 @@ export class TasksService {
     }
 
     // Validar idPai (ADR-V2-047): pai deve existir, mesmo projeto, sem ciclo.
+    // ADR-V2-050: quando filha é PHASE, pai TAMBÉM deve ser PHASE (sub-fase).
     // No create taskId ainda nao existe, entao usamos newParentId apenas
     // para descer a cadeia ascendente e validar profundidade.
     let idPaiBigInt: bigint | null = null;
@@ -143,7 +188,7 @@ export class TasksService {
 
       const paiExiste = await this.prisma.dTask.findFirst({
         where: { chave: idPaiBigInt, excluido: false },
-        select: { idProject: true },
+        select: { idProject: true, idClasse: true },
       });
       if (!paiExiste) {
         throw new NotFoundException(`Pai ${dto.idPai} nao encontrado`);
@@ -156,6 +201,15 @@ export class TasksService {
         );
       }
 
+      // ADR-V2-050: sub-fase requer pai com idClasse=-200.
+      // (TASK como filha de PHASE OU de TASK é permitida; apenas PHASE como
+      // filha de TASK é proibida — fase é macro-estrutural acima da task.)
+      if (isPhase && paiExiste.idClasse !== ID_CLASSE_PHASE) {
+        throw new BadRequestException(
+          `Sub-fase requer pai com idClasse=-200 (recebido idClasse=${paiExiste.idClasse}).`,
+        );
+      }
+
       // Profundidade: validateNoCycle aceita newParentId arbitrario e sobe
       // a cadeia ascendente — taskId sentinela aqui e BigInt(0) (nao existe
       // como chave real, portanto nunca colide). Garante MAX_DEPTH.
@@ -165,57 +219,86 @@ export class TasksService {
     const projectDados = project.dados as Record<string, unknown> | null;
     const prefix = (projectDados?.prefix as string | null) ?? 'DEV';
 
-    // Identifier escopado fora da transaction para usar no evento de audit
-    let createdIdentifier = `${prefix}-?`;
+    // Identifier escopado fora da transaction para usar no evento de audit.
+    // Para FASE permanece null (ADR-V2-050 — sequence DEV-N intacta).
+    let createdIdentifier: string | null = isPhase ? null : `${prefix}-?`;
+
+    // ADR-V2-050: logger.warn (telemetria barata) quando frontend manda campos
+    // que não fazem sentido para fase. Não bloqueia (reduz fricção de clients
+    // genéricos como Telegram/MCP).
+    if (isPhase && (dto.assigneeId || dto.sprintId || dto.priority || dto.taskType)) {
+      this.logger.warn(
+        `create_phase_ignored_fields projectId=${dto.projectId} ` +
+          `assignee=${!!dto.assigneeId} sprint=${!!dto.sprintId} ` +
+          `priority=${!!dto.priority} taskType=${!!dto.taskType}`,
+      );
+    }
 
     const task = await this.prisma.$transaction(async (tx) => {
-      // Gerar identifier atômico
-      const identifier = await this.identifierService.getNextIdentifier(tx, projectId, prefix);
-      createdIdentifier = identifier;
+      // TaskDados (ramo TASK) e Record<string, unknown> (ramo PHASE) são
+      // serializados igual via `Prisma.InputJsonValue`; ambos são objetos
+      // simples. `unknown` aqui evita conflito de Index signature entre os
+      // dois shapes; o cast final para InputJsonValue resolve o tipo.
+      let dadosPayload: unknown;
+      let inboxStatusChave: bigint | null = null;
+      let idPriority: bigint | null = null;
 
-      // Construir dados V3 iniciais
-      const dadosPayload = buildInitialTaskDados(
-        identifier,
-        creatorId.toString(),
-        dto.rawText || dto.source
-          ? {
-              rawText: dto.rawText,
-              source: dto.source as 'telegram' | 'web' | 'api' | 'mcp' | undefined,
-            }
-          : undefined,
-      );
+      if (isPhase) {
+        // ADR-V2-050: ramo FASE — pula identifier (sequence intacta), pula
+        // INBOX status (status agregado via PhaseMetricsService), pula priority.
+        dadosPayload = buildPhaseDados(creatorId.toString());
+      } else {
+        // Ramo TASK — comportamento legado preservado.
+        const identifier = await this.identifierService.getNextIdentifier(tx, projectId, prefix);
+        createdIdentifier = identifier;
 
-      // Injetar taskType (mantém signature de buildInitialTaskDados inalterada — ADR-V2-001)
-      if (dto.taskType) {
-        dadosPayload.taskType = dto.taskType;
+        // Construir dados V3 iniciais
+        const taskDados = buildInitialTaskDados(
+          identifier,
+          creatorId.toString(),
+          dto.rawText || dto.source
+            ? {
+                rawText: dto.rawText,
+                source: dto.source as 'telegram' | 'web' | 'api' | 'mcp' | undefined,
+              }
+            : undefined,
+        );
+
+        // Injetar taskType (mantém signature de buildInitialTaskDados inalterada — ADR-V2-001)
+        if (dto.taskType) {
+          taskDados.taskType = dto.taskType;
+        }
+
+        dadosPayload = taskDados;
+
+        // Buscar idStatus para INBOX (DTabela -441 do projeto)
+        const inboxStatus = await tx.dTabela.findFirst({
+          where: {
+            idClasse: BigInt(-441),
+            dEntidadeId: projectId,
+            excluido: false,
+          },
+          select: { chave: true },
+        });
+        inboxStatusChave = inboxStatus?.chave ?? null;
+
+        // Resolver idPriority (lookup DTabela -42X escopado pelo projeto)
+        idPriority = dto.priority
+          ? await this.resolvePriorityId(tx, projectId, dto.priority)
+          : null;
       }
-
-      // Buscar idStatus para INBOX (DTabela -441 do projeto)
-      const inboxStatus = await tx.dTabela.findFirst({
-        where: {
-          idClasse: BigInt(-441),
-          dEntidadeId: projectId,
-          excluido: false,
-        },
-        select: { chave: true },
-      });
-
-      // Resolver idPriority (lookup DTabela -42X escopado pelo projeto)
-      const idPriority = dto.priority
-        ? await this.resolvePriorityId(tx, projectId, dto.priority)
-        : null;
 
       // Criar DTask
       return tx.dTask.create({
         data: {
-          idClasse: ID_CLASSE_TASK,
+          idClasse: idClasseBigInt,
           idProject: projectId,
           nome: dto.nome,
           descricao: dto.descricao ?? null,
-          idStatus: inboxStatus?.chave ?? null,
-          idPriority,
-          idAssignee: dto.assigneeId ? BigInt(dto.assigneeId) : null,
-          idSprint: dto.sprintId ? BigInt(dto.sprintId) : null,
+          idStatus: isPhase ? null : inboxStatusChave,
+          idPriority: isPhase ? null : idPriority,
+          idAssignee: isPhase ? null : dto.assigneeId ? BigInt(dto.assigneeId) : null,
+          idSprint: isPhase ? null : dto.sprintId ? BigInt(dto.sprintId) : null,
           idCreator: creatorId,
           idPai: idPaiBigInt,
           dados: dadosPayload as Prisma.InputJsonValue,
@@ -1184,6 +1267,7 @@ export class TasksService {
   private buildResponse(
     task: {
       chave: bigint;
+      idClasse?: bigint | null;
       idProject?: bigint | null;
       nome: string;
       descricao?: string | null;
@@ -1201,12 +1285,18 @@ export class TasksService {
     const v3 = dados?.v3 as { state?: string } | null;
     const identifier = (dados?.identifier as string | null) ?? '';
     const taskType = (dados?.taskType as string | null) ?? null;
+    // ADR-V2-050: expor idClasse para o frontend distinguir TASK (-154) de
+    // PHASE (-200). Default "-154" preserva semântica para rows legados onde
+    // o select não trouxe a coluna (defensivo — todos os callers atuais
+    // já trazem idClasse).
+    const idClasseStr = task.idClasse?.toString() ?? '-154';
 
     return {
       id: task.chave.toString(),
       nome: task.nome,
       descricao: task.descricao ?? null,
       projectId: task.idProject?.toString() ?? '',
+      idClasse: idClasseStr,
       identifier,
       status: v3?.state ?? 'INBOX',
       priority: priorityMap ? this.mapPriorityEnum(task.idPriority, priorityMap) : null,

@@ -37,7 +37,17 @@ export class TaskResponseDto {
   @ApiProperty({ description: 'ID do projeto', example: '1' })
   projectId!: string;
 
-  @ApiProperty({ description: 'Identifier único (ex: DEV-7)', example: 'DEV-7' })
+  @ApiProperty({
+    description:
+      'idClasse polimórfica da DTask como string. "-154" = SCRUMBAN_TASK; ' +
+      '"-200" = PHASE/BLOCO (ADR-V2-047). Usado pelo frontend para distinguir ' +
+      'task executável de fase agrupadora.',
+    example: '-154',
+    enum: ['-154', '-200'],
+  })
+  idClasse!: string;
+
+  @ApiProperty({ description: 'Identifier único (ex: DEV-7); vazio para fases', example: 'DEV-7' })
   identifier!: string;
 
   @ApiProperty({ description: 'Estado V3 atual', example: 'INBOX' })

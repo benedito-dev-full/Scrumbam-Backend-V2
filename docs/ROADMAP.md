@@ -24,6 +24,68 @@
 
 ---
 
+## Task 2 — Criar Fase via HTTP `POST /tasks` com `idClasse=-200` (ADR-V2-050) — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Pós-ADR-V2-047 — fechamento lacuna de criação HTTP)
+**Módulo V2:** tasks (DTask)
+**Fase V2:** F5 (Domínio estrutural — pós-ADR-V2-047)
+**Tempo Real:** ~2h30 Implementer + ~0.75h Reviewer + ~0.5h Documenter
+**Completado em:** 2026-05-22
+**Quality Score:** 8.6/10 APPROVED
+
+**O Que Foi Feito:**
+
+**Core Feature — Criar fase via HTTP:**
+- Adicionado campo opcional `idClasse?: string` ao `CreateTaskDto` (whitelist `['-154', '-200']`)
+- Ramificação em `TasksService.create()` para ramo PHASE: pula identifier (sequence DEV-N intacta), pula INBOX status (derivado de métricas), pula priority
+- PHASE com `idPai` válida exige pai com `idClasse=-200` (sub-fase); PHASE com `idPai` apontando para TASK retorna BadRequestException
+- TASK com `idPai` apontando para PHASE é permitida (não-recíproco)
+- Helper `buildPhaseDados(creatorId)` isola dados de FASE (`kind: 'phase', createdBy`) de dados de TASK (V3 state machine)
+- Response `TaskResponseDto.idClasse` virou obrigatório (frontend distingue TASK vs PHASE)
+
+**Validações e Comportamentos:**
+- Campos `assigneeId`, `sprintId`, `priority`, `taskType` ignorados silenciosamente para PHASE com `logger.warn` telemetria (reduz fricção de clients genéricos)
+- Validação de sub-fase: pai deve estar no mesmo projeto (anti cross-project)
+- Profundidade validada via `PhaseHierarchyService.validateNoCycle()` (MAX_PHASE_DEPTH<20)
+- Evento `phase.created` emitido APÓS persistência bem-sucedida (Pilar 7)
+
+**Testes:**
+- 10 unit tests em `tasks.service.create-phase.spec.ts` (ramo PHASE: sem identifier, sub-fase, validações, campos ignorados, eventos)
+- 6 e2e tests em `tasks.controller.create-phase.e2e.spec.ts` (contrato HTTP, whitelist validation, backward compat)
+- 3 specs de Telegram atualizados (drift fix para `TaskResponseDto.idClasse` obrigatório)
+- Total 16 testes novos + 3 drift fixes; baseline sweep 487/511 PASS (24 pre-existentes mantidos)
+
+**ADR-V2-050 — Redigido e Aprovado:**
+- Decisão: `idClasse` opcional no DTO genérico (Alt A) vs rota dedicada `POST /tasks/phases` (Alt B rejeitada — fere Pilar 2)
+- Conformidade com Pilares: Pilar 1 N/A (estrutural), Pilar 2 PRESERVADO (endpoint genérico), Pilar 3 PRESERVADO (zero seed change)
+- Consequências: DX coesa, Pilar 2 reforçado, padrão escalável (future EPIC/SUBTASK_TEMPLATE via whitelist ampliar + tests)
+- Riscos mitigados: N+1 queries zero (reusa validação idPai existente + 1 field), identifier sequestro (unit test #1 valida), frontend mismatch (E2E cycle escrita→leitura)
+
+**Desvios do Plano Resolvidos:**
+- ADR-V2-049 → ADR-V2-050 (049 já usado por Telegram listener commit 0668860)
+- `TaskResponseDto.idClasse` virou obrigatório (não era planejado, mas necessário frontend)
+
+**Pilares:**
+- Pilar 1: N/A — DTask é estrutural (Prisma direto + transaction)
+- Pilar 2: ATIVO e REFORÇADO — solução reutiliza endpoint genérico `POST /tasks` (zero novo controller)
+- Pilar 3: SEM MUDANÇA — idClasse PHASE (-200) já seedada em ADR-V2-047 F1
+
+**Métricas:**
+- Build: ✅ PASS (npm run build → PASS, TypeScript 0 new errors)
+- ESLint: ✅ PASS (0 warnings nos 8 arquivos tocados)
+- Tests: ✅ 16/16 novos PASS (10 unit + 6 e2e); sweep 487/511 PASS (zero regressão)
+- Queries: ZERO nova query (validação idPai reusa select existente + 1 field idClasse)
+- N+1: ZERO (ramo PHASE evita 2 queries de identifier + priority vs TASK)
+
+**ADRs Vinculados:**
+- ADR-V2-050 (novo — POST /tasks aceita idClasse polimórfico)
+- ADR-V2-047 (pai — Fases via DTask.idPai, lacuna HTTP agora fechada)
+- ADR-V2-048 (complementar — Fases fora V3 board)
+- ADR-V2-001 (zero tabela nova — respeitado)
+- ADR-V2-042 (tenant isolation — respeitado)
+
+---
+
 ## F10 — Backend: Tests End-to-End Controller-Level (ADR-V2-047 Fase 10) — ✅ COMPLETA
 
 ### Task: ADR-V2-047 Fase 10 — Testes E2E Controller-Level — ✅ COMPLETA

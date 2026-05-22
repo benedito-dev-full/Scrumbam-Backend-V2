@@ -104,4 +104,21 @@ export class CreateTaskDto {
   @IsOptional()
   @IsString()
   idPai?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'idClasse polimórfica da DTask. Default: "-154" (SCRUMBAN_TASK). Use ' +
+      '"-200" para criar FASE/BLOCO (ADR-V2-047 / ADR-V2-050). Quando "-200", ' +
+      'os campos `assigneeId`, `sprintId`, `priority` e `taskType` são ' +
+      'IGNORADOS silenciosamente (fase é agrupador, sem intention própria). ' +
+      'Se `idPai` for informado para uma fase, o pai DEVE ser outra fase (-200) ' +
+      '— sub-fase.',
+    enum: ['-154', '-200'],
+    example: '-200',
+    default: '-154',
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(['-154', '-200'], { message: 'idClasse deve ser "-154" (TASK) ou "-200" (PHASE).' })
+  idClasse?: string;
 }

@@ -14,6 +14,18 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Task 2: Criar Fase via HTTP `POST /tasks` com `idClasse=-200` (ADR-V2-050 — Fechamento ADR-V2-047)** - 2026-05-22
+  - **Feature:** Campo opcional `idClasse?: string` em CreateTaskDto (whitelist `['-154', '-200']`), ramificação em TasksService.create() para PHASE
+  - **Comportamento PHASE:** Pula identifier (sequence DEV-N intacta), pula INBOX/priority (derivados de métricas), ignora assignee/sprint/taskType com logger.warn
+  - **Validação sub-fase:** Pai com `idClasse=-200` obrigatório se filha é PHASE; TASK filha de PHASE permitida (não-recíproco)
+  - **DTOs:** TaskResponseDto.idClasse agora obrigatório (frontend distingue TASK vs PHASE)
+  - **Helper:** `buildPhaseDados(creatorId)` separa dados de FASE de dados de TASK
+  - **Tests:** 16 novos (10 unit + 6 e2e); 3 specs Telegram drift fix; sweep 487/511 PASS (zero regressão)
+  - **Eventos:** `phase.created` emitido pós-persistência (Pilar 7)
+  - **Pilares:** Pilar 2 ATIVO (endpoint genérico), Pilar 3 PRESERVADO (zero seed change)
+  - **ADRs:** ADR-V2-050 (novo), ADR-V2-047 (pai), ADR-V2-048, ADR-V2-001, ADR-V2-042
+  - **Quality Score:** 8.6/10 APPROVED | Build: PASS, TypeScript: 0 new errors | Reviewer: Haiku
+
 - **F10 ADR-V2-047 Fase 10: Testes End-to-End Controller-Level (Fechamento de ADR-V2-047)** - 2026-05-21
   - **E2E Tests:** 4 testes controller-level em `tasks-phase-flow.e2e.spec.ts`
     - Cenario 1 (Happy Path): criar fase → 3 filhas → tree → metrics; validação contrato HTTP completo (79/79 PASS)
