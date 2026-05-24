@@ -120,12 +120,15 @@ describe('ProjectsService', () => {
   });
 
   describe('create()', () => {
-    it('deve criar DProject + DVincula MANAGER + seed statuses + sprint em transaction', async () => {
-      // Arrange
+    it('deve criar LIST (idClasse=-352) + DVincula MANAGER + seed statuses + sprint em transaction', async () => {
+      // Arrange — projeto do tipo LIST: mock retorna idClasse=-352 para que a
+      // condição `proj.idClasse === ID_CLASSE_LIST` no service seja verdadeira
+      // e seedBootstrap.seedProject seja chamado.
+      const listProject = { ...mockProject, idClasse: BigInt(-352) };
       prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
         const txMock = {
           dProject: {
-            create: jest.fn().mockResolvedValue(mockProject),
+            create: jest.fn().mockResolvedValue(listProject),
             findFirst: jest.fn().mockResolvedValue(null), // sem colisão de slug
           },
           dVincula: { create: jest.fn().mockResolvedValue({ chave: BigInt(1) }) },
@@ -144,7 +147,7 @@ describe('ProjectsService', () => {
         expect.any(BigInt), // projectId
         BigInt(100), // userEntidadeId
       );
-      // seedProject chamado dentro da transaction
+      // seedProject DEVE ser chamado para LIST (idClasse=-352)
       expect(seedBootstrap.seedProject).toHaveBeenCalledWith(
         expect.anything(), // tx
         expect.any(BigInt), // projectId
@@ -157,6 +160,46 @@ describe('ProjectsService', () => {
       );
       expect(result.nome).toBe('Test Project');
       expect(result.memberCount).toBe(1);
+    });
+
+    it('deve criar SPACE (idClasse=-350) sem chamar seedBootstrap', async () => {
+      // SPACE é contêiner estrutural — NÃO deve receber seed de statuses/sprint.
+      // Mock retorna idClasse=-350 → condição ID_CLASSE_LIST falha → seedBootstrap não chamado.
+      const spaceProject = { ...mockProject, idClasse: BigInt(-350) };
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const txMock = {
+          dProject: {
+            create: jest.fn().mockResolvedValue(spaceProject),
+            findFirst: jest.fn().mockResolvedValue(null),
+          },
+          dVincula: { create: jest.fn().mockResolvedValue({ chave: BigInt(1) }) },
+        };
+        return fn(txMock);
+      });
+
+      await service.create({ nome: 'My Space' }, BigInt(100));
+
+      expect(seedBootstrap.seedProject).not.toHaveBeenCalled();
+    });
+
+    it('deve criar FOLDER (idClasse=-351) sem chamar seedBootstrap', async () => {
+      // FOLDER é contêiner estrutural — NÃO deve receber seed de statuses/sprint.
+      // Mock retorna idClasse=-351 → condição ID_CLASSE_LIST falha → seedBootstrap não chamado.
+      const folderProject = { ...mockProject, idClasse: BigInt(-351) };
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const txMock = {
+          dProject: {
+            create: jest.fn().mockResolvedValue(folderProject),
+            findFirst: jest.fn().mockResolvedValue(null),
+          },
+          dVincula: { create: jest.fn().mockResolvedValue({ chave: BigInt(1) }) },
+        };
+        return fn(txMock);
+      });
+
+      await service.create({ nome: 'My Folder' }, BigInt(100));
+
+      expect(seedBootstrap.seedProject).not.toHaveBeenCalled();
     });
 
     it('deve usar prefix "DEV" como default quando não fornecido', async () => {
@@ -764,38 +807,53 @@ describe('ProjectsService', () => {
   });
 
   describe('delete()', () => {
-    it('deve fazer soft-delete em cascade (DVincula + DTask + DProject)', async () => {
+    it('deve fazer soft-delete em cascade recursivo (DVincula + DTask + DProject)', async () => {
       // Simular requireManagerRole — primeiro findFirst para MANAGER check
       prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(1) });
       prisma.dProject.findFirst.mockResolvedValue({ chave: BigInt(1), nome: 'Test' });
 
-      const updateManyVinculos = jest.fn().mockResolvedValue({ count: 2 });
+      const queryRaw = jest.fn().mockResolvedValue([{ chave: BigInt(1) }]);
       const updateManyTasks = jest.fn().mockResolvedValue({ count: 5 });
-      const updateProject = jest.fn().mockResolvedValue(mockProject);
+      const updateManyVinculos = jest.fn().mockResolvedValue({ count: 2 });
+      const updateManyProjects = jest.fn().mockResolvedValue({ count: 1 });
 
+      // O delete() usa $queryRaw (CTE recursiva) dentro da transaction para
+      // coletar descendentes (Space + Folders + Lists), depois faz cascade.
       prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
         return fn({
-          dVincula: { updateMany: updateManyVinculos },
+          $queryRaw: queryRaw,
           dTask: { updateMany: updateManyTasks },
-          dProject: { update: updateProject },
+          dVincula: { updateMany: updateManyVinculos },
+          dProject: { updateMany: updateManyProjects },
         });
       });
 
       await service.delete('1', BigInt(100));
 
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-      expect(updateManyVinculos).toHaveBeenCalledWith({
-        where: { idLocEscritu: BigInt(1), excluido: false },
-        data: { excluido: true },
-      });
-      expect(updateManyTasks).toHaveBeenCalledWith({
-        where: { idProject: BigInt(1), excluido: false },
-        data: { excluido: true },
-      });
-      expect(updateProject).toHaveBeenCalledWith({
-        where: { chave: BigInt(1) },
-        data: { excluido: true },
-      });
+      // CTE recursiva foi chamada para coletar IDs de descendentes
+      expect(queryRaw).toHaveBeenCalledTimes(1);
+      // Tasks de todas as Lists coletadas
+      expect(updateManyTasks).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ excluido: false }),
+          data: { excluido: true },
+        }),
+      );
+      // DVincula (membros) de todos os projetos coletados
+      expect(updateManyVinculos).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ excluido: false }),
+          data: { excluido: true },
+        }),
+      );
+      // DProject soft-delete de todos os descendentes
+      expect(updateManyProjects).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ excluido: false }),
+          data: { excluido: true },
+        }),
+      );
       expect(eventProducer.addInternalEvent).toHaveBeenCalledWith(
         'project.deleted',
         expect.objectContaining({ nome: 'Test', projectId: '1' }),
