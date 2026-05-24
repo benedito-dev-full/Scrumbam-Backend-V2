@@ -405,6 +405,10 @@ model DProject {
   // Json polimórfico — git deploy keys, automation config, etc.
   dados Json?
 
+  // ADR-V2-051: hierarquia self-referencial Space→Folder→List
+  idPai   BigInt?  // FK para DProject pai (NULL = raiz/Space)
+  privado Boolean  @default(false) // Space privado = acesso via DVincula -188
+
   excluido     Boolean  @default(false)
   criadoEm     DateTime @default(now()) @db.Timestamptz(6)
   atualizadoEm DateTime @default(now()) @updatedAt @db.Timestamptz(6)
@@ -413,9 +417,15 @@ model DProject {
   estab  DEntidade? @relation("ProjectEstab", fields: [idEstab], references: [chave], onDelete: NoAction, onUpdate: NoAction)
   tasks  DTask[]
 
+  // Self-relations (ADR-V2-051)
+  pai    DProject?  @relation("ProjectHierarchy", fields: [idPai], references: [chave], onDelete: NoAction, onUpdate: NoAction)
+  filhos DProject[] @relation("ProjectHierarchy")
+
   @@index([idClasse])
   @@index([idEstab])
   @@index([excluido, idEstab])
+  @@index([idPai])
+  @@index([excluido, idPai])
 }
 
 // =====================================================================
