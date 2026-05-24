@@ -174,8 +174,8 @@ const classesEspecificas: DClasseSeed[] = [
   // -350 SPACE: espaco de trabalho raiz (agrupador de Folders/Lists).
   // -351 FOLDER: pasta agrupadora dentro de um Space.
   // -352 LIST: lista de tasks (Board/Backlog), folha da hierarquia Space>Folder>List.
-  esp(-350, 'SPACE', 'Espaco de trabalho', -37, true),
-  esp(-351, 'FOLDER', 'Pasta agrupadora', -37, true),
+  esp(-350, 'SPACE', 'Espaco de trabalho', -37),
+  esp(-351, 'FOLDER', 'Pasta agrupadora', -37),
   esp(-352, 'LIST', 'Lista de tasks (Board/Backlog)', -37),
 
   // === DPedido — execucoes Claude Code (4 — Pilar 1 prep para F6) ===
