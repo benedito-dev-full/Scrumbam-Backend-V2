@@ -1,6 +1,50 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-22 (Task 2 COMPLETA — ADR-V2-050 APPROVED 8.6/10)
+**Ultima atualizacao:** 2026-05-24 (Bloco A COMPLETO — ADR-V2-051 APPROVED 8.67/10 médio)
+
+---
+
+## ✅ Bloco A — COMPLETE (V2 Integração Frontend — ADR-V2-051)
+
+**Module:** projects (DProject)
+**Task:** Bloco A — Fundação da Hierarquia Space/Folder/List
+**Status:** COMPLETO
+**Duration:** ~5h total (Strategist planning + Implementer coding + Reviewer validation + Documenter docs)
+**Quality Score:** 8.67/10 APPROVED (médio: A1 8.3 + A2 9.2 + A3 8.5)
+
+**Agents Performance:**
+| Agent | Phase | Duration | Quality |
+|-------|-------|----------|---------|
+| Strategist | A0 Planning | ~1h | Plan ADR-V2-051 (3 phases, anti-ciclo strategy) |
+| Implementer | A1+A2+A3 | ~2.5h | 31 testes PASS, zero N+1, ZERO perda dados |
+| Reviewer | A1+A2+A3 | ~1h | 8.67/10 médio (scores: 8.3, 9.2, 8.5) |
+| Documenter | A1+A2+A3 | ~0.5h | JSDoc, ROADMAP, CHANGELOG, STATUS, commit |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DProject é estrutural (Prisma direto)
+- Pilar 2 (Endpoints): ATIVO — reutiliza POST /projects genérico (zero novo controller)
+- Pilar 3 (Seed): ATIVO — 6 DClasses adicionadas (-187, -188, -350, -351, -352, -353)
+
+**Deliverables:**
+- [x] A1: 6 DClasses seedadas (COUNTS: 104 específicas / 149 total)
+- [x] A2: Migration DProject (idPai + privado, reversível, zero perda)
+- [x] A3: Anti-ciclo via CTE recursiva (validateNoCycle)
+- [x] A3: Cascade soft-delete bottom-up (Tasks → DVinculas → Projects)
+- [x] A3: seedBootstrap condicional (apenas LIST -352)
+- [x] DTOs: CreateProjectDto.idClasse whitelist + UpdateProjectDto.idPai
+- [x] JSDoc: validate anti-ciclo antes de UPDATE
+- [x] JSDoc: seedBootstrap condicional documentado
+- [x] JSDoc: cascade hierarquico documentado
+- [x] 31 testes PASS (unit + integration)
+
+**Metrics:**
+- Build: PASS (npm run build, TypeScript 0 new errors)
+- Tests: 31/31 PASS (projects.service.spec.ts + utils/anti-cycle.util.spec.ts)
+- Queries: ZERO N+1 (CTE recursivo otimizado + batch paralelo)
+- Migration: Reversível, migration down testada, zero perda
+- Pilares: 3/3 respeitados (N/A, ATIVO, ATIVO)
+
+**ADRs:** ADR-V2-051 (hierarquia + anti-ciclo), ADR-V2-001 (zero tabela nova)
 
 ---
 

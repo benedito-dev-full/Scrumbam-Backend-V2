@@ -8,6 +8,35 @@
 
 ---
 
+## Bloco A — Fundação da Hierarquia DProject Space/Folder/List ✅ COMPLETO
+
+**Status:** ✅ **COMPLETO** — Todas as 3 fases entregues (A1, A2, A3)
+
+**Cronograma:**
+- A1 (Seed 6 DClasses): **8.3/10 APPROVED** (2026-05-24)
+- A2 (Migration DProject idPai + privado): **9.2/10 APPROVED** (2026-05-24)
+- A3 (Anti-ciclo + Cascade + seedBootstrap): **8.5/10 APPROVED** (2026-05-24)
+
+**Quality Score Médio:** 8.67/10
+
+**Componentes:**
+- 6 DClasses adicionadas (-187, -188, -350, -351, -352, -353)
+- 1 Migration SQL aditiva, reversível, zero perda de dados
+- `validateNoCycle()` via CTE recursiva PostgreSQL (impede ciclos A→B→A)
+- Cascade soft-delete bottom-up (Tasks → DVinculas → Projects → pai)
+- seedBootstrap condicional (apenas LIST -352 recebe statuses + sprint)
+- 31/31 testes PASS (unit + integration)
+- Zero N+1 queries (CTE recursivo otimizado)
+
+**Pilares:**
+- Pilar 1: N/A (estrutural)
+- Pilar 2: ATIVO (reutiliza POST /projects genérico)
+- Pilar 3: PRESERVADO (6 DClasses, zero tabela nova)
+
+**ADRs:** ADR-V2-051 (principal), ADR-V2-001 (zero tabela nova)
+
+---
+
 ## ADR-V2-047 — FECHAMENTO COMPLETO (F0–F10 ENTREGUES)
 
 **Status:** ✅ **FECHADO** — Todas as 10 fases entregues (F0, F1, F3, F4, F5, F7, F8, F9, F10; F2 e F6 adiados v2)

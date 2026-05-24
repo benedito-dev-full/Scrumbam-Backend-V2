@@ -14,6 +14,45 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Bloco A — Fundação da Hierarquia DProject Space/Folder/List** - 2026-05-24 (V2 ADR-V2-051)
+  - **Seed das 6 DClasses** (A1 — Score 8.3/10):
+    * -187 BOOKMARK (DVincula — favoritos)
+    * -188 SPACE_PRIVATE_MEMBER (DVincula — membro privado)
+    * -350 SPACE (DProject — espaço raiz)
+    * -351 FOLDER (DProject — pasta agrupadora)
+    * -352 LIST (DProject — container de tasks com seed)
+    * -353 DOC (DTabela — documento rico em `dados.content`)
+    * COUNTS: 104 específicas / 149 total (era 98/143)
+  - **Migration Schema DProject** (A2 — Score 9.2/10):
+    * `idPai BigInt?` — FK self-referencial (hierarquia Space→Folder→List)
+    * `privado Boolean @default(false)` — isolamento por SPACE
+    * `@@index([idPai])` e `@@index([excluido, idPai])` para perfs
+    * Reversível: migration down testada
+  - **Anti-ciclo + Cascade Soft-Delete + seedBootstrap** (A3 — Score 8.5/10):
+    * `validateNoCycle()` — CTE recursivo PostgreSQL (impede A→B→A, A→B→C→A)
+    * Cascade bottom-up via CTE: Tasks → DVinculas → Projects → pai
+    * seedBootstrap condicional: apenas LIST (-352) recebe 9 statuses V3 + sprint
+    * UPDATE idPai valida anti-ciclo ANTES de transaction
+    * DELETE recursivo não viola FK (SPACE/FOLDER/LIST safe)
+  - **DTOs atualizados:**
+    * CreateProjectDto: `idClasse?: string` com whitelist ['-350','-351','-352']
+    * UpdateProjectDto: `idPai?: string | null` adicionado
+  - **JSDoc completo:**
+    * `validateNoCycle()`: 26 linhas de descrição + @example
+    * `create()`: seedBootstrap condicional documentado
+    * `update()`: validacao anti-ciclo antes de transaction documentado
+    * `delete()`: cascade hierarquico documentado
+  - **Pilares aplicados:**
+    * Pilar 1: N/A (DProject é estrutural, Prisma direto)
+    * Pilar 2: Reusa POST /projects genérico (zero novo controller)
+    * Pilar 3: 6 DClasses adicionadas ao seed (zero tabela nova)
+  - **Métricas:**
+    * Build: PASS (npm run build, TypeScript 0 new errors)
+    * Tests: 31/31 PASS (projects.service.spec.ts + anti-cycle.util.spec.ts)
+    * Queries: ZERO N+1 (CTE recursivo + batch paralelo)
+    * Migration: Reversível, zero perda de dados
+  - **ADRs vinculados:** ADR-V2-051, ADR-V2-001 (zero tabela nova)
+
 - **Task 2: Criar Fase via HTTP `POST /tasks` com `idClasse=-200` (ADR-V2-050 — Fechamento ADR-V2-047)** - 2026-05-22
   - **Feature:** Campo opcional `idClasse?: string` em CreateTaskDto (whitelist `['-154', '-200']`), ramificação em TasksService.create() para PHASE
   - **Comportamento PHASE:** Pula identifier (sequence DEV-N intacta), pula INBOX/priority (derivados de métricas), ignora assignee/sprint/taskType com logger.warn

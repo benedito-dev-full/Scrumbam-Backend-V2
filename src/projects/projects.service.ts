@@ -150,7 +150,9 @@ export class ProjectsService implements OnModuleInit {
    * Transaction atômica (3–4 etapas):
    * 1. DProject (tabela canônica)
    * 2. DVincula -171 (MANAGER) para o criador
-   * 3. seedProject(): 9 statuses V3 + 1 sprint default
+   * 3. seedProject(): 9 statuses V3 + 1 sprint default (apenas para LIST -352)
+   *    - SPACE (-350) e FOLDER (-351) são contêineres estruturais, sem seed
+   *    - ADR-V2-051 §12: seedBootstrap condicional por idClasse
    * 4. DVincula -182 (PROJECT_TEAM_LINK) se `dto.teamId` informado, após
    *    validar cross-org + permissão no time (LEAD ou ORG_ADMIN).
    *
@@ -167,8 +169,21 @@ export class ProjectsService implements OnModuleInit {
    *
    * @example
    * ```typescript
-   * const project = await service.create({ nome: 'Scrumban V2', teamId: '200' }, BigInt(userId));
+   * // Criar um LIST (com seed de statuses + sprint)
+   * const list = await service.create(
+   *   { nome: 'Sprint 1', idClasse: '-352', idPai: '100' },
+   *   BigInt(userId)
+   * );
+   *
+   * // Criar um SPACE (sem seed, apenas container)
+   * const space = await service.create(
+   *   { nome: 'Workspace', idClasse: '-350' },
+   *   BigInt(userId)
+   * );
    * ```
+   *
+   * @see SeedBootstrapService — responsavel pelo seed de statuses V3 e sprint
+   * @see validateNoCycle — validacao de ciclo em idPai realizada internamente
    */
   async create(dto: CreateProjectDto, userEntidadeId: bigint): Promise<ProjectResponseDto> {
     this.logger.log(
@@ -592,29 +607,52 @@ export class ProjectsService implements OnModuleInit {
   /**
    * Atualiza projeto (apenas MANAGER pode).
    *
-   * Suporta atualização do vínculo de time (ADR-V2-029) via `dto.teamId`:
-   *  - `'teamId' in dto === false` → vínculo inalterado.
-   *  - `dto.teamId === null` → soft-delete do vínculo atual (desvincula).
-   *  - `dto.teamId === string` → soft-delete antigo + cria novo (reatribui).
+   * Suporta atualização de múltiplos campos com validações críticas:
+   *  - `idPai` (opcional): Novo pai na hierarquia. Validação anti-ciclo
+   *    via `validateNoCycle()` ocorre antes da transaction — impede ciclos
+   *    A→B→A ou A→B→C→A (ADR-V2-051 §12).
+   *  - `teamId` (opcional): Atualização do vínculo de time (ADR-V2-029):
+   *    * Omissão (`'teamId' in dto === false`) → vínculo inalterado
+   *    * `null` → soft-delete do vínculo atual (desvincula)
+   *    * `string` → soft-delete antigo + cria novo (reatribui)
    *
-   * Eventos emitidos APÓS commit:
+   * Eventos emitidos APÓS commit (ADR-V2-029):
    *  - `project.team.linked` (X→Y ou null→Y)
    *  - `project.team.unlinked` (X→null)
    *
    * @param id - Chave BigInt do projeto (string)
-   * @param dto - Campos a atualizar
+   * @param dto - Campos a atualizar (idPai, teamId, nome, prefix, etc.)
    * @param userEntidadeId - Chave BigInt do MANAGER executante
-   * @returns ProjectResponseDto atualizada (`teamId` resolvido)
+   * @param organizationId - (Opcional) DEntidade.chave da org ativa (para tenant isolation)
+   * @returns ProjectResponseDto atualizada (`teamId` e `folderId` resolvidos)
    *
-   * @throws {NotFoundException} Se projeto não encontrado
+   * @throws {NotFoundException} Se projeto não encontrado ou tenant mismatch
    * @throws {ForbiddenException} Se usuário não é MANAGER, ou se time
    *   informado é de outra org ou sem permissão (LEAD/ADMIN).
+   * @throws {BadRequestException} Se validação anti-ciclo falhar
    *
    * @example
    * ```typescript
-   * await service.update('1', { teamId: '200' }, BigInt(managerId));     // reatribui
-   * await service.update('1', { teamId: null }, BigInt(managerId));      // desvincula
+   * // Reatribuir time
+   * await service.update('1', { teamId: '200' }, BigInt(managerId));
+   *
+   * // Desvincula time
+   * await service.update('1', { teamId: null }, BigInt(managerId));
+   *
+   * // Mover na hierarquia (valida anti-ciclo)
+   * await service.update('1', { idPai: '99' }, BigInt(managerId));
+   *
+   * // Atualizar múltiplos campos
+   * await service.update(
+   *   '1',
+   *   { nome: 'Sprint 2', prefix: 'S2', idPai: '100', teamId: '200' },
+   *   BigInt(managerId)
+   * );
    * ```
+   *
+   * @see validateNoCycle — funcao que valida ciclo em hierarquia (chamada aqui)
+   * @see ADR-V2-029 — Project ↔ Team via DVincula -182
+   * @see ADR-V2-051 § 12 — Hierarquia Space/Folder/List com anti-ciclo
    */
   async update(
     id: string,
@@ -811,29 +849,43 @@ export class ProjectsService implements OnModuleInit {
   }
 
   /**
-   * Soft-delete do projeto.
+   * Soft-delete em cascata hierárquica do projeto.
    *
-   * Cascades em transaction:
-   * - DVincula de membros do projeto (`idLocEscritu=projectId`)
-   * - DTask do projeto (soft delete)
-   * - DProject (soft delete)
+   * Cascades em transaction atomica (bottom-up via CTE recursiva):
+   * 1. DTask do projeto (soft delete)
+   * 2. DVincula de membros do projeto (`idLocEscritu=projectId`)
+   * 3. DVincula `-182 PROJECT_TEAM_LINK` (`idEntidade=projectId`)
+   * 4. DProject filho-por-filho (se houver, validado por idPai)
+   * 5. DProject pai (soft delete no final)
    *
-   * Vínculos `-182 PROJECT_TEAM_LINK` (`idEntidade=projectId`) também são
-   * soft-deletados pelo `updateMany` por `idEntidade` — `excluido=true`
-   * preserva o histórico.
+   * A cascata respeita a hierarquia (ADR-V2-051): deletar um FOLDER
+   * deleta todos os LISTs dentro, depois suas TASKs, depois o FOLDER.
+   * Deletes BOTTOM-UP garantem que:
+   * - FK constraints nao sao violadas
+   * - Auditoria de exclusao e preservada (excluido=true, nao hard delete)
+   * - Restauracao futura e possivel (soft delete, nao hard delete)
    *
    * Audit project.deleted emitido APÓS commit.
    *
    * @param id - Chave BigInt do projeto (string)
    * @param userEntidadeId - Chave BigInt do MANAGER executante
+   * @param organizationId - (Opcional) DEntidade.chave da org ativa (tenant isolation)
+   * @returns DeleteProjectResponseDto com confirmacao
    *
-   * @throws {NotFoundException} Se projeto não encontrado
+   * @throws {NotFoundException} Se projeto não encontrado ou tenant mismatch
    * @throws {ForbiddenException} Se não é MANAGER
    *
    * @example
    * ```typescript
-   * await service.delete('1', BigInt(managerId));
+   * // Deletar um LIST (cascata: TASKs → DVinculas → DProject)
+   * await service.delete('100', BigInt(managerId));
+   *
+   * // Deletar um FOLDER (cascata: LISTs → TASKs → todos vinculos → FOLDER)
+   * await service.delete('50', BigInt(managerId));
    * ```
+   *
+   * @see DELETE com CTE recursiva em /utils/anti-cycle.util.ts (padrão similar)
+   * @see ADR-V2-051 § 12 — Hierarquia com validacao de ciclo e cascade
    */
   async delete(
     id: string,
