@@ -4,14 +4,16 @@
  * Composicao do seed (ADR-V2-019: monolitico):
  *   - 45 classes fixas universais Devari-Core (range -1..-110), via spread de
  *     `templates/classes-base-template.ts`.
- *   - 98 classes especificas Scrumban-V2 (range -150..-527), declaradas
+ *   - 104 classes especificas Scrumban-V2 (range -150..-527), declaradas
  *     neste arquivo, agrupadas por seccao (DEntidade, DVincula, DPedido,
  *     DTabela, DEvento, DTabela secundario, Fases) com comentarios `// === ... ===`.
  *
- * Total: 143 DClasses (ADR-V2-026: +1 AUDIT_GENERIC; ADR-V2-028: +6 INVITE_*;
+ * Total: 149 DClasses (ADR-V2-026: +1 AUDIT_GENERIC; ADR-V2-028: +6 INVITE_*;
  *   ADR-V2-029: +1 PROJECT_TEAM_LINK; ADR-V2-033: +2 AGENT_SESSION_*;
  *   ADR-V2-FOLDERS-001: +1 FOLDER, +1 FOLDER_PROJECT_LINK;
- *   ADR-V2-047: +1 PHASE).
+ *   ADR-V2-047: +1 PHASE;
+ *   ADR-V2-051: +2 BOOKMARK/SPACE_PRIVATE_MEMBER, +3 SPACE/FOLDER/LIST;
+ *   GAP-04: +1 DOC).
  *
  * Validacao automatica:
  *   `validateHierarchy(classes)` e chamado no topo deste modulo. Qualquer
@@ -76,34 +78,38 @@ function esp(
 }
 
 /**
- * Array de classes especificas Scrumban-V2 (98 entradas).
+ * Array de classes especificas Scrumban-V2 (104 entradas).
  *
  * Ordem:
  *   1. DEntidade — 8 (sub-tipos de Pessoa: USER, PLATFORM_SCRUMBAN,
  *      ORGANIZATION, SCRUMBAN_PROJECT, SCRUMBAN_TASK, AGENT, TEAM, FOLDER).
  *      ADR-V2-FOLDERS-001 (+1 FOLDER).
- *   2. DVincula — 13 (relacoes Org-User, Project-User, Team, Project-Agent,
- *      Telegram, Project-Team, Folder-Project).
+ *   2. DVincula — 15 (relacoes Org-User, Project-User, Team, Project-Agent,
+ *      Telegram, Project-Team, Folder-Project, Bookmark, Space-Private-Member).
  *      ADR-V2-029 (+1 PROJECT_TEAM_LINK).
  *      ADR-V2-FOLDERS-001 (+1 FOLDER_PROJECT_LINK).
+ *      ADR-V2-051 (+2 BOOKMARK, SPACE_PRIVATE_MEMBER).
  *   3. Fases (DTask especializacao) — 1 (PHASE).
  *      ADR-V2-047 (+1 PHASE — agrupador hierarquico de DTask via idPai).
- *   4. DPedido — 4 (EXECUTION + EXEC_LOW/MED/HIGH para Pilar 1 / F6).
- *   5. DTabela principal — 35 (SPRINT, PRIORITY, TASK_TYPE, STATUS V3,
+ *   4. DProject — hierarquia Space/Folder/List — 3 (ADR-V2-051).
+ *      (+3 SPACE, FOLDER, LIST).
+ *   5. DPedido — 4 (EXECUTION + EXEC_LOW/MED/HIGH para Pilar 1 / F6).
+ *   6. DTabela principal — 36 (SPRINT, PRIORITY, TASK_TYPE, STATUS V3,
  *      CHANNEL, WEBHOOK, API_KEY, MCP_KEY, INSTALL_TOKEN, PAIRING_TOKEN,
- *      ISSUE_COUNTER).
- *   6. DEvento — 16 (AUDIT_GENERIC, NOTIFICATION, WEBHOOK_ATTEMPT,
+ *      ISSUE_COUNTER, DOC).
+ *      GAP-04 (+1 DOC).
+ *   7. DEvento — 16 (AUDIT_GENERIC, NOTIFICATION, WEBHOOK_ATTEMPT,
  *      AGENT_HEARTBEAT, TELEGRAM_*, MCP_CALL, EXECUTION_LOG, audit logs,
  *      INVITE_LIFECYCLE, AGENT_SESSION_CREATED, AGENT_SESSION_RESUMED).
  *      ADR-V2-026 (+1 AUDIT_GENERIC) + ADR-V2-027 (rename
  *      PROJECT_DELETED → PROJECT_LIFECYCLE; ORG_DELETED → ORG_LIFECYCLE)
  *      + ADR-V2-028 (+1 INVITE_LIFECYCLE)
  *      + ADR-V2-033 (+2 AGENT_SESSION_CREATED/RESUMED).
- *   7. DTabela secundario — 21 (AGENT_STATUS, EXEC_STATUS, RISK_LEVEL,
+ *   8. DTabela secundario — 21 (AGENT_STATUS, EXEC_STATUS, RISK_LEVEL,
  *      INVITE_TOKEN, INVITE_STATUS_*).
  *      ADR-V2-028 (+5 INVITE_TOKEN, INVITE_STATUS_PENDING/ACCEPTED/EXPIRED/REVOKED).
  *
- * Soma: 8 + 13 + 1 + 4 + 35 + 16 + 21 = 98.
+ * Soma: 8 + 15 + 1 + 3 + 4 + 36 + 16 + 21 = 104.
  */
 const classesEspecificas: DClasseSeed[] = [
   // === DEntidade — sub-tipos de Pessoa (5) + DProject/DTask (2) + FOLDER (1) ===
@@ -145,6 +151,13 @@ const classesEspecificas: DClasseSeed[] = [
   esp(-183, 'FOLDER_PROJECT_LINK', 'Vinculo Folder-Project', -37),
   esp(-185, 'PROJECT_AGENT', 'Vinculo Project-Agent', -37),
   esp(-186, 'TELEGRAM_LINK', 'Vinculo User-Telegram chat', -37),
+  // ADR-V2-051 + GAP-10: vinculos adicionais de entidade.
+  // -187 BOOKMARK: favorito/bookmark de qualquer entidade (DProject, DTask, etc.)
+  // armazenado como DVincula (idLocEscritu=userId, idEntidade=bookmarkedId).
+  // -188 SPACE_PRIVATE_MEMBER: membro explicitamente adicionado a Space privado
+  // (-350), espelhando o padrao de PROJECT_USER_LINK (-170) para Spaces.
+  esp(-187, 'BOOKMARK', 'Favorito/Bookmark', -37),
+  esp(-188, 'SPACE_PRIVATE_MEMBER', 'Membro de Space privado', -37),
 
   // === Fases (-200..-299) — hierarquia de tasks via DTask.idPai (ADR-V2-047) ===
   // PHASE eh DTask agrupadora (idClasse=-200), filha de ENTIDADES (-37), mesmo
@@ -153,6 +166,17 @@ const classesEspecificas: DClasseSeed[] = [
   // Cardinalidade 1:1 garantida pelo schema (coluna escalar). Range -200..-299
   // reservado para futuras especializacoes de DTask (BLOCK, MILESTONE, EPIC).
   esp(-200, 'PHASE', 'Fase (agrupador de tasks)', -37, true),
+
+  // === DProject — hierarquia Space/Folder/List (ADR-V2-051) ===
+  // Filhos de ENTIDADES (-37) — Space, Folder e List sao entidades de primeira
+  // classe com lifecycle proprio (CRUD, soft-delete com cascata de vinculos),
+  // cidadaos da navegacao do workspace (/workspace/spaces/:id/folders/:id/lists/:id).
+  // -350 SPACE: espaco de trabalho raiz (agrupador de Folders/Lists).
+  // -351 FOLDER: pasta agrupadora dentro de um Space.
+  // -352 LIST: lista de tasks (Board/Backlog), folha da hierarquia Space>Folder>List.
+  esp(-350, 'SPACE', 'Espaco de trabalho', -37, true),
+  esp(-351, 'FOLDER', 'Pasta agrupadora', -37, true),
+  esp(-352, 'LIST', 'Lista de tasks (Board/Backlog)', -37),
 
   // === DPedido — execucoes Claude Code (4 — Pilar 1 prep para F6) ===
   // Filho de PEDIDOS (-20)
@@ -198,6 +222,10 @@ const classesEspecificas: DClasseSeed[] = [
   esp(-473, 'INSTALL_TOKEN', 'Token install one-shot Argus', -52),
   esp(-474, 'PAIRING_TOKEN', 'Token pairing Telegram', -52),
   esp(-475, 'ISSUE_COUNTER', 'Contador DEV-N por team', -52),
+  // GAP-04: documento rico associado a qualquer entidade (DProject, DTask, Space, etc.).
+  // Conteudo rico (Markdown/JSON) armazenado em dados.content (campo Json de DTabela).
+  // Uso: DTabela (idClasse=-353, dEntidadeId=entidadeAlvo).
+  esp(-353, 'DOC', 'Documento rico (conteudo em dados.content)', -51),
 
   // === DEvento — auditoria (13) ===
   // Filhos de EVENTOS (-3) — audit trail polimorfico
@@ -271,7 +299,7 @@ const classesEspecificas: DClasseSeed[] = [
 ];
 
 /**
- * Array completo do seed (45 fixas + 98 especificas = 143 DClasses).
+ * Array completo do seed (45 fixas + 104 especificas = 149 DClasses).
  * Validado automaticamente em time de import (validateHierarchy abaixo).
  */
 export const classes: DClasseSeed[] = [...classesFixas, ...classesEspecificas];
