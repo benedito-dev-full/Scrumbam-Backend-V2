@@ -14,6 +14,18 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Bloco B — Autenticação Real + Workspace Switcher Multi-Org** - 2026-05-24 (V2 Frontend Integration)
+  - **B1 — Conexão Auth Frontend (8.8/10):**
+    * `.env.local`: `NEXT_PUBLIC_MOCK_AUTH=false` — frontend conectado ao backend real
+    * `package.json`: frontend sobe na porta 3001 (backend ocupa 3000)
+    * Auth pré-implementado — zero código novo necessário
+  - **B2 — Workspace Switcher Multi-Org (8.8/10):**
+    * `src/hooks/use-auth.ts`: `useSwitchOrg()` — mutation `POST /auth/switch-org` com atualização de store + invalidação de cache
+    * `src/lib/mock/auth.ts`: `mockSwitchOrg()` para modo dev offline
+    * `src/components/shell/workspace-switcher.tsx`: orgs reais via `GET /auth/me`, org ativa destacada, loading states, proteção anti-double-click
+  - **Backend:** Zero mudança (auth já implementado em F3)
+  - **Pilares:** Frontend reutiliza endpoints genéricos (Pilar 2 ATIVADO)
+
 - **Bloco A — Fundação da Hierarquia DProject Space/Folder/List** - 2026-05-24 (V2 ADR-V2-051)
   - **Seed das 6 DClasses** (A1 — Score 8.3/10):
     * -187 BOOKMARK (DVincula — favoritos)

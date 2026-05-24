@@ -1,6 +1,46 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-24 (Bloco A COMPLETO — ADR-V2-051 APPROVED 8.67/10 médio)
+**Ultima atualizacao:** 2026-05-24 (Bloco B COMPLETO — Frontend Integration 8.8/10 médio)
+
+---
+
+## ✅ Bloco B — COMPLETE (V2 Frontend Integration — Autenticação Real)
+
+**Module:** frontend (integração com backend real)
+**Task:** Bloco B — Autenticação Real + Workspace Switcher Multi-Org
+**Status:** COMPLETO
+**Duration:** ~2h total (Implementer frontend + Reviewer validation)
+**Quality Score:** 8.8/10 APPROVED (médio: B1 8.8 + B2 8.8)
+
+**Agents Performance:**
+| Agent | Phase | Duration | Quality |
+|-------|-------|----------|---------|
+| Strategist | B0 Planning | — | Frontend integration with backend real auth |
+| Implementer | B1+B2 | ~1.5h | 2 phases implemented, PASS all specs |
+| Reviewer | B1+B2 | ~0.5h | 8.8/10 médio (scores: 8.8, 8.8) |
+| Documenter | B1+B2 | — | Commit documentation (this step) |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — frontend não toca engine
+- Pilar 2 (Endpoints): ATIVO — reutiliza `/auth/me`, `/auth/switch-org` genéricos
+- Pilar 3 (Seed): N/A — frontend não toca seed
+
+**Deliverables:**
+- [x] B1: `.env.local` configurado com `NEXT_PUBLIC_MOCK_AUTH=false`
+- [x] B1: Frontend porta 3001, backend porta 3000
+- [x] B2: `useSwitchOrg()` com mutation `POST /auth/switch-org`
+- [x] B2: Workspace Switcher com orgs reais (GET `/auth/me`)
+- [x] B2: Org ativa destacada, loading states, proteção anti-double-click
+- [x] Backend: Zero alterações (auth pré-implementado)
+
+**Metrics:**
+- Frontend: Completo, zero erros de integração
+- Backend: Zero mudanças, zero impacto
+- Tests: Todos PASS (frontend specs)
+- Queries: N/A — frontend apenas consome APIs
+- Pilares: 2/3 respeitados (N/A, ATIVO, N/A)
+
+**ADRs:** Frontend integration (reutiliza auth endpoints backend F3)
 
 ---
 

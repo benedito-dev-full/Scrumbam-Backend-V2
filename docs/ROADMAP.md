@@ -8,6 +8,32 @@
 
 ---
 
+## Bloco B — Autenticação Real + Workspace Switcher Multi-Org ✅ COMPLETO
+
+**Status:** ✅ **COMPLETO** — Ambas as fases entregues (B1, B2)
+
+**Cronograma:**
+- B1 (Conexão Auth Frontend ao backend real): **8.8/10 APPROVED** (2026-05-24)
+- B2 (Workspace Switcher Multi-Org): **8.8/10 APPROVED** (2026-05-24)
+
+**Quality Score Médio:** 8.8/10
+
+**Componentes:**
+- `.env.local` configurado com `NEXT_PUBLIC_MOCK_AUTH=false`
+- Frontend porta 3001, backend porta 3000
+- `useSwitchOrg()` implementado com mutation HTTP
+- Workspace Switcher com orgs reais e org ativa destacada
+- Zero alterações no backend (auth pré-implementado)
+
+**Pilares:**
+- Pilar 1: N/A (frontend — não toca engine)
+- Pilar 2: ATIVO (reutiliza endpoints genéricos `/auth/me`, `/auth/switch-org`)
+- Pilar 3: N/A (frontend — não toca seed)
+
+**ADRs:** Frontend integration (frontend branch `feature/integracao-frontend-v2-hierarquia`)
+
+---
+
 ## Bloco A — Fundação da Hierarquia DProject Space/Folder/List ✅ COMPLETO
 
 **Status:** ✅ **COMPLETO** — Todas as 3 fases entregues (A1, A2, A3)
