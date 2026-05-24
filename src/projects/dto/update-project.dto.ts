@@ -99,6 +99,29 @@ export class UpdateProjectDto {
   prefix?: string;
 
   /**
+   * Novo projeto pai na hierarquia Space→Folder→List (ADR-V2-051).
+   *
+   * Convenção:
+   *  - `idPai` omitido → hierarquia inalterada.
+   *  - `idPai` string → define novo projeto pai (validação anti-ciclo é
+   *    executada no service via CTE recursiva antes do UPDATE).
+   *  - `idPai === null` → move para raiz (Space sem pai).
+   *
+   * Anti-ciclo: o service chama `validateNoCycle()` antes de persistir
+   * qualquer alteração de `idPai` (ADR-V2-051 §12).
+   *
+   * @see ADR-V2-051
+   */
+  @ApiPropertyOptional({
+    description: 'ID do projeto pai (hierarquia Space→Folder→List) | null para mover à raiz | omitir para manter',
+    example: '500',
+    nullable: true,
+  })
+  @ValidateIf((o: UpdateProjectDto) => o.idPai !== null && o.idPai !== undefined)
+  @IsString()
+  idPai?: string | null;
+
+  /**
    * Vínculo do projeto com um time (DVincula -182 PROJECT_TEAM_LINK).
    *
    * Convenção (ADR-V2-029):

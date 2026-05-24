@@ -20,9 +20,17 @@ import {
 } from './dto/project-response.dto';
 import { DeleteProjectResponseDto } from './dto/delete-project-response.dto';
 import { fallbackSlug, slugify } from './utils/slugify';
+import { validateNoCycle } from './utils/anti-cycle.util';
 
 /** idClasse de DProject no seed F1 (classes canônicas V2). */
 const ID_CLASSE_PROJECT = BigInt(-153); // SCRUMBAN_PROJECT (seed classes.seed.ts)
+
+/**
+ * idClasse DProject para LIST (ADR-V2-051 §3.2).
+ * Apenas LISTs recebem seed de statuses V3 e sprint default —
+ * SPACEs (-350) e FOLDERs (-351) são contêineres estruturais.
+ */
+const ID_CLASSE_LIST = BigInt(-352);
 
 /** idClasse de DVincula MANAGER de projeto (seed F1). */
 const ID_CLASSE_PROJECT_MANAGER = BigInt(-171);
@@ -196,8 +204,12 @@ export class ProjectsService implements OnModuleInit {
       // 2. DVincula -171 (MANAGER): criador é MANAGER
       await this.projectMembers.createManagerLink(tx, proj.chave, userEntidadeId);
 
-      // 3. Seed: 9 statuses V3 + 1 sprint default
-      await this.seedBootstrap.seedProject(tx, proj.chave);
+      // 3. Seed: 9 statuses V3 + 1 sprint default — apenas para LIST (ADR-V2-051 §12).
+      //    SPACE (-350) e FOLDER (-351) são contêineres estruturais e não precisam
+      //    de seed de statuses/sprint. Apenas LIST (-352) contém tasks.
+      if (proj.idClasse === ID_CLASSE_LIST) {
+        await this.seedBootstrap.seedProject(tx, proj.chave);
+      }
 
       // 4. (opcional) Vincular ao time (ADR-V2-029)
       if (dto.teamId) {
@@ -635,6 +647,16 @@ export class ProjectsService implements OnModuleInit {
       throw new NotFoundException(`Projeto ${id} não encontrado`);
     }
 
+    // Pré-condição: validar anti-ciclo antes de qualquer UPDATE de idPai (ADR-V2-051 §12).
+    // Usar `'idPai' in dto` para distinguir omissão de null explícito.
+    const idPaiProvided = 'idPai' in dto;
+    if (idPaiProvided) {
+      const novoPaiId = dto.idPai !== null && dto.idPai !== undefined
+        ? BigInt(dto.idPai)
+        : null;
+      await validateNoCycle(this.prisma, projectId, novoPaiId);
+    }
+
     // Determinar se o teamId foi enviado pelo cliente (incluindo null
     // explícito). Não usar `dto.teamId !== undefined` — distinção pode ser
     // perdida por validators/serializers.
@@ -670,12 +692,22 @@ export class ProjectsService implements OnModuleInit {
     };
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      // Resolver valor efetivo de idPai: undefined = não toca, null = remove pai,
+      // BigInt = novo pai. A validação anti-ciclo já ocorreu antes da transaction.
+      let effectiveIdPai: bigint | null | undefined;
+      if (idPaiProvided) {
+        effectiveIdPai = dto.idPai !== null && dto.idPai !== undefined
+          ? BigInt(dto.idPai)
+          : null;
+      }
+
       const u = await tx.dProject.update({
         where: { chave: projectId },
         data: {
           ...(dto.nome !== undefined ? { nome: dto.nome } : {}),
           ...(dto.description !== undefined ? { descricao: dto.description } : {}),
           ...(effectiveRepoUrl !== undefined ? { repoUrl: effectiveRepoUrl } : {}),
+          ...(effectiveIdPai !== undefined ? { idPai: effectiveIdPai } : {}),
           dados: novosDados as Prisma.InputJsonValue,
         },
       });
@@ -834,31 +866,49 @@ export class ProjectsService implements OnModuleInit {
     }
 
     const counts = await this.prisma.$transaction(async (tx) => {
-      // Cascade: DVincula dos membros (idLocEscritu=projectId).
-      const membersResult = await tx.dVincula.updateMany({
-        where: { idLocEscritu: projectId, excluido: false },
+      // 1. Coletar todos os descendentes via CTE recursiva (Space + Folders + Lists).
+      //    Inclui o próprio projeto na raiz da árvore.
+      const descendants = await tx.$queryRaw<Array<{ chave: bigint }>>`
+        WITH RECURSIVE tree AS (
+          SELECT "chave" FROM "DProject"
+          WHERE "chave" = ${projectId} AND "excluido" = false
+
+          UNION ALL
+
+          SELECT p."chave" FROM "DProject" p
+          INNER JOIN tree t ON p."idPai" = t."chave"
+          WHERE p."excluido" = false
+        )
+        SELECT "chave" FROM tree
+      `;
+
+      const ids = descendants.map((d) => d.chave);
+
+      // 2. Cascade bottom-up: Tasks filhas de todas as Lists coletadas.
+      const tasksResult = await tx.dTask.updateMany({
+        where: { idProject: { in: ids }, excluido: false },
         data: { excluido: true },
       });
 
-      // Cascade: DVincula -182 PROJECT_TEAM_LINK (idEntidade=projectId).
+      // 3. Cascade: DVincula de membros de todos os projetos coletados.
+      const membersResult = await tx.dVincula.updateMany({
+        where: { idLocEscritu: { in: ids }, excluido: false },
+        data: { excluido: true },
+      });
+
+      // 4. Cascade: DVincula PROJECT_TEAM_LINK de todos os projetos coletados.
       await tx.dVincula.updateMany({
         where: {
-          idEntidade: projectId,
+          idEntidade: { in: ids },
           idClasse: ID_CLASSE_PROJECT_TEAM_LINK,
           excluido: false,
         },
         data: { excluido: true },
       });
 
-      // Cascade: DTask do projeto
-      const tasksResult = await tx.dTask.updateMany({
-        where: { idProject: projectId, excluido: false },
-        data: { excluido: true },
-      });
-
-      // Soft delete do projeto
-      await tx.dProject.update({
-        where: { chave: projectId },
+      // 5. Soft-delete de todos os DProject descendentes (Lists, Folders, Space).
+      await tx.dProject.updateMany({
+        where: { chave: { in: ids }, excluido: false },
         data: { excluido: true },
       });
 
