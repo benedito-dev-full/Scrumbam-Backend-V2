@@ -1,4 +1,4 @@
-import { IsEnum, IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsEnum, IsIn, IsISO8601, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
@@ -121,4 +121,15 @@ export class CreateTaskDto {
   @IsString()
   @IsIn(['-154', '-200'], { message: 'idClasse deve ser "-154" (TASK) ou "-200" (PHASE).' })
   idClasse?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Data limite da task (due date) no formato ISO 8601 (ex: "2026-06-30" ou ' +
+      '"2026-06-30T23:59:59.000Z"). Persistida como DateTime? na coluna DTask.dueDate ' +
+      '(D1 — Bloco D integração frontend V2). Aceita date-only ou datetime completo.',
+    example: '2026-06-30',
+  })
+  @IsOptional()
+  @IsISO8601()
+  dueDate?: string;
 }

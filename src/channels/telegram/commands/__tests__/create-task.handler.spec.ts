@@ -16,6 +16,7 @@ const makeTaskResponse = () => ({
   taskType: null,
   assigneeId: '100',
   sprintId: null,
+  dueDate: null, // D1 — campo obrigatório no TaskResponseDto
   dados: null,
   criadoEm: new Date().toISOString(),
   atualizadoEm: new Date().toISOString(),

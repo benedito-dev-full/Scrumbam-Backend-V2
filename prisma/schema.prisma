@@ -363,6 +363,9 @@ model DTask {
   // Json polimórfico — V3 intentions, telemetria, workSessions[], etc.
   dados Json?
 
+  // Data limite da task (D1 — Bloco D integração frontend V2)
+  dueDate DateTime? @db.Timestamptz(6)
+
   excluido     Boolean  @default(false)
   criadoEm     DateTime @default(now()) @db.Timestamptz(6)
   atualizadoEm DateTime @default(now()) @updatedAt @db.Timestamptz(6)
@@ -382,6 +385,7 @@ model DTask {
   @@index([excluido, idProject])
   @@index([idPai])
   @@index([idPai, excluido])
+  @@index([dueDate], map: "DTask_dueDate_idx")
 }
 
 // =====================================================================

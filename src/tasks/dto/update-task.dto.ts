@@ -1,6 +1,7 @@
 import {
   IsEnum,
   IsIn,
+  IsISO8601,
   IsOptional,
   IsString,
   MaxLength,
@@ -85,4 +86,17 @@ export class UpdateTaskDto {
   @ValidateIf((o: UpdateTaskDto) => o.idPai !== null)
   @IsString()
   idPai?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Data limite da task (due date) no formato ISO 8601. ' +
+      'string=nova data; null=remove a data; ausente=não toca. ' +
+      'Exemplo: "2026-06-30" ou "2026-06-30T23:59:59.000Z".',
+    example: '2026-06-30',
+    nullable: true,
+  })
+  @IsOptional()
+  @ValidateIf((o: UpdateTaskDto) => o.dueDate !== null)
+  @IsISO8601()
+  dueDate?: string | null;
 }

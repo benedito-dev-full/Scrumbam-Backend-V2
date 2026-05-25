@@ -78,6 +78,15 @@ export class TaskResponseDto {
   sprintId!: string | null;
 
   @ApiPropertyOptional({
+    description:
+      'Data limite da task em ISO 8601. Null se não definida. ' +
+      '(D1 — Bloco D integração frontend V2)',
+    nullable: true,
+    example: '2026-06-30T03:00:00.000Z',
+  })
+  dueDate!: string | null;
+
+  @ApiPropertyOptional({
     description: 'Dados polimórficos (identifier, v3, telemetry, automation)',
     nullable: true,
   })

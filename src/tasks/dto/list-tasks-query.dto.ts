@@ -1,7 +1,9 @@
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
   IsInt,
+  IsISO8601,
   IsNumber,
   IsOptional,
   IsString,
@@ -10,7 +12,7 @@ import {
   Min,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 
 /**
  * DTO para query de listagem de tasks (GET /tasks).
@@ -199,4 +201,55 @@ export class ListTasksQueryDto {
   @Max(20)
   @Type(() => Number)
   depth?: number;
+
+  /**
+   * Filtro por data limite — início do intervalo (inclusivo).
+   *
+   * Formato ISO 8601 (date-only ou datetime completo).
+   * Combina com `dueDateTo` para intervalo fechado.
+   *
+   * Exemplo: `dueDateFrom=2026-06-01` retorna tasks com dueDate >= 2026-06-01.
+   */
+  @ApiPropertyOptional({
+    description:
+      'Filtrar tasks com dueDate >= este valor (ISO 8601). ' +
+      'Combine com `dueDateTo` para intervalo fechado.',
+    example: '2026-06-01',
+  })
+  @IsOptional()
+  @IsISO8601()
+  dueDateFrom?: string;
+
+  /**
+   * Filtro por data limite — fim do intervalo (inclusivo).
+   *
+   * Formato ISO 8601 (date-only ou datetime completo).
+   */
+  @ApiPropertyOptional({
+    description:
+      'Filtrar tasks com dueDate <= este valor (ISO 8601). ' +
+      'Combine com `dueDateFrom` para intervalo fechado.',
+    example: '2026-06-30',
+  })
+  @IsOptional()
+  @IsISO8601()
+  dueDateTo?: string;
+
+  /**
+   * Filtro por "vence hoje" no timezone America/Sao_Paulo.
+   *
+   * Quando `true`, retorna tasks com dueDate entre o início e o fim
+   * do dia atual (00:00:00 → 23:59:59.999) em horário de Brasília.
+   * Tem precedência sobre `dueDateFrom`/`dueDateTo` quando combinados.
+   */
+  @ApiPropertyOptional({
+    description:
+      'Quando true, retorna apenas tasks com dueDate no dia de hoje ' +
+      '(timezone America/Sao_Paulo). Tem precedência sobre dueDateFrom/dueDateTo.',
+    example: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }: { value: unknown }) => value === 'true' || value === true)
+  dueDateToday?: boolean;
 }

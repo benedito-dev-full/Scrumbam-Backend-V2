@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { EventProducerService } from '../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../common/services/correlation-id.service';
+import { TimezoneService } from '../common/services/timezone.service';
 import { TasksIdentifierService } from './tasks-identifier.service';
 import { PhaseHierarchyService } from './services/phase-hierarchy.service';
 import { validateTransition, isValidState } from './tasks-state-machine';
@@ -111,6 +112,7 @@ export class TasksService {
     private readonly correlationIdService: CorrelationIdService,
     private readonly phaseHierarchy: PhaseHierarchyService,
     private readonly phaseMetrics: PhaseMetricsService,
+    private readonly timezoneService: TimezoneService,
   ) {}
 
   /**
@@ -302,6 +304,8 @@ export class TasksService {
           idCreator: creatorId,
           idPai: idPaiBigInt,
           dados: dadosPayload as Prisma.InputJsonValue,
+          // D1 — dueDate como DateTime? (não em `dados` JSON)
+          dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
         },
       });
     });
@@ -516,6 +520,22 @@ export class TasksService {
       }
     }
 
+    // D1 — Filtros por dueDate (TimezoneService garante timezone America/Sao_Paulo).
+    // Precedência: dueDateToday > dueDateFrom/dueDateTo.
+    if (query.dueDateToday) {
+      const today = this.timezoneService.getPeriodDates('today');
+      where.dueDate = { gte: today.gte, lte: today.lte };
+    } else if (query.dueDateFrom || query.dueDateTo) {
+      const dueDateFilter: { gte?: Date; lte?: Date } = {};
+      if (query.dueDateFrom) {
+        dueDateFilter.gte = new Date(query.dueDateFrom);
+      }
+      if (query.dueDateTo) {
+        dueDateFilter.lte = new Date(query.dueDateTo);
+      }
+      where.dueDate = dueDateFilter;
+    }
+
     const tasks = await this.prisma.dTask.findMany({
       where,
       select: {
@@ -528,6 +548,7 @@ export class TasksService {
         idPriority: true,
         idAssignee: true,
         idSprint: true,
+        dueDate: true,
         dados: true,
         excluido: true,
         criadoEm: true,
@@ -670,6 +691,15 @@ export class TasksService {
       }
     }
 
+    // D1 — semântica ternária para dueDate:
+    //   undefined → não tocar o campo
+    //   null      → remover a data (dueDate = null)
+    //   string    → nova data (parseada para Date)
+    let dueDateUpdate: Date | null | undefined = undefined;
+    if (dto.dueDate !== undefined) {
+      dueDateUpdate = dto.dueDate ? new Date(dto.dueDate) : null;
+    }
+
     const updated = await this.prisma.dTask.update({
       where: { chave: taskId },
       data: {
@@ -681,6 +711,7 @@ export class TasksService {
         ...(idPriorityUpdate !== undefined ? { idPriority: idPriorityUpdate } : {}),
         ...(idPaiUpdate !== undefined ? { idPai: idPaiUpdate } : {}),
         ...(novosDados !== undefined ? { dados: novosDados as Prisma.InputJsonValue } : {}),
+        ...(dueDateUpdate !== undefined ? { dueDate: dueDateUpdate } : {}),
       },
     });
 
@@ -1275,6 +1306,7 @@ export class TasksService {
       idPriority?: bigint | null;
       idAssignee?: bigint | null;
       idSprint?: bigint | null;
+      dueDate?: Date | null;
       dados?: unknown;
       criadoEm: Date;
       atualizadoEm: Date;
@@ -1303,6 +1335,8 @@ export class TasksService {
       taskType,
       assigneeId: task.idAssignee?.toString() ?? null,
       sprintId: task.idSprint?.toString() ?? null,
+      // D1 — dueDate como coluna tipada (não em dados JSON)
+      dueDate: task.dueDate ? task.dueDate.toISOString() : null,
       dados,
       criadoEm: task.criadoEm.toISOString(),
       atualizadoEm: task.atualizadoEm.toISOString(),
