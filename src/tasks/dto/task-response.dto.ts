@@ -78,6 +78,13 @@ export class TaskResponseDto {
   sprintId!: string | null;
 
   @ApiPropertyOptional({
+    description: 'ID da task pai (subtarefa). Null se task raiz.',
+    nullable: true,
+    example: '42',
+  })
+  idPai!: string | null;
+
+  @ApiPropertyOptional({
     description:
       'Data limite da task em ISO 8601. Null se não definida. ' +
       '(D1 — Bloco D integração frontend V2)',

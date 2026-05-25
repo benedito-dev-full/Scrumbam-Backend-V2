@@ -549,6 +549,7 @@ export class TasksService {
         chave: true,
         idClasse: true,
         idProject: true,
+        idPai: true,
         nome: true,
         descricao: true,
         idStatus: true,
@@ -1307,6 +1308,7 @@ export class TasksService {
       chave: bigint;
       idClasse?: bigint | null;
       idProject?: bigint | null;
+      idPai?: bigint | null;
       nome: string;
       descricao?: string | null;
       idStatus?: bigint | null;
@@ -1342,6 +1344,7 @@ export class TasksService {
       taskType,
       assigneeId: task.idAssignee?.toString() ?? null,
       sprintId: task.idSprint?.toString() ?? null,
+      idPai: task.idPai?.toString() ?? null,
       // D1 — dueDate como coluna tipada (não em dados JSON)
       dueDate: task.dueDate ? task.dueDate.toISOString() : null,
       dados,
