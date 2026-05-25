@@ -526,14 +526,21 @@ export class TasksService {
       const today = this.timezoneService.getPeriodDates('today');
       where.dueDate = { gte: today.gte, lte: today.lte };
     } else if (query.dueDateFrom || query.dueDateTo) {
-      const dueDateFilter: { gte?: Date; lte?: Date } = {};
+      // Usa TimezoneService para garantir corte correto em America/Sao_Paulo.
+      // applyDateFilters aceita strings YYYY-MM-DD; quando só um lado está
+      // presente, usamos o mesmo valor no extremo ausente para montar o range
+      // completo e depois extraímos apenas o lado relevante.
+      const from = query.dueDateFrom ?? query.dueDateTo!;
+      const to = query.dueDateTo ?? query.dueDateFrom!;
+      const range = this.timezoneService.applyDateFilters(from, to);
+      const dueDateResult: { gte?: Date; lte?: Date } = {};
       if (query.dueDateFrom) {
-        dueDateFilter.gte = new Date(query.dueDateFrom);
+        dueDateResult.gte = range.gte;
       }
       if (query.dueDateTo) {
-        dueDateFilter.lte = new Date(query.dueDateTo);
+        dueDateResult.lte = range.lte;
       }
-      where.dueDate = dueDateFilter;
+      where.dueDate = dueDateResult;
     }
 
     const tasks = await this.prisma.dTask.findMany({

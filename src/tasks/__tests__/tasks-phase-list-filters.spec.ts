@@ -6,6 +6,7 @@ import { PhaseMetricsService } from '../services/phase-metrics.service';
 import { PrismaService } from '../../prisma.service';
 import { EventProducerService } from '../../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../../common/services/correlation-id.service';
+import { TimezoneService } from '../../common/services/timezone.service';
 import { ListTasksQueryDto } from '../dto/list-tasks-query.dto';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
@@ -141,6 +142,15 @@ describe('Tasks Fase 4 — filtros hierárquicos (ADR-V2-047)', () => {
           {
             provide: PhaseMetricsService,
             useValue: { compute: jest.fn() },
+          },
+          {
+            provide: TimezoneService,
+            useValue: {
+              getPeriodDates: jest.fn().mockReturnValue({ gte: new Date(), lte: new Date() }),
+              toStartOfDayBrazil: jest.fn().mockImplementation((d: Date) => d),
+              toEndOfDayBrazil: jest.fn().mockImplementation((d: Date) => d),
+              applyDateFilters: jest.fn().mockReturnValue({ gte: new Date(), lte: new Date() }),
+            },
           },
         ],
       }).compile();

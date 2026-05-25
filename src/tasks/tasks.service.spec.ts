@@ -7,6 +7,7 @@ import { PhaseMetricsService } from './services/phase-metrics.service';
 import { PrismaService } from '../prisma.service';
 import { EventProducerService } from '../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../common/services/correlation-id.service';
+import { TimezoneService } from '../common/services/timezone.service';
 import { validateTransition, validTransitions } from './tasks-state-machine';
 import { TaskStatus } from './schemas/task-dados.schema';
 
@@ -120,6 +121,15 @@ describe('TasksService', () => {
         { provide: CorrelationIdService, useValue: correlationIdMock },
         { provide: PhaseHierarchyService, useValue: phaseHierarchyMock },
         { provide: PhaseMetricsService, useValue: phaseMetricsMock },
+        {
+          provide: TimezoneService,
+          useValue: {
+            getPeriodDates: jest.fn().mockReturnValue({ gte: new Date(), lte: new Date() }),
+            toStartOfDayBrazil: jest.fn().mockImplementation((d: Date) => d),
+            toEndOfDayBrazil: jest.fn().mockImplementation((d: Date) => d),
+            applyDateFilters: jest.fn().mockReturnValue({ gte: new Date(), lte: new Date() }),
+          },
+        },
       ],
     }).compile();
 
@@ -1078,6 +1088,15 @@ describe('TasksService', () => {
           {
             provide: PhaseMetricsService,
             useValue: { compute: jest.fn() },
+          },
+          {
+            provide: TimezoneService,
+            useValue: {
+              getPeriodDates: jest.fn().mockReturnValue({ gte: new Date(), lte: new Date() }),
+              toStartOfDayBrazil: jest.fn().mockImplementation((d: Date) => d),
+              toEndOfDayBrazil: jest.fn().mockImplementation((d: Date) => d),
+              applyDateFilters: jest.fn().mockReturnValue({ gte: new Date(), lte: new Date() }),
+            },
           },
         ],
       }).compile();
