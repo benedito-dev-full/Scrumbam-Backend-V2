@@ -574,7 +574,7 @@ export class InvitesService {
 
     return {
       ...session,
-      redirectTo: '/intentions',
+      redirectTo: '/',
     };
   }
 
