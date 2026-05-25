@@ -27,6 +27,31 @@ export class ProjectResponseDto {
   @ApiProperty({ description: 'Nome do projeto', example: 'Scrumban V2' })
   nome!: string;
 
+  /**
+   * Tipo do projeto (ADR-V2-051 hierarquia Space/Folder/List).
+   *
+   * Valores canônicos: -350=SPACE, -351=FOLDER, -352=LIST, -353=DOC.
+   * Serializado como string (BigInt).
+   */
+  @ApiProperty({
+    description: 'idClasse do DProject (tipo hierárquico). -350=SPACE, -351=FOLDER, -352=LIST, -353=DOC.',
+    example: '-350',
+  })
+  idClasse!: string;
+
+  /**
+   * ID do DProject pai na hierarquia (ADR-V2-051).
+   *
+   * `null` para SPACEs (raiz). Presente para FOLDERs (pai=SPACE) e
+   * LISTs/DOCs (pai=FOLDER).
+   */
+  @ApiPropertyOptional({
+    description: 'ID do DProject pai na hierarquia ou null para raízes (SPACEs).',
+    example: '100',
+    nullable: true,
+  })
+  idPai!: string | null;
+
   @ApiPropertyOptional({ description: 'Prefixo dos identifiers', example: 'DEV', nullable: true })
   prefix!: string | null;
 
@@ -75,6 +100,18 @@ export class ProjectResponseDto {
     nullable: true,
   })
   folderId!: string | null;
+
+  /**
+   * Visibilidade do projeto (ADR-V2-051 §8).
+   *
+   * `true` = privado (visível apenas a membros DVincula -188).
+   * `false` = público na org (padrão).
+   */
+  @ApiProperty({
+    description: 'Projeto privado (true) ou público na org (false)',
+    example: false,
+  })
+  privado!: boolean;
 
   @ApiProperty({ description: 'Data de criação ISO 8601', example: '2026-05-09T00:00:00.000Z' })
   criadoEm!: string;

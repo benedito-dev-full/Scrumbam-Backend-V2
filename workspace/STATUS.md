@@ -1,6 +1,57 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-24 (Bloco B COMPLETO — Frontend Integration 8.8/10 médio)
+**Ultima atualizacao:** 2026-05-24 (Bloco C COMPLETO — Hierarquia Space/Folder/List 8.7/10 médio)
+
+---
+
+## ✅ Bloco C — COMPLETE (V2 Frontend Integration — Hierarquia Space/Folder/List)
+
+**Module:** projects (DProject) + frontend (React components)
+**Task:** Bloco C — GET /projects filtros + hierarquia Space/Folder/List + sidebar + CRUD inline
+**Status:** COMPLETO
+**Duration:** ~3h total (Implementer backend + Implementer frontend + Reviewer validation)
+**Quality Score:** 8.7/10 APPROVED (médio: C1 8.8 + C2 8.5 + C3 8.3 + C4 8.7 + C5 9.0)
+
+**Agents Performance:**
+| Agent | Phase | Duration | Quality |
+|-------|-------|----------|---------|
+| Strategist | C0 Planning | — | Hierarquia Space/Folder/List + filtros + guards |
+| Implementer | C1-C5 Backend | ~1.5h | 73 testes PASS, ZERO N+1, hierarchy guards |
+| Implementer | C1-C5 Frontend | ~1h | 5 hooks + 4 components (SpaceTree, dialogs, inline rename) |
+| Reviewer | C1-C5 | ~0.5h | 8.7/10 médio (scores: 8.8, 8.5, 8.3, 8.7, 9.0) |
+| Documenter | C1-C5 | — | JSDoc, ROADMAP, CHANGELOG, STATUS, commit |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DProject é estrutural (Prisma direto)
+- Pilar 2 (Endpoints): ATIVO — reutiliza POST /projects e GET /projects genéricos (zero novo controller)
+- Pilar 3 (Seed): ATIVO — 6 DClasses adicionadas em Bloco A (-187, -188, -350, -351, -352, -353)
+
+**Deliverables:**
+- [x] C1: GET /projects com filtros `idClasse` e `idPai`
+- [x] C1: POST /projects aceita `idClasse` para criar SPACE/FOLDER/LIST discriminado
+- [x] C1: `useSpaces()`, `useFolders()`, `useLists()` hooks conectados ao backend
+- [x] C1: `validateHierarchyRule()` bloqueia hierarquias inválidas
+- [x] C2: Campo `privado?: boolean` no CRUD DProject
+- [x] C2: `useCreateSpace()`, `useRenameProject()`, `useArchiveProject()` hooks
+- [x] C2: `CreateSpaceDialog` componente
+- [x] C3: `SpaceTree` hierárquico com lazy loading por nível
+- [x] C3: localStorage persist, cadeado para spaces privados, chevron animado
+- [x] C4: `useCreateFolder()`, `useCreateList()` hooks
+- [x] C4: `CreateFolderDialog`, `CreateListDialog` componentes
+- [x] C4: inline rename duplo-clique (SpaceTree)
+- [x] C5: Filtro `?privado` no GET /projects
+- [x] Backend: 73/73 testes PASS
+
+**Metrics:**
+- Backend: Completo, 73 testes PASS (era 31 antes do Bloco C)
+- Frontend: Zero erros de integração, componentes compilam
+- Build: PASS (npm run build backend + frontend)
+- TypeScript: 0 errors
+- N+1 Queries: ZERO (batch queries otimizadas)
+- Queries/request: ~2 (GET /projects + schema resolution)
+- Pilares: 3/3 respeitados (N/A, ATIVO, ATIVO)
+
+**ADRs:** ADR-V2-051 (hierarquia + anti-ciclo), ADR-V2-001 (zero tabela nova)
 
 ---
 

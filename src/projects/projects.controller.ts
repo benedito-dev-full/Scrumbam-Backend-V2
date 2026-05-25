@@ -137,6 +137,24 @@ export class ProjectsController {
     description: 'Filtra projetos vinculados ao time (DVincula -182)',
     example: '200',
   })
+  @ApiQuery({
+    name: 'idClasse',
+    required: false,
+    description: 'Filtra por idClasse do DProject. Ex: -350=SPACE, -351=FOLDER, -352=LIST, -353=DOC.',
+    example: '-350',
+  })
+  @ApiQuery({
+    name: 'idPai',
+    required: false,
+    description: 'Filtra projetos cujo DProject.idPai é igual a este valor.',
+    example: '100',
+  })
+  @ApiQuery({
+    name: 'privado',
+    required: false,
+    description: 'Filtra pelo campo privado. true=apenas privados, false=apenas públicos. Ausente=sem filtro.',
+    example: 'false',
+  })
   @ApiResponse({ status: 200, description: 'Lista de projetos', type: ListProjectResponseDto })
   async findMany(
     @Request() req: JwtRequest,
@@ -147,6 +165,9 @@ export class ProjectsController {
       limit: query.limit ?? 20,
       teamId: query.teamId,
       organizationId: req.user.organizationId,
+      idClasse: query.idClasse,
+      idPai: query.idPai,
+      privado: query.privado,
     });
   }
 

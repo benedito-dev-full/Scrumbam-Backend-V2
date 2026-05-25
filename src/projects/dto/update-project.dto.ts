@@ -145,4 +145,19 @@ export class UpdateProjectDto {
   @ValidateIf((o: UpdateProjectDto) => o.teamId !== null && o.teamId !== undefined)
   @IsString()
   teamId?: string | null;
+
+  /**
+   * Altera visibilidade do projeto (ADR-V2-051 §8).
+   *
+   * - `true`  → projeto privado (visível apenas a membros DVincula -188)
+   * - `false` → projeto público na org
+   * - omitido → visibilidade inalterada
+   */
+  @ApiPropertyOptional({
+    description: 'Tornar projeto privado (true) ou público (false) | omitir para manter',
+    example: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  privado?: boolean;
 }

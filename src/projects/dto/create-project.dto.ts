@@ -133,6 +133,50 @@ export class CreateProjectDto {
   repoUrl?: string;
 
   /**
+   * Tipo hierárquico do projeto (ADR-V2-051 — hierarquia Space/Folder/List).
+   *
+   * Valores canônicos:
+   * - `-350` SPACE  — raiz da hierarquia, não possui pai
+   * - `-351` FOLDER — filho de SPACE, agrupador intermediário
+   * - `-352` LIST   — contém tasks; recebe seed de statuses V3 + sprint
+   * - `-353` DOC    — documento (reservado, sem seed)
+   *
+   * Quando ausente, o projeto é criado como LIST padrão (idClasse=-153,
+   * backwards-compatibility com código anterior ao ADR-V2-051).
+   *
+   * @see ADR-V2-051 — Hierarquia Space/Folder/List
+   */
+  @ApiPropertyOptional({
+    description: 'Tipo hierárquico do projeto (-350 SPACE, -351 FOLDER, -352 LIST, -353 DOC)',
+    example: '-352',
+  })
+  @IsOptional()
+  @IsString()
+  idClasse?: string;
+
+  /**
+   * ID do projeto pai na hierarquia (ADR-V2-051).
+   *
+   * Regras de hierarquia:
+   * - **SPACE** (`-350`): deve ser `null` (SPACE é sempre raiz)
+   * - **FOLDER** (`-351`): deve apontar para um SPACE (`-350`)
+   * - **LIST** (`-352`): deve apontar para FOLDER (`-351`) ou SPACE (`-350`)
+   * - **Outros** (legado `-153`, DOC `-353`): sem restrição hierárquica
+   *
+   * Quando omitido ou `null`, o projeto não possui pai (raiz).
+   *
+   * @see ADR-V2-051 — Hierarquia Space/Folder/List
+   */
+  @ApiPropertyOptional({
+    description: 'ID do projeto pai na hierarquia (null para raiz)',
+    example: '100',
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  idPai?: string | null;
+
+  /**
    * ID do time ao qual o projeto será vinculado (DVincula -182).
    *
    * Quando fornecido, cria atomicamente um vínculo PROJECT_TEAM_LINK
@@ -156,4 +200,20 @@ export class CreateProjectDto {
   @IsOptional()
   @IsString()
   teamId?: string;
+
+  /**
+   * Torna o projeto privado (ADR-V2-051 §8).
+   *
+   * Quando `true`, o projeto só é visível a membros explicitamente
+   * vinculados via DVincula -188 (SPACE_PRIVATE_MEMBER).
+   * Quando `false` (padrão), o projeto é visível a todos da org.
+   */
+  @ApiPropertyOptional({
+    description: 'Tornar projeto privado (visível apenas a membros explícitos)',
+    example: false,
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  privado?: boolean;
 }

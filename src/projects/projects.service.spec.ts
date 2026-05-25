@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ProjectsService } from './projects.service';
 import { SeedBootstrapService } from './seed-bootstrap.service';
 import { ProjectMembersService } from './project-members.service';
@@ -803,6 +803,194 @@ describe('ProjectsService', () => {
 
       // Deve usar apenas a coluna canônica.
       expect(result.repoUrl).toBe(legacyRepo);
+    });
+  });
+
+  // ─── Testes ADR-V2-051: idClasse + idPai no create() ──────────────────────
+
+  describe('create() — idClasse e idPai (ADR-V2-051)', () => {
+    /**
+     * Helper que configura $transaction retornando um projeto com o idClasse fornecido.
+     */
+    const setupTxForIdClasse = (idClasse: bigint) => {
+      const proj = { ...mockProject, idClasse };
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const txMock = {
+          dProject: {
+            create: jest.fn().mockResolvedValue(proj),
+            findFirst: jest.fn().mockResolvedValue(null), // sem colisão de slug
+          },
+          dVincula: { create: jest.fn().mockResolvedValue({ chave: BigInt(1) }) },
+        };
+        return fn(txMock);
+      });
+    };
+
+    it('deve criar projeto com idClasse=-350 (SPACE) quando dto.idClasse fornecido', async () => {
+      setupTxForIdClasse(BigInt(-350));
+
+      const result = await service.create(
+        { nome: 'My Space', idClasse: '-350' },
+        BigInt(100),
+      );
+
+      // O response deve refletir o idClasse=-350 que o mock retornou.
+      expect(result.idClasse).toBe('-350');
+    });
+
+    it('deve usar idClasse=-153 como fallback quando dto.idClasse ausente', async () => {
+      setupTxForIdClasse(BigInt(-153));
+
+      const result = await service.create({ nome: 'Legacy Project' }, BigInt(100));
+
+      expect(result.idClasse).toBe('-153');
+    });
+
+    it('findMany com idClasse="-350" deve filtrar apenas projetos SPACE', async () => {
+      const spaceProject = { ...mockProject, idClasse: BigInt(-350) };
+      prisma.dVincula.findMany
+        .mockResolvedValueOnce([{ idLocEscritu: BigInt(1) }]) // roles user
+        .mockResolvedValueOnce([]) // team links
+        .mockResolvedValueOnce([]); // folder links
+      prisma.dProject.findMany.mockResolvedValue([spaceProject]);
+      prisma.dVincula.groupBy.mockResolvedValue([
+        { idLocEscritu: BigInt(1), _count: { chave: 1 } },
+      ]);
+
+      const result = await service.findMany(BigInt(100), { idClasse: '-350' });
+
+      // Verifica que o filtro foi passado para dProject.findMany
+      const projectsCall = prisma.dProject.findMany.mock.calls[0][0];
+      expect(projectsCall.where).toMatchObject({ idClasse: BigInt(-350) });
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].idClasse).toBe('-350');
+    });
+
+    it('findMany com idPai="100" deve aplicar filtro BigInt corretamente', async () => {
+      prisma.dVincula.findMany
+        .mockResolvedValueOnce([{ idLocEscritu: BigInt(1) }]) // roles user
+        .mockResolvedValueOnce([]) // team links
+        .mockResolvedValueOnce([]); // folder links
+      prisma.dProject.findMany.mockResolvedValue([mockProject]);
+      prisma.dVincula.groupBy.mockResolvedValue([
+        { idLocEscritu: BigInt(1), _count: { chave: 1 } },
+      ]);
+
+      await service.findMany(BigInt(100), { idPai: '100' });
+
+      const projectsCall = prisma.dProject.findMany.mock.calls[0][0];
+      // idPai deve ser convertido para BigInt(100) no where
+      expect(projectsCall.where).toMatchObject({ idPai: BigInt(100) });
+    });
+
+    it('findMany com privado=false deve aplicar filtro { privado: false } no where (C5)', async () => {
+      // Apenas Spaces públicos (privado=false) devem aparecer.
+      const publicSpace = { ...mockProject, idClasse: BigInt(-350), privado: false };
+      prisma.dVincula.findMany
+        .mockResolvedValueOnce([{ idLocEscritu: BigInt(1) }]) // roles user
+        .mockResolvedValueOnce([]) // team links
+        .mockResolvedValueOnce([]); // folder links
+      prisma.dProject.findMany.mockResolvedValue([publicSpace]);
+      prisma.dVincula.groupBy.mockResolvedValue([
+        { idLocEscritu: BigInt(1), _count: { chave: 1 } },
+      ]);
+
+      await service.findMany(BigInt(100), { privado: false });
+
+      const projectsCall = prisma.dProject.findMany.mock.calls[0][0];
+      expect(projectsCall.where).toMatchObject({ privado: false });
+      expect(projectsCall.where).not.toHaveProperty('privado', true);
+    });
+
+    it('findMany com privado=true deve aplicar filtro { privado: true } no where (C5)', async () => {
+      // Apenas Spaces privados devem aparecer.
+      const privateSpace = { ...mockProject, idClasse: BigInt(-350), privado: true };
+      prisma.dVincula.findMany
+        .mockResolvedValueOnce([{ idLocEscritu: BigInt(1) }]) // roles user
+        .mockResolvedValueOnce([]) // team links
+        .mockResolvedValueOnce([]); // folder links
+      prisma.dProject.findMany.mockResolvedValue([privateSpace]);
+      prisma.dVincula.groupBy.mockResolvedValue([
+        { idLocEscritu: BigInt(1), _count: { chave: 1 } },
+      ]);
+
+      await service.findMany(BigInt(100), { privado: true });
+
+      const projectsCall = prisma.dProject.findMany.mock.calls[0][0];
+      expect(projectsCall.where).toMatchObject({ privado: true });
+    });
+
+    it('findMany sem privado não deve incluir filtro de privacidade no where (C5)', async () => {
+      // Ausência de `privado` = sem filtro (retorna públicos e privados).
+      prisma.dVincula.findMany
+        .mockResolvedValueOnce([{ idLocEscritu: BigInt(1) }]) // roles user
+        .mockResolvedValueOnce([]) // team links
+        .mockResolvedValueOnce([]); // folder links
+      prisma.dProject.findMany.mockResolvedValue([mockProject]);
+      prisma.dVincula.groupBy.mockResolvedValue([
+        { idLocEscritu: BigInt(1), _count: { chave: 1 } },
+      ]);
+
+      await service.findMany(BigInt(100));
+
+      const projectsCall = prisma.dProject.findMany.mock.calls[0][0];
+      expect(projectsCall.where).not.toHaveProperty('privado');
+    });
+
+    it('deve lançar BadRequestException ao criar FOLDER com pai que não é SPACE', async () => {
+      // Mock: pai existe mas é um FOLDER (-351), não SPACE (-350).
+      prisma.dProject.findFirst.mockResolvedValue({
+        chave: BigInt(99),
+        idClasse: BigInt(-351), // FOLDER — inválido como pai de outro FOLDER
+        nome: 'Outro Folder',
+        descricao: null,
+        idEstab: null,
+        dados: {},
+        excluido: false,
+        criadoEm: new Date(),
+        atualizadoEm: new Date(),
+      });
+
+      await expect(
+        service.create(
+          { nome: 'Bad Folder', idClasse: '-351', idPai: '99' },
+          BigInt(100),
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('deve criar FOLDER com idPai que é SPACE sem lançar exceção', async () => {
+      // Mock: pai existe e é SPACE (-350) — hierarquia válida.
+      prisma.dProject.findFirst.mockResolvedValue({
+        chave: BigInt(50),
+        idClasse: BigInt(-350), // SPACE — válido como pai de FOLDER
+        nome: 'My Space',
+        descricao: null,
+        idEstab: null,
+        dados: {},
+        excluido: false,
+        criadoEm: new Date(),
+        atualizadoEm: new Date(),
+      });
+
+      const folderProject = { ...mockProject, idClasse: BigInt(-351) };
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const txMock = {
+          dProject: {
+            create: jest.fn().mockResolvedValue(folderProject),
+            findFirst: jest.fn().mockResolvedValue(null),
+          },
+          dVincula: { create: jest.fn().mockResolvedValue({ chave: BigInt(1) }) },
+        };
+        return fn(txMock);
+      });
+
+      await expect(
+        service.create(
+          { nome: 'Valid Folder', idClasse: '-351', idPai: '50' },
+          BigInt(100),
+        ),
+      ).resolves.not.toThrow();
     });
   });
 

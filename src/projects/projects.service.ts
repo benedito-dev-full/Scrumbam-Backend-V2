@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -22,8 +23,14 @@ import { DeleteProjectResponseDto } from './dto/delete-project-response.dto';
 import { fallbackSlug, slugify } from './utils/slugify';
 import { validateNoCycle } from './utils/anti-cycle.util';
 
-/** idClasse de DProject no seed F1 (classes canônicas V2). */
+/** idClasse de DProject no seed F1 (classes canônicas V2). Fallback legado. */
 const ID_CLASSE_PROJECT = BigInt(-153); // SCRUMBAN_PROJECT (seed classes.seed.ts)
+
+/** idClasse DProject para SPACE (ADR-V2-051 §3.2). Raiz da hierarquia — sem pai. */
+const ID_CLASSE_SPACE = BigInt(-350);
+
+/** idClasse DProject para FOLDER (ADR-V2-051 §3.2). Filho de SPACE. */
+const ID_CLASSE_FOLDER = BigInt(-351);
 
 /**
  * idClasse DProject para LIST (ADR-V2-051 §3.2).
@@ -59,6 +66,7 @@ const ID_CLASSE_ORG_ADMIN = BigInt(-161);
  *
  * @see ADR-V2-029 (teamId filter)
  * @see ADR-V2-042 (organizationId obrigatorio para isolamento multi-tenant)
+ * @see ADR-V2-051 (idClasse/idPai hierarquia Space/Folder/List)
  */
 export interface FindManyProjectsOptions {
   cursor?: string;
@@ -76,6 +84,38 @@ export interface FindManyProjectsOptions {
    * `throw` quando ausente (mantem compat com MCP que e cross-org by design).
    */
   organizationId?: string;
+  /**
+   * Filtra por idClasse do DProject (ADR-V2-051 hierarquia Space/Folder/List).
+   *
+   * Valores canônicos:
+   * - `-350` SPACE (raiz)
+   * - `-351` FOLDER (filho de SPACE)
+   * - `-352` LIST (contém tasks)
+   * - `-353` DOC
+   *
+   * Quando ausente, retorna todos os projetos do usuário independente do tipo.
+   */
+  idClasse?: string;
+  /**
+   * Filtra DProjects cujo `idPai` é igual a este valor.
+   *
+   * Permite listar FOLDERs de um SPACE específico ou LISTs de um FOLDER.
+   * Quando ausente, não filtra por pai (retorna raízes e filhos).
+   */
+  idPai?: string;
+
+  /**
+   * Filtra pelo campo `DProject.privado`.
+   *
+   * - `true`  → apenas projetos privados
+   * - `false` → apenas projetos públicos
+   * - ausente → sem filtro (retorna ambos)
+   *
+   * O membership (DVincula) já garante isolamento por usuário/org.
+   * Este filtro é adicional para exibição seletiva no frontend
+   * (ex: listar apenas Spaces públicos da sidebar).
+   */
+  privado?: boolean;
 }
 
 /**
@@ -191,6 +231,16 @@ export class ProjectsService implements OnModuleInit {
         (dto.teamId ? ` (team=${dto.teamId})` : ''),
     );
 
+    // Resolver idClasse efetivo: DTO tem precedência; fallback para -153 (legado).
+    const effectiveIdClasse = dto.idClasse ? BigInt(dto.idClasse) : ID_CLASSE_PROJECT;
+
+    // Validação hierárquica: ANTES da transaction para fail-fast.
+    // validateHierarchyRule rejeita: SPACE com qualquer pai, FOLDER com pai
+    // que não seja SPACE, LIST com pai que não seja FOLDER nem SPACE.
+    if (dto.idPai !== undefined && dto.idPai !== null) {
+      await this.validateHierarchyRule(effectiveIdClasse, dto.idPai);
+    }
+
     const project = await this.prisma.$transaction(async (tx) => {
       // Derivar slug único antes de criar o projeto (ADR-V2-030).
       // Reutiliza tx para enxergar inserções desta mesma transação.
@@ -204,14 +254,20 @@ export class ProjectsService implements OnModuleInit {
         ...(dto.description ? { description: dto.description } : {}),
       };
 
+      // Resolver idPai: string → BigInt, null → null, undefined → omitir.
+      const idPaiValue =
+        dto.idPai !== undefined && dto.idPai !== null ? BigInt(dto.idPai) : undefined;
+
       // 1. DProject
       const proj = await tx.dProject.create({
         data: {
-          idClasse: ID_CLASSE_PROJECT,
+          idClasse: effectiveIdClasse,
           nome: dto.nome,
           ...(dto.description ? { descricao: dto.description } : {}),
           ...(dto.orgId ? { idEstab: BigInt(dto.orgId) } : {}),
           ...(dto.repoUrl ? { repoUrl: dto.repoUrl } : {}),
+          ...(idPaiValue !== undefined ? { idPai: idPaiValue } : {}),
+          ...(dto.privado !== undefined ? { privado: dto.privado } : {}),
           dados: dadosPayload as Prisma.InputJsonValue,
         },
       });
@@ -320,7 +376,7 @@ export class ProjectsService implements OnModuleInit {
     userEntidadeId: bigint,
     opts: FindManyProjectsOptions = {},
   ): Promise<ListProjectResponseDto> {
-    const { cursor, teamId, organizationId } = opts;
+    const { cursor, teamId, organizationId, idClasse, idPai, privado } = opts;
     const take = Math.min(opts.limit ?? 20, 100);
 
     // ADR-V2-042: organizationId vira filtro de tenant via DProject.idEstab.
@@ -397,6 +453,12 @@ export class ProjectsService implements OnModuleInit {
           chave: { in: projectIds },
           excluido: false,
           ...(orgIdBig !== undefined ? { idEstab: orgIdBig } : {}),
+          // ADR-V2-051: filtro hierárquico por tipo (SPACE/FOLDER/LIST/DOC)
+          ...(idClasse !== undefined ? { idClasse: BigInt(idClasse) } : {}),
+          // ADR-V2-051: filtro por pai direto (ex: FOLDERs de um SPACE)
+          ...(idPai !== undefined ? { idPai: BigInt(idPai) } : {}),
+          // C5: filtro de privacidade — apenas quando explicitamente enviado
+          ...(privado !== undefined ? { privado } : {}),
         },
         orderBy: { chave: 'desc' },
       }),
@@ -746,6 +808,7 @@ export class ProjectsService implements OnModuleInit {
           ...(dto.description !== undefined ? { descricao: dto.description } : {}),
           ...(effectiveRepoUrl !== undefined ? { repoUrl: effectiveRepoUrl } : {}),
           ...(effectiveIdPai !== undefined ? { idPai: effectiveIdPai } : {}),
+          ...(dto.privado !== undefined ? { privado: dto.privado } : {}),
           dados: novosDados as Prisma.InputJsonValue,
         },
       });
@@ -1235,6 +1298,59 @@ export class ProjectsService implements OnModuleInit {
   }
 
   /**
+   * Valida as regras de hierarquia Space/Folder/List (ADR-V2-051).
+   *
+   * Regras:
+   * - SPACE (-350): idPai deve ser null — Space é sempre raiz.
+   * - FOLDER (-351): idPai deve apontar para um SPACE (-350).
+   * - LIST (-352): idPai deve apontar para FOLDER (-351) ou SPACE (-350).
+   * - Outros (legado -153, DOC -353, etc.): sem restrição hierárquica nova.
+   *
+   * Faz 1 query `dProject.findUnique` para verificar o idClasse do pai
+   * antes de persistir — fail-fast, fora da transaction.
+   *
+   * @param idClasse - idClasse BigInt do projeto a criar
+   * @param idPai - ID string do projeto pai (obrigatório ter valor quando chamado)
+   *
+   * @throws {BadRequestException} Se a hierarquia for inválida
+   */
+  private async validateHierarchyRule(idClasse: bigint, idPai: string): Promise<void> {
+    // SPACE nunca pode ter pai — é raiz por definição.
+    if (idClasse === ID_CLASSE_SPACE) {
+      throw new BadRequestException('SPACE não pode ter projeto pai (é sempre raiz da hierarquia)');
+    }
+
+    // Para FOLDER e LIST: verificar o tipo do pai.
+    if (idClasse === ID_CLASSE_FOLDER || idClasse === ID_CLASSE_LIST) {
+      const pai = await this.prisma.dProject.findFirst({
+        where: { chave: BigInt(idPai), excluido: false },
+        select: { chave: true, idClasse: true },
+      });
+
+      if (!pai) {
+        throw new BadRequestException(`Projeto pai ${idPai} não encontrado`);
+      }
+
+      if (idClasse === ID_CLASSE_FOLDER) {
+        // FOLDER deve ter pai do tipo SPACE.
+        if (pai.idClasse !== ID_CLASSE_SPACE) {
+          throw new BadRequestException(
+            'FOLDER deve ter um SPACE como pai direto (hierarquia inválida)',
+          );
+        }
+      } else if (idClasse === ID_CLASSE_LIST) {
+        // LIST deve ter pai do tipo FOLDER ou SPACE.
+        if (pai.idClasse !== ID_CLASSE_FOLDER && pai.idClasse !== ID_CLASSE_SPACE) {
+          throw new BadRequestException(
+            'LIST deve ter um FOLDER ou SPACE como pai direto (hierarquia inválida)',
+          );
+        }
+      }
+    }
+    // Outros tipos (legado -153, DOC -353, etc.): sem restrição — aceitar qualquer pai.
+  }
+
+  /**
    * Valida que o time pode ser vinculado ao projeto (ADR-V2-029):
    *  1. Team existe (DEntidade idClasse=-180, excluido=false).
    *  2. Cross-org: team.idEstab === projectOrgId (bloqueia leak entre orgs).
@@ -1323,11 +1439,14 @@ export class ProjectsService implements OnModuleInit {
   private buildResponse(
     project: {
       chave: bigint;
+      idClasse: bigint;
+      idPai?: bigint | null;
       nome: string;
       descricao?: string | null;
       idEstab?: bigint | null;
       dados?: unknown;
       repoUrl?: string | null;
+      privado?: boolean;
       criadoEm: Date;
       atualizadoEm: Date;
     },
@@ -1339,12 +1458,15 @@ export class ProjectsService implements OnModuleInit {
 
     return {
       id: project.chave.toString(),
+      idClasse: project.idClasse.toString(),
+      idPai: project.idPai?.toString() ?? null,
       nome: project.nome,
       prefix: (dados?.prefix as string | null) ?? 'DEV',
       description: (dados?.description as string | null | undefined) ?? project.descricao ?? null,
       orgId: project.idEstab?.toString() ?? null,
       memberCount,
       repoUrl: project.repoUrl ?? null,
+      privado: project.privado ?? false,
       teamId,
       folderId,
       criadoEm: project.criadoEm.toISOString(),

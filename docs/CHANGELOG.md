@@ -14,6 +14,43 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Bloco C — Hierarquia Space/Folder/List com Filtros e Guards (C1-C5)** - 2026-05-24 (V2 Frontend Integration)
+  - **C1 — GET /projects com filtros idClasse/idPai + hooks useSpaces/useFolders/useLists (8.8/10):**
+    * Backend: `ListProjectsQueryDto` com `idClasse?: string` e `idPai?: string` para filtros opcionais
+    * Backend: `ProjectResponseDto` com `idClasse!: string` e `idPai!: string | null` obrigatórios
+    * Backend: `ProjectsService.findMany()` aplica filtros via WHERE condicional; `buildResponse()` serializa novos campos
+    * Backend: Controller `@ApiQuery` documenta filtros para Swagger
+    * Frontend: `src/lib/types/api.ts` — tipos DProjectDto, DProjectIdClasse, CreateProjectDto, UpdateProjectDto
+    * Frontend: `src/lib/query-keys.ts` — chaves projects.spaces, projects.folders(), projects.lists()
+    * Frontend: `src/hooks/use-projects.ts` — hooks useSpaces(), useFolders(), useLists() reutilizam findMany() com filtros
+  - **C1 — POST /projects com idClasse discriminado + validateHierarchyRule (8.8/10):**
+    * Backend: CreateProjectDto.idClasse opcional (whitelist ['-350','-351','-352'] para SPACE/FOLDER/LIST)
+    * Backend: POST /projects agora usa dto.idClasse (não mais hardcoded -153)
+    * Backend: validateHierarchyRule() bloqueia hierarquias inválidas em create() + update()
+  - **C2 — Campo privado no CRUD DProject + useCreateSpace/Rename/Archive (8.5/10):**
+    * Backend: CreateProjectDto/UpdateProjectDto com `privado?: boolean`
+    * Backend: ProjectResponseDto com `privado!: boolean`
+    * Backend: create() e update() persistem privado em DProject
+    * Frontend: useCreateSpace(), useRenameProject(), useArchiveProject() hooks criados
+    * Frontend: CreateSpaceDialog novo — input privado checkbox
+  - **C3 — SpaceTree hierárquico com lazy loading + localStorage + cadeado (8.3/10):**
+    * Frontend: src/components/spaces/space-tree.tsx novo — árvore recursiva com lazy loading por nível
+    * Frontend: localStorage persist (scrumban-tree-state) para estado expansão nodes
+    * Frontend: Ícone cadeado para Spaces privados (-350), chevron animado (rotação 90°)
+    * Frontend: workspace-panel.tsx importa SpaceTree real (antes era mock)
+  - **C4 — CRUD Folder/List + inline rename duplo-clique (8.7/10):**
+    * Frontend: useCreateFolder(), useCreateList() hooks criados em use-projects.ts
+    * Frontend: CreateFolderDialog, CreateListDialog componentes novos
+    * Frontend: SpaceTree suporta inline rename duplo-clique (reutiliza useRenameProject)
+  - **C5 — Filtro ?privado backend + guards membership preservados (9.0/10):**
+    * Backend: ListProjectsQueryDto com `privado?: boolean` + @Transform para boolean
+    * Backend: findMany() aplica filtro condicional privado
+    * Backend: Controller repassa query.privado com @ApiQuery
+    * Backend: Membership guard preservado (DVincula existente protege Spaces privados)
+  - **Tests:** 73/73 PASS no backend (era 31 antes do Bloco C)
+  - **Pilares:** Pilar 1 N/A (DProject estrutural); Pilar 2 ATIVO (endpoints genéricos); Pilar 3 ATIVO (6 DClasses A1-A3)
+  - **Quality Score:** 8.7/10 médio (C1: 8.8, C2: 8.5, C3: 8.3, C4: 8.7, C5: 9.0)
+
 - **Bloco B — Autenticação Real + Workspace Switcher Multi-Org** - 2026-05-24 (V2 Frontend Integration)
   - **B1 — Conexão Auth Frontend (8.8/10):**
     * `.env.local`: `NEXT_PUBLIC_MOCK_AUTH=false` — frontend conectado ao backend real
