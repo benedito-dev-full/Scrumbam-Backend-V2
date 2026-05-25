@@ -893,6 +893,14 @@ export class TasksService {
       },
     });
 
+    // Cascatear status para todas as subtarefas descendentes (recursivo via BFS).
+    // Não lança erro se a cascata falhar — a task mãe já foi atualizada.
+    void this.cascadeStatusToDescendants(taskId, toStatus, newIdStatus, nowIso).catch((err) => {
+      this.logger.warn(
+        `cascade status falhou para taskId=${taskId.toString()}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
+
     // Hidratar nome do ator quando o controller passa o JWT (actorId).
     let actorName: string | null = null;
     if (actorId) {
@@ -935,6 +943,56 @@ export class TasksService {
 
     const priorityMap = await this.buildPriorityMap([updated.idPriority]);
     return this.buildResponse(updated, priorityMap);
+  }
+
+  /**
+   * Cascateia o status para todos os descendentes de uma task (BFS).
+   * Atualiza apenas tasks-folha (idClasse != PHASE). Sem state machine —
+   * é uma operação de sincronia visual, não de workflow individual.
+   */
+  private async cascadeStatusToDescendants(
+    parentId: bigint,
+    toStatus: string,
+    newIdStatus: bigint | null,
+    nowIso: string,
+  ): Promise<void> {
+    const queue: bigint[] = [parentId];
+
+    while (queue.length > 0) {
+      const currentIds = queue.splice(0, queue.length);
+
+      const children = await this.prisma.dTask.findMany({
+        where: { idPai: { in: currentIds }, excluido: false },
+        select: { chave: true, idClasse: true, dados: true },
+      });
+
+      if (children.length === 0) break;
+
+      const leafIds = children
+        .filter((c) => c.idClasse !== ID_CLASSE_PHASE)
+        .map((c) => c.chave);
+
+      if (leafIds.length > 0) {
+        // Atualiza dados.v3.state para cada filho preservando o restante do json
+        for (const child of children.filter((c) => c.idClasse !== ID_CLASSE_PHASE)) {
+          const dadosAtual = (child.dados as Record<string, unknown>) ?? {};
+          const novosDados = {
+            ...dadosAtual,
+            v3: { ...(dadosAtual.v3 as object | null ?? {}), state: toStatus, movedAt: nowIso, movedBy: 'cascade' },
+          };
+          await this.prisma.dTask.update({
+            where: { chave: child.chave },
+            data: {
+              dados: novosDados as Prisma.InputJsonValue,
+              ...(newIdStatus && { idStatus: newIdStatus }),
+            },
+          });
+        }
+      }
+
+      // Continua BFS com filhos de qualquer tipo
+      queue.push(...children.map((c) => c.chave));
+    }
   }
 
   /**
