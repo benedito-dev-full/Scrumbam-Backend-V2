@@ -76,33 +76,51 @@ export class TeamsService {
     const orgIdBigInt = BigInt(orgId);
     await this.requireOrgMembership(orgIdBigInt, userEntidadeId);
 
-    const prefix = dto.prefix ?? 'DEV';
+    // Gerar prefix único: derivado do nome se não fornecido
+    const requestedPrefix = dto.prefix;
 
-    // Validar unicidade do prefixo na org
-    const existingCounter = await this.prisma.dTabela.findFirst({
-      where: {
-        idClasse: ID_CLASSE_ISSUE_COUNTER,
-        excluido: false,
-        dEntidadeId: {
-          // teams desta org
-          in: (
-            await this.prisma.dEntidade.findMany({
-              where: { idEstab: orgIdBigInt, idClasse: ID_CLASSE_TEAM, excluido: false },
-              select: { chave: true },
-            })
-          ).map((t) => t.chave),
-        },
-      },
-      select: { metaDados: true },
-    });
+    // Buscar todos os prefixos já usados nesta org
+    const teamIds = (
+      await this.prisma.dEntidade.findMany({
+        where: { idEstab: orgIdBigInt, idClasse: ID_CLASSE_TEAM, excluido: false },
+        select: { chave: true },
+      })
+    ).map((t) => t.chave);
 
-    // Verificar se algum counter existente usa o mesmo prefix
-    if (existingCounter) {
-      const existingPrefix = (existingCounter.metaDados as Record<string, unknown>)?.prefix;
-      if (existingPrefix === prefix) {
+    const usedPrefixes = new Set(
+      (
+        await this.prisma.dTabela.findMany({
+          where: { idClasse: ID_CLASSE_ISSUE_COUNTER, excluido: false, dEntidadeId: { in: teamIds } },
+          select: { metaDados: true },
+        })
+      )
+        .map((c) => (c.metaDados as Record<string, unknown>)?.prefix as string)
+        .filter(Boolean),
+    );
+
+    let prefix: string;
+    if (requestedPrefix) {
+      // Validar unicidade do prefix explicitamente informado
+      if (usedPrefixes.has(requestedPrefix)) {
         throw new ConflictException(
-          `Prefixo "${prefix}" já existe em outro time desta organização`,
+          `Prefixo "${requestedPrefix}" já existe em outro time desta organização`,
         );
+      }
+      prefix = requestedPrefix;
+    } else {
+      // Gerar prefix automático a partir do nome (3-4 letras maiúsculas)
+      const base = dto.nome
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '')
+        .slice(0, 4);
+      const candidate = base || 'TM';
+      if (!usedPrefixes.has(candidate)) {
+        prefix = candidate;
+      } else {
+        // Sufixo numérico até achar um livre
+        let i = 2;
+        while (usedPrefixes.has(`${candidate}${i}`) && i < 100) i++;
+        prefix = `${candidate}${i}`;
       }
     }
 
