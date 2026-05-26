@@ -60,6 +60,11 @@ const ID_CLASSE_PROJECT_TEAM_LINK = BigInt(-182);
 const ID_CLASSE_FOLDER_PROJECT_LINK = BigInt(-183);
 /** idClasse de DVincula ORG_ROLE_ADMIN (seed F1). */
 const ID_CLASSE_ORG_ADMIN = BigInt(-161);
+const ID_CLASSE_ORG_MEMBER = BigInt(-162);
+const ID_CLASSE_ORG_VIEWER = BigInt(-163);
+
+/** Todos os roles de org — qualquer um deles qualifica o usuário como membro. */
+const ORG_ROLE_CLASSES = [ID_CLASSE_ORG_ADMIN, ID_CLASSE_ORG_MEMBER, ID_CLASSE_ORG_VIEWER];
 
 /**
  * Opções para `findMany()`.
@@ -409,34 +414,88 @@ export class ProjectsService implements OnModuleInit {
       }
     }
 
-    // 2) Query: DVincula das project-roles do usuário, intersectado opcionalmente
-    //    com os projectIds do time.
-    const vinculos = await this.prisma.dVincula.findMany({
+    // 2) Visibilidade de projetos — duas camadas (ADR-V2-051 + privado flag):
+    //
+    //    Camada A — Espaços públicos: se orgIdBig está presente e o usuário
+    //    tem qualquer DVincula de org (-161/-162/-163) nessa org, TODOS os
+    //    DProjects com privado=false e idEstab=orgId são visíveis sem DVincula
+    //    de projeto. Isso garante que usuários convidados (que só têm -162/-163)
+    //    vejam os espaços públicos imediatamente.
+    //
+    //    Camada B — Projetos privados / acesso explícito: DVincula -171/-172/-173
+    //    existente para aquele projeto específico (independente de privado).
+    //
+    //    União das duas camadas, deduplicada via Set<string>.
+
+    // Camada B: IDs de projetos com DVincula explícita do usuário.
+    const vinculosExplicitos = await this.prisma.dVincula.findMany({
       where: {
         idEntidade: userEntidadeId,
         idClasse: { in: PROJECT_ROLE_CLASSES },
         excluido: false,
-        // Combina filtros de team + cursor no mesmo objeto idLocEscritu.
-        // Spreads consecutivos com a mesma chave fazem o segundo sobrescrever
-        // o primeiro silenciosamente — bug detectado no review da Task 19.
-        ...(teamProjectIds && cursor
-          ? { idLocEscritu: { in: teamProjectIds, lt: BigInt(cursor) } }
-          : teamProjectIds
-            ? { idLocEscritu: { in: teamProjectIds } }
-            : cursor
-              ? { idLocEscritu: { lt: BigInt(cursor) } }
-              : {}),
+        ...(teamProjectIds
+          ? { idLocEscritu: { in: teamProjectIds } }
+          : {}),
       },
-      select: {
-        idLocEscritu: true,
-      },
-      take: take + 1,
-      orderBy: { idLocEscritu: 'desc' },
+      select: { idLocEscritu: true },
     });
+    const explicitSet = new Set(
+      vinculosExplicitos
+        .map((v) => v.idLocEscritu?.toString())
+        .filter((v): v is string => v !== undefined),
+    );
 
-    const hasMore = vinculos.length > take;
-    const pageVinculos = hasMore ? vinculos.slice(0, take) : vinculos;
-    const projectIds = pageVinculos.map((v) => v.idLocEscritu);
+    // Camada A: espaços públicos da org (apenas quando orgIdBig está presente).
+    let publicProjectIds: bigint[] = [];
+    if (orgIdBig !== undefined) {
+      // Verifica se o usuário é membro da org (tem qualquer DVincula -161/-162/-163).
+      const orgVinculo = await this.prisma.dVincula.findFirst({
+        where: {
+          idEntidade: userEntidadeId,
+          idLocEscritu: orgIdBig,
+          idClasse: { in: ORG_ROLE_CLASSES },
+          excluido: false,
+        },
+        select: { chave: true },
+      });
+
+      if (orgVinculo) {
+        const publicProjects = await this.prisma.dProject.findMany({
+          where: {
+            idEstab: orgIdBig,
+            privado: false,
+            excluido: false,
+            ...(teamProjectIds ? { chave: { in: teamProjectIds } } : {}),
+            ...(idClasse !== undefined ? { idClasse: BigInt(idClasse) } : {}),
+            ...(idPai !== undefined ? { idPai: BigInt(idPai) } : {}),
+          },
+          select: { chave: true },
+        });
+        publicProjectIds = publicProjects.map((p) => p.chave);
+      }
+    }
+
+    // União: projetos com DVincula explícita + projetos públicos da org.
+    const allIds = new Set<string>([
+      ...explicitSet,
+      ...publicProjectIds.map((id) => id.toString()),
+    ]);
+
+    if (allIds.size === 0) {
+      return { items: [], pagination: { hasMore: false, nextCursor: null } };
+    }
+
+    // Cursor pagination sobre o conjunto unido (ordenado desc por chave).
+    // Converte Set para array de BigInt, aplica cursor se necessário.
+    let allIdsBig = Array.from(allIds).map((id) => BigInt(id));
+    if (cursor) {
+      const cursorBig = BigInt(cursor);
+      allIdsBig = allIdsBig.filter((id) => id < cursorBig);
+    }
+    allIdsBig.sort((a, b) => (b > a ? 1 : b < a ? -1 : 0));
+
+    const hasMore = allIdsBig.length > take;
+    const projectIds = (hasMore ? allIdsBig.slice(0, take) : allIdsBig) as bigint[];
 
     if (projectIds.length === 0) {
       return { items: [], pagination: { hasMore: false, nextCursor: null } };
@@ -500,11 +559,8 @@ export class ProjectsService implements OnModuleInit {
       ),
     );
 
-    // nextCursor segue o ultimo membership da pagina (nao o ultimo project),
-    // pois o cursor controla iteracao em DVincula. Se org filtrou tudo desta
-    // pagina, hasMore continua valido para que o client peca a proxima pagina.
     const nextCursor = hasMore
-      ? pageVinculos[pageVinculos.length - 1].idLocEscritu.toString()
+      ? projectIds[projectIds.length - 1].toString()
       : null;
 
     return { items, pagination: { hasMore, nextCursor } };
