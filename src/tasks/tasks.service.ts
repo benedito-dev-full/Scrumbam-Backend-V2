@@ -657,11 +657,18 @@ export class TasksService {
       }
     }
 
-    // Merge superficial em `dados` quando taskType for atualizado.
+    // Merge superficial em `dados` quando taskType ou assignedToAi mudar.
     // Preserva identifier, v3, telemetry, capture, automation intactos.
     const dadosAtuais = (existing.dados as Record<string, unknown> | null) ?? {};
+    const isAiAssignee = dto.assigneeId === 'ai';
     const novosDados =
-      dto.taskType !== undefined ? { ...dadosAtuais, taskType: dto.taskType } : undefined;
+      dto.taskType !== undefined || dto.assigneeId !== undefined
+        ? {
+            ...dadosAtuais,
+            ...(dto.taskType !== undefined ? { taskType: dto.taskType } : {}),
+            ...(dto.assigneeId !== undefined ? { assignedToAi: isAiAssignee } : {}),
+          }
+        : undefined;
 
     // Resolver idPriority (semântica undefined/null/string):
     //   undefined → não tocar
@@ -714,7 +721,7 @@ export class TasksService {
         ...(dto.nome !== undefined ? { nome: dto.nome } : {}),
         ...(dto.descricao !== undefined ? { descricao: dto.descricao } : {}),
         ...(dto.assigneeId !== undefined
-          ? { idAssignee: dto.assigneeId ? BigInt(dto.assigneeId) : null }
+          ? { idAssignee: dto.assigneeId && !isAiAssignee ? BigInt(dto.assigneeId) : null }
           : {}),
         ...(idPriorityUpdate !== undefined ? { idPriority: idPriorityUpdate } : {}),
         ...(idPaiUpdate !== undefined ? { idPai: idPaiUpdate } : {}),
@@ -1400,7 +1407,7 @@ export class TasksService {
       status: v3?.state ?? 'INBOX',
       priority: priorityMap ? this.mapPriorityEnum(task.idPriority, priorityMap) : null,
       taskType,
-      assigneeId: task.idAssignee?.toString() ?? null,
+      assigneeId: dados?.assignedToAi ? 'ai' : (task.idAssignee?.toString() ?? null),
       sprintId: task.idSprint?.toString() ?? null,
       idPai: task.idPai?.toString() ?? null,
       // D1 — dueDate como coluna tipada (não em dados JSON)
