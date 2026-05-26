@@ -806,8 +806,10 @@ export class ProjectsService implements OnModuleInit {
     }
 
     // Pré-condição: validar anti-ciclo antes de qualquer UPDATE de idPai (ADR-V2-051 §12).
-    // Usar `'idPai' in dto` para distinguir omissão de null explícito.
-    const idPaiProvided = 'idPai' in dto;
+    // NOTA: NÃO usar `'idPai' in dto` — com transform:true o class-transformer
+    // instancia o DTO com todas as props declaradas em undefined, tornando `in`
+    // sempre true e apagando o idPai existente. Usar !== undefined é correto.
+    const idPaiProvided = dto.idPai !== undefined;
     if (idPaiProvided) {
       const novoPaiId = dto.idPai !== null && dto.idPai !== undefined
         ? BigInt(dto.idPai)
@@ -815,10 +817,10 @@ export class ProjectsService implements OnModuleInit {
       await validateNoCycle(this.prisma, projectId, novoPaiId);
     }
 
-    // Determinar se o teamId foi enviado pelo cliente (incluindo null
-    // explícito). Não usar `dto.teamId !== undefined` — distinção pode ser
-    // perdida por validators/serializers.
-    const teamIdProvided = 'teamId' in dto;
+    // Determinar se o teamId foi enviado pelo cliente (incluindo null explícito).
+    // NOTA: mesmo motivo do idPai — class-transformer com transform:true adiciona
+    // todas as props declaradas com undefined, então 'teamId' in dto é sempre true.
+    const teamIdProvided = dto.teamId !== undefined;
 
     // Resolver teamId anterior (para audit de previousTeamId e detecção
     // no-op). Single query indexada.
