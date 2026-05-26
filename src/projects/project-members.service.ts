@@ -76,6 +76,48 @@ export class ProjectMembersService {
   async getMembers(projectId: string): Promise<ListProjectMembersResponseDto> {
     const projectIdBigInt = BigInt(projectId);
 
+    // Busca o projeto para saber se é público e qual a org (idEstab)
+    const project = await this.prisma.dProject.findFirst({
+      where: { chave: projectIdBigInt, excluido: false },
+      select: { privado: true, idEstab: true },
+    });
+
+    // Espaço público: retorna todos os membros da org
+    if (project && !project.privado && project.idEstab) {
+      const orgId = project.idEstab;
+      const ID_CLASSE_ORG_ADMIN = BigInt(-161);
+      const ID_CLASSE_ORG_MEMBER = BigInt(-162);
+      const ID_CLASSE_ORG_VIEWER = BigInt(-163);
+      const ORG_ROLE_CLASSES = [ID_CLASSE_ORG_ADMIN, ID_CLASSE_ORG_MEMBER, ID_CLASSE_ORG_VIEWER];
+
+      const orgVinculos = await this.prisma.dVincula.findMany({
+        where: {
+          idLocEscritu: orgId,
+          idClasse: { in: ORG_ROLE_CLASSES },
+          excluido: false,
+        },
+        include: {
+          entidade: {
+            select: { chave: true, nome: true, email: true },
+          },
+        },
+        orderBy: { idClasse: 'asc' },
+      });
+
+      const members: ProjectMemberDto[] = orgVinculos
+        .filter((v) => v.entidade)
+        .map((v) => ({
+          userId: v.idEntidade!.toString(),
+          nome: v.entidade!.nome,
+          email: v.entidade!.email ?? null,
+          role: 'MEMBER',
+          cargo: null,
+        }));
+
+      return { members };
+    }
+
+    // Espaço privado ou sem org: retorna apenas DVinculas explícitos do projeto
     const vinculos = await this.prisma.dVincula.findMany({
       where: {
         idLocEscritu: projectIdBigInt,
