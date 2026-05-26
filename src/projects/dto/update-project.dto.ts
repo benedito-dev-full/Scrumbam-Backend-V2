@@ -160,4 +160,34 @@ export class UpdateProjectDto {
   @IsOptional()
   @IsBoolean()
   privado?: boolean;
+
+  /**
+   * Nova cor hex do espaço (`#RRGGBB`). Aceita `null` para limpar.
+   * Persistida em `DProject.dados.color`.
+   */
+  @ApiPropertyOptional({
+    description: 'Cor hex do espaço (#RRGGBB). null = limpar.',
+    example: '#3b82f6',
+    nullable: true,
+  })
+  @IsOptional()
+  @ValidateIf((o: UpdateProjectDto) => o.color !== null)
+  @IsString()
+  @Matches(/^#[0-9A-Fa-f]{6}$/, { message: 'color deve ser hex no formato #RRGGBB' })
+  color?: string | null;
+
+  /**
+   * Ícone do espaço (emoji ou slug). Aceita `null` para limpar.
+   * Persistido em `DProject.dados.icon`.
+   */
+  @ApiPropertyOptional({
+    description: 'Ícone do espaço (emoji ou slug). null = limpar.',
+    example: '🚀',
+    nullable: true,
+  })
+  @IsOptional()
+  @ValidateIf((o: UpdateProjectDto) => o.icon !== null)
+  @IsString()
+  @MaxLength(50)
+  icon?: string | null;
 }

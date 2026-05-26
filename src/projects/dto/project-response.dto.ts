@@ -113,6 +113,12 @@ export class ProjectResponseDto {
   })
   privado!: boolean;
 
+  @ApiPropertyOptional({ description: 'Cor hex do espaço (#RRGGBB). Lida de dados.color.', example: '#3b82f6', nullable: true })
+  color?: string | null;
+
+  @ApiPropertyOptional({ description: 'Ícone do espaço (emoji ou slug). Lido de dados.icon.', example: '🚀', nullable: true })
+  icon?: string | null;
+
   @ApiProperty({ description: 'Data de criação ISO 8601', example: '2026-05-09T00:00:00.000Z' })
   criadoEm!: string;
 

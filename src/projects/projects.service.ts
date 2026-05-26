@@ -257,6 +257,8 @@ export class ProjectsService implements OnModuleInit {
         automationEnabled: dto.automationEnabled ?? false,
         slug,
         ...(dto.description ? { description: dto.description } : {}),
+        ...(dto.color !== undefined ? { color: dto.color } : {}),
+        ...(dto.icon !== undefined ? { icon: dto.icon } : {}),
       };
 
       // Resolver idPai: string → BigInt, null → null, undefined → omitir.
@@ -845,6 +847,8 @@ export class ProjectsService implements OnModuleInit {
       ...(dto.prefix !== undefined ? { prefix: dto.prefix } : {}),
       ...(dto.automationEnabled !== undefined ? { automationEnabled: dto.automationEnabled } : {}),
       ...(dto.description !== undefined ? { description: dto.description } : {}),
+      ...(dto.color !== undefined ? { color: dto.color } : {}),
+      ...(dto.icon !== undefined ? { icon: dto.icon } : {}),
     };
 
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -1523,6 +1527,8 @@ export class ProjectsService implements OnModuleInit {
       memberCount,
       repoUrl: project.repoUrl ?? null,
       privado: project.privado ?? false,
+      color: (dados?.color as string | null) ?? null,
+      icon: (dados?.icon as string | null) ?? null,
       teamId,
       folderId,
       criadoEm: project.criadoEm.toISOString(),

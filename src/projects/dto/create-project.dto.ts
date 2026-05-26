@@ -216,4 +216,29 @@ export class CreateProjectDto {
   @IsOptional()
   @IsBoolean()
   privado?: boolean;
+
+  /**
+   * Cor hex do espaço (`#RRGGBB`). Persistida em `DProject.dados.color`.
+   * Usada no avatar do espaço na sidebar e no modal.
+   */
+  @ApiPropertyOptional({
+    description: 'Cor hex do espaço (#RRGGBB). Persistida em dados.color.',
+    example: '#3b82f6',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^#[0-9A-Fa-f]{6}$/, { message: 'color deve ser hex no formato #RRGGBB' })
+  color?: string | null;
+
+  /**
+   * Ícone do espaço (emoji ou slug). Persistido em `DProject.dados.icon`.
+   */
+  @ApiPropertyOptional({
+    description: 'Ícone do espaço (emoji ou slug). Persistido em dados.icon.',
+    example: '🚀',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  icon?: string | null;
 }
