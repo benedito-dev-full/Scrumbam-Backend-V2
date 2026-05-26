@@ -63,6 +63,7 @@ describe('TasksService', () => {
     };
     dTabela: { findFirst: jest.Mock; findMany: jest.Mock; create: jest.Mock; update: jest.Mock };
     dEntidade: { findFirst: jest.Mock };
+    dPedido: { findMany: jest.Mock };
     $transaction: jest.Mock;
   };
   let identifierService: { getNextIdentifier: jest.Mock };
@@ -86,6 +87,8 @@ describe('TasksService', () => {
       },
       // Necessário porque TasksService.create() hidrata creator via dEntidade.findFirst.
       dEntidade: { findFirst: jest.fn().mockResolvedValue({ nome: 'Tester' }) },
+      // findActiveExecutionsForTasks roda em findMany/findOne — default = [] (sem locks).
+      dPedido: { findMany: jest.fn().mockResolvedValue([]) },
       $transaction: jest.fn(),
     };
 
@@ -1037,6 +1040,149 @@ describe('TasksService', () => {
     });
   });
 
+  // ─── activeExecution (lock UI) ──────────────────────────────────────────────
+
+  describe('activeExecution — lock UI quando IA está executando', () => {
+    it('findOne() deve retornar activeExecution=null quando não há DPedido ativo', async () => {
+      prisma.dTask.findFirst.mockResolvedValue(makeTask());
+      prisma.dPedido.findMany.mockResolvedValue([]);
+
+      const result = await service.findOne('7');
+
+      expect(result.activeExecution).toBeNull();
+      // 1 query batch (idClasse=-300..-304, baixado=false)
+      expect(prisma.dPedido.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('findOne() deve popular activeExecution quando DPedido ativo aponta para a task', async () => {
+      prisma.dTask.findFirst.mockResolvedValue(makeTask({ chave: BigInt(7) }));
+      prisma.dPedido.findMany.mockResolvedValue([
+        {
+          chave: BigInt(9001),
+          idClasse: BigInt(-301), // LOW
+          aprovado: true,
+          baixado: false,
+          criadoEm: new Date('2026-05-26T12:00:00Z'),
+          dados: { taskId: '7' },
+        },
+      ]);
+
+      const result = await service.findOne('7');
+
+      expect(result.activeExecution).toEqual({
+        id: '9001',
+        status: 'running',
+        riskLevel: 'LOW',
+        startedAt: '2026-05-26T12:00:00.000Z',
+      });
+    });
+
+    it('findOne() deve mapear aprovado=false → status=awaiting_approval', async () => {
+      prisma.dTask.findFirst.mockResolvedValue(makeTask({ chave: BigInt(7) }));
+      prisma.dPedido.findMany.mockResolvedValue([
+        {
+          chave: BigInt(9002),
+          idClasse: BigInt(-303), // HIGH
+          aprovado: false,
+          baixado: false,
+          criadoEm: new Date('2026-05-26T13:00:00Z'),
+          dados: { taskId: '7' },
+        },
+      ]);
+
+      const result = await service.findOne('7');
+
+      expect(result.activeExecution?.status).toBe('awaiting_approval');
+      expect(result.activeExecution?.riskLevel).toBe('HIGH');
+    });
+
+    it('findOne() deve derivar riskLevel=MEDIUM para idClasse=-302', async () => {
+      prisma.dTask.findFirst.mockResolvedValue(makeTask({ chave: BigInt(7) }));
+      prisma.dPedido.findMany.mockResolvedValue([
+        {
+          chave: BigInt(9003),
+          idClasse: BigInt(-302),
+          aprovado: true,
+          baixado: false,
+          criadoEm: new Date('2026-05-26T14:00:00Z'),
+          dados: { taskId: '7' },
+        },
+      ]);
+
+      const result = await service.findOne('7');
+
+      expect(result.activeExecution?.riskLevel).toBe('MEDIUM');
+    });
+
+    it('findOne() deve ignorar DPedidos cujo dados.taskId não bate com a task', async () => {
+      prisma.dTask.findFirst.mockResolvedValue(makeTask({ chave: BigInt(7) }));
+      prisma.dPedido.findMany.mockResolvedValue([
+        {
+          chave: BigInt(9999),
+          idClasse: BigInt(-301),
+          aprovado: true,
+          baixado: false,
+          criadoEm: new Date('2026-05-26T15:00:00Z'),
+          dados: { taskId: '999' }, // outra task
+        },
+      ]);
+
+      const result = await service.findOne('7');
+
+      expect(result.activeExecution).toBeNull();
+    });
+
+    it('findMany() deve hidratar activeExecution em batch — ZERO N+1 (1 query para 5 tasks)', async () => {
+      const tasks = Array.from({ length: 5 }, (_, i) =>
+        makeTask({ chave: BigInt(i + 1), idProject: BigInt(1) }),
+      );
+      prisma.dTask.findMany.mockResolvedValue(tasks);
+      // 2 das 5 tasks têm execução ativa
+      prisma.dPedido.findMany.mockResolvedValue([
+        {
+          chave: BigInt(9001),
+          idClasse: BigInt(-301),
+          aprovado: true,
+          baixado: false,
+          criadoEm: new Date('2026-05-26T10:00:00Z'),
+          dados: { taskId: '2' },
+        },
+        {
+          chave: BigInt(9002),
+          idClasse: BigInt(-303),
+          aprovado: false,
+          baixado: false,
+          criadoEm: new Date('2026-05-26T11:00:00Z'),
+          dados: { taskId: '4' },
+        },
+      ]);
+
+      const result = await service.findMany({}, ['1']);
+
+      expect(result.items).toHaveLength(5);
+      // Mapping correto: 2 das 5 com execução
+      const locked = result.items.filter((t) => t.activeExecution !== null);
+      expect(locked).toHaveLength(2);
+      expect(locked.map((t) => t.id).sort()).toEqual(['2', '4']);
+      expect(result.items.find((t) => t.id === '2')?.activeExecution?.riskLevel).toBe('LOW');
+      expect(result.items.find((t) => t.id === '4')?.activeExecution?.status).toBe(
+        'awaiting_approval',
+      );
+      // ZERO N+1: 1 única chamada para batch de executions
+      expect(prisma.dPedido.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('findMany() vazio não deve fazer hit no banco para executions', async () => {
+      prisma.dTask.findMany.mockResolvedValue([]);
+
+      const result = await service.findMany({}, ['1']);
+
+      expect(result.items).toHaveLength(0);
+      // Sem tasks, nenhum lookup de executions necessário
+      expect(prisma.dPedido.findMany).not.toHaveBeenCalled();
+    });
+  });
+
   // ─── Identifier atômico: 10 chamadas sequenciais sem colisão ───────────────
 
   describe('identifier atômico (10 chamadas sequenciais)', () => {
@@ -1063,6 +1209,7 @@ describe('TasksService', () => {
           update: jest.fn(),
         },
         dEntidade: { findFirst: jest.fn().mockResolvedValue({ nome: 'Tester' }) },
+        dPedido: { findMany: jest.fn().mockResolvedValue([]) },
         $transaction: jest.fn(),
       };
 

@@ -14,7 +14,7 @@ import { UpdateTaskDto } from './dto/update-task.dto';
 import { UpdateTaskStatusDto } from './dto/update-task-status.dto';
 import { UpdateTaskSprintDto } from './dto/update-task-sprint.dto';
 import { ListTasksQueryDto } from './dto/list-tasks-query.dto';
-import { TaskResponseDto, ListTasksResponseDto } from './dto/task-response.dto';
+import { TaskResponseDto, ListTasksResponseDto, ActiveExecutionDto } from './dto/task-response.dto';
 
 /**
  * idClasse de DTask no seed F1 (classes canônicas V2).
@@ -84,6 +84,53 @@ const TABELA_CLASSE_TO_PRIORITY: Record<string, string> = {
   '-423': 'LOW',
   '-424': 'URGENT',
 };
+
+/**
+ * idClasses de DPedido que representam executions Claude Code via VPS.
+ * -300 = EXECUTION (agrupador), -301 = LOW, -302 = MEDIUM, -303 = HIGH,
+ * -304 reservado para variantes futuras. ADR-V2-005 / ADR-V2-006.
+ *
+ * Usado em `findActiveExecutionsForTasks` para filtrar DPedido cujo
+ * `dados.taskId` aponta para uma task carregada. `baixado=false` é o
+ * sinal de execução "ainda ativa" — quando o agente conclui (sucesso
+ * ou falha), o DPedido é marcado como baixado.
+ */
+const EXECUTION_CLASS_IDS = [BigInt(-300), BigInt(-301), BigInt(-302), BigInt(-303), BigInt(-304)];
+
+/**
+ * Deriva o `riskLevel` (LOW/MEDIUM/HIGH) a partir do `idClasse` do DPedido.
+ * Pedidos -300 (agrupador) e -304 (reservado) caem em LOW como fallback
+ * conservador — na prática `OperacaoExecucaoClaude` só cria -301/-302/-303.
+ *
+ * @param idClasse - chave da DClasse do DPedido (BigInt)
+ * @returns enum `LOW` | `MEDIUM` | `HIGH`
+ */
+function deriveRiskLevel(idClasse: bigint): 'LOW' | 'MEDIUM' | 'HIGH' {
+  if (idClasse === BigInt(-302)) return 'MEDIUM';
+  if (idClasse === BigInt(-303)) return 'HIGH';
+  return 'LOW';
+}
+
+/**
+ * Deriva o `status` simplificado da execução a partir dos campos do DPedido.
+ *
+ * Regra:
+ * - `aprovado=false` → `awaiting_approval` (ainda pendente do gate de risco MEDIUM/HIGH)
+ * - `aprovado=true` e `baixado=false` → `running` (em execução pelo agente VPS)
+ *
+ * Pedidos com `baixado=true` NÃO entram aqui — eles são filtrados no
+ * batch lookup (a UI só precisa do lock enquanto a task está ativa).
+ *
+ * @param row - linha do DPedido com `aprovado` e `baixado`
+ * @returns enum de status simplificado para o frontend
+ */
+function deriveExecutionStatus(row: {
+  aprovado: boolean | null;
+  baixado: boolean | null;
+}): 'queued' | 'running' | 'awaiting_approval' {
+  if (row.aprovado === false || row.aprovado === null) return 'awaiting_approval';
+  return 'running';
+}
 
 /**
  * Service de tasks (DTask).
@@ -571,7 +618,11 @@ export class TasksService {
 
     // Batch lookup do mapa de priority (ZERO N+1 — 1 query para todo o lote)
     const priorityMap = await this.buildPriorityMap(pageTasks.map((t) => t.idPriority));
-    const items = pageTasks.map((t) => this.buildResponse(t, priorityMap));
+    // Batch lookup de execuções ativas (1 query para todo o lote — ZERO N+1).
+    // Filtra DPedido idClasse=-300..-304 com baixado=false cujo dados.taskId
+    // pertence ao lote. Quando ausente, frontend trata task como editável.
+    const executionsMap = await this.findActiveExecutionsForTasks(pageTasks.map((t) => t.chave));
+    const items = pageTasks.map((t) => this.buildResponse(t, priorityMap, executionsMap));
     const nextCursor = hasMore ? pageTasks[pageTasks.length - 1].chave.toString() : null;
 
     return { items, pagination: { hasMore, nextCursor } };
@@ -614,7 +665,10 @@ export class TasksService {
     }
 
     const priorityMap = await this.buildPriorityMap([task.idPriority]);
-    return this.buildResponse(task, priorityMap);
+    // Lookup de execução ativa para esta task (1 query — N+1 inexistente).
+    // Quando presente, sinaliza que a UI deve travar a task (read-only).
+    const executionsMap = await this.findActiveExecutionsForTasks([task.chave]);
+    return this.buildResponse(task, priorityMap, executionsMap);
   }
 
   /**
@@ -975,9 +1029,7 @@ export class TasksService {
 
       if (children.length === 0) break;
 
-      const leafIds = children
-        .filter((c) => c.idClasse !== ID_CLASSE_PHASE)
-        .map((c) => c.chave);
+      const leafIds = children.filter((c) => c.idClasse !== ID_CLASSE_PHASE).map((c) => c.chave);
 
       if (leafIds.length > 0) {
         // Atualiza dados.v3.state para cada filho preservando o restante do json
@@ -985,7 +1037,12 @@ export class TasksService {
           const dadosAtual = (child.dados as Record<string, unknown>) ?? {};
           const novosDados = {
             ...dadosAtual,
-            v3: { ...(dadosAtual.v3 as object | null ?? {}), state: toStatus, movedAt: nowIso, movedBy: 'cascade' },
+            v3: {
+              ...((dadosAtual.v3 as object | null) ?? {}),
+              state: toStatus,
+              movedAt: nowIso,
+              movedBy: 'cascade',
+            },
           };
           await this.prisma.dTask.update({
             where: { chave: child.chave },
@@ -1368,6 +1425,76 @@ export class TasksService {
     return map;
   }
 
+  /**
+   * Constrói um mapa `taskIdString → ActiveExecutionDto` para uma lista de
+   * tasks em uma única query, sem N+1.
+   *
+   * Filtra `DPedido` onde:
+   * - `idClasse IN (-300..-304)` — execuções Claude Code (ADR-V2-005/006)
+   * - `baixado = false` — ainda ativa (sucesso/falha marca `baixado=true`)
+   * - `excluido = false`
+   * - `dados ? 'taskId'` — campo JSON presente (filtro grosseiro em SQL)
+   *
+   * O filtro final `dados.taskId IN (taskIds)` é feito em memória porque
+   * o suporte de Prisma para filtros JSON tipados (`path: ['taskId'], in: [...]`)
+   * varia entre versões de driver — preferimos um filtro grosseiro estável
+   * + matching em memória (overhead irrelevante: o set de executions ativas
+   * por org é pequeno, geralmente <10).
+   *
+   * @param taskIds - lista de chaves de DTask a verificar (BigInt). Vazia ⇒ Map vazio sem hit no banco.
+   * @returns Map onde key=`task.chave.toString()`, value=ActiveExecutionDto
+   */
+  private async findActiveExecutionsForTasks(
+    taskIds: bigint[],
+  ): Promise<Map<string, ActiveExecutionDto>> {
+    const map = new Map<string, ActiveExecutionDto>();
+    if (taskIds.length === 0) return map;
+
+    const taskIdStrings = new Set(taskIds.map((id) => id.toString()));
+
+    const pedidos = await this.prisma.dPedido.findMany({
+      where: {
+        idClasse: { in: EXECUTION_CLASS_IDS },
+        baixado: false,
+        excluido: false,
+        // Filtro grosseiro: garante que `dados.taskId` existe.
+        // O matching exato contra `taskIdStrings` acontece em memória abaixo.
+        dados: { path: ['taskId'], not: Prisma.AnyNull },
+      },
+      select: {
+        chave: true,
+        idClasse: true,
+        aprovado: true,
+        baixado: true,
+        criadoEm: true,
+        dados: true,
+      },
+    });
+
+    for (const p of pedidos) {
+      const dados = p.dados as Record<string, unknown> | null;
+      const taskId = dados?.taskId;
+      if (typeof taskId !== 'string') continue;
+      if (!taskIdStrings.has(taskId)) continue;
+
+      // Se uma task tiver múltiplos DPedido ativos (cenário anômalo), prefere
+      // o mais recente — a iteração ordena em memória.
+      const existing = map.get(taskId);
+      if (existing && new Date(existing.startedAt).getTime() >= p.criadoEm.getTime()) {
+        continue;
+      }
+
+      map.set(taskId, {
+        id: p.chave.toString(),
+        status: deriveExecutionStatus(p),
+        riskLevel: deriveRiskLevel(p.idClasse),
+        startedAt: p.criadoEm.toISOString(),
+      });
+    }
+
+    return map;
+  }
+
   private buildResponse(
     task: {
       chave: bigint;
@@ -1386,6 +1513,7 @@ export class TasksService {
       atualizadoEm: Date;
     },
     priorityMap?: Map<string, string>,
+    executionsMap?: Map<string, ActiveExecutionDto>,
   ): TaskResponseDto {
     const dados = task.dados as Record<string, unknown> | null;
     const v3 = dados?.v3 as { state?: string } | null;
@@ -1396,9 +1524,10 @@ export class TasksService {
     // o select não trouxe a coluna (defensivo — todos os callers atuais
     // já trazem idClasse).
     const idClasseStr = task.idClasse?.toString() ?? '-154';
+    const taskIdStr = task.chave.toString();
 
     return {
-      id: task.chave.toString(),
+      id: taskIdStr,
       nome: task.nome,
       descricao: task.descricao ?? null,
       projectId: task.idProject?.toString() ?? '',
@@ -1413,6 +1542,7 @@ export class TasksService {
       // D1 — dueDate como coluna tipada (não em dados JSON)
       dueDate: task.dueDate ? task.dueDate.toISOString() : null,
       dados,
+      activeExecution: executionsMap?.get(taskIdStr) ?? null,
       criadoEm: task.criadoEm.toISOString(),
       atualizadoEm: task.atualizadoEm.toISOString(),
     };

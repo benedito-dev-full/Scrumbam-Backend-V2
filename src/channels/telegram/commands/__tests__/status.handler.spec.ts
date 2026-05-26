@@ -25,6 +25,8 @@ const makeResultWith = (count: number, hasMore = false) => ({
     sprintId: null,
     dueDate: null, // D1 — campo obrigatório no TaskResponseDto
     dados: null,
+    idPai: null, // ADR-V2-047
+    activeExecution: null, // lock UI: null quando não há execução IA ativa
     criadoEm: new Date().toISOString(),
     atualizadoEm: new Date().toISOString(),
   })),

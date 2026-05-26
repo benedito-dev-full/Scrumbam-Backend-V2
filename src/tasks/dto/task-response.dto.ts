@@ -1,6 +1,57 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
+ * Estado de execução ativa de uma task (DPedido idClasse=-300..-304 com
+ * `baixado=false` e `dados.taskId` igual à chave da task).
+ *
+ * Quando presente em `TaskResponseDto.activeExecution`, a task está
+ * sendo processada pela IA (Claude Code via agente VPS) e a UI deve
+ * tratá-la como read-only (sem drag-and-drop, sem edição inline, sem
+ * mover de coluna). A própria criação de uma execução só acontece
+ * quando o usuário clica explicitamente em "Executar" — portanto
+ * `activeExecution !== null` é o sinal canônico de "lock".
+ *
+ * Volta a `null` quando o agente conclui (`baixado=true`) ou quando a
+ * execução é rejeitada/expirada (também `baixado=true`).
+ *
+ * @see OperacaoExecucaoClaude (Pilar 1 — DPedido idClasse=-301/-302/-303)
+ * @see ADR-V2-005 (Engine Pilar 1 ATIVADO)
+ * @see ADR-V2-006 (risk via idClasse)
+ */
+export class ActiveExecutionDto {
+  @ApiProperty({
+    description: 'ID do DPedido (BigInt como string) que representa a execução ativa.',
+    example: '12345',
+  })
+  id!: string;
+
+  @ApiProperty({
+    description:
+      'Estado simplificado derivado de aprovado/baixado do DPedido: ' +
+      '`awaiting_approval` (aprovado=false), `running` (aprovado=true, baixado=false). ' +
+      'Quando `baixado=true`, a execução deixa de aparecer (o campo activeExecution vira null).',
+    enum: ['queued', 'running', 'awaiting_approval'],
+    example: 'running',
+  })
+  status!: 'queued' | 'running' | 'awaiting_approval';
+
+  @ApiProperty({
+    description:
+      'Nível de risco da execução, derivado do idClasse do DPedido ' +
+      '(-301=LOW, -302=MEDIUM, -303=HIGH). ADR-V2-006.',
+    enum: ['LOW', 'MEDIUM', 'HIGH'],
+    example: 'LOW',
+  })
+  riskLevel!: 'LOW' | 'MEDIUM' | 'HIGH';
+
+  @ApiProperty({
+    description: 'Data ISO 8601 de criação do DPedido (início da execução).',
+    example: '2026-05-26T13:00:00.000Z',
+  })
+  startedAt!: string;
+}
+
+/**
  * DTO de resposta de task.
  *
  * Retornado em create, findOne, update e updateStatus.
@@ -98,6 +149,18 @@ export class TaskResponseDto {
     nullable: true,
   })
   dados!: Record<string, unknown> | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Execução ativa (Claude Code via VPS) associada a esta task. ' +
+      '`null` quando não há execução em andamento. Quando presente, a ' +
+      'UI deve tratar a task como read-only — o disparo da execução é ' +
+      'irreversível e consome tokens da assinatura Claude Max, então ' +
+      'edições durante a janela de execução são bloqueadas no client.',
+    type: () => ActiveExecutionDto,
+    nullable: true,
+  })
+  activeExecution!: ActiveExecutionDto | null;
 
   @ApiProperty({ description: 'Data de criação ISO 8601' })
   criadoEm!: string;
