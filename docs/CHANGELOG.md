@@ -14,6 +14,26 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Task-Lock Execution — UI bloqueio durante execução IA** (2026-05-26, V2 Pós-F13, hotfix cross-repo)
+  - **Backend:** Campo `activeExecution?: ActiveExecutionDto | null` em `TaskResponseDto` (JSDoc completo + Swagger)
+  - **DTO:** `ActiveExecutionDto` com `id` (BigInt como string), `status` (running/awaiting_approval), `riskLevel` (LOW/MEDIUM/HIGH), `startedAt` (ISO 8601)
+  - **Backend:** Batch lookup zero N+1 — `findActiveExecutionsForTasks()` faz 1 query em DPedido com idClasse IN -300..-304, baixado=false
+  - **Derivação:** Status via `aprovado` field (false → awaiting_approval, true → running); RiskLevel via idClasse (-302 → MEDIUM, -303 → HIGH, resto → LOW)
+  - **Frontend:** `isLocked = activeExecution != null` em kanban-board, task-detail-drawer, list — bloqueia drag, edição, mudança de status/prioridade/assignee
+  - **Frontend:** Badge Lock com Lucide icon, visual cursor-not-allowed opacity-60, tooltips "Em execução pela IA"
+  - **Pilares:** Pilar 1 PRESERVADO (só leitura DPedido), Pilar 2 EXTENSÃO (zero endpoint novo), Pilar 3 PRESERVADO (zero DClasse nova)
+  - **Tests:** 7 unit tests backend (batch N+1 genuíno via toHaveBeenCalledTimes), 108 telegram specs PASS
+  - **Score:** 8.6/10 APPROVED (gate 8.0)
+
+### Fixed
+
+- **Task-Lock:** Caso de borda — user em estado "em-progresso + assigneeId=ai" agora bloqueia UI mesmo sem ter clicado Executar
+- **Task-Lock:** Perda de tracking ao recarregar — verdade canônica migrou de store volátil (useTaskExecution) para backend (DPedido)
+
+### Performance
+
+- **Task-Lock:** +1 query batch por findMany() de tasks (DPedido lookup), offset ao verificar N+1 queries por request: agora ~N+3 em vez de N+2
+
 - **Prompt Builder — Backend monta prompt natural a partir de DTask** (2026-05-26, V2 Pós-F13)
   - **Feature:** `PromptBuilderService` injetável com 5 templates Markdown (code/docs/research/validation/other)
   - **Detecção:** Cascata `dados.taskType` → regex(nome) → 'other' (suporta aliases legacy)

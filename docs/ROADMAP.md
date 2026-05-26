@@ -2,9 +2,53 @@
 
 **Versao:** 1.0
 **Mantido por:** Documenter Agent V2
-**Atualizado em:** 2026-05-21
+**Atualizado em:** 2026-05-26
 
 > Este documento rastreia tasks por Fase (F0..F17). Strategist abre, Implementer entrega, Reviewer valida, Documenter fecha. Cada task tem entrada com Status, Modulo, Fase, Tempo Real, Quality Score, Pilares aplicados e ADRs vinculados.
+
+---
+
+## Task-Lock Execution — UI bloqueio durante execução IA ✅ COMPLETA
+
+**Status:** ✅ **COMPLETA** — Feature entregue, Reviewer APPROVED 8.6/10
+**Módulo V2:** tasks (backend) + kanban-board, task-detail-drawer (frontend)
+**Fase V2:** Pós-F13 (hotfix — sincronização cross-repo)
+**Tempo Real:** ~3h total (Implementer 2h + Reviewer 40m + Documenter 30m)
+**Completado em:** 2026-05-26
+**Quality Score:** 8.6/10 APPROVED (gate 8.0)
+
+**O Que Foi Feito:**
+
+**Core Feature — Backend expõe execução ativa; frontend bloqueia UI:**
+- `TaskResponseDto` novo campo `activeExecution!: ActiveExecutionDto | null` com JSDoc completo
+- `ActiveExecutionDto` com status (running/awaiting_approval), riskLevel (LOW/MEDIUM/HIGH), startedAt
+- Backend batch lookup zero N+1: `findActiveExecutionsForTasks()` faz 1 query em DPedido idClasse -300..-304 com baixado=false
+- Derivação de status: aprovado=false → awaiting_approval; aprovado=true, baixado=false → running
+- Derivação de riskLevel: idClasse=-302 → MEDIUM, -303 → HIGH, resto → LOW (fallback conservador)
+- Frontend: `isLocked = activeExecution != null` bloqueia drag-and-drop, edição inline, mudança de status/prioridade/assignee
+- Visual: Badge Lock com cor/ícone Lucide, cursor-not-allowed opacity-60, tooltips em pickers explicando "Em execução pela IA"
+
+**Pilares:**
+- Pilar 1 (Engine): Apenas leitura de DPedido — ZERO INSERT/UPDATE. OperacaoExecucaoClaude segue único caminho de INSERT
+- Pilar 2 (Endpoints): Zero endpoints novos. Estendeu TaskResponseDto do `/tasks` existente
+- Pilar 3 (Seed): Zero DClasses novas. Reusa -300..-304 já canônicos (ADR-V2-006)
+
+**Testes:**
+- 7 unit tests backend (activeExecution — null sem pedido, running com aprovado=true, awaiting_approval, riskLevel mapping, taskId mismatch, batch N+1 genuíno, lista vazia)
+- 108 telegram handler specs PASS sem regressão
+- 0 erros TypeScript; eslint PASS; build PASS
+- Frontend: tsc 0 errors, build PASS
+
+**Resolve dois bugs:**
+1. Caso de borda: user em estado "em-progresso + assigneeId=ai" SEM ter clicado Executar não bloqueava UI
+2. Perda de tracking ao recarregar: store volátil em memória sumia, agora verdade canônica mora no backend
+
+**ADRs vinculados:** ADR-V2-005 (Engine), ADR-V2-006 (risk via idClasse) — nenhum ADR novo necessário (mudança localizada em TaskResponseDto)
+
+**Métricas:**
+- Queries: +1 por findMany de tasks (batch lookup DPedido)
+- N+1: ZERO comprovado (1 query batch + Set lookup O(1) em memória)
+- Backward compat: `activeExecution` opcional no frontend, sempre presente (null) no backend
 
 ---
 

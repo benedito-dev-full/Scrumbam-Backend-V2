@@ -1,6 +1,61 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-26 (Prompt Builder COMPLETO — Backend monta prompt a partir de DTask 8.8/10)
+**Ultima atualizacao:** 2026-05-26 (Task-Lock Execution COMPLETO — UI bloqueio durante execução IA 8.6/10)
+
+---
+
+## ✅ TASK-LOCK EXECUTION — COMPLETE (V2 Pós-F13 — UI bloqueio durante execução IA)
+
+**Module:** tasks (backend Scrumban-Backend-V2) + frontend (kanban-board, task-detail-drawer, list)
+**Task:** Backend expõe execução ativa (DPedido idClasse -300..-304); frontend bloqueia UI (lock visual + bloqueio de ações)
+**Status:** COMPLETO
+**Duration:** ~3h total (Implementer 2h + Reviewer 40m + Documenter 30m)
+**Quality Score:** 8.6/10 APPROVED (gate 8.0)
+
+**Agents Performance:**
+| Agent | Phase | Duration | Quality |
+|-------|-------|----------|---------|
+| Strategist | Planning | — | Feature pequena — sem plano, feedback inline suficiente |
+| Implementer | Backend + Frontend | 2h | Batch lookup zero N+1, 7 testes, 3 componentes frontend |
+| Reviewer | Full Review | 40m | 8.6/10 APPROVED (N+1 comprovado, 3 issues menores -0.4) |
+| Documenter | Docs | 30m | JSDoc (já completo), ROADMAP, CHANGELOG, STATUS, commit |
+
+**Pilares:**
+- Pilar 1 (Engine): PRESERVADO — apenas leitura de DPedido; zero INSERT/UPDATE; OperacaoExecucaoClaude segue único INSERT
+- Pilar 2 (Endpoints): EXTENSÃO — zero endpoint novo; estendeu TaskResponseDto (reutiliza GET/POST /tasks)
+- Pilar 3 (Seed): PRESERVADO — zero DClasse nova; reusa -300..-304 já canônicos (ADR-V2-006)
+
+**Deliverables:**
+- [x] Backend: `ActiveExecutionDto` com id, status, riskLevel, startedAt + JSDoc completo
+- [x] Backend: `TaskResponseDto.activeExecution!: ActiveExecutionDto | null` com Swagger
+- [x] Backend: `findActiveExecutionsForTasks()` batch lookup (1 query + Set lookup em memória)
+- [x] Backend: Derivação `deriveRiskLevel()` (-302→MEDIUM, -303→HIGH, resto→LOW)
+- [x] Backend: Derivação `deriveExecutionStatus()` (aprovado=false→awaiting_approval, true→running)
+- [x] Frontend: kanban-board.tsx — isLocked bloqueia drag, adiciona Badge Lock, oculta botão Executar
+- [x] Frontend: task-detail-drawer.tsx — isLocked desabilita EditableTitle, EditableTextarea, dueDate, pickers
+- [x] Frontend: lists/[id]/page.tsx (TaskRowBackend) — isLocked bloqueia drag-handle, handlers retornam early, Badge Lock inline
+- [x] 7 unit tests backend (batch genuíno, riskLevel mapping, status derivação, taskId mismatch, lista vazia)
+- [x] 108 telegram handler specs PASS (idPai + activeExecution adicionados aos mocks)
+- [x] 0 TypeScript errors; ESLint PASS; build PASS em ambos repos
+
+**Metrics:**
+- Build: ✅ PASS (backend + frontend)
+- TypeScript: 0 erros nos arquivos modificados
+- N+1 Queries: ZERO (assert `toHaveBeenCalledTimes(1)` genuíno)
+- Queries/request: +1 (batch DPedido lookup, offset negligível)
+- Tests: 7/7 PASS (backend), 108/108 PASS (telegram, zero regressão)
+- Backward Compat: `activeExecution` opcional frontend; sempre presente (null) backend
+
+**Issues Menores (penalidade total -0.4):**
+1. Isolamento de org não documentado na query SQL (-0.2) — invocação usa pré-filtrado taskIds (garantido por accessibleProjectIds), mas comentário explícito ausente
+2. Assimetria tipagem backend/frontend (-0.1) — backend activeExecution! (sempre presente), frontend activeExecution? (opcional)
+3. Constante AUTOMATION_CLASS_IDS pode duplicar (-0.1) — deriveRiskLevel hardcoda -302/-303; se existir mapa canônico, seria melhor reusar
+
+**ADRs:** ADR-V2-005 (Engine Pilar 1), ADR-V2-006 (Risk via idClasse) — nenhum ADR novo redigido (mudança localizada)
+
+**Bugs Resolvidos:**
+- Caso de borda: user em estado "em-progresso + assigneeId='ai'" SEM ter clicado Executar não bloqueava UI → AGORA BLOQUEIA
+- Perda ao reload: lock sumia pós-F1 refresh, tracking voltava. Solução: DPedido como fonte canônica
 
 ---
 
