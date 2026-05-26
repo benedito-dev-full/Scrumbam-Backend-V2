@@ -7,8 +7,7 @@
     "assets": [
       {
         "include": "executions/services/prompt-templates/*.md",
-        "outDir": "dist/src",
-        "watchAssets": true
+        "outDir": "dist/src"
       }
     ]
   }
