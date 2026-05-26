@@ -112,22 +112,38 @@ function deriveRiskLevel(idClasse: bigint): 'LOW' | 'MEDIUM' | 'HIGH' {
 }
 
 /**
- * Deriva o `status` simplificado da execução a partir dos campos do DPedido.
+ * Deriva o `status` simplificado da execução a partir do DPedido.
  *
- * Regra:
- * - `aprovado=false` → `awaiting_approval` (ainda pendente do gate de risco MEDIUM/HIGH)
- * - `aprovado=true` e `baixado=false` → `running` (em execução pelo agente VPS)
+ * Verdade canônica V2: `dados.approval.status` (Risk Gate ADR-V2-006/048).
+ * Possíveis valores persistidos pelo Engine:
+ * - `queued` → LOW risk, já liberado, aguardando agente VPS pegar (não bloqueia ação humana)
+ * - `awaiting_approval` → MEDIUM/HIGH risk, requer aprovação humana antes de rodar
+ * - `approved` → foi aprovado e está rodando no agente
+ * - `rejected`/`expired` → não devem chegar aqui (baixado=true filtra)
  *
- * Pedidos com `baixado=true` NÃO entram aqui — eles são filtrados no
- * batch lookup (a UI só precisa do lock enquanto a task está ativa).
+ * Fallback legado: se `dados.approval.status` ausente (DPedido antigo),
+ * usa o campo raw `aprovado` — semântica histórica do Engine. Mantido
+ * pra não quebrar dados pré-existentes.
  *
- * @param row - linha do DPedido com `aprovado` e `baixado`
+ * Pedidos com `baixado=true` NÃO entram aqui — filtrados no batch lookup.
+ *
+ * @param row - linha do DPedido com `aprovado`, `baixado` e `dados`
  * @returns enum de status simplificado para o frontend
  */
 function deriveExecutionStatus(row: {
   aprovado: boolean | null;
   baixado: boolean | null;
+  dados: unknown;
 }): 'queued' | 'running' | 'awaiting_approval' {
+  const dados = (row.dados ?? null) as Record<string, unknown> | null;
+  const approval = (dados?.approval ?? null) as Record<string, unknown> | null;
+  const approvalStatus = approval?.status;
+
+  if (approvalStatus === 'queued') return 'queued';
+  if (approvalStatus === 'approved') return 'running';
+  if (approvalStatus === 'awaiting_approval') return 'awaiting_approval';
+
+  // Fallback legado: DPedido sem dados.approval.status
   if (row.aprovado === false || row.aprovado === null) return 'awaiting_approval';
   return 'running';
 }
