@@ -8,6 +8,56 @@
 
 ---
 
+## Notifications Integration — Frontend (Sino + Inbox Real) ✅ COMPLETA
+
+**Status:** ✅ **COMPLETA** — Feature entregue, Reviewer APPROVED 8.5/10 pós-fixes
+**Módulo V2:** frontend (Scrumbam-Frontend-V2) — notifications-popover, /inbox, useNotifications hooks
+**Fase V2:** Pós-F13 (integração frontend com endpoints V2 já existentes)
+**Tempo Real:** ~3h total (Implementer 2h + Reviewer 40m + Re-implementer 20m + Re-reviewer 20m + Documenter 30m)
+**Completado em:** 2026-05-26
+**Quality Score:** 8.5/10 APPROVED (initial 7.2 NEEDS_CHANGES + fixes 8.5 APPROVED)
+
+**O Que Foi Feito:**
+
+**Core Feature — Sino funcional + /inbox com 4 tabs + polling:**
+- **NotificationsPopover** (topbar) — sino com badge vermelho (cap 99+), 5 últimas não lidas em dropdown
+  - Click em notificação → navega para `/lists/:projectId` ou `/spaces/:projectId` (via `resolveNotificationTarget()`)
+  - Marcar como lida em paralelo via `useMarkAsRead()`
+  - Botão "Marcar todas" (header) via `useMarkAllAsRead()` com toast de confirmação
+  - Link "Ver todas" → `/inbox`
+- **/inbox** (página nova) — 4 tabs (Todas / Não lidas / Menções / Atribuições)
+  - Polling badge a cada 30s (refetchInterval) via `useUnreadCount()`
+  - Mutations reais: `useMarkAsRead()`, `useMarkAllAsRead()`, `useDeleteNotification()`
+  - Click em notificação → navega para target + marca como lida
+- **5 Hooks** completos em `use-notifications.ts`:
+  - `useNotifications(filter)` — lista com filtros client-side (mentions/assignments)
+  - `useUnreadCount()` — polling 30s, refetchIntervalInBackground
+  - `useMarkAsRead()` — PATCH /notifications/:id/read
+  - `useMarkAllAsRead()` — PATCH /notifications/read-all com toast
+  - `useDeleteNotification()` — DELETE /notifications/:id
+  - Helper `resolveNotificationTarget()` — mapeia (taskId, projectId, executionId) → rota ou fallback
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — frontend apenas consome endpoints backend V2
+- Pilar 2 (Endpoints): REUTILIZA endpoints já existentes em `/notifications/*` (Task #3 F7, 2026-05-10)
+- Pilar 3 (Seed): PRESERVADO — zero DClasse nova, zero seed
+
+**Testes e Validação:**
+- Build: ✅ PASS (frontend Scrumbam-Frontend-V2 + backend zero alterações)
+- TypeScript: 0 erros (tsc 0 errors em ambos repos)
+- ESLint: 0 warnings em 2 arquivos novos (use-notifications.ts, notifications-popover.tsx)
+- React/TanStack Query: Hooks com stale/refetch/background corretos, mutations com onSuccess/onError
+
+**Fixes Pós-Review (Score 7.2 → 8.5):**
+1. **C1 (Rota inválida):** `/tasks/:id` inexistente → corrigido para `/lists/:projectId` ou `/spaces/:projectId` (helper `resolveNotificationTarget()`)
+2. **M1 (Request duplo):** Dupla chamada `GET /notifications` na montagem de /inbox → removido segundo useQuery desnecessário
+3. **M2 (Fallback null):** `resolveNotificationTarget()` retorna `null` para casos sem rota — caller usa fallback `/inbox`
+4. **m1 (Acessibilidade):** aria-label no botão sino com contagem dinâmica, buttons com type="button" explícito, :focus-visible
+
+**ADRs vinculados:** ADR-V2-008 (DEvento substitui notifications), ADR-V2-025 (Soft delete via excluido), ADR-V2-029 (Polling frontend), ADR-V2-032 (Destinatários multi-modelo)
+
+---
+
 ## Task-Lock Execution — UI bloqueio durante execução IA ✅ COMPLETA
 
 **Status:** ✅ **COMPLETA** — Feature entregue, Reviewer APPROVED 8.6/10

@@ -14,6 +14,17 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Notifications Integration — Frontend (Sino + Inbox Real)** (2026-05-26, V2 Pós-F13, integração cross-repo)
+  - **Frontend:** `NotificationsPopover` novo no topbar — sino com badge vermelho (cap 99+), 5 últimas não lidas em dropdown
+  - **Frontend:** /inbox nova — 4 tabs (Todas / Não lidas / Menções / Atribuições), click navega + marca como lida
+  - **Hooks (5):** `useNotifications(filter)` com filtros client-side; `useUnreadCount()` com polling 30s; `useMarkAsRead()`, `useMarkAllAsRead()`, `useDeleteNotification()` mutations
+  - **Helper:** `resolveNotificationTarget()` mapeia (taskId, projectId) → `/lists/:projectId` ou `/spaces/:projectId` ou fallback
+  - **Integração:** Consome endpoints backend `/notifications/*` já existentes (Task #3 F7 — zero alterações backend)
+  - **Pilares:** Pilar 2 REUTILIZA endpoints, Pilar 3 PRESERVADO (zero DClasse nova)
+  - **Fixes:** Rota válida (/lists com projectId), request duplo removido, fallback null padronizado, a11y (aria-label, type=button)
+  - **Quality:** Build PASS, tsc 0 errors, ESLint 0 warnings (7.2 initial → 8.5 APPROVED pós-fixes)
+  - **Score:** 8.5/10 APPROVED (gate 8.0, 3 commits com fixes)
+
 - **Task-Lock Execution — UI bloqueio durante execução IA** (2026-05-26, V2 Pós-F13, hotfix cross-repo)
   - **Backend:** Campo `activeExecution?: ActiveExecutionDto | null` em `TaskResponseDto` (JSDoc completo + Swagger)
   - **DTO:** `ActiveExecutionDto` com `id` (BigInt como string), `status` (running/awaiting_approval), `riskLevel` (LOW/MEDIUM/HIGH), `startedAt` (ISO 8601)

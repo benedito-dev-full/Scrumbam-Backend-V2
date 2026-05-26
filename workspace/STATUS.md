@@ -1,6 +1,57 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-26 (Task-Lock Execution COMPLETO — UI bloqueio durante execução IA 8.6/10)
+**Ultima atualizacao:** 2026-05-26 (Notifications Integration COMPLETO — Sino + Inbox Real 8.5/10)
+
+---
+
+## ✅ NOTIFICATIONS INTEGRATION — COMPLETE (V2 Pós-F13 — Sino + Inbox Real, Frontend)
+
+**Module:** frontend (Scrumbam-Frontend-V2) — notifications-popover, /inbox, use-notifications hooks
+**Task:** Sino funcional (badge, 5 últimas não lidas), /inbox (4 tabs), polling 30s, navegação por target + mark-as-read
+**Status:** COMPLETO
+**Duration:** ~3h total (Implementer 2h + Reviewer 40m + Re-implementer 20m + Re-reviewer 20m + Documenter 30m)
+**Quality Score:** 8.5/10 APPROVED (initial 7.2 NEEDS_CHANGES + 4 fixes → 8.5 APPROVED)
+
+**Agents Performance:**
+| Agent | Phase | Duration | Quality |
+|-------|-------|----------|---------|
+| Implementer | Frontend (hooks + popover + /inbox) | 2h | NotificationsPopover, 5 hooks, /inbox page, resolveNotificationTarget helper |
+| Reviewer | Initial Review | 40m | 7.2/10 NEEDS_CHANGES (C1 rota inválida, M1 request duplo, M2 fallback, m1 a11y) |
+| Implementer | Fixes | 20m | C1: /lists/:projectId + /spaces/:projectId via helper; M1: removido useQuery duplo; M2: fallback null; m1: aria-label |
+| Reviewer | Re-review | 20m | 8.5/10 APPROVED (todos fixes corretos) |
+| Documenter | Docs | 30m | JSDoc (use-notifications + NotificationsPopover), ROADMAP, CHANGELOG, STATUS, commit |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — frontend apenas consome endpoints backend (zero operações no backend)
+- Pilar 2 (Endpoints): REUTILIZA endpoints `/notifications/*` já existentes (Task #3 F7 — 2026-05-10, score 8.2)
+- Pilar 3 (Seed): PRESERVADO — zero DClasse nova, zero alterações seed
+
+**Deliverables:**
+- [x] Frontend: `NotificationsPopover` component (sino + badge + 5 últimas + "Ver todas")
+- [x] Frontend: `/inbox` page com 4 tabs (Todas / Não lidas / Menções / Atribuições)
+- [x] Hook: `useNotifications(filter)` — filtros cliente-side (mentions/assignments)
+- [x] Hook: `useUnreadCount()` — polling 30s, refetchIntervalInBackground=true
+- [x] Hook: `useMarkAsRead()` — PATCH /notifications/:id/read, invalida árvore, sucesso silencioso
+- [x] Hook: `useMarkAllAsRead()` — PATCH /notifications/read-all, toast confirmação
+- [x] Hook: `useDeleteNotification()` — DELETE /notifications/:id
+- [x] Helper: `resolveNotificationTarget()` — (taskId, projectId) → `/lists/:projectId` ou `/spaces/:projectId` ou null
+- [x] A11y: aria-label dinâmico no sino, buttons com type="button", :focus-visible anel visível teclado
+- [x] Styling: badge 99+, cores temas, avatar initials, timestamp relativo
+
+**Fixes Pós-Review (Score 7.2 → 8.5):**
+1. **C1 (Rota inválida):** Remover `/tasks/:id` inexistente → corrigido para `/lists/:projectId` (quando taskId + projectId) ou `/spaces/:projectId` (quando só projectId)
+2. **M1 (Request duplo):** /inbox carregava `useNotifications()` 2x → removido segundo hook, mantém 1x com filter='all'
+3. **M2 (Fallback null):** `resolveNotificationTarget()` retorna null (sem rota) → caller navega para `/inbox` (fallback seguro)
+4. **m1 (Acessibilidade):** aria-label no botão sino com contagem dinâmica "Notificações (X não lidas)", todos buttons com type="button", :focus-visible mostra anel
+
+**Metrics:**
+- Build: ✅ PASS (frontend Scrumbam-Frontend-V2)
+- TypeScript: 0 erros (tsc 0 errors)
+- ESLint: 0 warnings (2 arquivos: use-notifications.ts, notifications-popover.tsx)
+- Tests: Frontend não tem testes automatizados (projeto feature pequena, validação manual + visual)
+- Backend: Zero alterações (endpoints reutilizados)
+
+**ADRs:** ADR-V2-008 (DEvento substitui notifications), ADR-V2-025 (Soft delete via excluido), ADR-V2-029 (Polling frontend), ADR-V2-032 (Destinatários multi-modelo) — nenhum ADR novo redigido
 
 ---
 
