@@ -1,6 +1,60 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-24 (Bloco C COMPLETO — Hierarquia Space/Folder/List 8.7/10 médio)
+**Ultima atualizacao:** 2026-05-26 (Prompt Builder COMPLETO — Backend monta prompt a partir de DTask 8.8/10)
+
+---
+
+## ✅ Prompt Builder — COMPLETE (V2 Pós-F13 — Backend monta prompt a partir de DTask)
+
+**Module:** executions (prompt-builder)
+**Task:** Backend monta prompt natural a partir de DTask, resolve regressão F13
+**Status:** COMPLETO
+**Duration:** ~14h total (Implementer 7h + Reviewer 1h15m + Re-review 45m + Documenter 1h)
+**Quality Score:** 8.8/10 APPROVED (gate elevado 8.5 pelo CEO)
+
+**Agents Performance:**
+| Agent | Phase | Duration | Quality |
+|-------|-------|----------|---------|
+| Strategist | Planning | ~2h | Feature design, 3 Pilares, 2 ADRs |
+| Implementer | Development | 7h | 10 sub-tasks (templates, service, DTO, Engine, tests) |
+| Reviewer | Initial | 1h15m | 7.2/10 NEEDS_CHANGES (bug C1: CommandValidator rejeita parênteses) |
+| Implementer | Fixes | ~2h | 4 fixes (C1, C2/M1, R1, R2) + 9 testes novos |
+| Reviewer | Re-review | 45m | 8.8/10 APPROVED (todos fixes corretos) |
+| Documenter | Docs | 1h | JSDoc, ROADMAP, CHANGELOG, STATUS, commit |
+
+**Pilares:**
+- Pilar 1 (Engine): PRESERVADO — OperacaoPedido idClasse -301/-302/-303 intacto, Risk Gate funciona
+- Pilar 2 (Endpoints): ATIVADO — reutiliza POST /projects/:id/execute (zero novo controller)
+- Pilar 3 (Seed): PRESERVADO — zero DClasse nova, apenas metadado string `dados.taskType`
+
+**Deliverables:**
+- [x] PromptBuilderService com 5 templates Markdown (code/docs/research/validation/other)
+- [x] Cascata de detecção taskType (dados.taskType → regex → 'other')
+- [x] ExecutionsService aceita modo PROMPT, COMMAND (legado), HÍBRIDO (debug)
+- [x] Placeholder simbólico `task-built-prompt-placeholder` (sem metacaracteres)
+- [x] Anti-enumeration: `idProject` no WHERE previne disclosure
+- [x] DTO validação cross-field + @Matches(/^\d+$/)
+- [x] Repositório de templates em memória (fs em constructor)
+- [x] 32 unit/integration tests (18 PromptBuilder + 7 ExecutionsService + 7 DTO)
+- [x] 82 Engine tests preservados (zero regressão Risk Gate)
+- [x] ADR-V2-048 e ADR-V2-049 redigidos e aprovados
+
+**Metrics:**
+- Build: ✅ PASS (npm run build)
+- TypeScript: 0 erros novos
+- ESLint: 0 warnings (9 arquivos tocados)
+- Tests: 32/32 PASS (novos), 82/82 PASS (Engine), 75/75 PASS (ExecutionsService suite)
+- Queries: +1 (DTask findFirst com select restrito)
+- N+1 Queries: ZERO
+- Pilares: 3/3 respeitados (PRESERVADO, ATIVADO, PRESERVADO)
+
+**ADRs:** ADR-V2-048 (Risk vence TaskType), ADR-V2-049 (Prompt Builder canônico)
+
+**Notas:**
+- Regressão F13 corrigida: frontend enviava `taskId` ("39") como prompt → backend agora monta natural
+- Fixes aplicados pós-initial-review: bug C1 (CommandValidator + parênteses), test C2/M1 (REAL validator), R1 (anti-enumeration), R2 (@Matches)
+- Mode simbólico precedeu <task-built-prompt> que foi rejeitado pelo validator REAL — teste genuíno detectou regressão
+- Frontend update em PR separada (fora deste escopo — sub-task 10 do plano)
 
 ---
 

@@ -22,6 +22,30 @@ export interface IExecucaoData {
     timeoutMs?: number;
   };
 
+  /**
+   * Prompt natural enviado ao Claude (ADR-V2-049).
+   *
+   * Quando preenchido, é a fonte ÚNICA do prompt — o processor
+   * (`execution-run.processor.ts:resolvePrompt`) lê este campo
+   * preferencialmente sobre `command.args[-p]`.
+   *
+   * Populado pelo `PromptBuilderService` quando `POST /projects/:id/execute`
+   * recebe `taskId` no body (modo prompt). No modo legado (apenas `command`),
+   * fica indefinido e o processor faz fallback para `command.args`.
+   */
+  prompt?: string;
+
+  /**
+   * Tipo da task que originou esta execução (ADR-V2-049).
+   *
+   * Valores canônicos V2: `'code' | 'docs' | 'research' | 'validation' | 'other'`.
+   * Metadado de domínio — NÃO afeta workflow do Engine (Risk Gate continua
+   * vencendo no `idClasse`, conforme ADR-V2-048).
+   *
+   * Persistido em `DPedido.dados.taskType` para audit/UI/relatórios.
+   */
+  taskType?: string;
+
   /** Lookup canonico de risco (-525/-526/-527) para UI/auditoria */
   riskLevelCode?: string;
 
@@ -49,32 +73,32 @@ export interface IExecucaoData {
   /** Approval Flow — gerenciado por OperacaoExecucaoClaude.aprova() e gravarComoAwaitingApproval() */
   approval?: {
     status: 'queued' | 'awaiting_approval' | 'approved' | 'rejected' | 'expired';
-    approvedBy?: string;   // entidadeId como string
+    approvedBy?: string; // entidadeId como string
     rejectedBy?: string;
     rejectedReason?: string;
-    expiresAt?: string;    // ISO 8601
-    decidedAt?: string;    // ISO 8601
+    expiresAt?: string; // ISO 8601
+    decidedAt?: string; // ISO 8601
   };
 
   /** Claude runtime — preenchido por _executarClaude() */
   claude?: {
     sessionId?: string;
     sessionPath?: string;
-    stdout?: string;       // truncado a 1MB
-    stderr?: string;       // truncado a 1MB
+    stdout?: string; // truncado a 1MB
+    stderr?: string; // truncado a 1MB
     exitCode?: number;
-    startedAt?: string;    // ISO 8601
-    finishedAt?: string;   // ISO 8601
+    startedAt?: string; // ISO 8601
+    finishedAt?: string; // ISO 8601
     durationMs?: number;
   };
 
   /** Git workflow — preenchido após sucesso do Claude (exitCode=0 + mudanças detectadas) */
   git?: {
-    headBefore?: string;     // commit hash antes
-    headAfter?: string;      // commit hash após
-    branch?: string;         // scrumban/auto-<chave>
+    headBefore?: string; // commit hash antes
+    headAfter?: string; // commit hash após
+    branch?: string; // scrumban/auto-<chave>
     commitMessage?: string;
-    pushedAt?: string;       // ISO 8601
+    pushedAt?: string; // ISO 8601
     filesChanged?: number;
   };
 
@@ -82,9 +106,9 @@ export interface IExecucaoData {
   pullRequest?: {
     url?: string;
     number?: number;
-    openedAt?: string;       // ISO 8601
-    rolledBackAt?: string;   // ISO 8601 (se rollback)
-    rollbackRef?: string;    // commit hash do rollback
+    openedAt?: string; // ISO 8601
+    rolledBackAt?: string; // ISO 8601 (se rollback)
+    rollbackRef?: string; // commit hash do rollback
   };
 
   /** Vínculo task (opcional — se execution foi disparada a partir de uma task) */
@@ -95,8 +119,8 @@ export interface IExecucaoData {
   /** Audit trail — preenchido no constructor com dados iniciais */
   audit?: {
     correlationId: string;
-    triggeredBy: string;  // entidadeId do user como string
-    agentId: string;      // entidadeId do AGENT (-310) como string
-    projectId: string;    // projectId como string
+    triggeredBy: string; // entidadeId do user como string
+    agentId: string; // entidadeId do AGENT (-310) como string
+    projectId: string; // projectId como string
   };
 }

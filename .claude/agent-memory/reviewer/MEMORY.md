@@ -194,6 +194,21 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 | Task#1 Fase7 | fases-via-dtask-idpai (MCP tools) | pós-F5 | **9.0** | **APPROVED** | 158/158 specs (+25 novos); Pilar 2 DRY perfeito (list_phases delega 100% findMany); zero N+1 (includeMetrics ignorado + CTE F5 sem loop); tenant gate dupla OK; schema consistency spec passa; constructor order OK; BigInt→string via PhaseTreeService+buildResponse; textResult uniforme |
 | Task#3 Fase9 | fases-via-dtask-idpai (V3+Flow+Telegram) | pós-F8 | **8.7** | **APPROVED** | ZERO seed diff; -494 reutilizado OK; 91/91 specs novos; M1: JSDoc @throws incorrecto (NotFoundException mas lança ForbiddenException para outra org) em ByPhaseResolverService; M2: DVincula tenant filter sem restrição de idClasse de role; M3: worker force exit em timer leak (fake timers cleanup não completo); L1: notification-triggers.const.ts adiciona phase.completed mas o comentário diz "por simetria" sem ADR |
 
+## HISTÓRICO DE SCORES (continuação — linha 196+)
+
+| Task | Módulo | Fase | Score | Decisão | Issue principal |
+|------|--------|------|-------|---------|-----------------|
+| (2026-05-26) | prompt-builder | Pós-F13 | **7.2** | **NEEDS_CHANGES** | C1: CommandValidator.DANGEROUS_CHARS rejeita `()` no prompt placeholder (feature disfuncional em produção); masked por mock no integration test |
+| (2026-05-26) re-review | prompt-builder | Pós-F13 | **8.8** | **APPROVED** | C1 fix Opção B (placeholder simbólico); C2/M1 teste REAL detectou variante `<` `>`; R1 dupla camada anti-enum; R2 @Matches `^\d+$`; gate CEO 8.5 atingido |
+
+## PADRÕES APRENDIDOS: PROMPT BUILDER (2026-05-26)
+
+- **`DANGEROUS_CHARS` do CommandValidator é global**: verificar que qualquer texto que passar por `args[]` (inclusive placeholders internos) não contém `[|&;\`$()<>]`. Prompts de linguagem natural SEMPRE conterão parênteses. Fix: usar placeholder simbólico `<task-built-prompt>` em vez do prompt real no `args`, OU remover parênteses dos templates.
+- **Mock de CommandValidator em integration test mascara rejeição**: se `validate: jest.fn()` é o mock, o teste não detecta que o placeholder real seria rejeitado. Sempre adicionar ao menos 1 cenário com o CommandValidator REAL quando o placeholder gerado pelo sistema é passado.
+- **Anti-enumeration na query de scoping**: ao buscar recurso por ID e validar escopo (project/org) em application level, a diferença NotFoundException vs ForbiddenException vaza existência do recurso. Preferir incluir `idProject` no WHERE do banco para retornar NotFoundException em ambos os casos.
+- **`BigInt("abc")` sem validação = 500**: quando `taskId` vem de campo `@IsString` no DTO sem `@Matches(/^\d+$/)`, uma string não-numérica lança SyntaxError não tratado. Sempre adicionar `@Matches(/^\d+$/)` em campos que serão convertidos com `BigInt()`.
+- **Prompt em `args` para placeholder estruturado — padrão antiético**: passar o prompt completo (potencialmente longo, com parênteses, backticks) em `args` do command é arquiteturalmente errado. O processor já lê `dados.prompt` — o placeholder de command deveria ter um valor simbólico curto e sem metacaracteres.
+
 ## PADRÕES APRENDIDOS F13 TASK1 SUB4 (Agente V2 — RUN_CLAUDE_CODE + session extraction)
 
 - **`execFile` sem shell = defesa obrigatória para spawn CLI externo**: verificar que o runner usa `execFile` (não `exec`), args como array (nunca string), sem opção `shell: true`. Com `execFile`, o prompt vai como `argv[N]` — metacaracteres de shell não são interpretados mesmo que o prompt contenha `$(rm -rf /)`.

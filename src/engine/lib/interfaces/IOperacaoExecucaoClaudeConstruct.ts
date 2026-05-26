@@ -19,6 +19,21 @@ export interface IOperacaoExecucaoClaudeConstruct extends IOperacaoPedidoConstru
   taskId?: string;
   /** Comando a executar (estrutura completa) */
   command: IExecucaoData['command'];
+  /**
+   * Prompt natural pré-montado pelo `PromptBuilderService` (ADR-V2-049).
+   *
+   * Opcional. Quando presente, é populado em `dados.prompt` (fonte canônica V2
+   * lida pelo `execution-run.processor.ts`). Quando ausente, o processor faz
+   * fallback para `command.args[-p]` (modo legado).
+   */
+  prompt?: string;
+  /**
+   * Tipo da task (`code | docs | research | validation | other`) — ADR-V2-049.
+   *
+   * Opcional. Persistido em `dados.taskType` para audit/UI/relatórios. NÃO
+   * influencia o Risk Gate (ADR-V2-048 — Risk vence TaskType no idClasse).
+   */
+  taskType?: string;
   /** Correlation ID para rastreamento distributed (X-Correlation-Id) */
   correlationId: string;
   /**

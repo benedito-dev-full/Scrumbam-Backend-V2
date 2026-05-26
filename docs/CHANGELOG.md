@@ -14,6 +14,28 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Prompt Builder — Backend monta prompt natural a partir de DTask** (2026-05-26, V2 Pós-F13)
+  - **Feature:** `PromptBuilderService` injetável com 5 templates Markdown (code/docs/research/validation/other)
+  - **Detecção:** Cascata `dados.taskType` → regex(nome) → 'other' (suporta aliases legacy)
+  - **ExecutionsService:** 3 modos — PROMPT (`{taskId}`), COMMAND (legado), HÍBRIDO (debug)
+  - **Engine:** `OperacaoExecucaoClaude` popula `dados.prompt` como fonte canônica V2
+  - **Segurança:** Anti-enumeration via `idProject` no WHERE (task de outro projeto → 404)
+  - **CommandValidator:** Placeholder simbólico sem metacaracteres (separação texto natural vs comando)
+  - **DTO:** Validação cross-field + @Matches(/^\d+$/) em taskId
+  - **Tests:** 32 unit/integration tests (PromptBuilder 18 + ExecutionsService 7 + DTO 7), 82 Engine preservados
+  - **Pilares:** Pilar 1 PRESERVADO, Pilar 2 ATIVADO (reutiliza POST /projects/:id/execute), Pilar 3 PRESERVADO
+  - **ADRs:** ADR-V2-048 (Risk vence TaskType), ADR-V2-049 (Prompt Builder canônico)
+  - **Score:** 8.8/10 APPROVED (gate elevado 8.5 pelo CEO)
+
+### Fixed
+
+- **Regressão F13:** Frontend enviava `taskId` como prompt — backend agora monta prompt natural via DTask
+
+### Performance
+
+- **PromptBuilderService:** Templates carregados 1x em memória (fs.readFileSync no constructor), zero IO em runtime
+- **ExecutionsService:** +1 query DTask (com select restrito), ZERO N+1
+
 - **Bloco C — Hierarquia Space/Folder/List com Filtros e Guards (C1-C5)** - 2026-05-24 (V2 Frontend Integration)
   - **C1 — GET /projects com filtros idClasse/idPai + hooks useSpaces/useFolders/useLists (8.8/10):**
     * Backend: `ListProjectsQueryDto` com `idClasse?: string` e `idPai?: string` para filtros opcionais

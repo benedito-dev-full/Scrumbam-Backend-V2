@@ -79,8 +79,13 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
     this.githubClient = params.githubClient;
 
     // 3. Inicializa dados com defaults (command obrigatório + audit trail)
+    //    ADR-V2-049: prompt e taskType são opcionais; quando presentes (modo
+    //    PROMPT do ExecutionsService), populam o caminho canônico V2 lido
+    //    por `execution-run.processor.ts:resolvePrompt`.
     this.dados = {
       command: params.command,
+      ...(params.prompt !== undefined ? { prompt: params.prompt } : {}),
+      ...(params.taskType !== undefined ? { taskType: params.taskType } : {}),
       audit: {
         correlationId: params.correlationId,
         triggeredBy: params.usuario,

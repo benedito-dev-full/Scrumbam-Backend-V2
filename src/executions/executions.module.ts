@@ -15,6 +15,7 @@ import { ApprovalFlowSweeperService } from './approval-flow-sweeper.service';
 import { ExecutionHistoryService } from './execution-history.service';
 import { ClaudeRunnerService } from './claude-runner.service';
 import { CommandValidatorService } from './services/command-validator.service';
+import { PromptBuilderService } from './services/prompt-builder.service';
 import { EXECUTION_QUEUE_NAME } from './queues/execution-queue.constants';
 import { ExecutionQueueService } from './queues/execution-queue.service';
 import { InMemoryQueueService } from './queues/in-memory-queue.service';
@@ -95,6 +96,7 @@ export class ExecutionsModule {
       ExecutionHistoryService,
       ClaudeRunnerService,
       CommandValidatorService,
+      PromptBuilderService,
       queueProvider,
       ExecutionAccessGuard,
       ExecutionThrottlerGuard,
@@ -108,7 +110,12 @@ export class ExecutionsModule {
       imports: [...baseImports, ...redisImports],
       controllers: [ExecutionsController],
       providers: [...baseProviders, ...processorProvider],
-      exports: [ExecutionsService, ExecutionHistoryService, ClaudeRunnerService, ExecutionQueueService],
+      exports: [
+        ExecutionsService,
+        ExecutionHistoryService,
+        ClaudeRunnerService,
+        ExecutionQueueService,
+      ],
     };
   }
 }

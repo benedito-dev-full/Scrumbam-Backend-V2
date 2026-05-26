@@ -8,6 +8,50 @@
 
 ---
 
+## Prompt Builder — Backend monta prompt a partir de DTask ✅ COMPLETA
+
+**Status:** ✅ **COMPLETA** — Feature entregue, Reviewer APPROVED 8.8/10
+**Módulo V2:** executions (prompt-builder)
+**Fase V2:** Pós-F13 (correção de regressão no contrato de execução)
+**Tempo Real:** ~14h (Implementer 7h + Reviewer 1h15m inicial + Re-review 45m + Documenter 1h)
+**Completado em:** 2026-05-26
+**Quality Score:** 8.8/10 APPROVED (gate elevado 8.5 pelo CEO)
+
+**O Que Foi Feito:**
+
+**Core Feature — Backend monta prompt natural a partir de DTask:**
+- `PromptBuilderService` injetável com 5 templates Markdown (code/docs/research/validation/other)
+- Detecta `taskType` em cascata: `DTask.dados.taskType` → regex(nome) → 'other'
+- `ExecutionsService` aceita 3 modos: PROMPT (`{taskId}`), COMMAND (legado), HÍBRIDO (debug)
+- `OperacaoExecucaoClaude` popula `dados.prompt` como fonte canônica V2
+- Placeholder simbólico `task-built-prompt-placeholder` (sem metacaracteres) em `command.args[1]`
+- Anti-enumeration: `idProject` no WHERE previne disclosure cross-project
+- DTO validação cross-field + `@Matches(/^\d+$/)` em taskId
+
+**Pilares:**
+- Pilar 1: PRESERVADO (Engine intacto, `OperacaoPedido` idClasse -301/-302/-303)
+- Pilar 2: ATIVADO (reutiliza `POST /projects/:id/execute`, zero endpoint novo)
+- Pilar 3: PRESERVADO (zero DClasse nova, apenas string metadado `dados.taskType`)
+
+**Testes:**
+- 18 unit tests PromptBuilderService (100% pass)
+- 7 integration tests ExecutionsService (100% pass, CommandValidator REAL)
+- 7 unit tests ExecuteCommandDto (100% pass)
+- 75 testes ExecutionsService suite (1 falha pré-existente)
+- 82 testes Engine (zero regressão Risk Gate)
+
+**ADRs Redigidos:**
+- **ADR-V2-048:** Risk Level vence TaskType no `idClasse` (reforça ADR-V2-006)
+- **ADR-V2-049:** Backend é responsável por montar prompt; `DPedido.dados.prompt` é fonte canônica V2
+
+**Métricas:**
+- Build: ✅ PASS
+- TypeScript: 0 erros novos
+- N+1 Queries: ZERO (1 query DTask + templates em memória)
+- Queries/request: +1 (DTask findFirst com select restrito)
+
+---
+
 ## Bloco B — Autenticação Real + Workspace Switcher Multi-Org ✅ COMPLETO
 
 **Status:** ✅ **COMPLETO** — Ambas as fases entregues (B1, B2)

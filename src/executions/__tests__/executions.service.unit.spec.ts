@@ -1,4 +1,10 @@
-import { ForbiddenException, Logger, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import {
+  ForbiddenException,
+  Logger,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { ExecutionsService } from '../executions.service';
 import { ExecuteCommandDto } from '../dto/execute-command.dto';
 
@@ -25,12 +31,14 @@ function buildRiskGateScript(riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'): string {
   })`;
 }
 
-function buildService(overrides: {
-  riskLevel?: 'LOW' | 'MEDIUM' | 'HIGH';
-  projectExists?: boolean;
-  membershipExists?: boolean;
-  agentId?: string | null;
-} = {}) {
+function buildService(
+  overrides: {
+    riskLevel?: 'LOW' | 'MEDIUM' | 'HIGH';
+    projectExists?: boolean;
+    membershipExists?: boolean;
+    agentId?: string | null;
+  } = {},
+) {
   const {
     riskLevel = 'LOW',
     projectExists = true,
@@ -40,22 +48,26 @@ function buildService(overrides: {
 
   const mockPrisma = {
     dProject: {
-      findFirst: jest.fn().mockResolvedValue(
-        projectExists ? { chave: BigInt(100), dados: {}, excluido: false } : null,
-      ),
+      findFirst: jest
+        .fn()
+        .mockResolvedValue(
+          projectExists ? { chave: BigInt(100), dados: {}, excluido: false } : null,
+        ),
     },
     dVincula: {
       findFirst: jest.fn().mockImplementation(({ where }: { where: any }) => {
         if (where?.idClasse === BigInt(-185)) {
-          return Promise.resolve(agentId !== null
-            ? {
-                chave: BigInt(900),
-                entidade: {
-                  chave: BigInt(agentId),
-                  dados: { statusCode: '-510', tunnelPort: 20000 },
-                },
-              }
-            : null);
+          return Promise.resolve(
+            agentId !== null
+              ? {
+                  chave: BigInt(900),
+                  entidade: {
+                    chave: BigInt(agentId),
+                    dados: { statusCode: '-510', tunnelPort: 20000 },
+                  },
+                }
+              : null,
+          );
         }
 
         return Promise.resolve(membershipExists ? { idClasse: BigInt(-171) } : null);
@@ -63,14 +75,21 @@ function buildService(overrides: {
     },
     dPedido: {
       findFirst: jest.fn().mockResolvedValue(null),
-      update: jest.fn().mockResolvedValue({ chave: BigInt(1000001), dados: {}, criadoEm: new Date(), atualizadoEm: new Date() }),
+      update: jest.fn().mockResolvedValue({
+        chave: BigInt(1000001),
+        dados: {},
+        criadoEm: new Date(),
+        atualizadoEm: new Date(),
+      }),
     },
     $queryRaw: jest.fn().mockResolvedValue([{ nextval: BigInt(1000001) }]),
-    $transaction: jest.fn().mockImplementation(async (fn: (tx: any) => Promise<any>) => fn({
-      dPedido: {
-        create: jest.fn().mockResolvedValue({ chave: BigInt(1000001) }),
-      },
-    })),
+    $transaction: jest.fn().mockImplementation(async (fn: (tx: any) => Promise<any>) =>
+      fn({
+        dPedido: {
+          create: jest.fn().mockResolvedValue({ chave: BigInt(1000001) }),
+        },
+      }),
+    ),
     dVFS: {
       findFirst: jest.fn().mockImplementation(({ where }: { where: any }) => {
         const scripts: Record<number, string> = {
@@ -81,7 +100,14 @@ function buildService(overrides: {
           7: '(async function posGravacao(op) {})',
         };
         const conteudo = scripts[where.chaveScript];
-        return conteudo ? Promise.resolve({ chave: BigInt(100), chaveScript: where.chaveScript, conteudo, ativo: true }) : Promise.resolve(null);
+        return conteudo
+          ? Promise.resolve({
+              chave: BigInt(100),
+              chaveScript: where.chaveScript,
+              conteudo,
+              ativo: true,
+            })
+          : Promise.resolve(null);
       }),
     },
     dEvento: {
@@ -109,6 +135,16 @@ function buildService(overrides: {
   const mockExecutionQueue = {
     enqueueExecution: jest.fn().mockResolvedValue(undefined),
   };
+  // ADR-V2-049: PromptBuilder mockado — testes deste arquivo usam modo COMMAND
+  // (passam command literal). `buildFromTaskId` retorna stub previsível
+  // caso algum cenário evolua para modo PROMPT.
+  const mockPromptBuilder = {
+    buildFromTaskId: jest.fn().mockResolvedValue({
+      prompt: 'mocked prompt',
+      taskType: 'code',
+      taskName: 'mocked task',
+    }),
+  };
 
   const service = new ExecutionsService(
     mockPrisma as any,
@@ -118,9 +154,17 @@ function buildService(overrides: {
     mockCommandValidator as any,
     mockAgentTunnel as any,
     mockExecutionQueue as any,
+    mockPromptBuilder as any,
   );
 
-  return { service, mockPrisma, mockCommandValidator, mockAgentTunnel, mockExecutionQueue };
+  return {
+    service,
+    mockPrisma,
+    mockCommandValidator,
+    mockAgentTunnel,
+    mockExecutionQueue,
+    mockPromptBuilder,
+  };
 }
 
 describe('ExecutionsService.execute()', () => {
@@ -148,7 +192,9 @@ describe('ExecutionsService.execute()', () => {
   it('deve lancar UnprocessableEntityException se agent primary nao existe', async () => {
     const { service } = buildService({ agentId: null });
 
-    await expect(service.execute('100', baseDto, '1')).rejects.toThrow(UnprocessableEntityException);
+    await expect(service.execute('100', baseDto, '1')).rejects.toThrow(
+      UnprocessableEntityException,
+    );
   });
 
   it('deve criar execution LOW como queued e enfileirar job', async () => {
@@ -240,7 +286,9 @@ describe('ExecutionsService.execute()', () => {
       throw new UnprocessableEntityException('comando rejeitado');
     });
 
-    await expect(service.execute('100', baseDto, '1')).rejects.toThrow(UnprocessableEntityException);
+    await expect(service.execute('100', baseDto, '1')).rejects.toThrow(
+      UnprocessableEntityException,
+    );
 
     expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
