@@ -236,6 +236,24 @@ export class ListTasksQueryDto {
   dueDateTo?: string;
 
   /**
+   * Filtro por bloco (Opção A — dados.idBloco).
+   *
+   * Retorna apenas tasks cujo campo `dados->>'idBloco'` é igual ao valor
+   * informado. Tasks permanecem com `idPai=null` (raiz) e aparecem
+   * normalmente nas views List e Kanban.
+   */
+  @ApiPropertyOptional({
+    description:
+      'Filtrar tasks vinculadas a um bloco (dados.idBloco). ' +
+      'String numérica — chave da task de bloco (idClasse=-200).',
+    example: '42',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d+$/, { message: 'idBloco deve ser string numérica positiva' })
+  idBloco?: string;
+
+  /**
    * Filtro por "vence hoje" no timezone America/Sao_Paulo.
    *
    * Quando `true`, retorna tasks com dueDate entre o início e o fim

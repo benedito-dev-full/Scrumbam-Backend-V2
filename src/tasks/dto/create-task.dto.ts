@@ -1,4 +1,4 @@
-import { IsEnum, IsIn, IsISO8601, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsEnum, IsIn, IsISO8601, IsObject, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
@@ -132,4 +132,14 @@ export class CreateTaskDto {
   @IsOptional()
   @IsISO8601()
   dueDate?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Campos extras polimórficos (Opção A). Aceita `{ idBloco: string }` para ' +
+      'vincular a task a um bloco (idClasse=-200) sem usar idPai.',
+    example: { idBloco: '42' },
+  })
+  @IsOptional()
+  @IsObject()
+  dados?: Record<string, unknown>;
 }

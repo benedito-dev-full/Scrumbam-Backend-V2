@@ -334,6 +334,12 @@ export class TasksService {
           taskDados.taskType = dto.taskType;
         }
 
+        // Opção A — idBloco: referência ao bloco (idClasse=-200) sem usar idPai.
+        // Tasks mantêm idPai=null e aparecem em List/Kanban normalmente.
+        if (dto.dados?.idBloco) {
+          (taskDados as Record<string, unknown>).idBloco = dto.dados.idBloco;
+        }
+
         dadosPayload = taskDados;
 
         // Buscar idStatus para INBOX (DTabela -441 do projeto)
@@ -562,6 +568,11 @@ export class TasksService {
       }
     }
 
+    // Opção A — filtro por dados.idBloco (JSON path, sem romper raiz idPai=null).
+    if (query.idBloco) {
+      where.dados = { path: ['idBloco'], equals: query.idBloco };
+    }
+
     // Filtro por status: buscar idStatus das DTabelas correspondentes
     const statuses = query.statuses?.length ? query.statuses : query.status ? [query.status] : [];
     if (statuses.length > 0) {
@@ -727,18 +738,20 @@ export class TasksService {
       }
     }
 
-    // Merge superficial em `dados` quando taskType ou assignedToAi mudar.
+    // Merge superficial em `dados` quando taskType, assignedToAi ou dados mudar.
     // Preserva identifier, v3, telemetry, capture, automation intactos.
     const dadosAtuais = (existing.dados as Record<string, unknown> | null) ?? {};
     const isAiAssignee = dto.assigneeId === 'ai';
-    const novosDados =
-      dto.taskType !== undefined || dto.assigneeId !== undefined
-        ? {
-            ...dadosAtuais,
-            ...(dto.taskType !== undefined ? { taskType: dto.taskType } : {}),
-            ...(dto.assigneeId !== undefined ? { assignedToAi: isAiAssignee } : {}),
-          }
-        : undefined;
+    const hasDadosMerge = dto.taskType !== undefined || dto.assigneeId !== undefined || dto.dados !== undefined;
+    const novosDados = hasDadosMerge
+      ? {
+          ...dadosAtuais,
+          ...(dto.taskType !== undefined ? { taskType: dto.taskType } : {}),
+          ...(dto.assigneeId !== undefined ? { assignedToAi: isAiAssignee } : {}),
+          // Opção A — merge de chaves extras (ex: idBloco). null remove a chave.
+          ...(dto.dados !== undefined ? dto.dados : {}),
+        }
+      : undefined;
 
     // Resolver idPriority (semântica undefined/null/string):
     //   undefined → não tocar

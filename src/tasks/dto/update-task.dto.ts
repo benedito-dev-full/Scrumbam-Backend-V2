@@ -2,6 +2,7 @@ import {
   IsEnum,
   IsIn,
   IsISO8601,
+  IsObject,
   IsOptional,
   IsString,
   MaxLength,
@@ -99,4 +100,14 @@ export class UpdateTaskDto {
   @ValidateIf((o: UpdateTaskDto) => o.dueDate !== null)
   @IsISO8601()
   dueDate?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Merge superficial em dados (Opção A). Aceita `{ idBloco: string | null }` ' +
+      'para vincular/desvincular a task de um bloco sem usar idPai.',
+    example: { idBloco: '42' },
+  })
+  @IsOptional()
+  @IsObject()
+  dados?: Record<string, unknown | null>;
 }
