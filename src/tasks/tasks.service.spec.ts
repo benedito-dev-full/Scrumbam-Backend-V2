@@ -1063,7 +1063,7 @@ describe('TasksService', () => {
           aprovado: true,
           baixado: false,
           criadoEm: new Date('2026-05-26T12:00:00Z'),
-          dados: { taskId: '7' },
+          dados: { task: { id: '7' } },
         },
       ]);
 
@@ -1086,7 +1086,7 @@ describe('TasksService', () => {
           aprovado: false,
           baixado: false,
           criadoEm: new Date('2026-05-26T13:00:00Z'),
-          dados: { taskId: '7' },
+          dados: { task: { id: '7' } },
         },
       ]);
 
@@ -1105,7 +1105,7 @@ describe('TasksService', () => {
           aprovado: true,
           baixado: false,
           criadoEm: new Date('2026-05-26T14:00:00Z'),
-          dados: { taskId: '7' },
+          dados: { task: { id: '7' } },
         },
       ]);
 
@@ -1123,7 +1123,7 @@ describe('TasksService', () => {
           aprovado: true,
           baixado: false,
           criadoEm: new Date('2026-05-26T15:00:00Z'),
-          dados: { taskId: '999' }, // outra task
+          dados: { task: { id: '999' } }, // outra task
         },
       ]);
 
@@ -1145,7 +1145,7 @@ describe('TasksService', () => {
           aprovado: true,
           baixado: false,
           criadoEm: new Date('2026-05-26T10:00:00Z'),
-          dados: { taskId: '2' },
+          dados: { task: { id: '2' } },
         },
         {
           chave: BigInt(9002),
@@ -1153,7 +1153,7 @@ describe('TasksService', () => {
           aprovado: false,
           baixado: false,
           criadoEm: new Date('2026-05-26T11:00:00Z'),
-          dados: { taskId: '4' },
+          dados: { task: { id: '4' } },
         },
       ]);
 

@@ -1457,9 +1457,10 @@ export class TasksService {
         idClasse: { in: EXECUTION_CLASS_IDS },
         baixado: false,
         excluido: false,
-        // Filtro grosseiro: garante que `dados.taskId` existe.
+        // Filtro grosseiro: garante que `dados.task.id` existe (formato
+        // canônico persistido pelo Engine OperacaoExecucaoClaude).
         // O matching exato contra `taskIdStrings` acontece em memória abaixo.
-        dados: { path: ['taskId'], not: Prisma.AnyNull },
+        dados: { path: ['task', 'id'], not: Prisma.AnyNull },
       },
       select: {
         chave: true,
@@ -1473,7 +1474,10 @@ export class TasksService {
 
     for (const p of pedidos) {
       const dados = p.dados as Record<string, unknown> | null;
-      const taskId = dados?.taskId;
+      // Engine OperacaoExecucaoClaude persiste taskId nested em dados.task.id
+      // (string). Acesso defensivo contra estrutura inesperada.
+      const task = (dados?.task ?? null) as Record<string, unknown> | null;
+      const taskId = task?.id;
       if (typeof taskId !== 'string') continue;
       if (!taskIdStrings.has(taskId)) continue;
 
