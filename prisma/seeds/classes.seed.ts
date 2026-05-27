@@ -4,7 +4,7 @@
  * Composicao do seed (ADR-V2-019: monolitico):
  *   - 45 classes fixas universais Devari-Core (range -1..-110), via spread de
  *     `templates/classes-base-template.ts`.
- *   - 104 classes especificas Scrumban-V2 (range -150..-527), declaradas
+ *   - 105 classes especificas Scrumban-V2 (range -150..-527), declaradas
  *     neste arquivo, agrupadas por seccao (DEntidade, DVincula, DPedido,
  *     DTabela, DEvento, DTabela secundario, Fases) com comentarios `// === ... ===`.
  *
@@ -78,7 +78,7 @@ function esp(
 }
 
 /**
- * Array de classes especificas Scrumban-V2 (104 entradas).
+ * Array de classes especificas Scrumban-V2 (105 entradas).
  *
  * Ordem:
  *   1. DEntidade — 8 (sub-tipos de Pessoa: USER, PLATFORM_SCRUMBAN,
@@ -267,6 +267,7 @@ const classesEspecificas: DClasseSeed[] = [
   // diretamente de -3, mantendo o padrao polimorfico DEvento+idClasse.
   esp(-505, 'AGENT_SESSION_CREATED', 'Sessao Claude Code criada', -3),
   esp(-506, 'AGENT_SESSION_RESUMED', 'Sessao Claude Code retomada', -3),
+  esp(-507, 'TASK_COMMENT', 'Comentario textual em task', -3),
 
   // === DTabela — status lookups secundarios (21) ===
   // Filhos de STATUS (-52)
@@ -299,7 +300,7 @@ const classesEspecificas: DClasseSeed[] = [
 ];
 
 /**
- * Array completo do seed (45 fixas + 104 especificas = 149 DClasses).
+ * Array completo do seed (45 fixas + 105 especificas = 150 DClasses).
  * Validado automaticamente em time de import (validateHierarchy abaixo).
  */
 export const classes: DClasseSeed[] = [...classesFixas, ...classesEspecificas];

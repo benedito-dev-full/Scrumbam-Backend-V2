@@ -23,6 +23,7 @@ import { SprintsModule } from './sprints/sprints.module';
 import { WorkflowStatusesModule } from './workflow-statuses/workflow-statuses.module';
 import { ProjectsModule } from './projects/projects.module';
 import { TasksModule } from './tasks/tasks.module';
+import { CommentsModule } from './comments/comments.module';
 
 // F6 — Engine + Executions (OperacaoExecucaoClaude + ApprovalFlow + Sweeper)
 import { ExecutionsModule } from './executions/executions.module';
@@ -105,6 +106,7 @@ import { BookmarksModule } from './bookmarks/bookmarks.module';
     WorkflowStatusesModule,
     ProjectsModule,
     TasksModule,
+    CommentsModule,
     // F6 — Automation Claude Code (Engine + Executions + ApprovalFlow)
     ExecutionsModule.forRoot(),
     // F7 — Eventos Canônicos (EventProducerService global + /events/health)

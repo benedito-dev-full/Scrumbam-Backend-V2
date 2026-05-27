@@ -28,6 +28,8 @@ const TYPE_TO_CLASSE: Readonly<Record<string, bigint>> = Object.freeze({
   'task.status.changed': BigInt(-498), // TASK_STATUS_CHANGED
   'task.assigned': BigInt(-498), // reusa via metaDados._meta.action
   'task.deleted': BigInt(-498), // reusa via metaDados._meta.action
+  'task.comment.created': BigInt(-507), // TASK_COMMENT (seed Fase 1 — ia-tools-backend)
+  'task.comment.deleted': BigInt(-507), // TASK_COMMENT (seed Fase 1 — ia-tools-backend)
 
   // Phases (ADR-V2-047 — Fase 8). Reusa -489 AUDIT_GENERIC (padrão ADR-V2-027 —
   // sem DClasse semântica dedicada). Distinção via metaDados._meta.action.

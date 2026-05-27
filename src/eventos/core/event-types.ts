@@ -20,6 +20,8 @@ export const EVENT_TYPES = {
   TASK_STATUS_CHANGED: 'task.status.changed',
   TASK_ASSIGNED: 'task.assigned',
   TASK_DELETED: 'task.deleted',
+  TASK_COMMENT_CREATED: 'task.comment.created',
+  TASK_COMMENT_DELETED: 'task.comment.deleted',
 
   // ============== PHASES (ADR-V2-047 — Fase 8: webhooks phase.*) ==============
   // Fases são DTask com idClasse=-200 (PHASE) — não tabela própria.
