@@ -78,6 +78,7 @@ Regras:
 |---|---|---|
 | Tasks | `task.created` | `-497` TASK_CREATED |
 | Tasks | `task.status.changed`, `task.assigned`, `task.deleted` | `-498` TASK_STATUS_CHANGED |
+| Comments | `task.comment.created`, `task.comment.deleted` | `-507` TASK_COMMENT |
 | Projects | `project.created`, `project.updated`, `project.deleted` | `-499` PROJECT_LIFECYCLE |
 | Orgs | `org.created`, `org.updated`, `org.deleted` | `-500` ORG_LIFECYCLE |
 | Teams | `team.created`, `team.deleted` | `-489` AUDIT_GENERIC |

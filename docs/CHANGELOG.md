@@ -14,6 +14,21 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **CommentsModule polimorfico (task|project|folder|list)** - 2026-05-27 (Fases 1+2+2.1+4, Score médio 8.625/10 APPROVED)
+  - **Seed (Fase 1):** DClasse `-507 TASK_COMMENT` (filha de -3 EVENTOS, folha)
+  - **Event types (Fase 1):** `task.comment.created`, `task.comment.deleted` + `doc.*` dormentes (ADR-V2-008 reutilizado)
+  - **Endpoints:** `POST /comments/:targetType/:targetId` (201), `GET /comments/:targetType/:targetId?cursor=...&limit=20` (200)
+  - **Storage:** DEvento polimórfico (Pilar 1 preservado — audit, não transacional)
+  - **Resolver centralizado:** CommentTargetResolver valida existência + acesso (task/project/folder/list) com tenant isolation ADR-V2-042
+  - **DTOs:** CreateCommentDto (texto), CommentResponseDto (id, targetType, texto, autorNome, createdAt), ListCommentsResponseDto (items + nextCursor)
+  - **Enum:** CommentTargetType = 'task'|'project'|'folder'|'list' (doc pronto para v2)
+  - **Testes:** 12 integration tests (4 tipos × happy + 404/403/400 + cursor + N+1)
+  - **Qualidade:** Build PASS, TypeScript 0 new errors, Queries zero N+1, Conformidade plano 100%
+  - **Pilares:** Pilar 1 preservado (audit), Pilar 2 novo controller justificado (resolver), Pilar 3 respeitado (zero tabela nova)
+  - **Débitos:** 4 registrados (DEBT-COMMENTS-01 a 04 no ROADMAP)
+  - **Decisão:** DClasse `-507 TASK_COMMENT` mantém nome por compat (débito naming aceito polimorficamente)
+  - **Fases:** 1 (8.5/10), 2 (8.2/10), 2.1 (9.0/10), 4 (8.8/10); Fase 3 deferida com análise preservada
+
 - **Task E1 — Preferências de usuário em DEntidade.dados.preferences** - 2026-05-27 (Score 9.2/10 APPROVED)
   - **Estrutura:** UserPreferencesDto com 3 sub-blocos (appearance, locale, notifications) — todos opcionais
   - **Persistência:** DEntidade.dados.preferences (campo Json polimórfico — ZERO migration, ZERO tabela nova)

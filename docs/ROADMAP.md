@@ -279,6 +279,65 @@
 
 ---
 
+## CommentsModule Polimorfico (task|project|folder|list) — ✅ COMPLETA
+
+**Status:** ✅ **COMPLETA** — Fases 1+2+2.1+4 entregues (5 fases paralelas — 1 Strategist, 3 Implementer, 3 Reviewer, 1 Documenter)
+
+**Cronograma:**
+- Fase 1 (Seed + Event Types): **8.5/10 APPROVED** (2026-05-27)
+- Fase 2 (CommentsModule polimórfico): **8.2/10 APPROVED** (2026-05-27)
+- Fase 2.1 (Fix M1 tenant isolation): **9.0/10 APPROVED** (2026-05-27)
+- Fase 4 (12 testes integração): **8.8/10 APPROVED** (2026-05-27)
+
+**Quality Score Médio:** 8.625/10 (gate Reviewer ≥ 8.0 superado)
+
+**O Que Foi Feito:**
+
+**Core Feature — Comentários polimórficos em 4 tipos (task, project, folder, list):**
+- **Seed (Fase 1):** DClasse `-507 TASK_COMMENT` (filha de -3 EVENTOS) adicionada
+- **Event types (Fase 1):** `task.comment.created`, `task.comment.deleted` + tipos doc dormentes
+- **Endpoints:** `POST /comments/:targetType/:targetId` (criar), `GET /comments/:targetType/:targetId` (listar com cursor pagination)
+- **Storage:** DEvento polimórfico com `idClasse=-507`, `identificadorExterno=targetId`, `metaDados={targetType, autorId}`
+- **CommentTargetResolver:** abstração central que valida existência + acesso por `targetType` (task/project/folder/list)
+- **Validação:** tenant isolation simétrica (ADR-V2-042) para todos 4 tipos via membership DVincula
+- **Cursor pagination:** DESC por chave BigInt, zero N+1 (join DEntidade para nome autor)
+- **DTOs:** CreateCommentDto, CommentResponseDto, ListCommentsResponseDto, ListCommentsQueryDto, CommentTargetType enum
+- **Testes:** 12 integration tests cobrindo 4 tipos × happy path + 404/403/400 + cursor pagination + N+1 validation
+
+**Pilares:**
+- Pilar 1 (Engine): PRESERVADO — DEvento é tabela de audit, não transacional
+- Pilar 2 (Endpoints): NOVO controller próprio justificado (polimorfismo + resolver central)
+- Pilar 3 (Seed): RESPEITADO — DClasse -507 adicionada, zero tabela nova
+
+**Débitos Registrados (DEBT-COMMENTS-01 a DEBT-COMMENTS-04):**
+- DEBT-01: Índice composto (idClasse, identificadorExterno) em DEvento pré-escala
+- DEBT-02: Extrair PROJECT_MEMBERSHIP_CLASSES como constante reutilizável
+- DEBT-03: Cobrir cursor segunda página + malformado nos testes
+- DEBT-04: Simetria addInternalEvent not.toHaveBeenCalled nos cenários 403
+
+**Decisões Arquiteturais:**
+- DClasse `-507 TASK_COMMENT` mantém nome por compatibilidade (débito de naming aceito — reusado polimorficamente)
+- `targetType` suportados v1: task, project, folder, list (doc pronto pra próxima sprint)
+- CommentTargetResolver centraliza validação de acesso (SRP — resolver apenas autorização)
+
+**Desvios Aceitáveis:**
+- Plano previa 10 cenários; implementado 12 (cobertura aumentada)
+- Fase 3 (DocsModule) deferida para próxima sprint (análise preservada)
+
+**Métricas:**
+- Build: ✅ PASS (npm run build → 0 new errors)
+- TypeScript: 0 new errors no módulo comments
+- Tests: 12/12 PASS (10 cenários + 2 extras Fase 2.1 cross-tenant)
+- N+1 Queries: ZERO (1 query dEvento com include relação DEntidade)
+- Conformidade com Plano: 100% (4 fases contratadas, 4 entregues)
+
+**ADRs:**
+- ADR-V2-001 (zero tabela nova — respeitado via DEvento)
+- ADR-V2-042 (tenant isolation — implementado simetricamente)
+- Nenhum ADR novo necessário (polimorfismo já decidido em ADR-V2-008)
+
+---
+
 ## F10 — Backend: Tests End-to-End Controller-Level (ADR-V2-047 Fase 10) — ✅ COMPLETA
 
 ### Task: ADR-V2-047 Fase 10 — Testes E2E Controller-Level — ✅ COMPLETA

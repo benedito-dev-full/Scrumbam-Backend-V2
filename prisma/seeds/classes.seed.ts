@@ -8,12 +8,13 @@
  *     neste arquivo, agrupadas por seccao (DEntidade, DVincula, DPedido,
  *     DTabela, DEvento, DTabela secundario, Fases) com comentarios `// === ... ===`.
  *
- * Total: 149 DClasses (ADR-V2-026: +1 AUDIT_GENERIC; ADR-V2-028: +6 INVITE_*;
+ * Total: 150 DClasses (ADR-V2-026: +1 AUDIT_GENERIC; ADR-V2-028: +6 INVITE_*;
  *   ADR-V2-029: +1 PROJECT_TEAM_LINK; ADR-V2-033: +2 AGENT_SESSION_*;
  *   ADR-V2-FOLDERS-001: +1 FOLDER, +1 FOLDER_PROJECT_LINK;
  *   ADR-V2-047: +1 PHASE;
  *   ADR-V2-051: +2 BOOKMARK/SPACE_PRIVATE_MEMBER, +3 SPACE/FOLDER/LIST;
- *   GAP-04: +1 DOC).
+ *   GAP-04: +1 DOC;
+ *   GAP-COMMENT: +1 TASK_COMMENT).
  *
  * Validacao automatica:
  *   `validateHierarchy(classes)` e chamado no topo deste modulo. Qualquer
@@ -110,6 +111,7 @@ function esp(
  *      ADR-V2-028 (+5 INVITE_TOKEN, INVITE_STATUS_PENDING/ACCEPTED/EXPIRED/REVOKED).
  *
  * Soma: 8 + 15 + 1 + 3 + 4 + 36 + 16 + 21 = 104.
+ * Com GAP-COMMENT: +1 = 105.
  */
 const classesEspecificas: DClasseSeed[] = [
   // === DEntidade — sub-tipos de Pessoa (5) + DProject/DTask (2) + FOLDER (1) ===
@@ -267,7 +269,11 @@ const classesEspecificas: DClasseSeed[] = [
   // diretamente de -3, mantendo o padrao polimorfico DEvento+idClasse.
   esp(-505, 'AGENT_SESSION_CREATED', 'Sessao Claude Code criada', -3),
   esp(-506, 'AGENT_SESSION_RESUMED', 'Sessao Claude Code retomada', -3),
-  esp(-507, 'TASK_COMMENT', 'Comentario textual em task', -3),
+  // GAP-COMMENT (Fase 1 — ia-tools-backend): comentários polimórficos em
+  // tasks/projects/folders/lists via DEvento (ADR-V2-001 respeitado — zero
+  // tabela nova). idClasse=-507 serve polimorfico (nome histórico TASK_COMMENT,
+  // reusado para todos os tipos na v1). Ver `src/comments/README.md` para detalhes.
+  esp(-507, 'TASK_COMMENT', 'Comentario textual em qualquer alvo (task|project|folder|list)', -3),
 
   // === DTabela — status lookups secundarios (21) ===
   // Filhos de STATUS (-52)
