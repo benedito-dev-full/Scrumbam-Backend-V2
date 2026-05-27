@@ -32,6 +32,7 @@
     "seed": "node dist/prisma/seeds/seed-runner.js"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@nestjs/bullmq": "^10.0.1",
     "@nestjs/common": "^10.3.0",
     "@nestjs/config": "^3.1.1",
