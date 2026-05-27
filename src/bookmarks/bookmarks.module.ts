@@ -1,5 +1,6 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 
+import { AuthModule } from '../auth/auth.module';
 import { BookmarksController } from './bookmarks.controller';
 import { BookmarksService } from './bookmarks.service';
 
@@ -15,9 +16,10 @@ import { BookmarksService } from './bookmarks.service';
  * Pilar 3 PRESERVADO: DClasse -187 ja seedada, sem alteracao de seed.
  *
  * `CommonModule` e global — `PrismaService` disponivel sem import explicito.
- * `AuthModule` e global via `AuthCompositeGuard` registrado no guard.
+ * `AuthModule` importado via forwardRef — resolve McpKeyGuard no AuthCompositeGuard.
  */
 @Module({
+  imports: [forwardRef(() => AuthModule)],
   controllers: [BookmarksController],
   providers: [BookmarksService],
   exports: [BookmarksService],
