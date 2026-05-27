@@ -12,6 +12,23 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Fixed
+
+- **Task D2 — Validação de Existência do targetId em Bookmarks (ADR-V2-051)** - 2026-05-27 (Score 9.0/10 APPROVED)
+  - **Metodo privado:** `assertTargetExists(targetId: bigint, targetType: TargetType)` — valida existência do alvo antes de criar bookmark
+  - **Comportamento por targetType:**
+    * `space|folder|list`: 1 query `dProject.findFirst({ chave: targetId, idClasse, excluido: false })`
+    * `team`: 1 query `dEntidade.findFirst({ chave: targetId, idClasse: TEAM_CLASSE, excluido: false })`
+    * `doc`: retorna 501 (HttpException NOT_IMPLEMENTED) — modulo de docs nao implementado em V2
+  - **Validacao:** BigInt try/catch em `create()` lanca 400 BadRequestException se targetId invalido
+  - **Error handling:** NotFoundException com mensagem descritiva `"${targetType} com id=${targetId} não encontrado"`
+  - **Zero N+1:** Exatamente 1 query O(1) por tipo, executada ANTES do bloco de deduplicacao
+  - **Select minimo:** `{ chave: true }` — confirma existência sem trazer colunas desnecessarias
+  - **Tests:** 16/16 passing (10 em `create`, 3 em `findMany`, 3 em `remove`); 6 novos testes adicionados (space-404, folder-404, list-404, team-ok, team-404, doc-501)
+  - **Quality:** Build PASS, TypeScript 0 errors, ESLint 0 errors
+  - **ADRs:** ADR-V2-051 (DClasse -187 BOOKMARK), ADR-V2-001 (zero tabela nova)
+  - **Score:** 9.0/10 APPROVED (gate CEO 8.0 superado; 1 issue MINOR futuro: TargetType extensivel sem default)
+
 ### Added
 
 - **Task D1 — Feature de Bookmarks/Favoritos (ADR-V2-051 DClasse -187)** - 2026-05-27 (Score 8.5/10 APPROVED)

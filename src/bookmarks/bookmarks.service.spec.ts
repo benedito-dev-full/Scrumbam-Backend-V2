@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 
 import { BookmarksService } from './bookmarks.service';
@@ -13,6 +13,12 @@ const mockPrisma = {
     findFirst: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+  },
+  dProject: {
+    findFirst: jest.fn(),
+  },
+  dEntidade: {
+    findFirst: jest.fn(),
   },
 };
 
@@ -120,6 +126,8 @@ describe('BookmarksService', () => {
 
   describe('create', () => {
     it('deve criar bookmark novo com sucesso (201)', async () => {
+      // assertTargetExists: space existe no banco
+      mockPrisma.dProject.findFirst.mockResolvedValueOnce({ chave: TARGET_ID });
       mockPrisma.dVincula.findMany.mockResolvedValueOnce([]); // nenhum existente
       const created = makeVincula();
       mockPrisma.dVincula.create.mockResolvedValueOnce(created);
@@ -134,6 +142,8 @@ describe('BookmarksService', () => {
     });
 
     it('deve reativar DVincula soft-deleted (200)', async () => {
+      // assertTargetExists: space existe no banco
+      mockPrisma.dProject.findFirst.mockResolvedValueOnce({ chave: TARGET_ID });
       const softDeleted = makeVincula({ excluido: true });
       mockPrisma.dVincula.findMany.mockResolvedValueOnce([softDeleted]);
       const reactivated = makeVincula({ excluido: false });
@@ -154,6 +164,8 @@ describe('BookmarksService', () => {
     });
 
     it('deve lancar ConflictException se bookmark ja existe ativo (409)', async () => {
+      // assertTargetExists: space existe no banco
+      mockPrisma.dProject.findFirst.mockResolvedValueOnce({ chave: TARGET_ID });
       const active = makeVincula({ excluido: false });
       mockPrisma.dVincula.findMany.mockResolvedValueOnce([active]);
 
@@ -167,6 +179,69 @@ describe('BookmarksService', () => {
       const dto: CreateBookmarkDto = { targetId: 'nao-um-numero', targetType: 'space' };
 
       await expect(service.create(USER_ID, dto)).rejects.toThrow(BadRequestException);
+      // assertTargetExists nao e chamado — excecao ocorre antes da conversao BigInt
+      expect(mockPrisma.dProject.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.dVincula.findMany).not.toHaveBeenCalled();
+    });
+
+    // --- Novos casos D2: validacao de existencia do alvo ---
+
+    it('deve lancar NotFoundException se targetType=space e alvo nao existe (404)', async () => {
+      mockPrisma.dProject.findFirst.mockResolvedValueOnce(null);
+
+      const dto: CreateBookmarkDto = { targetId: '350', targetType: 'space' };
+      await expect(service.create(USER_ID, dto)).rejects.toThrow(NotFoundException);
+      expect(mockPrisma.dVincula.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.dVincula.create).not.toHaveBeenCalled();
+    });
+
+    it('deve lancar NotFoundException se targetType=folder e alvo nao existe (404)', async () => {
+      mockPrisma.dProject.findFirst.mockResolvedValueOnce(null);
+
+      const dto: CreateBookmarkDto = { targetId: '350', targetType: 'folder' };
+      await expect(service.create(USER_ID, dto)).rejects.toThrow(NotFoundException);
+      expect(mockPrisma.dVincula.findMany).not.toHaveBeenCalled();
+    });
+
+    it('deve lancar NotFoundException se targetType=list e alvo nao existe (404)', async () => {
+      mockPrisma.dProject.findFirst.mockResolvedValueOnce(null);
+
+      const dto: CreateBookmarkDto = { targetId: '350', targetType: 'list' };
+      await expect(service.create(USER_ID, dto)).rejects.toThrow(NotFoundException);
+      expect(mockPrisma.dVincula.findMany).not.toHaveBeenCalled();
+    });
+
+    it('deve criar bookmark de team com sucesso quando dEntidade existe (201)', async () => {
+      // assertTargetExists: team existe no banco (dEntidade)
+      mockPrisma.dEntidade.findFirst.mockResolvedValueOnce({ chave: TARGET_ID });
+      mockPrisma.dVincula.findMany.mockResolvedValueOnce([]);
+      const created = makeVincula({ metaDados: { targetType: 'team' } });
+      mockPrisma.dVincula.create.mockResolvedValueOnce(created);
+
+      const dto: CreateBookmarkDto = { targetId: '350', targetType: 'team' };
+      const result = await service.create(USER_ID, dto);
+
+      expect(result.reactivated).toBe(false);
+      expect(mockPrisma.dEntidade.findFirst).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.dVincula.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('deve lancar NotFoundException se targetType=team e alvo nao existe (404)', async () => {
+      mockPrisma.dEntidade.findFirst.mockResolvedValueOnce(null);
+
+      const dto: CreateBookmarkDto = { targetId: '350', targetType: 'team' };
+      await expect(service.create(USER_ID, dto)).rejects.toThrow(NotFoundException);
+      expect(mockPrisma.dVincula.findMany).not.toHaveBeenCalled();
+    });
+
+    it('deve lancar HttpException 501 se targetType=doc (nao implementado)', async () => {
+      const dto: CreateBookmarkDto = { targetId: '350', targetType: 'doc' };
+      const error = await service.create(USER_ID, dto).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(HttpException);
+      expect((error as HttpException).getStatus()).toBe(HttpStatus.NOT_IMPLEMENTED);
+      expect(mockPrisma.dProject.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.dEntidade.findFirst).not.toHaveBeenCalled();
       expect(mockPrisma.dVincula.findMany).not.toHaveBeenCalled();
     });
   });

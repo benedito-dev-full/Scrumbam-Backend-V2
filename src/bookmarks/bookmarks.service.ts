@@ -2,6 +2,8 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Injectable,
   Logger,
   NotFoundException,
@@ -9,12 +11,21 @@ import {
 import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma.service';
-import { CreateBookmarkDto } from './dto/create-bookmark.dto';
+import { CreateBookmarkDto, TargetType } from './dto/create-bookmark.dto';
 import { ListBookmarksQueryDto } from './dto/list-bookmarks-query.dto';
 import { BookmarkResponseDto, ListBookmarksResponseDto } from './dto/bookmark-response.dto';
 
 /** DClasse -187 — BOOKMARK (seedada em ADR-V2-051). */
 const BOOKMARK_CLASSE = BigInt(-187);
+
+/** DClasse -350 SPACE (ADR-V2-051). */
+const SPACE_CLASSE = BigInt(-350);
+/** DClasse -351 FOLDER (ADR-V2-051). */
+const FOLDER_CLASSE = BigInt(-351);
+/** DClasse -352 LIST (ADR-V2-051). */
+const LIST_CLASSE = BigInt(-352);
+/** DClasse -180 TEAM (seed F1). */
+const TEAM_CLASSE = BigInt(-180);
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
@@ -121,6 +132,55 @@ export class BookmarksService {
   }
 
   /**
+   * Verifica se o alvo do bookmark existe no banco.
+   *
+   * Consulta DProject (para space/folder/list) ou DEntidade (para team)
+   * com o idClasse discriminador correspondente. Lanca NotFoundException
+   * se o registro nao existir ou estiver soft-deleted.
+   *
+   * Para targetType='doc': retorna 501 (Not Implemented) — modulo de docs
+   * nao existe no V2. Remover este branch quando F-docs for implementada.
+   *
+   * @param targetId - ID do alvo ja convertido para BigInt.
+   * @param targetType - Tipo do alvo (space | folder | list | doc | team).
+   * @throws {NotFoundException} Se o alvo nao existe ou esta excluido.
+   * @throws {HttpException(501)} Se targetType='doc' (nao implementado).
+   */
+  private async assertTargetExists(targetId: bigint, targetType: TargetType): Promise<void> {
+    this.logger.debug(`assertTargetExists: targetType=${targetType} targetId=${targetId}`);
+
+    if (targetType === 'doc') {
+      throw new HttpException(
+        'Bookmarks de documentos ainda não suportados nesta versão',
+        HttpStatus.NOT_IMPLEMENTED,
+      );
+    }
+
+    let exists: { chave: bigint } | null = null;
+
+    if (targetType === 'space' || targetType === 'folder' || targetType === 'list') {
+      const idClasse =
+        targetType === 'space' ? SPACE_CLASSE :
+        targetType === 'folder' ? FOLDER_CLASSE :
+        LIST_CLASSE;
+
+      exists = await this.prisma.dProject.findFirst({
+        where: { chave: targetId, idClasse, excluido: false },
+        select: { chave: true },
+      });
+    } else if (targetType === 'team') {
+      exists = await this.prisma.dEntidade.findFirst({
+        where: { chave: targetId, idClasse: TEAM_CLASSE, excluido: false },
+        select: { chave: true },
+      });
+    }
+
+    if (exists === null) {
+      throw new NotFoundException(`${targetType} com id=${targetId} não encontrado`);
+    }
+  }
+
+  /**
    * Cria um bookmark ou reativa um soft-deleted existente.
    *
    * Deduplicacao logica por `(userId, targetId, targetType)`:
@@ -132,6 +192,7 @@ export class BookmarksService {
    * @param dto - Dados do bookmark a criar.
    * @returns Bookmark criado/reativado e flag de reativacao.
    * @throws {BadRequestException} Se `targetId` nao e um numero valido.
+   * @throws {NotFoundException} Se o alvo do bookmark nao existe no banco.
    * @throws {ConflictException} Se bookmark ja existe e esta ativo.
    */
   async create(userId: bigint, dto: CreateBookmarkDto): Promise<CreateResult> {
@@ -143,6 +204,9 @@ export class BookmarksService {
         `targetId "${dto.targetId}" nao e um numero valido para BigInt`,
       );
     }
+
+    // Verifica existencia do alvo antes de criar o bookmark
+    await this.assertTargetExists(targetId, dto.targetType);
 
     // Busca DVinculas existentes com mesmo (idLocEscritu, idEntidade, idClasse)
     const existingRows = await this.prisma.dVincula.findMany({

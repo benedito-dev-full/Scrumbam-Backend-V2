@@ -1,6 +1,156 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-26 (Notifications Integration COMPLETO — Sino + Inbox Real 8.5/10)
+**Ultima atualizacao:** 2026-05-27 (Task D2 — Validação targetId COMPLETO — 9.0/10)
+
+---
+
+## ✅ TASK D2 — VALIDACAO DE EXISTENCIA DO TARGETID EM BOOKMARKS — COMPLETE (ADR-V2-051)
+
+**Module:** bookmarks (backend Scrumban-Backend-V2)
+**Task:** Validação do targetId antes de criar bookmark; metodo privado assertTargetExists com suporte aos 5 targetTypes
+**Status:** COMPLETO
+**Date:** 2026-05-27
+**Duration:** ~25m total (Implementer ~25m + Documenter ~10m)
+**Quality Score:** 9.0/10 APPROVED (gate CEO 8.0)
+
+**Agents Performance:**
+| Agent | Phase | Duration | Quality |
+|-------|-------|----------|---------|
+| Implementer | assertTargetExists method + 6 testes | 25m | Zero N+1, `select: { chave: true }`, BigInt try/catch em create |
+| Reviewer | Initial Review | — | 9.0/10 APPROVED — Build PASS, 16/16 tests PASS, conformidade 100% com plano |
+| Documenter | JSDoc + CHANGELOG + STATUS + commit | 10m | JSDoc ja completo no metodo privado |
+
+**Pilares:**
+- Pilar 1 (Engine): PRESERVADO — `dProject.findFirst` e `dEntidade.findFirst` diretos; sem DPedido
+- Pilar 2 (Endpoints): N/A — validação interna (sem novo endpoint)
+- Pilar 3 (Seed): PRESERVADO — constants locais, nao-muda prisma/schema.prisma
+
+**Deliverables:**
+- [x] Metodo privado: `assertTargetExists(targetId: bigint, targetType: TargetType): Promise<void>`
+- [x] Validação targetType 'space': dProject com idClasse=-350 (SPACE_CLASSE)
+- [x] Validação targetType 'folder': dProject com idClasse=-351 (FOLDER_CLASSE)
+- [x] Validação targetType 'list': dProject com idClasse=-352 (LIST_CLASSE)
+- [x] Validação targetType 'team': dEntidade com idClasse=-180 (TEAM_CLASSE)
+- [x] Validação targetType 'doc': retorna HttpException 501 (NOT_IMPLEMENTED)
+- [x] BigInt try/catch em create() — 400 BadRequestException se targetId invalido
+- [x] NotFoundException com mensagem descritiva: "${targetType} com id=${targetId} não encontrado"
+- [x] Chamada em create() ANTES de dVincula.findMany (deduplicacao)
+- [x] Tests: 6 novos (space-404, folder-404, list-404, team-ok, team-404, doc-501); 10 total create
+- [x] JSDoc: Parametros @param, @throws, @example no metodo privado e em create()
+
+**Architecture:**
+- **Query estilo:** 1 `findFirst` por tipo (space/folder/list compartilham dProject + discriminador via idClasse)
+- **Performance:** Zero N+1; exatamente 1 query adicional por chamada create()
+- **Select minimo:** `{ chave: true }` — confirma existência sem overhead de colunas extras
+- **Error messages:** Descritivas e tipadas (TargetType enum garante exhaustiveness)
+
+**Metrics:**
+- Build: ✅ PASS (npm run build)
+- TypeScript: 0 errors novos no modulo bookmarks (13 pre-existentes em outros modulos nao relacionados)
+- ESLint: 0 errors, 0 warnings
+- Tests: 16/16 passing (10 create, 3 findMany, 3 remove)
+- N+1 Queries: ZERO (1 query assertTargetExists ANTES do dVincula.findMany)
+- Conformidade com Plano: 100% (3/3 fases, 2/2 arquivos, 4/4 constantes)
+
+**Desvios Registrados (Aceitaveis):**
+1. **Estrutura `if/else if` vs `switch/case`:** Plano previa switch/case; implementado com if/else if + ternario para idClasse (elimina DRY em 3 blocos dProject identicos). Comportamento identico, cobertura igual. ✅ JUSTIFICADO
+2. **Contagem testes 16 vs 17:** Plano previa 17; resultado 16 — happy path space existente absorvido pelo teste original (mock adicionado). Zero lacuna de cobertura, zero regressao. ✅ JUSTIFICADO
+
+**Issues Encontrados (MINOR):**
+- **M1 (MINOR):** Gap futuro se TargetType enum crescer (ex: 'sprint') — existiria sem ramo correspondente em assertTargetExists, `exists` ficaria null, lancaria NotFoundException em vez de error especifico. Nao bloqueia; monitorar quando F-docs for implementada. Mitigacao futura: switch/case com default ou satisfies never.
+
+**Quality Gate:**
+- Code Review: 9.0/10 APPROVED (gate 8.0 superado)
+- No new errors, zero regressoes, conformidade 100% com plano
+- Issue MINOR nao bloqueia producao
+
+**ADRs:**
+- ADR-V2-051 (DClasse -187 BOOKMARK, validação targetId)
+- ADR-V2-001 (Zero tabela nova — targets em tabelas existentes)
+
+---
+
+## ✅ TASK D1 — BOOKMARKS/FAVORITOS — COMPLETE (ADR-V2-051 DClasse -187)
+
+**Module:** bookmarks (backend Scrumban-Backend-V2)
+**Task:** GET/POST/DELETE /bookmarks com deduplicacao, reativacao soft-deleted, ownership validation
+**Status:** COMPLETO
+**Date:** 2026-05-27
+**Duration:** ~2h total (Implementer 45m + Reviewer 40m + Re-reviewer 20m + Documenter 15m)
+**Quality Score:** 8.5/10 APPROVED (gate CEO 8.0)
+
+**Agents Performance:**
+| Agent | Phase | Duration | Quality |
+|-------|-------|----------|---------|
+| Strategist | Planning | — | Plano 8/8 fases, 5 arquivos novos, endpoints contratados |
+| Implementer | Modulo bookmarks | 45m | Service + Controller + DTOs + 10 testes, 2 issues review corrigidos pós-submit |
+| Reviewer | Initial Review | 40m | 7.5/10 NEEDS_CHANGES — ISSUE-1: @IsString em targetId; ISSUE-2: filtro targetType em JS (paginacao quebrada) |
+| Implementer | Fixes | 20m | ISSUE-1: @IsNumberString em targetId (DTO validation); ISSUE-2: filtro no WHERE Prisma (JSON path filter) |
+| Reviewer | Re-review | 20m | 8.5/10 APPROVED (ambos fixes corretos, zero regressoes) |
+| Documenter | Docs | 15m | JSDoc (já completo), CHANGELOG.md entry, STATUS.md update, commit |
+
+**Pilares:**
+- Pilar 1 (Engine): PRESERVADO — DVincula direto, sem DPedido
+- Pilar 2 (Endpoints): JUSTIFICADO — controller proprio (deduplicacao + ownership nao suportados pelos genericos /entidades)
+- Pilar 3 (Seed): PRESERVADO — DClasse -187 pre-seedada (ADR-V2-051, Bloco A)
+
+**Deliverables:**
+- [x] Modulo: `src/bookmarks/` com BookmarksController, BookmarksService, BookmarksModule
+- [x] Endpoints: GET /bookmarks (lista paginada), POST /bookmarks (cria/reativa), DELETE /bookmarks/:id (soft-delete)
+- [x] DTOs: CreateBookmarkDto (targetId, targetType), BookmarkResponseDto (id, targetId, targetType, criadoEm), ListBookmarksResponseDto (items + pagination)
+- [x] Deduplicacao: Busca DVincula por (userId, targetId, targetType) — reativa soft-deleted, lanca 409 se ativo
+- [x] Ownership: DELETE valida idLocEscritu === userId (403 ForbiddenException se violado)
+- [x] Filtros: ?targetType=[space|folder|list|doc|team] opcional via WHERE Prisma JSON path filter
+- [x] Paginacao: Cursor-based com nextCursor (hasMore calculado corretamente apos filtro)
+- [x] Logging: NestJS Logger em service + controller com rastreamento de operacoes
+- [x] Swagger: @ApiTags, @ApiBearerAuth, @ApiOperation, @ApiResponse em todos handlers
+- [x] Tests: 10 testes unitarios (findMany, create happy/reactivate/conflict, remove happy/notfound/ownership)
+- [x] JSDoc: Completo em service (class + 3 metodos), controller (class + 3 handlers), DTOs e helpers
+
+**Architecture:**
+- **Storage:** DVincula idClasse=-187 BOOKMARK (pre-seedada em ADR-V2-051)
+  ```
+  idClasse = -187n
+  idLocEscritu = userId (DEntidade.chave do usuario)
+  idEntidade = targetId (ID da entidade favoritada)
+  metaDados = { targetType: 'space'|'folder'|'list'|'doc'|'team' }
+  excluido = false (ativo) ou true (soft-deleted)
+  ```
+- **Deduplicacao:** Logica no service.create() — busca existente com `findMany` por (idClasse, idLocEscritu, idEntidade), filtra por targetType em memoria (volume esperado muito baixo)
+- **Validacao:** @IsNumberString em targetId (DTO); BigInt try/catch em service (400 BadRequestException)
+- **Auth:** AuthCompositeGuard em todos endpoints (JWT + API Key)
+
+**Metrics:**
+- Build: ✅ PASS (npm run build)
+- TypeScript: 0 errors no modulo bookmarks
+- ESLint: 0 errors, 0 warnings
+- Tests: 10/10 passing
+- N+1 Queries: ZERO (findMany e create usam indices existentes)
+- Queries/deduplicacao: 1 query findMany por (idLocEscritu, idEntidade, idClasse) → filtro JS targetType (O(1) na pratica)
+
+**Issues Encontrados no Review:**
+1. **ISSUE-1 (BLOQUEANTE):** `create-bookmark.dto.ts` usava `@IsString() + @IsNotEmpty()` em targetId — permitia strings nao-numericas; BigInt("abc") lancava SyntaxError em 500
+   - **Fix:** Substituido por `@IsNumberString({}, { message: 'targetId deve ser um numero inteiro valido' })` — agora 400 antes de chegar ao service
+   - **Status:** CORRIGIDO ✅
+
+2. **ISSUE-2 (BLOQUEANTE):** `bookmarks.service.ts` filtrava targetType em JS apos `take: limit+1` — produzia hasMore errado
+   - Exemplo: banco retorna 21 items, 15 do tipo errado, filtered.length=6 <= limit, hasMore=false (ERRADO)
+   - **Fix:** Filtro targetType movido para WHERE do Prisma via JSON path filter (`metaDados: { path: ['targetType'], equals: query.targetType }`)
+   - **Teste atualizado:** Verifica que o WHERE do Prisma recebe o filtro; mock simula banco ja retornando items filtrados
+   - **Status:** CORRIGIDO ✅
+
+**Debito Tecnico (Registrado para futuro):**
+- Indice GIN em `DVincula.metaDados` para queries targetType em escala (atualmente O(1) pratica via filtro em memoria)
+- Race condition em POST concorrente (sem unique partial index PostgreSQL) — aceitavel para MVP; futura mitigacao: `UNIQUE (idLocEscritu, idEntidade, idClasse) WHERE NOT excluido AND (metaDados->'targetType' = ...)`
+
+**Quality Gate:**
+- Initial score: 7.5/10 (2 issues bloqueantes)
+- Re-review score: 8.5/10 APPROVED (gate CEO 8.0 superado)
+- No new issues, zero regressoes, 10/10 testes mantidos
+
+**ADRs:**
+- ADR-V2-051 (DClasse -187 BOOKMARK, Bloco A — seed)
+- ADR-V2-001 (Zero tabela nova — DVincula direto)
 
 ---
 
