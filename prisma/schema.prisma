@@ -252,6 +252,7 @@ model DEvento {
   @@index([idEntidade])
   @@index([criadoEm])
   @@index([idClasse, criadoEm(sort: Desc)])
+  @@index([idClasse, identificadorExterno])
 }
 
 // =====================================================================
