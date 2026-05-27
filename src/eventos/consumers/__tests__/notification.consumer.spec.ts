@@ -20,6 +20,7 @@ describe('NotificationConsumer', () => {
     dProject: { findFirst: jest.fn() },
     dVincula: { findMany: jest.fn() },
     dEvento: { findMany: jest.fn(), createMany: jest.fn() },
+    dEntidade: { findMany: jest.fn() },
   };
 
   let consumer: NotificationConsumer;
@@ -29,6 +30,54 @@ describe('NotificationConsumer', () => {
     consumer = new NotificationConsumer(prisma as never);
     prisma.dEvento.findMany.mockResolvedValue([]);
     prisma.dEvento.createMany.mockResolvedValue({ count: 0 });
+    // Default: nenhum recipient tem preferencia salva → todos elegiveis
+    // (preserva o comportamento dos specs pre-Task E1).
+    prisma.dEntidade.findMany.mockResolvedValue([]);
+  });
+
+  it('suprime notificacoes para recipients com inAppEnabled=false', async () => {
+    prisma.dTask.findFirst.mockResolvedValue({
+      chave: BigInt(10),
+      nome: 'Task suprimida',
+      idCreator: BigInt(1),
+      idAssignee: BigInt(2),
+      idProject: BigInt(7),
+    });
+    // Recipient 2 desligou notificacoes in-app; 1 nao tem preferencia.
+    prisma.dEntidade.findMany.mockResolvedValue([
+      {
+        chave: BigInt(2),
+        dados: { preferences: { notifications: { inAppEnabled: false } } },
+      },
+    ]);
+
+    await consumer.handle(event('task.status.changed', { taskId: '10' }));
+
+    expect(prisma.dEvento.createMany).toHaveBeenCalledTimes(1);
+    const callArg = prisma.dEvento.createMany.mock.calls[0][0] as {
+      data: Array<{ idEntidade: bigint }>;
+    };
+    const recipients = callArg.data.map((row) => row.idEntidade);
+    expect(recipients).toContain(BigInt(1));
+    expect(recipients).not.toContain(BigInt(2));
+  });
+
+  it('suprime evento completo quando todos recipients estao desligados', async () => {
+    prisma.dTask.findFirst.mockResolvedValue({
+      chave: BigInt(10),
+      nome: 'Task',
+      idCreator: BigInt(1),
+      idAssignee: BigInt(2),
+      idProject: BigInt(7),
+    });
+    prisma.dEntidade.findMany.mockResolvedValue([
+      { chave: BigInt(1), dados: { preferences: { notifications: { inAppEnabled: false } } } },
+      { chave: BigInt(2), dados: { preferences: { notifications: { inAppEnabled: false } } } },
+    ]);
+
+    await consumer.handle(event('task.status.changed', { taskId: '10' }));
+
+    expect(prisma.dEvento.createMany).not.toHaveBeenCalled();
   });
 
   it('cria notificacoes para creator e assignee de task.status.changed', async () => {
@@ -119,13 +168,11 @@ describe('NotificationConsumer', () => {
       idAssignee: null,
       idProject: null,
     });
-    prisma.dEvento.findMany
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        {
-          identificadorExterno: 'corr-1:notification:task.status.changed:1',
-        },
-      ]);
+    prisma.dEvento.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        identificadorExterno: 'corr-1:notification:task.status.changed:1',
+      },
+    ]);
 
     await consumer.handle(event('task.status.changed', { taskId: '10' }));
     await consumer.handle(event('task.status.changed', { taskId: '10' }));

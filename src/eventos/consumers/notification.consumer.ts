@@ -40,6 +40,25 @@ function addRecipient(recipients: Set<bigint>, value: bigint | null | undefined)
 }
 
 /**
+ * Le `dados.preferences.notifications.inAppEnabled` com seguranca a partir
+ * do campo Json polimorfico de DEntidade.
+ *
+ * @param dados - Conteudo bruto de `DEntidade.dados` (Json | null).
+ * @returns `false` apenas se o usuario explicitamente desligou a entrega
+ *   in-app; `true` para qualquer outro estado (campo ausente, undefined,
+ *   tipos invalidos) — preserva o default historico de entregar.
+ */
+function shouldDeliverInApp(dados: Prisma.JsonValue | null): boolean {
+  if (!dados || typeof dados !== 'object' || Array.isArray(dados)) return true;
+  const prefs = (dados as Record<string, unknown>).preferences;
+  if (!prefs || typeof prefs !== 'object' || Array.isArray(prefs)) return true;
+  const notif = (prefs as Record<string, unknown>).notifications;
+  if (!notif || typeof notif !== 'object' || Array.isArray(notif)) return true;
+  const flag = (notif as Record<string, unknown>).inAppEnabled;
+  return flag !== false;
+}
+
+/**
  * Consumer de notificacoes in-app.
  *
  * Persiste notificacoes como `DEvento.idClasse=-490` e nunca reemite eventos,
@@ -96,7 +115,22 @@ export class NotificationConsumer implements IEventConsumer {
       return;
     }
 
-    const identifiers = drafts.map((draft) => this.buildIdentifier(event, draft.recipientId));
+    // Respeita preferences.notifications.inAppEnabled (Task E1 — entrega
+    // seletiva). Batch lookup unico em DEntidade — evita N+1. Default = true
+    // quando preferences ausente (preserva comportamento historico).
+    const allowedRecipients = await this.filterByInAppPreference(drafts.map((d) => d.recipientId));
+    const allowedDrafts = drafts.filter((d) => allowedRecipients.has(d.recipientId));
+    if (allowedDrafts.length === 0) {
+      this.logger.debug(
+        `notification suppressed by preference: type=${event.type} ` +
+          `correlationId=${event.correlationId}`,
+      );
+      return;
+    }
+
+    const identifiers = allowedDrafts.map((draft) =>
+      this.buildIdentifier(event, draft.recipientId),
+    );
     const existing = await this.prisma.dEvento.findMany({
       where: {
         idClasse: NOTIFICATION_CLASSE,
@@ -111,7 +145,7 @@ export class NotificationConsumer implements IEventConsumer {
         .filter((id): id is string => typeof id === 'string'),
     );
 
-    const data = drafts
+    const data = allowedDrafts
       .filter((draft) => !existingIds.has(this.buildIdentifier(event, draft.recipientId)))
       .map((draft) => this.toCreateManyInput(event, draft));
 
@@ -256,6 +290,38 @@ export class NotificationConsumer implements IEventConsumer {
       ...(projectId && { projectId: projectId.toString() }),
       executionId: getPayloadId(event.payload, ['executionId', 'pedidoId'])?.toString(),
     }));
+  }
+
+  /**
+   * Filtra recipients que tem `preferences.notifications.inAppEnabled = false`
+   * em `DEntidade.dados` (Task E1). Uma unica query batch — zero N+1.
+   *
+   * @param recipientIds - IDs candidatos a receber a notificacao.
+   * @returns Conjunto dos IDs que devem receber. Recipients ausentes da
+   *   tabela (improvavel) ou com preferencia ausente/true sao incluidos.
+   */
+  private async filterByInAppPreference(recipientIds: bigint[]): Promise<Set<bigint>> {
+    const unique = [...new Set(recipientIds)];
+    if (unique.length === 0) return new Set();
+
+    const rows = await this.prisma.dEntidade.findMany({
+      where: { chave: { in: unique }, excluido: false },
+      select: { chave: true, dados: true },
+    });
+
+    const allowed = new Set<bigint>(unique);
+    const found = new Set<bigint>();
+    for (const row of rows) {
+      found.add(row.chave);
+      if (!shouldDeliverInApp(row.dados)) {
+        allowed.delete(row.chave);
+      }
+    }
+    // Recipients nao encontrados em DEntidade sao mantidos (default = entregar).
+    for (const id of unique) {
+      if (!found.has(id)) allowed.add(id);
+    }
+    return allowed;
   }
 
   private buildIdentifier(event: IEvent, recipientId: bigint): string {
