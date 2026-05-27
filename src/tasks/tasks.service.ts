@@ -291,11 +291,12 @@ export class TasksService {
     // ADR-V2-050: logger.warn (telemetria barata) quando frontend manda campos
     // que não fazem sentido para fase. Não bloqueia (reduz fricção de clients
     // genéricos como Telegram/MCP).
-    if (isPhase && (dto.assigneeId || dto.sprintId || dto.priority || dto.taskType)) {
+    if (isPhase && (dto.assigneeId || dto.sprintId || dto.priority || dto.taskType || dto.assigneeTeamId)) {
       this.logger.warn(
         `create_phase_ignored_fields projectId=${dto.projectId} ` +
           `assignee=${!!dto.assigneeId} sprint=${!!dto.sprintId} ` +
-          `priority=${!!dto.priority} taskType=${!!dto.taskType}`,
+          `priority=${!!dto.priority} taskType=${!!dto.taskType} ` +
+          `assigneeTeamId=${!!dto.assigneeTeamId}`,
       );
     }
 
@@ -338,6 +339,12 @@ export class TasksService {
         // Tasks mantêm idPai=null e aparecem em List/Kanban normalmente.
         if (dto.dados?.idBloco) {
           (taskDados as Record<string, unknown>).idBloco = dto.dados.idBloco;
+        }
+
+        // assigneeTeamId — atribuição de time (dados.assigneeTeamId).
+        // Fase ignora este campo (ramo acima retorna antes de chegar aqui).
+        if (dto.assigneeTeamId) {
+          (taskDados as Record<string, unknown>).assigneeTeamId = dto.assigneeTeamId;
         }
 
         dadosPayload = taskDados;
@@ -573,6 +580,13 @@ export class TasksService {
       where.dados = { path: ['idBloco'], equals: query.idBloco };
     }
 
+    // Filtro por time (dados.assigneeTeamId). Mutuamente exclusivo com idBloco
+    // quando passados simultaneamente (assigneeTeamId tem precedência — último set).
+    // Para combinar os dois filtros, refatorar para AND explícito em PR separado.
+    if (query.assigneeTeamId) {
+      where.dados = { path: ['assigneeTeamId'], equals: query.assigneeTeamId };
+    }
+
     // Filtro por status: buscar idStatus das DTabelas correspondentes
     const statuses = query.statuses?.length ? query.statuses : query.status ? [query.status] : [];
     if (statuses.length > 0) {
@@ -742,12 +756,17 @@ export class TasksService {
     // Preserva identifier, v3, telemetry, capture, automation intactos.
     const dadosAtuais = (existing.dados as Record<string, unknown> | null) ?? {};
     const isAiAssignee = dto.assigneeId === 'ai';
-    const hasDadosMerge = dto.taskType !== undefined || dto.assigneeId !== undefined || dto.dados !== undefined;
+    const hasDadosMerge =
+      dto.taskType !== undefined ||
+      dto.assigneeId !== undefined ||
+      dto.assigneeTeamId !== undefined ||
+      dto.dados !== undefined;
     const novosDados = hasDadosMerge
       ? {
           ...dadosAtuais,
           ...(dto.taskType !== undefined ? { taskType: dto.taskType } : {}),
           ...(dto.assigneeId !== undefined ? { assignedToAi: isAiAssignee } : {}),
+          ...(dto.assigneeTeamId !== undefined ? { assigneeTeamId: dto.assigneeTeamId } : {}),
           // Opção A — merge de chaves extras (ex: idBloco). null remove a chave.
           ...(dto.dados !== undefined ? dto.dados : {}),
         }
@@ -1528,6 +1547,26 @@ export class TasksService {
     return map;
   }
 
+  /**
+   * Constrói TaskResponseDto a partir de registro DTask.
+   *
+   * Extrai campos polimórficos de `dados` JSON (identifier, taskType, assigneeTeamId, v3).
+   * Resolve prioridade via priorityMap (batch lookup, ZERO N+1).
+   * Busca execução ativa Claude Code (DPedido ativa) via executionsMap (batch lookup).
+   *
+   * @param task - Registro DTask com dados completos (inclusive JSON polimórfico)
+   * @param priorityMap - Map pré-calculado chave-DTabela → enum priority (opcional)
+   * @param executionsMap - Map pré-calculado taskId → ActiveExecutionDto (opcional)
+   * @returns TaskResponseDto com todos os campos expostos no top-level
+   *
+   * @example
+   * ```typescript
+   * const response = service.buildResponse(task, priorityMap, executionsMap);
+   * // Expõe assigneeTeamId (extraído de dados.assigneeTeamId)
+   * // Expõe taskType (extraído de dados.taskType)
+   * // Expõe status derivado de dados.v3.state
+   * ```
+   */
   private buildResponse(
     task: {
       chave: bigint;
@@ -1552,6 +1591,7 @@ export class TasksService {
     const v3 = dados?.v3 as { state?: string } | null;
     const identifier = (dados?.identifier as string | null) ?? '';
     const taskType = (dados?.taskType as string | null) ?? null;
+    const assigneeTeamId = (dados?.assigneeTeamId as string | null) ?? null;
     // ADR-V2-050: expor idClasse para o frontend distinguir TASK (-154) de
     // PHASE (-200). Default "-154" preserva semântica para rows legados onde
     // o select não trouxe a coluna (defensivo — todos os callers atuais
@@ -1569,6 +1609,7 @@ export class TasksService {
       status: v3?.state ?? 'INBOX',
       priority: priorityMap ? this.mapPriorityEnum(task.idPriority, priorityMap) : null,
       taskType,
+      assigneeTeamId,
       assigneeId: dados?.assignedToAi ? 'ai' : (task.idAssignee?.toString() ?? null),
       sprintId: task.idSprint?.toString() ?? null,
       idPai: task.idPai?.toString() ?? null,

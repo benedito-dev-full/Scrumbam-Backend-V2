@@ -4225,3 +4225,66 @@ Plano `workspace/plans/plan-orphan-workspace.md`. Ciclo completo Strategist → 
 **Agent:** strategist
 **Status:** Completo
 
+
+---
+
+## ✅ Fase 1 — assigneeTeamId em DTask — COMPLETE (V2 Execução)
+
+**Module:** tasks (DTask — Fase 1 Blocos D/E/F)
+**Task:** Fase 1 — Adiciona campo `assigneeTeamId` para atribuição de tasks a times
+**Status:** COMPLETO
+**Duration:** ~1.5h total (Implementer backend + Reviewer validation + Documenter docs)
+**Quality Score:** 8.0/10 APPROVED
+
+**Agents Performance:**
+| Agent | Phase | Duration | Quality |
+|-------|-------|----------|---------|
+| Strategist | Planning | — | Fase 1 mapeada (Blocos D/E/F próximos) |
+| Implementer | Backend development | ~1h | Implementação de assigneeTeamId em 5 DTOs + service |
+| Reviewer | Code review | ~20m | 8.0/10 APPROVED (gate mínimo) |
+| Documenter | JSDoc + commit | ~10m | JSDoc completo, ROADMAP/CHANGELOG/STATUS, commit |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DTask é estrutural (Prisma direto), zero operações transacionais
+- Pilar 2 (Endpoints): ATIVO — reutiliza endpoints GET/POST/PUT /tasks (zero novo controller)
+- Pilar 3 (Seed): PRESERVADO — zero DClasse nova, apenas campo `dados.assigneeTeamId` (JSON polimórfico)
+
+**Deliverables:**
+- [x] CreateTaskDto: `assigneeTeamId?: string` com `@ApiPropertyOptional` + descrição
+- [x] UpdateTaskDto: `assigneeTeamId?: string | null` com `@ValidateIf` + semantic (null remove)
+- [x] ListTasksQueryDto: `assigneeTeamId?: string` com `@Matches(/^\d+$/)` para filtro
+- [x] TaskResponseDto: `assigneeTeamId!: string | null` exposto no top-level
+- [x] TasksService.create(): Persiste `dto.assigneeTeamId` em `dados.assigneeTeamId` JSON
+- [x] TasksService.update(): Merge superficial em `dados.assigneeTeamId` (undefined=nada, null=remove, string=set)
+- [x] TasksService.findMany(): Filtro via `dados` JSON path (Prisma JSON query)
+- [x] TasksService.buildResponse(): Extrai `assigneeTeamId` de `dados` e expõe no DTO response
+- [x] JSDoc: Método `buildResponse()` com documentação de extraction polimórfica
+
+**Campos Modificados:**
+1. `src/tasks/dto/create-task.dto.ts` — linha 144
+2. `src/tasks/dto/update-task.dto.ts` — linha 87-90
+3. `src/tasks/dto/list-tasks-query.dto.ts` — linha 272-275
+4. `src/tasks/dto/task-response.dto.ts` — linha 129-132
+5. `src/tasks/tasks.service.ts` — linhas 294-301, 346-348, 574-588, 768-769, 1550+ (buildResponse JSDoc)
+
+**Metrics:**
+- Build: ✅ PASS (npm run build)
+- TypeScript: 0 errors nos arquivos modificados
+- Tests: Regressão zero (testes de tasks existentes PASS)
+- N+1 Queries: ZERO (find/filter via JSON path, sem lookup extra)
+- Queries/request: ZERO (+0, sem queries adicionais — JSON filtro nativo PostgreSQL)
+- JSON Polimorfismo: dados.assigneeTeamId preserva outros campos (taskType, idBloco, v3, telemetry)
+
+**ADRs:** ADR-V2-001 (zero tabela nova — usar dados JSON), ADR-V2-050 (polimorfismo via dados JSON)
+
+**Notas Técnicas:**
+- Campo persistido em `DTask.dados` como chave `assigneeTeamId` (string — chave DEntidade idClasse=-155 TEAM)
+- Filtro em listagem usa Prisma JSON path: `{ path: ['assigneeTeamId'], equals: queryValue }`
+- Merge superficial em update respeita semantica ternária: undefined (nada), null (remove), string (set)
+- Sem impacto em polimorfismo existente (taskType, idBloco, v3.state, telemetry intactos)
+
+**Próximas Fases:**
+- Fase 2: Validação de time (idClasse=-155) durante create/update
+- Fase 3: Filtros combinados (assigneeTeamId + idBloco + status em 1 query)
+- Blocos D/E/F: Frontend integration (Team selector, inline rename no Kanban)
+

@@ -254,6 +254,27 @@ export class ListTasksQueryDto {
   idBloco?: string;
 
   /**
+   * Filtro por time responsável (dados.assigneeTeamId).
+   *
+   * Retorna apenas tasks cujo campo `dados->>'assigneeTeamId'` é igual ao
+   * valor informado. String numérica — chave da DEntidade do time.
+   *
+   * Nota: quando combinado com `idBloco`, `assigneeTeamId` tem precedência
+   * (último a ser setado no objeto `where`). Para filtro combinado, refatorar
+   * para `AND` explícito em PR dedicado.
+   */
+  @ApiPropertyOptional({
+    description:
+      'Filtrar tasks atribuídas a um time (dados.assigneeTeamId). ' +
+      'String numérica — chave da DEntidade idClasse=-155 TEAM.',
+    example: '42',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d+$/, { message: 'assigneeTeamId deve ser string numérica positiva' })
+  assigneeTeamId?: string;
+
+  /**
    * Filtro por "vence hoje" no timezone America/Sao_Paulo.
    *
    * Quando `true`, retorna tasks com dueDate entre o início e o fim

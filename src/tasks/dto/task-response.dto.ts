@@ -122,6 +122,15 @@ export class TaskResponseDto {
   })
   taskType!: string | null;
 
+  @ApiPropertyOptional({
+    description:
+      'ID do time responsável pela task. Extraído de dados.assigneeTeamId. ' +
+      'Null se não atribuído a nenhum time.',
+    nullable: true,
+    example: '42',
+  })
+  assigneeTeamId!: string | null;
+
   @ApiPropertyOptional({ description: 'ID do assignee', nullable: true })
   assigneeId!: string | null;
 

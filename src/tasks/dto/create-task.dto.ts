@@ -135,6 +135,16 @@ export class CreateTaskDto {
 
   @ApiPropertyOptional({
     description:
+      'ID do time responsável pela task (chave DEntidade idClasse=-155 TEAM). ' +
+      'Persistido em dados.assigneeTeamId. Exposto no top-level do response.',
+    example: '42',
+  })
+  @IsOptional()
+  @IsString()
+  assigneeTeamId?: string;
+
+  @ApiPropertyOptional({
+    description:
       'Campos extras polimórficos (Opção A). Aceita `{ idBloco: string }` para ' +
       'vincular a task a um bloco (idClasse=-200) sem usar idPai.',
     example: { idBloco: '42' },

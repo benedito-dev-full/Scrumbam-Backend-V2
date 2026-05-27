@@ -78,6 +78,19 @@ export class UpdateTaskDto {
 
   @ApiPropertyOptional({
     description:
+      'ID do time responsável (chave DEntidade idClasse=-155 TEAM). ' +
+      'string=atribui time; null=remove atribuição; ausente=não toca. ' +
+      'Persistido em dados.assigneeTeamId via merge superficial.',
+    example: '42',
+    nullable: true,
+  })
+  @IsOptional()
+  @ValidateIf((o: UpdateTaskDto) => o.assigneeTeamId !== null)
+  @IsString()
+  assigneeTeamId?: string | null;
+
+  @ApiPropertyOptional({
+    description:
       'Mover task na hierarquia de fases (ADR-V2-047). ' +
       'string=novo pai; null=move para raiz; ausente=nao toca.',
     example: '5',
