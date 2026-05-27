@@ -14,6 +14,28 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Task D1 — Feature de Bookmarks/Favoritos (ADR-V2-051 DClasse -187)** - 2026-05-27 (Score 8.5/10 APPROVED)
+  - **Modulo novo:** `src/bookmarks/` com BookmarksController + BookmarksService isolados
+  - **Endpoints REST:** `GET /bookmarks`, `POST /bookmarks`, `DELETE /bookmarks/:id` com `AuthCompositeGuard`
+  - **Storage:** DVincula -187 (BOOKMARK) — idClasse=-187, idLocEscritu=userId, idEntidade=targetId, metaDados={targetType}
+  - **Deduplicacao:** Logica no service — busca existente por `(userId, targetId, targetType)`:
+    * Ja existe + ativo → 409 ConflictException
+    * Ja existe + soft-deleted → reativa via update (200)
+    * Nao existe → cria novo (201)
+  - **Ownership:** DELETE valida `idLocEscritu === userId` antes de soft-delete (ForbiddenException se violado)
+  - **Filtros:** `?targetType=[space|folder|list|doc|team]` opcional; cursor pagination (`?cursor`, `?limit`)
+  - **Tipos:** `TargetType = 'space'|'folder'|'list'|'doc'|'team'` com enum whitelist em DTO
+  - **Validacao:** `@IsNumberString` em targetId (DTO); BigInt try/catch em service (400 se invalido)
+  - **DTOs:** CreateBookmarkDto (targetId, targetType) + BookmarkResponseDto (id, targetId, targetType, criadoEm) + ListBookmarksResponseDto (items + pagination)
+  - **Logging:** NestJS Logger em service + controller com rastreamento de operacoes (create/reativacao/delete/ownership-violation)
+  - **Tests:** 10 testes unitarios (findMany, create happy-path + reativacao + conflito, remove happy-path + not-found + ownership)
+  - **Swagger:** `@ApiTags('bookmarks')`, `@ApiBearerAuth()`, `@ApiOperation()`, `@ApiResponse()` em todos os handlers
+  - **Pilares:** Pilar 1 PRESERVADO (DVincula direto, sem DPedido); Pilar 2 JUSTIFICADO (controller proprio — deduplicacao + ownership nao suportados pelos genericos); Pilar 3 PRESERVADO (DClasse -187 pre-existente em seed)
+  - **Review:** 2 issues bloqueantes corrigidos — Issue #1: `@IsNumberString` em targetId (DTO validation); Issue #2: filtro targetType movido para WHERE do Prisma (JSON path filter, paginacao corrigida)
+  - **Quality:** Build PASS, TypeScript 0 errors, ESLint 0 errors, 10/10 tests PASS
+  - **Score:** 8.5/10 APPROVED (gate CEO 8.0 superado)
+  - **ADRs:** ADR-V2-051 (DClasse -187 BOOKMARK), ADR-V2-001 (zero tabela nova)
+
 - **Notifications Integration — Frontend (Sino + Inbox Real)** (2026-05-26, V2 Pós-F13, integração cross-repo)
   - **Frontend:** `NotificationsPopover` novo no topbar — sino com badge vermelho (cap 99+), 5 últimas não lidas em dropdown
   - **Frontend:** /inbox nova — 4 tabs (Todas / Não lidas / Menções / Atribuições), click navega + marca como lida
