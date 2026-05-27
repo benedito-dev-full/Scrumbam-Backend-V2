@@ -18,6 +18,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto, AvailableOrgDto, UserProfileDto } from './dto/auth-response.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
+import { UserPreferencesDto } from './dto/user-preferences.dto';
 // forwardRef para evitar circular dependency AuthModule ↔ OrganizationsModule
 import { OrganizationsService } from '../organizations/organizations.service';
 
@@ -407,13 +408,16 @@ export class AuthService {
    * @throws {NotFoundException} Se usuário não encontrado
    */
   async getMe(userGroupId: bigint): Promise<UserProfileDto> {
-    // Query 1: DUserGroup + DEntidade em JOIN (N+1 ZERO)
+    // Query 1: DUserGroup + DEntidade em JOIN (N+1 ZERO).
+    // `dados: true` selecionado na entidade para extrair `preferences`
+    // (E1 — preferências em DEntidade.dados.preferences).
     const userGroup = await this.prisma.dUserGroup.findUnique({
       where: { chave: userGroupId },
       include: {
         entidades: {
           where: { idClasse: ID_CLASSE_USER, excluido: false },
           take: 1,
+          select: { chave: true, nome: true, dados: true },
         },
       },
     });
@@ -423,6 +427,8 @@ export class AuthService {
     }
 
     const entidade = userGroup.entidades[0];
+    const dados = (entidade.dados as Record<string, unknown>) ?? {};
+    const preferences = dados.preferences as UserPreferencesDto | undefined;
 
     // Query 2: TODOS os vinculos ativos do usuario (-161/-162/-163) com nome
     // da org em JOIN. Ordenados ADMIN antes — o primeiro vira a org "default"
@@ -462,6 +468,11 @@ export class AuthService {
       // `true` quando user não tem nenhuma DVincula -161/-162/-163 ativa.
       // O frontend usa para renderizar `<NoWorkspaces />` com CTAs.
       isOrphan: availableOrgs.length === 0,
+      // E1 — preferências persistidas em DEntidade.dados.preferences.
+      // `undefined` quando o usuário ainda não gravou nenhuma preferência
+      // (frontend aplica defaults). Outras chaves de `dados`
+      // (defaultProjectId etc.) NÃO são expostas aqui — fora de escopo.
+      preferences,
     };
   }
 
@@ -483,6 +494,22 @@ export class AuthService {
     }
 
     const dadosAtuais = (entidade.dados as Record<string, unknown>) ?? {};
+    const prefsAtuais = (dadosAtuais.preferences as Record<string, unknown>) ?? {};
+
+    // Merge por chave de 1º nível em `preferences`: mandar `appearance`
+    // substitui o bloco appearance inteiro, sem tocar `locale` ou
+    // `notifications`. `undefined` em qualquer sub-bloco = preservar.
+    const novasPrefs = dto.preferences;
+    const prefsAtualizadas = novasPrefs
+      ? {
+          ...prefsAtuais,
+          ...(novasPrefs.appearance !== undefined && { appearance: novasPrefs.appearance }),
+          ...(novasPrefs.locale !== undefined && { locale: novasPrefs.locale }),
+          ...(novasPrefs.notifications !== undefined && {
+            notifications: novasPrefs.notifications,
+          }),
+        }
+      : prefsAtuais;
 
     await this.prisma.$transaction(async (tx) => {
       await tx.dEntidade.update({
@@ -497,6 +524,7 @@ export class AuthService {
             ...(dto.onboardingCompleted !== undefined && {
               onboardingCompleted: dto.onboardingCompleted,
             }),
+            ...(novasPrefs !== undefined && { preferences: prefsAtualizadas }),
           } as Prisma.InputJsonValue,
         },
       });

@@ -1,5 +1,14 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsEmail, IsOptional, IsString, MaxLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsEmail,
+  IsOptional,
+  IsString,
+  MaxLength,
+  ValidateNested,
+} from 'class-validator';
+import { UserPreferencesDto } from './user-preferences.dto';
 
 /**
  * DTO para atualização do perfil do usuário autenticado (PATCH /auth/me).
@@ -54,4 +63,22 @@ export class UpdateMeDto {
   @IsOptional()
   @IsBoolean()
   onboardingCompleted?: boolean;
+
+  /**
+   * Preferências pessoais do usuário (tema, idioma, notificações).
+   *
+   * Persistidas em `DEntidade.dados.preferences`. Merge por chave de 1º nível:
+   * mandar `appearance` substitui o bloco appearance inteiro mas não toca
+   * `locale` ou `notifications`. Campos ausentes não são alterados.
+   *
+   * @see UserPreferencesDto — shape completo dos sub-blocos.
+   */
+  @ApiPropertyOptional({
+    description: 'Preferências de UI/notificações (merge por chave de 1º nível)',
+    type: () => UserPreferencesDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => UserPreferencesDto)
+  preferences?: UserPreferencesDto;
 }

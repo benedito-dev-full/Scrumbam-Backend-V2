@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { UserPreferencesDto } from './user-preferences.dto';
 
 /**
  * Resumo de uma organizacao a qual o usuario tem vinculo ativo.
@@ -104,6 +105,23 @@ export class UserProfileDto {
     example: false,
   })
   isOrphan!: boolean;
+
+  /**
+   * Preferências pessoais do usuário (tema, idioma, notificações).
+   *
+   * Populado APENAS por `GET /auth/me`. Os endpoints `login`, `register`,
+   * `refresh` e `switch-org` NÃO incluem este campo no `user` (mantêm
+   * payload mínimo). Frontend deve chamar `/auth/me` após login para
+   * obter preferências e aplicar tema/idioma.
+   *
+   * `undefined` quando o usuário ainda não gravou nenhuma preferência
+   * — frontend aplica defaults sensatos (theme='system', etc.).
+   */
+  @ApiPropertyOptional({
+    description: 'Preferências de UI/notificações do usuário',
+    type: () => UserPreferencesDto,
+  })
+  preferences?: UserPreferencesDto;
 }
 
 /**

@@ -12,6 +12,33 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Added
+
+- **Task E1 — Preferências de usuário em DEntidade.dados.preferences** - 2026-05-27 (Score 9.2/10 APPROVED)
+  - **Estrutura:** UserPreferencesDto com 3 sub-blocos (appearance, locale, notifications) — todos opcionais
+  - **Persistência:** DEntidade.dados.preferences (campo Json polimórfico — ZERO migration, ZERO tabela nova)
+  - **Merge por chave de 1º nível:** PATCH com apenas appearance não altera locale/notifications (seguro para atualizacoes parciais)
+  - **DTOs novos:**
+    * UserAppearancePreferencesDto — theme (light/dark/system), density (compact/normal/cozy), accent (hex/CSS)
+    * UserLocalePreferencesDto — language (BCP-47), timezone (IANA), dateFormat (token)
+    * UserNotificationsPreferencesDto — emailOnMention, emailDigest, inAppEnabled (booleanos)
+    * UserPreferencesDto (root) — agrupa os 3 sub-blocos
+  - **Service integrado:**
+    * `updateMe()`: merge intelligente em dados.preferences (linha ~500+)
+    * `getMe()`: extrai preferences do dados e retorna no UserProfileDto
+  - **DTOs modificados:**
+    * UpdateMeDto — campo preferences?: UserPreferencesDto com @ValidateNested @Type
+    * UserProfileDto — campo preferences?: UserPreferencesDto (@ApiPropertyOptional)
+  - **Validacao:** class-validator em todos os campos (enum para theme/density, @MaxLength para strings, @IsBoolean para flags)
+  - **Swagger:** @ApiPropertyOptional completo em todos os campos
+  - **Tests:** 5 novos testes unitarios em auth.service.spec.ts (merge correto, campos raiz preservados, noop, validacao rejeitada)
+  - **Build:** PASS (npm run build, tsc 0 errors, eslint 0 warnings)
+  - **Quality:** Score 9.2/10 APPROVED (gate 8.0 superado; zero breaking changes, 100% backward compatible)
+  - **ADRs:** Nenhum ADR novo necessário (reuso de campo Json existente, arquitetura decidida)
+  - **Pilar 1:** N/A — cadastro estrutural (Prisma direto em transaction)
+  - **Pilar 2:** N/A — nenhum endpoint novo (integrado em PATCH /auth/me)
+  - **Pilar 3:** PRESERVADO — DEntidade.dados.preferences é chave dentro do campo Json, não nova DClasse
+
 ### Fixed
 
 - **Task D2 — Validação de Existência do targetId em Bookmarks (ADR-V2-051)** - 2026-05-27 (Score 9.0/10 APPROVED)

@@ -434,6 +434,149 @@ describe('AuthService', () => {
       // Tem 2 orgs → não é órfão (regressão zero).
       expect(result.isOrphan).toBe(false);
     });
+
+    // E1 — preferências em DEntidade.dados.preferences
+    it('expõe user.preferences quando DEntidade.dados.preferences está gravado (E1)', async () => {
+      const mockPrefs = {
+        appearance: { theme: 'dark' },
+        locale: { language: 'pt-BR' },
+      };
+      prisma.dUserGroup.findUnique.mockResolvedValue({
+        chave: BigInt(1),
+        usuario: 'joao@test.com',
+        entidades: [
+          {
+            chave: BigInt(2),
+            nome: 'João Silva',
+            dados: { defaultProjectId: '10', preferences: mockPrefs },
+          },
+        ],
+      });
+      prisma.dVincula.findMany.mockResolvedValue([]);
+
+      const result = await service.getMe(BigInt(1));
+
+      expect(result.preferences).toEqual(mockPrefs);
+    });
+
+    it('preferences=undefined quando DEntidade.dados não tem o bloco (E1)', async () => {
+      prisma.dUserGroup.findUnique.mockResolvedValue({
+        chave: BigInt(1),
+        usuario: 'joao@test.com',
+        entidades: [{ chave: BigInt(2), nome: 'João Silva', dados: null }],
+      });
+      prisma.dVincula.findMany.mockResolvedValue([]);
+
+      const result = await service.getMe(BigInt(1));
+
+      expect(result.preferences).toBeUndefined();
+    });
+  });
+
+  describe('updateMe', () => {
+    // E1 — merge por chave de 1º nível em DEntidade.dados.preferences
+    const mockEntidadeBase = (dados: Record<string, unknown> | null) => ({
+      chave: BigInt(2),
+      dados,
+    });
+
+    /**
+     * Helper: captura o `data.dados` passado ao tx.dEntidade.update e
+     * retorna a chamada do mock. updateMe roda dentro de $transaction;
+     * o helper amarra o tx mock e expõe o updateSpy para asserts.
+     */
+    const setupUpdateTx = () => {
+      const updateSpy = jest.fn().mockResolvedValue({});
+      prisma.$transaction.mockImplementation(
+        async (fn: (tx: typeof prisma) => Promise<unknown>) => {
+          return fn({
+            ...prisma,
+            dEntidade: { ...prisma.dEntidade, update: updateSpy },
+            dUserGroup: { ...prisma.dUserGroup, update: jest.fn().mockResolvedValue({}) },
+          } as unknown as typeof prisma);
+        },
+      );
+      // getMe é chamado no final — mockar para não falhar.
+      prisma.dUserGroup.findUnique.mockResolvedValue({
+        chave: BigInt(1),
+        usuario: 'joao@test.com',
+        entidades: [{ chave: BigInt(2), nome: 'João Silva', dados: {} }],
+      });
+      prisma.dVincula.findMany.mockResolvedValue([]);
+      return updateSpy;
+    };
+
+    it('preserva sub-bloco existente quando PATCH manda outro sub-bloco', async () => {
+      prisma.dEntidade.findFirst.mockResolvedValue(
+        mockEntidadeBase({
+          preferences: {
+            locale: { language: 'pt-BR' },
+            notifications: { inAppEnabled: true },
+          },
+        }),
+      );
+      const updateSpy = setupUpdateTx();
+
+      await service.updateMe(BigInt(1), {
+        preferences: { appearance: { theme: 'dark' } },
+      });
+
+      const persistedDados = updateSpy.mock.calls[0][0].data.dados;
+      expect(persistedDados.preferences).toEqual({
+        locale: { language: 'pt-BR' },
+        notifications: { inAppEnabled: true },
+        appearance: { theme: 'dark' },
+      });
+    });
+
+    it('cria bloco preferences quando dados ainda não tem', async () => {
+      prisma.dEntidade.findFirst.mockResolvedValue(mockEntidadeBase({}));
+      const updateSpy = setupUpdateTx();
+
+      await service.updateMe(BigInt(1), {
+        preferences: { notifications: { inAppEnabled: false } },
+      });
+
+      const persistedDados = updateSpy.mock.calls[0][0].data.dados;
+      expect(persistedDados.preferences).toEqual({
+        notifications: { inAppEnabled: false },
+      });
+    });
+
+    it('preserva campos raiz (defaultProjectId, onboardingCompleted) ao gravar preferences', async () => {
+      prisma.dEntidade.findFirst.mockResolvedValue(
+        mockEntidadeBase({
+          defaultProjectId: '10',
+          onboardingCompleted: true,
+        }),
+      );
+      const updateSpy = setupUpdateTx();
+
+      await service.updateMe(BigInt(1), {
+        preferences: { appearance: { theme: 'light' } },
+      });
+
+      const persistedDados = updateSpy.mock.calls[0][0].data.dados;
+      expect(persistedDados.defaultProjectId).toBe('10');
+      expect(persistedDados.onboardingCompleted).toBe(true);
+      expect(persistedDados.preferences).toEqual({ appearance: { theme: 'light' } });
+    });
+
+    it('noop em preferences quando dto não inclui o campo (não escreve preferences)', async () => {
+      prisma.dEntidade.findFirst.mockResolvedValue(
+        mockEntidadeBase({
+          preferences: { appearance: { theme: 'dark' } },
+        }),
+      );
+      const updateSpy = setupUpdateTx();
+
+      await service.updateMe(BigInt(1), { name: 'Novo Nome' });
+
+      const persistedDados = updateSpy.mock.calls[0][0].data.dados;
+      // dto sem `preferences` → preferences atuais preservadas via
+      // spread de dadosAtuais (sem sobrescrita), NÃO removidas.
+      expect(persistedDados.preferences).toEqual({ appearance: { theme: 'dark' } });
+    });
   });
 
   describe('issueSessionForUser', () => {

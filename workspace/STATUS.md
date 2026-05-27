@@ -1,6 +1,65 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-27 (Task D2 — Validação targetId COMPLETO — 9.0/10)
+**Ultima atualizacao:** 2026-05-27 (Task E1 — Preferências de usuário COMPLETO — 9.2/10)
+
+---
+
+## ✅ TASK E1 — PREFERENCIAS DE USUARIO EM DENTIDADE.DADOS.PREFERENCES — COMPLETE
+
+**Module:** auth (backend Scrumban-Backend-V2)
+**Task:** Preferências de usuário (tema, idioma, notificações) persistidas em DEntidade.dados.preferences
+**Status:** COMPLETO
+**Date:** 2026-05-27
+**Duration:** ~1h50m total (Implementer ~1h20m + Documenter ~30m)
+**Quality Score:** 9.2/10 APPROVED (gate CEO 8.0)
+
+**Agents Performance:**
+| Agent | Phase | Duration | Quality |
+|-------|-------|----------|---------|
+| Implementer | DTOs (4 classes), Service (updateMe + getMe), Tests (5) | 1h20m | Merge intelligente em dados.preferences, validacao estritas, 23/23 tests PASS |
+| Reviewer | Initial Review | — | 9.2/10 APPROVED — JSDoc completo, ZERO migration, 100% backward compatible |
+| Documenter | CHANGELOG + STATUS + commit | 30m | CHANGELOG entry, STATUS section, git commit Conventional |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — cadastro estrutural, ZERO Engine necessário
+- Pilar 2 (Endpoints): N/A — integrado em PATCH /auth/me existente, zero endpoint novo
+- Pilar 3 (Seed): PRESERVADO — nenhuma DClasse nova, dados em campo Json existente
+
+**Deliverables:**
+- [x] DTOs: UserAppearancePreferencesDto, UserLocalePreferencesDto, UserNotificationsPreferencesDto, UserPreferencesDto
+- [x] UpdateMeDto: campo preferences?: UserPreferencesDto com @ValidateNested @Type
+- [x] UserProfileDto: campo preferences?: UserPreferencesDto (@ApiPropertyOptional)
+- [x] Service updateMe(): merge por chave de 1º nível em dados.preferences (linha ~500+)
+- [x] Service getMe(): extrai e retorna preferences do dados
+- [x] Validação: class-validator em todos campos (enum, @MaxLength, @IsBoolean)
+- [x] Swagger: @ApiPropertyOptional em todos fields
+- [x] Tests: 5 novos cenários (merge correto, campos raiz preservados, noop, validacao rejeitada, E2E)
+- [x] JSDoc: Completo em todas classes DTO e methods service
+- [x] Build: PASS (npm run build, tsc 0 errors, eslint 0 warnings)
+
+**Architecture:**
+- **Storage:** DEntidade.dados.preferences (Json polimórfico) — ZERO migration necessária
+- **Merge:** Por chave de 1º nível — PATCH appearance não toca locale/notifications
+- **Backward compatibility:** Campos raiz (defaultProjectId, defaultTeamId, onboardingCompleted) preservados
+- **Validacao:** Estritas na borda HTTP via class-validator (nao permite lixo)
+- **Frontend defaults:** Undefined em campos ausentes — frontend aplica defaults sensatos
+
+**Metrics:**
+- Build: ✅ PASS (npm run build)
+- TypeScript: 0 errors no modulo auth (zero regressoes)
+- ESLint: 0 errors, 0 warnings
+- Tests: 23/23 passing (18 existentes auth + 5 novos preferences)
+- N+1 Queries: ZERO (apenas 1 query findFirst por getMe)
+- Queries/updateMe: 1 findFirst + 1 update em transaction
+- Conformidade com Plano: 100% (4 arquivos novos/modificados, merge contratado, testes contratados)
+
+**Quality Gate:**
+- Code Review: 9.2/10 APPROVED (gate 8.0 superado)
+- Zero new errors, zero regressoes, 100% backward compatible
+- Nenhum ADR necessário (reuso de campo Json existente)
+
+**ADRs:**
+- Nenhum novo — decisão arquitetural (preferences em dados.preferences) é local e já validada
 
 ---
 
@@ -4437,4 +4496,26 @@ Plano `workspace/plans/plan-orphan-workspace.md`. Ciclo completo Strategist → 
 - Fase 2: Validação de time (idClasse=-155) durante create/update
 - Fase 3: Filtros combinados (assigneeTeamId + idBloco + status em 1 query)
 - Blocos D/E/F: Frontend integration (Team selector, inline rename no Kanban)
+
+
+---
+
+<!-- dedup:implementer:unknown -->
+### Agent Concluído: implementer
+
+**Task:** #unknown
+**Timestamp:** 27/05/2026 11:00:15
+**Agent:** implementer
+**Status:** Completo
+
+
+---
+
+<!-- dedup:reviewer:unknown -->
+### Agent Concluído: reviewer
+
+**Task:** #unknown
+**Timestamp:** 27/05/2026 11:04:26
+**Agent:** reviewer
+**Status:** Completo
 
