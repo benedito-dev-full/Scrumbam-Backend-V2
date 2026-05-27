@@ -14,7 +14,6 @@ import { IsBoolean, IsIn, IsOptional, IsString, MaxLength, ValidateNested } from
  * const appearance: UserAppearancePreferencesDto = {
  *   theme: 'dark',
  *   density: 'compact',
- *   accent: '#6366F1',
  * };
  * ```
  */
@@ -44,23 +43,6 @@ export class UserAppearancePreferencesDto {
   @IsOptional()
   @IsIn(['compact', 'normal', 'cozy'])
   density?: 'compact' | 'normal' | 'cozy';
-
-  /**
-   * Cor de destaque (accent color) — hex ou CSS var.
-   *
-   * Limite de 32 caracteres acomoda valores `#RRGGBB`, `rgb(...)` e
-   * variáveis CSS curtas. Validação semântica (hex válido) fica no
-   * frontend para não bloquear formatos legítimos futuros.
-   */
-  @ApiPropertyOptional({
-    description: 'Cor de destaque (accent) em hex ou CSS',
-    example: '#6366F1',
-    maxLength: 32,
-  })
-  @IsOptional()
-  @IsString()
-  @MaxLength(32)
-  accent?: string;
 }
 
 /**
@@ -191,7 +173,7 @@ export class UserNotificationsPreferencesDto {
  */
 export class UserPreferencesDto {
   /**
-   * Bloco de aparência (tema, densidade, accent).
+   * Bloco de aparência (tema, densidade).
    */
   @ApiPropertyOptional({ type: () => UserAppearancePreferencesDto })
   @IsOptional()
