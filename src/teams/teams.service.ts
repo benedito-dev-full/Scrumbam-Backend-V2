@@ -16,6 +16,7 @@ import {
   ListTeamMembersResponseDto,
   TeamMemberDto,
 } from './dto/team-response.dto';
+import { TeamFeedItemDto, TeamFeedResponseDto } from './dto/team-feed-response.dto';
 
 /** idClasses para times e memberships (seed F1). */
 const ID_CLASSE_TEAM = BigInt(-180);
@@ -873,6 +874,96 @@ export class TeamsService {
       where: { chave: vinculo.chave },
       data: { excluido: true },
     });
+  }
+
+  /**
+   * Retorna feed de atividades do time (DEvento -497 e -498).
+   *
+   * Agrupa eventos de tasks cujo `idEntidade` aponta para o time.
+   * Cursor pagination descendente por `DEvento.chave` (mais recente primeiro).
+   *
+   * Limite máximo: 50 itens por página.
+   *
+   * @param teamId - Chave BigInt do time
+   * @param userEntidadeId - Chave BigInt do usuário (deve ser membro do time)
+   * @param cursor - Cursor para paginação (chave BigInt do último evento)
+   * @param limit - Quantidade por página (default 20, max 50)
+   * @returns Feed paginado de atividades
+   *
+   * @throws {NotFoundException} Se time não encontrado
+   * @throws {ForbiddenException} Se não é membro do time
+   *
+   * @example
+   * ```typescript
+   * const feed = await service.getFeed(BigInt('200'), BigInt(userId));
+   * ```
+   */
+  async getFeed(
+    teamId: bigint,
+    userEntidadeId: bigint,
+    cursor?: string,
+    limit = 20,
+  ): Promise<TeamFeedResponseDto> {
+    // Validar que time existe e usuário tem acesso (reutiliza validação existente)
+    await this.findOne(teamId.toString(), userEntidadeId);
+
+    const take = Math.min(limit, 50);
+
+    // Query DEvento WHERE idEntidade = teamId AND idClasse IN (-497, -498)
+    // idClasse -497 = TASK_CREATED, -498 = TASK_STATUS_CHANGED (seed F1)
+    const eventos = await this.prisma.dEvento.findMany({
+      where: {
+        idEntidade: teamId,
+        idClasse: { in: [BigInt(-497), BigInt(-498)] },
+        ...(cursor ? { chave: { lt: BigInt(cursor) } } : {}),
+      },
+      orderBy: { chave: 'desc' },
+      take: take + 1,
+    });
+
+    const hasMore = eventos.length > take;
+    const items = hasMore ? eventos.slice(0, take) : eventos;
+
+    return {
+      items: items.map((e) => this.buildFeedItem(e)),
+      nextCursor: hasMore ? items[items.length - 1].chave.toString() : null,
+      hasMore,
+    };
+  }
+
+  /**
+   * Constrói TeamFeedItemDto a partir de um DEvento.
+   *
+   * Extrai metaDados polimórfico: `metaDados._meta.action` define a ação canônica;
+   * os outros campos (taskId, taskNome, userId, etc.) ficam no nível raiz de metaDados.
+   *
+   * @param evento - Linha do DEvento com chave, idClasse, descricao, metaDados, chcriacao
+   * @returns TeamFeedItemDto normalizado
+   */
+  private buildFeedItem(evento: {
+    chave: bigint;
+    descricao: string | null;
+    metaDados: unknown;
+    criadoEm: Date;
+  }): TeamFeedItemDto {
+    // metaDados é o payload completo persistido pelo audit-log.consumer.
+    // feedAction, feedStatusAnterior, feedStatusNovo ficam no nível raiz
+    // (evitam conflito com _meta que o consumer sobrescreve com metadados
+    // técnicos: source, timestamp, correlationId).
+    const meta = (evento.metaDados as Record<string, unknown>) ?? {};
+
+    return {
+      id: evento.chave.toString(),
+      acao: (meta.feedAction as string) ?? 'TASK_STATUS_CHANGED',
+      descricao: evento.descricao ?? '',
+      taskId: (meta.taskId as string) ?? null,
+      taskNome: (meta.taskNome as string) ?? null,
+      userId: (meta.userId as string) ?? null,
+      userName: (meta.userName as string) ?? null,
+      statusAnterior: (meta.feedStatusAnterior as string) ?? null,
+      statusNovo: (meta.feedStatusNovo as string) ?? null,
+      criadoEm: evento.criadoEm.toISOString(),
+    };
   }
 
   // ─── Helpers privados ─────────────────────────────────────────────────────

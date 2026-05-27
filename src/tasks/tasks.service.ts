@@ -428,6 +428,30 @@ export class TasksService {
       );
     }
 
+    // Feed de atividades do time — emitido quando task é criada com assigneeTeamId.
+    // Usa entidadeId=teamId → audit-log.consumer extrai e persiste DEvento.idEntidade=teamId.
+    // O endpoint GET /teams/:id/feed filtra por DEvento.idEntidade=teamId.
+    // feedAction fica no nível raiz do metaDados (evita conflito com _meta do audit-log).
+    // Pilar 7: APÓS persistência (commit já concluído acima).
+    const taskDadosForFeed = task.dados as Record<string, unknown> | null;
+    const createdWithTeamId = taskDadosForFeed?.assigneeTeamId as string | undefined;
+    if (createdWithTeamId) {
+      await this.eventProducer.addInternalEvent(
+        'task.created',
+        {
+          entidadeId: createdWithTeamId,
+          taskId: task.chave.toString(),
+          taskNome: task.nome,
+          userId: creatorId.toString(),
+          userName: creator?.nome ?? null,
+          feedAction: 'TASK_CREATED',
+          feedTeamId: createdWithTeamId,
+        },
+        this.correlationIdService.getOrGenerate(),
+        { source: TasksService.name },
+      );
+    }
+
     const priorityMap = await this.buildPriorityMap([task.idPriority]);
     return this.buildResponse(task, priorityMap);
   }
@@ -848,6 +872,26 @@ export class TasksService {
       );
     }
 
+    // Feed de atividades do time — emitido quando assigneeTeamId é definido no update.
+    // Usa entidadeId=teamId → audit-log.consumer persiste DEvento.idEntidade=teamId.
+    // Pilar 7: APÓS persistência.
+    if (dto.assigneeTeamId) {
+      const dadosAntes = existing.dados as Record<string, unknown> | null;
+      await this.eventProducer.addInternalEvent(
+        'task.assigned',
+        {
+          entidadeId: dto.assigneeTeamId,
+          taskId: taskId.toString(),
+          taskNome: updated.nome,
+          userId: (dadosAntes?.createdBy as string | undefined) ?? null,
+          feedAction: 'TASK_ASSIGNED',
+          feedTeamId: dto.assigneeTeamId,
+        },
+        this.correlationIdService.getOrGenerate(),
+        { source: TasksService.name },
+      );
+    }
+
     const priorityMap = await this.buildPriorityMap([updated.idPriority]);
     return this.buildResponse(updated, priorityMap);
   }
@@ -1036,6 +1080,31 @@ export class TasksService {
       this.correlationIdService.getOrGenerate(),
       { source: TasksService.name },
     );
+
+    // Feed de atividades do time — emitido quando a task tem assigneeTeamId.
+    // Usa entidadeId=teamId → audit-log.consumer persiste DEvento.idEntidade=teamId.
+    // feedAction, feedStatusAnterior, feedStatusNovo ficam no nível raiz (evitam conflito com _meta).
+    // Pilar 7: APÓS persistência.
+    const teamIdForFeed = (task.dados as Record<string, unknown> | null)?.assigneeTeamId as string | undefined;
+    if (teamIdForFeed) {
+      const isCompleted = toStatus === 'DONE' || toStatus === 'VALIDATED';
+      await this.eventProducer.addInternalEvent(
+        'task.status.changed',
+        {
+          entidadeId: teamIdForFeed,
+          taskId: taskId.toString(),
+          taskNome: task.nome,
+          ...(actorId && { userId: actorId.toString() }),
+          ...(actorName && { userName: actorName }),
+          feedAction: isCompleted ? 'TASK_COMPLETED' : 'TASK_STATUS_CHANGED',
+          feedTeamId: teamIdForFeed,
+          feedStatusAnterior: fromStatus,
+          feedStatusNovo: toStatus,
+        },
+        this.correlationIdService.getOrGenerate(),
+        { source: TasksService.name },
+      );
+    }
 
     // ADR-V2-047 Fase 8: detector de phase.completed.
     // Disparado quando uma TASK FOLHA (não PHASE) muda para DONE e o pai

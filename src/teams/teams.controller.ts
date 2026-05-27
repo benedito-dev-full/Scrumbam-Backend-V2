@@ -26,6 +26,7 @@ import {
   ListTeamResponseDto,
   ListTeamMembersResponseDto,
 } from './dto/team-response.dto';
+import { TeamFeedResponseDto } from './dto/team-feed-response.dto';
 import { AuthCompositeGuard } from '../auth/guards/auth-composite.guard';
 import { CurrentUser, JwtPayload } from '../auth/decorators/current-user.decorator';
 
@@ -128,6 +129,46 @@ export class TeamsController {
     @Query('limit') limit?: string,
   ): Promise<ListTeamResponseDto> {
     return this.teamsService.findMine(
+      BigInt(user.entidadeId),
+      cursor,
+      limit ? parseInt(limit, 10) : 20,
+    );
+  }
+
+  /**
+   * Retorna feed de atividades do time (eventos de tasks vinculadas ao time).
+   *
+   * Cursor pagination descendente (mais recente primeiro).
+   * Requer que o usuário seja membro do time.
+   *
+   * @param id - ID do time
+   * @param user - Usuário autenticado (deve ser membro do time)
+   * @param cursor - Cursor para paginação (ID do último evento da página anterior)
+   * @param limit - Quantidade por página (default 20, max 50)
+   * @returns Feed paginado de atividades
+   *
+   * @example
+   * ```bash
+   * curl http://localhost:3000/api/v1/teams/200/feed \
+   *   -H "Authorization: Bearer {token}"
+   * ```
+   */
+  @Get('teams/:id/feed')
+  @ApiOperation({ summary: 'Feed de atividades do time' })
+  @ApiParam({ name: 'id', description: 'ID do time' })
+  @ApiQuery({ name: 'cursor', required: false, description: 'Cursor para paginação' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Itens por página (max 50)' })
+  @ApiResponse({ status: 200, description: 'Feed retornado', type: TeamFeedResponseDto })
+  @ApiResponse({ status: 403, description: 'Não é membro do time' })
+  @ApiResponse({ status: 404, description: 'Time não encontrado' })
+  async getFeed(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ): Promise<TeamFeedResponseDto> {
+    return this.teamsService.getFeed(
+      BigInt(id),
       BigInt(user.entidadeId),
       cursor,
       limit ? parseInt(limit, 10) : 20,
