@@ -325,7 +325,7 @@ export class TasksController {
     @Request() req: JwtRequest,
   ): Promise<TaskResponseDto> {
     const allowed = await this.resolveScopedProjectIds(req);
-    return this.tasksService.update(id, dto, allowed);
+    return this.tasksService.update(id, dto, allowed, BigInt(req.user.entidadeId));
   }
 
   /**

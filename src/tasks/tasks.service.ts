@@ -291,7 +291,10 @@ export class TasksService {
     // ADR-V2-050: logger.warn (telemetria barata) quando frontend manda campos
     // que não fazem sentido para fase. Não bloqueia (reduz fricção de clients
     // genéricos como Telegram/MCP).
-    if (isPhase && (dto.assigneeId || dto.sprintId || dto.priority || dto.taskType || dto.assigneeTeamId)) {
+    if (
+      isPhase &&
+      (dto.assigneeId || dto.sprintId || dto.priority || dto.taskType || dto.assigneeTeamId)
+    ) {
       this.logger.warn(
         `create_phase_ignored_fields projectId=${dto.projectId} ` +
           `assignee=${!!dto.assigneeId} sprint=${!!dto.sprintId} ` +
@@ -756,6 +759,7 @@ export class TasksService {
     id: string,
     dto: UpdateTaskDto,
     accessibleProjectIds?: string[],
+    actorId?: bigint,
   ): Promise<TaskResponseDto> {
     const taskId = BigInt(id);
 
@@ -876,14 +880,24 @@ export class TasksService {
     // Usa entidadeId=teamId → audit-log.consumer persiste DEvento.idEntidade=teamId.
     // Pilar 7: APÓS persistência.
     if (dto.assigneeTeamId) {
-      const dadosAntes = existing.dados as Record<string, unknown> | null;
+      // Hidratar nome do ator (quem está atribuindo) quando o controller passa o JWT.
+      let actorName: string | null = null;
+      if (actorId) {
+        const actor = await this.prisma.dEntidade.findFirst({
+          where: { chave: actorId, excluido: false },
+          select: { nome: true },
+        });
+        actorName = actor?.nome ?? null;
+      }
+
       await this.eventProducer.addInternalEvent(
         'task.assigned',
         {
           entidadeId: dto.assigneeTeamId,
           taskId: taskId.toString(),
           taskNome: updated.nome,
-          userId: (dadosAntes?.createdBy as string | undefined) ?? null,
+          userId: actorId?.toString() ?? null,
+          userName: actorName,
           feedAction: 'TASK_ASSIGNED',
           feedTeamId: dto.assigneeTeamId,
         },
@@ -1085,7 +1099,9 @@ export class TasksService {
     // Usa entidadeId=teamId → audit-log.consumer persiste DEvento.idEntidade=teamId.
     // feedAction, feedStatusAnterior, feedStatusNovo ficam no nível raiz (evitam conflito com _meta).
     // Pilar 7: APÓS persistência.
-    const teamIdForFeed = (task.dados as Record<string, unknown> | null)?.assigneeTeamId as string | undefined;
+    const teamIdForFeed = (task.dados as Record<string, unknown> | null)?.assigneeTeamId as
+      | string
+      | undefined;
     if (teamIdForFeed) {
       const isCompleted = toStatus === 'DONE' || toStatus === 'VALIDATED';
       await this.eventProducer.addInternalEvent(
