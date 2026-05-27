@@ -1,7 +1,7 @@
 # Documenter Agent Memory — Scrumban-Backend-V2
 
-**Versão:** 1.5 (atualizado após Task #6 MCP expansion — 9º tool)
-**Última atualização:** 2026-05-14
+**Versão:** 1.6 (atualizado após Task E1 — preferências de usuário)
+**Última atualização:** 2026-05-27
 
 ---
 
@@ -452,6 +452,31 @@ export class [Nome]Dto {
   - Controller JSDoc deve detalhar comportamentos condicionalidades e RBAC
   - MEDIUM ISSUE pode ser aceptável se mitigação vem em sub-tarefa seguinte (documentar explícitamente)
   - Backward-compat crítica em hotfixes — verificar que COM projectId não regride
+
+### Task E1: Preferências de usuário em DEntidade.dados.preferences (2026-05-27)
+- **Scope:** `auth` (Pilar 1 N/A | Pilar 2 N/A | Pilar 3 PRESERVADO)
+- **Reuso Campo Json:** DEntidade.dados.preferences (reutiliza campo polimórfico existente)
+- **DTOs Novos:** 4 classes (UserAppearancePreferencesDto, UserLocalePreferencesDto, UserNotificationsPreferencesDto, UserPreferencesDto)
+- **Service Integrado:**
+  - `updateMe()`: merge por chave de 1º nível (linha ~500+, evita sobrescrever locale/notifications)
+  - `getMe()`: extrai preferences e retorna em UserProfileDto
+- **Validacao:** class-validator estritos (enum theme/density, @MaxLength language/timezone/dateFormat, @IsBoolean flags)
+- **Merge Pattern:** PATCH com appearance={theme:'dark'} substitui bloco appearance inteiro mas preserva locale/notifications (seguro)
+- **Tests:** 5 novos em auth.service.spec.ts (merge correto, campos raiz preservados, noop, validacao rejeitada, E2E)
+- **JSDoc Quality:** 100% — UserAppearancePreferencesDto (4 props), UserLocalePreferencesDto (3 props), UserNotificationsPreferencesDto (3 props), UserPreferencesDto (3 props), UpdateMeDto (campo preferences), UserProfileDto (campo preferences)
+- **Commit:** `caf2603` (scope `auth`, type `feat`)
+- **Build:** npm run build PASS, tsc 0 errors, eslint 0 warnings
+- **Tests:** 23/23 PASS (18 existentes auth + 5 novos preferences)
+- **Backward-compat:** 100% (campos raiz defaultProjectId/defaultTeamId/onboardingCompleted preservados, preferences novo campo opcional)
+- **Quality:** 9.2/10 APPROVED (gate 8.0 superado)
+- **Workflow:** Implementer (1h20m) → Reviewer (rápido) → Documenter (30m CHANGELOG + STATUS + commit) = 1h50m total
+- **Lições:**
+  - **Merge Pattern:** Por chave de 1º nível e padrão chave para dados polimórficos — mandar só appearance não toca outros blocos
+  - **Json Field Reuse:** Dados.preferences entra ao lado de dados.defaultProjectId — sem migration
+  - **Validacao Aninhada:** @ValidateNested + @Type essencial para sub-DTOs (sem ele class-transformer não valida)
+  - **Frontend Defaults:** Undefined em campos ausentes — frontend aplica theme='system', density='normal', etc.
+  - **No ADR Needed:** Decisão arquitectural local (reuso campo Json existente) — não estrutural, não cria padrão novo
+  - **CHANGELOG Format:** Keep a Changelog [@ApiPropertyOptional com type() em Swagger]
 
 ### Task 01 F4: Corrigir persistência de `priority` em DTask (2026-05-12)
 - **Scope:** `tasks` (Pilar 2 — reutilizar endpoint genérico)
