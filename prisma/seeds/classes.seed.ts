@@ -4,17 +4,18 @@
  * Composicao do seed (ADR-V2-019: monolitico):
  *   - 45 classes fixas universais Devari-Core (range -1..-110), via spread de
  *     `templates/classes-base-template.ts`.
- *   - 105 classes especificas Scrumban-V2 (range -150..-527), declaradas
+ *   - 107 classes especificas Scrumban-V2 (range -150..-527), declaradas
  *     neste arquivo, agrupadas por seccao (DEntidade, DVincula, DPedido,
  *     DTabela, DEvento, DTabela secundario, Fases) com comentarios `// === ... ===`.
  *
- * Total: 150 DClasses (ADR-V2-026: +1 AUDIT_GENERIC; ADR-V2-028: +6 INVITE_*;
+ * Total: 152 DClasses (ADR-V2-026: +1 AUDIT_GENERIC; ADR-V2-028: +6 INVITE_*;
  *   ADR-V2-029: +1 PROJECT_TEAM_LINK; ADR-V2-033: +2 AGENT_SESSION_*;
  *   ADR-V2-FOLDERS-001: +1 FOLDER, +1 FOLDER_PROJECT_LINK;
  *   ADR-V2-047: +1 PHASE;
  *   ADR-V2-051: +2 BOOKMARK/SPACE_PRIVATE_MEMBER, +3 SPACE/FOLDER/LIST;
  *   GAP-04: +1 DOC;
- *   GAP-COMMENT: +1 TASK_COMMENT).
+ *   GAP-COMMENT: +1 TASK_COMMENT;
+ *   Frente B Nexus IA: +1 GEMINI_API_KEY (-481), +1 AI_CHAT_MESSAGE (-508)).
  *
  * Validacao automatica:
  *   `validateHierarchy(classes)` e chamado no topo deste modulo. Qualquer
@@ -79,7 +80,7 @@ function esp(
 }
 
 /**
- * Array de classes especificas Scrumban-V2 (105 entradas).
+ * Array de classes especificas Scrumban-V2 (107 entradas).
  *
  * Ordem:
  *   1. DEntidade — 8 (sub-tipos de Pessoa: USER, PLATFORM_SCRUMBAN,
@@ -112,6 +113,7 @@ function esp(
  *
  * Soma: 8 + 15 + 1 + 3 + 4 + 36 + 16 + 21 = 104.
  * Com GAP-COMMENT: +1 = 105.
+ * Com Frente B Nexus IA (+1 GEMINI_API_KEY, +1 AI_CHAT_MESSAGE): +2 = 107.
  */
 const classesEspecificas: DClasseSeed[] = [
   // === DEntidade — sub-tipos de Pessoa (5) + DProject/DTask (2) + FOLDER (1) ===
@@ -224,6 +226,12 @@ const classesEspecificas: DClasseSeed[] = [
   esp(-473, 'INSTALL_TOKEN', 'Token install one-shot Argus', -52),
   esp(-474, 'PAIRING_TOKEN', 'Token pairing Telegram', -52),
   esp(-475, 'ISSUE_COUNTER', 'Contador DEV-N por team', -52),
+  // Frente B (Nexus IA Chat — v1): chave de API global do provider Gemini,
+  // armazenada como DTabela canônica (ADR-V2-004). v1: 1 chave global
+  // (dEntidadeId=null), com fallback para process.env.GOOGLE_API_KEY no dev.
+  // dados.plaintext + dados.hash + dados.prefix; v2 multi-tenant trocara
+  // para dEntidadeId=orgId. Ver src/ai/README.md (R-2 plaintext aceito v1).
+  esp(-481, 'GEMINI_API_KEY', 'Chave Gemini (provider IA Nexus)', -52),
   // GAP-04: documento rico associado a qualquer entidade (DProject, DTask, Space, etc.).
   // Conteudo rico (Markdown/JSON) armazenado em dados.content (campo Json de DTabela).
   // Uso: DTabela (idClasse=-353, dEntidadeId=entidadeAlvo).
@@ -274,6 +282,12 @@ const classesEspecificas: DClasseSeed[] = [
   // tabela nova). idClasse=-507 serve polimorfico (nome histórico TASK_COMMENT,
   // reusado para todos os tipos na v1). Ver `src/comments/README.md` para detalhes.
   esp(-507, 'TASK_COMMENT', 'Comentario textual em qualquer alvo (task|project|folder|list)', -3),
+  // Frente B (Nexus IA Chat — v1): mensagens polimorficas user/assistant do
+  // chat IA persistidas em DEvento. identificadorExterno=entidadeId do user
+  // na v1 (conversa unica); na v2 vira UUID por conversa SEM mudanca de schema.
+  // descricao=conteudo da mensagem. metaDados={role, model, tokens?, toolCalls?}.
+  // ZERO tabela nova (ADR-V2-001). Ver src/ai/README.md.
+  esp(-508, 'AI_CHAT_MESSAGE', 'Mensagem do chat IA Nexus (polimorfica user/assistant)', -3),
 
   // === DTabela — status lookups secundarios (21) ===
   // Filhos de STATUS (-52)

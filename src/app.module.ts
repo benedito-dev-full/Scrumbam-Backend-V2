@@ -50,6 +50,8 @@ import { AutomationModule } from './automation/automation.module';
 import { InvitesModule } from './invites/invites.module';
 // Feature transversal — Bookmarks/Favoritos (ADR-V2-051 DClasse -187)
 import { BookmarksModule } from './bookmarks/bookmarks.module';
+// Frente B (Nexus IA Chat — v1): chat IA com Gemini + 4 tools (createTask/Comment/listComments/getProjectSummary)
+import { AiModule } from './ai/ai.module';
 
 /**
  * AppModule raiz do Scrumban-Backend-V2.
@@ -132,6 +134,8 @@ import { BookmarksModule } from './bookmarks/bookmarks.module';
     InvitesModule,
     // Feature transversal — Bookmarks/Favoritos (ADR-V2-051 DClasse -187)
     BookmarksModule,
+    // Frente B (Nexus IA Chat — v1) — POST /ai/chat + GET /ai/chat/history
+    AiModule,
   ],
   providers: [
     // LoggingInterceptor global — loga method, path, statusCode, durationMs, correlationId

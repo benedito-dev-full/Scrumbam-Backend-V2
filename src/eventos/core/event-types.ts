@@ -141,6 +141,14 @@ export const EVENT_TYPES = {
   INVITE_ACCEPTED_MERGE: 'invite.accepted.merge',
   INVITE_EXPIRED: 'invite.expired',
   INVITE_REVOKED: 'invite.revoked',
+
+  // ============== NEXUS IA CHAT (Frente B — v1) ==============
+  // Emitidos APOS persistencia da DEvento -508 AI_CHAT_MESSAGE.
+  // metaDados carrega role, model, tokens, toolCalls — payload completo
+  // para audit/webhook futuro. AI_CHAT_TOOL_CALLED reusa -508 para o audit
+  // trail (mesma tabela de mensagens, distincao via type + metaDados).
+  AI_CHAT_MESSAGE_CREATED: 'ai.chat.message.created',
+  AI_CHAT_TOOL_CALLED: 'ai.chat.tool.called',
 } as const;
 
 /**

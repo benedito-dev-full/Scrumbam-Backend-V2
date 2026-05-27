@@ -12,6 +12,36 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Added — Frente B: Nexus IA Chat v1
+- **Backend `src/ai/` (14 arquivos novos):**
+  - `AiChatController` com POST/GET/DELETE `/ai/chat[/history]`
+  - `AiChatService` (orquestracao Gemini + tool calling + persistencia)
+  - `ChatMessagesService` (CRUD DEvento -508 polimorfico)
+  - `GeminiProvider` (impl @google/generative-ai@0.24.1, modelo `gemini-1.5-flash`)
+  - `GeminiApiKeyService` (DTabela -481 + fallback env GOOGLE_API_KEY)
+  - 4 tools: createTask, getProjectSummary, createComment, listComments
+  - System prompt PT-BR com personalidade Nexus + regras anti-hallucination
+  - Hard limits: maxToolIterations=5, timeout 30s, retry 1x em 429/5xx
+- **Schema (COUNTS: 107 especificas / 152 total):**
+  - DClasse `-481 GEMINI_API_KEY` (DTabela, idPai=-52) — plaintext v1
+  - DClasse `-508 AI_CHAT_MESSAGE` (DEvento, idPai=-3) — user/assistant messages
+  - Índice B.0 (produção): `@@index([idClasse, identificadorExterno])` em DEvento
+- **Frontend `/ia` page (Scrumbam-Frontend-V2):**
+  - `useNexusChat()` hook (TanStack Query) — optimistic + rollback + toasts 502/503/504
+  - Auto-scroll, design preservado (aurora, cores brand), Quick Actions ocultadas
+  - Shift+Enter quebra linha, Enter envia
+- **Quality:**
+  - Backend: 8.76/10 médio (B.0 9.2, B.2 8.3, B.2.1 9.0)
+  - Frontend: 9.0/10 médio (B.3 8.8, B.3.1 9.2)
+  - Zero N+1 (1 query load histórico + 1 insert resposta)
+  - Build PASS, TypeScript 0 errors, ESLint PASS
+- **Decisões v1:**
+  - Conversa única por user (identificadorExterno = entidadeId)
+  - Resposta completa JSON (não SSE — streaming v2)
+  - API key plaintext v1 (encriptação DEBT-NEXUS-02)
+  - Rate limit monitorado (DEBT-NEXUS-03)
+- **Débitos:** DEBT-NEXUS-01 (specs unitários), DEBT-NEXUS-02 (encriptação KMS), DEBT-NEXUS-03 (rate limit)
+
 ### Added
 
 - **CommentsModule polimorfico (task|project|folder|list)** - 2026-05-27 (Fases 1+2+2.1+4, Score médio 8.625/10 APPROVED)

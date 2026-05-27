@@ -1,6 +1,81 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-27 (Task E1 — Preferências de usuário COMPLETO — 9.2/10)
+**Ultima atualizacao:** 2026-05-27 (Frente B — Nexus IA Chat v1 COMPLETO — Score médio 8.92/10)
+
+---
+
+## ✅ FRENTE B — NEXUS IA CHAT v1 (GEMINI + 4 TOOLS + DEVENTO -508) — COMPLETE
+
+**Module:** ai (backend Scrumban-Backend-V2) + ia (frontend Scrumbam-Frontend-V2)
+**Frente:** B (paralela a Frente A — CommentsModule)
+**Status:** COMPLETO
+**Date:** 2026-05-27
+**Duration:** ~24h total (Backend Implementer ~12h + Frontend Implementer ~8h + 2 Reviewer ~2h + Documenter ~2h)
+**Quality Score:** 8.92/10 APPROVED (Backend 8.76/10, Frontend 9.0/10)
+
+**Agents Performance:**
+| Agent | Phase | Duration | Quality |
+|-------|-------|----------|---------|
+| Strategist | B.1: Blueprint 14 items, 5 decisões | — | — |
+| Implementer (Backend) | B.2: AI module completo (15 arquivos) | 12h | 8.3/10 APPROVED; B.2.1 fix 9.0/10 APPROVED |
+| Implementer (Frontend) | B.3: Nexus /ia page | 8h | 8.8/10 APPROVED; B.3.1 fix 9.2/10 APPROVED |
+| Reviewer | 4 reviews (B.0 índice + B.2 backend + B.2.1 + B.3 frontend) | 2h | Score médio 8.92/10 |
+| Documenter | JSDoc + ROADMAP + CHANGELOG + STATUS + commits | 2h | — |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DEvento é audit (não transacional)
+- Pilar 2 (Endpoints): NOVO controller `AiChatController` justificado (Gemini orchestration)
+- Pilar 3 (Seed): 2 DClasses novas (-481, -508), ZERO tabela nova
+
+**Deliverables:**
+- [x] Backend: AiChatController (3 rotas), AiChatService, ChatMessagesService, GeminiProvider, GeminiApiKeyService
+- [x] 4 Tools: createTask, getProjectSummary, createComment, listComments (tool-calling real)
+- [x] System prompt PT-BR com Nexus personality
+- [x] Hard limits: maxToolIterations=5, timeout 30s, retry 1x
+- [x] DClasse -481 (GEMINI_API_KEY), -508 (AI_CHAT_MESSAGE)
+- [x] Índice B.0 produção: `@@index([idClasse, identificadorExterno])` em DEvento
+- [x] Frontend: `/ia` page, `useNexusChat()` hook (TanStack Query)
+- [x] Optimistic updates + rollback, toasts para 502/503/504
+- [x] Auto-scroll, design preservado, Quick Actions ocultas
+- [x] JSDoc completo em ambos repositórios
+
+**Architecture:**
+- **Storage:** DEvento -508 polimórfico (user/assistant messages com metadata tool-calls)
+- **Persistência:** Append user ANTES Gemini; append assistant APÓS (sem orfãos)
+- **Tool Context:** ToolRegistry injeta userEntidadeId + organizationId (tenant isolation)
+- **Tenant Isolation:** All tools validate via JWT context; IA nunca escolhe user
+- **Conversação Única v1:** identificadorExterno = entidadeId (v2 futura: UUID multi-chat)
+- **API Key Storage:** DTabela -481 plaintext v1 (encriptação KMS deferred)
+- **Frontend Integration:** Real com backend (não mock), TanStack Query polling-ready
+
+**Metrics:**
+- Build: ✅ PASS (backend npm run build + frontend npm run build)
+- TypeScript: 0 errors (ambos repos tsc 0)
+- ESLint: 0 warnings (modules tocados)
+- Queries: +1 DEvento loadHistory batch (O(1) zero N+1)
+- Queries/request: +1 (history batch load)
+- N+1 Queries: ZERO comprovado
+- Tests: Backend integração real; Frontend ~5 specs hook behavior + error handling
+
+**Quality Gate:**
+- Backend B.2: 8.3/10 APPROVED; B.2.1 (fixes): 9.0/10 APPROVED
+- Frontend B.3: 8.8/10 APPROVED; B.3.1 (fixes): 9.2/10 APPROVED
+- Score médio: 8.92/10 (gate 8.0 superado)
+
+**ADRs:**
+- Nenhum ADR novo proposto (decisões v1 simples e localizadas no plano)
+
+**Débitos Registrados:**
+- **DEBT-NEXUS-01:** Specs unitários do módulo AI (chat-messages.service.spec.ts, ai-chat.service.spec.ts, gemini-api-key.service.spec.ts com mocks)
+- **DEBT-NEXUS-02:** Encriptação de API key Gemini em DTabela (KMS/Vault quando em produção)
+- **DEBT-NEXUS-03:** Rate limit por user no endpoint /ai/chat (monitorar nos primeiros dias)
+
+**Próximas Ações:**
+- Push backend (Scrumban-Backend-V2) — CI validará migrations, build, tests
+- Push frontend (Scrumbam-Frontend-V2) — CI validará build, tsc, ESLint
+- Configurar GOOGLE_API_KEY em Dokploy (env var ou DTabela -481)
+- Smoke test manual: enviar mensagem, receber resposta, verificar persistência DEvento
+- Monitorar rate limit primeiros 7 dias de produção
 
 ---
 

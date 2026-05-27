@@ -113,6 +113,12 @@ const TYPE_TO_CLASSE: Readonly<Record<string, bigint>> = Object.freeze({
   'invite.accepted': BigInt(-502),
   'invite.expired': BigInt(-502),
   'invite.revoked': BigInt(-502),
+
+  // Nexus IA Chat (Frente B — v1). Ambos persistem em DEvento -508
+  // AI_CHAT_MESSAGE. A distincao no audit fica em descricao=event.type +
+  // metaDados._meta.action ('message_created' vs 'tool_called').
+  'ai.chat.message.created': BigInt(-508),
+  'ai.chat.tool.called': BigInt(-508),
 });
 
 /** Catch-all para tipos não mapeados (ADR-V2-026). */

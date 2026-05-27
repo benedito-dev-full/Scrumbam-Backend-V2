@@ -279,6 +279,80 @@
 
 ---
 
+## Frente B — Nexus IA Chat v1 (Gemini + 4 tools + DEvento -508) ✅ COMPLETA
+
+**Status:** ✅ **COMPLETA** — Módulo AI entregue, integração frontend (Scrumbam-Frontend-V2) entregue, índice DEvento B.0 em produção
+
+**Cronograma:**
+- B.0 (Índice composto DEvento): **9.2/10 APPROVED** (2026-05-27, em produção)
+- B.1 (Strategist plan): Entregue (blueprint)
+- B.2 (Backend AI module completo): **8.3/10 APPROVED** (2026-05-27)
+- B.2.1 (Fix M1+M2+L1 — query filter / timer leak / comentário): **9.0/10 APPROVED** (2026-05-27)
+- B.3 (Frontend Nexus UI): **8.8/10 APPROVED** (2026-05-27, Scrumbam-Frontend-V2)
+- B.3.1 (Fix M2+M1+M3 — auto-scroll / toast 502 / imports): **9.2/10 APPROVED** (2026-05-27)
+
+**Quality Score Médio:** 8.92/10 (Backend 8.76/10, Frontend 9.0/10)
+
+**O Que Foi Feito:**
+
+**Core Feature — Chat IA Nexus com Gemini Flash e 4 tools polimórficas:**
+- **Backend (`src/ai/`):**
+  - `AiChatController` (POST/GET/DELETE `/ai/chat[/history]`) — JWT/ApiKey/MCP via AuthCompositeGuard
+  - `AiChatService` — orquestra Gemini + tool calling + persistência DEvento -508
+  - `ChatMessagesService` — CRUD em DEvento -508 (append, findHistoryForProvider, clearHistory)
+  - `GeminiProvider` — integra `@google/generative-ai@0.24.1` (modelo `gemini-1.5-flash`)
+  - `GeminiApiKeyService` — DTabela -481 + fallback env GOOGLE_API_KEY
+  - **4 Tools:** `createTask`, `getProjectSummary`, `createComment`, `listComments` (tool-calling completo)
+  - **System Prompt:** PT-BR com personalidade Nexus + regras anti-hallucination
+  - **Hard Limits:** maxToolIterations=5, timeout 30s, retry 1x em 429/5xx
+  - **DTOs:** SendMessageDto, ChatMessageResponseDto, ChatHistoryResponseDto, ChatToolCallDto
+  - **Eventos:** `ai.chat.message.created`, `ai.chat.tool.called` emitidos APÓS persistência
+
+- **Schema:**
+  - DClasse `-481 GEMINI_API_KEY` (DTabela, idPai=-52) — armazena key plaintext v1
+  - DClasse `-508 AI_CHAT_MESSAGE` (DEvento, idPai=-3) — mensagens user/assistant
+  - COUNTS: 107 classes específicas / 152 total
+  - **Índice B.0 (em produção):** `@@index([idClasse, identificadorExterno])` em DEvento (perf chat history)
+
+- **Frontend (`/ia` page, Scrumbam-Frontend-V2):**
+  - `useNexusChat()` hook (TanStack Query) — optimistic update + rollback + toasts contextuais
+  - Suporte a 502/503/504 com mensagens amigáveis
+  - Auto-scroll para última mensagem (UX)
+  - Design 100% preservado (gradiente aurora, cores brand, ModelDropdown intacto)
+  - Quick Actions ocultadas durante conversa (padrão ChatGPT)
+  - Enter envia, Shift+Enter quebra linha
+
+**Pilares Aplicados:**
+- Pilar 1 (Engine): N/A — DEvento é audit (não transacional), sem DPedido necessário
+- Pilar 2 (Endpoints): NOVO controller `AiChatController` justificado (orquestracao Gemini complexa + tool calling)
+- Pilar 3 (Seed): 2 DClasses novas (-481, -508), ZERO tabela nova; índice adicionado
+
+**Decisões Arquiteturais:**
+- v1: conversa única por user (identificadorExterno = entidadeId)
+- v2 futura: múltiplas conversas via UUID — zero refactor de schema necessário (campo `identificadorExterno` já suporta)
+- API key plaintext v1 — encriptação (KMS/Vault) registrada como DEBT-NEXUS-02
+- Resposta completa JSON (não SSE) — streaming fica para v2
+- Rate limit por user monitorado nos primeiros dias — DEBT-NEXUS-03
+
+**Testes:**
+- Backend: Integração real com Gemini (primeiras 3 reqs grátis, depois falso em CI)
+- Frontend: 5+ specs covering hook behavior, error handling, auto-scroll, optimistic updates
+- Zero N+1 queries (1 query DEvento carregamento histórico, 1 insert persistência resposta)
+- 0 erros TypeScript em ambos repos, build PASS, ESLint PASS
+
+**Débitos Registrados:**
+- **DEBT-NEXUS-01:** Specs unitários do módulo AI (chat-messages.service.spec.ts, ai-chat.service.spec.ts, gemini-api-key.service.spec.ts)
+- **DEBT-NEXUS-02:** Encriptação de API key Gemini em DTabela (KMS/Vault)
+- **DEBT-NEXUS-03:** Rate limit por user no endpoint /ai/chat (monitorar primeiros dias)
+
+**Configuração Obrigatória em Produção:**
+- `GOOGLE_API_KEY` como env var (Dokploy) OU registro manual em DTabela -481
+
+**ADRs Redigidos:**
+- Nenhum ADR novo proposto (2 DClasses, decisões v1 são claras e documentadas no plano)
+
+---
+
 ## CommentsModule Polimorfico (task|project|folder|list) — ✅ COMPLETA
 
 **Status:** ✅ **COMPLETA** — Fases 1+2+2.1+4 entregues (5 fases paralelas — 1 Strategist, 3 Implementer, 3 Reviewer, 1 Documenter)
