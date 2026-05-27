@@ -16,6 +16,7 @@ COPY src ./src
 COPY templates ./templates
 COPY .env.example ./.env.example
 COPY agent/install.sh ./agent/install.sh
+COPY scripts ./scripts
 
 RUN npm run build
 RUN npm run build:seeds
