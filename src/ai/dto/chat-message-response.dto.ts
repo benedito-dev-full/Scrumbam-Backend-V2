@@ -36,10 +36,10 @@ export class ChatMessageResponseDto {
   assistantMessage!: string;
 
   /**
-   * Modelo usado para gerar a resposta (ex: 'gemini-1.5-flash').
+   * Modelo usado para gerar a resposta (ex: 'gemini-2.5-flash').
    * Frontend pode mostrar como tooltip para transparencia.
    */
-  @ApiProperty({ description: 'Modelo usado', example: 'gemini-1.5-flash' })
+  @ApiProperty({ description: 'Modelo usado', example: 'gemini-2.5-flash' })
   model!: string;
 
   /**

@@ -24,8 +24,9 @@ import {
   AiToolDefinition,
 } from './ai-provider.interface';
 
-/** Modelo Gemini v1 — flash equilibra custo e latencia para chat MVP. */
-const GEMINI_MODEL = 'gemini-1.5-flash';
+/** Modelo Gemini v1 — flash equilibra custo e latencia para chat MVP.
+ *  NOTA: gemini-1.5-* foi descontinuado pelo Google em 2025; 2.5-flash e o atual. */
+const GEMINI_MODEL = 'gemini-2.5-flash';
 
 /** Hard limit do loop de tool calling (defesa em profundidade — R-5). */
 const DEFAULT_MAX_TOOL_ITERATIONS = 5;

@@ -17,7 +17,7 @@ import { ToolRegistry } from './tools/tool-registry';
 /**
  * AiModule — Nexus IA chat (Frente B — v1).
  *
- * Provider unico v1: Gemini (`gemini-1.5-flash`). Arquitetura preparada
+ * Provider unico v1: Gemini (`gemini-2.5-flash`). Arquitetura preparada
  * para Claude/OpenAI futuro (interface `AiProvider`).
  *
  * Storage: `DEvento idClasse=-508 AI_CHAT_MESSAGE` (Pilar 1 N/A — audit).

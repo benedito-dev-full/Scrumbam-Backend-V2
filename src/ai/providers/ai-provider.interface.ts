@@ -46,7 +46,7 @@ export interface AiToolDefinition {
 export interface AiProviderResult {
   /** Texto final produzido pelo modelo (apos todas as tool calls). */
   finalMessage: string;
-  /** Nome do modelo usado (ex: 'gemini-1.5-flash'). */
+  /** Nome do modelo usado (ex: 'gemini-2.5-flash'). */
   model: string;
   /** Auditoria das tools executadas — preview de cada chamada. */
   toolCallsExecuted: Array<{

@@ -30,7 +30,7 @@ export class ChatHistoryMessageDto {
   /** Modelo usado (apenas para `role=assistant`). */
   @ApiPropertyOptional({
     description: 'Modelo usado (apenas role=assistant)',
-    example: 'gemini-1.5-flash',
+    example: 'gemini-2.5-flash',
   })
   model?: string;
 
