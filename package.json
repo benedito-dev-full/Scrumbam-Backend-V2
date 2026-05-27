@@ -7,7 +7,7 @@
   "scripts": {
     "build": "nest build && npm run copy:dvfs-assets",
     "build:seeds": "tsc -p tsconfig.seeds.json && npm run copy:dvfs-assets",
-    "copy:dvfs-assets": "mkdir -p dist/src/engine/dvfs && cp src/engine/dvfs/*.js dist/src/engine/dvfs/",
+    "copy:dvfs-assets": "node scripts/copy-dvfs-assets.js",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",

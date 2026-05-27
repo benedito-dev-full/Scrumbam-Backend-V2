@@ -200,6 +200,7 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 |------|--------|------|-------|---------|-----------------|
 | (2026-05-26) | prompt-builder | Pós-F13 | **7.2** | **NEEDS_CHANGES** | C1: CommandValidator.DANGEROUS_CHARS rejeita `()` no prompt placeholder (feature disfuncional em produção); masked por mock no integration test |
 | (2026-05-26) re-review | prompt-builder | Pós-F13 | **8.8** | **APPROVED** | C1 fix Opção B (placeholder simbólico); C2/M1 teste REAL detectou variante `<` `>`; R1 dupla camada anti-enum; R2 @Matches `^\d+$`; gate CEO 8.5 atingido |
+| Task D2 | bookmarks-validacao | Pós-D1 | **9.0** | **APPROVED** | 16/16 specs; assertTargetExists 1 query O(1) por tipo; doc=501 correto; M1: gap futuro se TargetType crescer (exists=null→404); M2: folder/list tests nao verificam idClasse correto na query |
 
 ## PADRÕES APRENDIDOS: PROMPT BUILDER (2026-05-26)
 
@@ -381,6 +382,7 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 | Task 2 | executions (F6) | F6 | 8.5 | APPROVED | ScheduleModule.forRoot() duplicado; testes de integração I1-I4 ausentes (unit tests cobrem os casos) |
 | Task 1 sub1 | agent scaffolding | F13 cliente | **9.0** | **APPROVED** | 4 MINORs: branches loader não cobertas (EPERM/isFile), ownership check ausente, discrepância jest.config.js no handoff, 0% coverage logger/index (esperado) |
 | Task 1 sub6 | agent install+systemd | F13 cliente | **7.4** | **NEEDS_CHANGES** | M1: agent/.claude/ na localização errada (não commitada). M2: ANTHROPIC_API_KEY gap — claude CLI não vai autenticar. M3: ssh-keyscan stderr silenciado perde diagnóstico TOFU. |
+| Task D1 | bookmarks-feature | pós-F5 | **7.5** | **NEEDS_CHANGES** | H1: @IsString() em targetId (devia @IsNumberString() — padrão explícito no plano e em todos os outros DTOs de ID). H2: bug paginação quando ?targetType usado — hasMore calculado sobre filtered (pós-filtro JS) em vez de rows (pré-filtro banco). |
 
 Detalhes: [F2 scores](project_f2_scores.md) | [F3 scores](project_f3_scores.md) | [F5 scores](project_f5_scores.md)
 
@@ -396,6 +398,14 @@ Detalhes: [F2 scores](project_f2_scores.md) | [F3 scores](project_f3_scores.md) 
 - **`ProtectHome=read-only` permite leitura cross-user**: com `ProtectHome=read-only`, `/root/.claude/CLAUDE.md` com `chmod 0644` É legível pelo service user `scrumban-agent` — o path não fica inaccessible como com `=yes`. Decisão arquitetural válida para o trade-off CEO-usa-root.
 - **`PrivateTmp=true` no systemd cobre `claude` CLI**: o `claude` CLI quando invocado via `execFile` do Node usa o mesmo namespace de `/tmp` do processo pai. `PrivateTmp=true` no service garante que arquivos temporários do claude ficam no `/tmp` privado — não vaza para o `/tmp` do sistema. Aceitar como pattern de hardening adequado.
 
+## PADRÕES APRENDIDOS — BOOKMARKS/DVincula FEATURE (Task D1, 2026-05-27)
+
+- **`@IsNumberString()` obrigatório em todo campo que vai para `BigInt()`**: padrão do projeto é usar `@IsNumberString({}, { message: '...' })` em campos como `targetId`, `idClasse`, `cursor` etc. Usar `@IsString()` sem `@Matches(/^\d+$/)` ou `@IsNumberString()` permite que strings não-numéricas passem a validação do DTO e causem `SyntaxError` (500 em vez de 400) no service. Verificar via grep nos DTOs antes de aprovar.
+- **Bug de paginacao: `hasMore` sobre `filtered.length` vs `rows.length`**: quando há filtro em memória pós-select (ex: filtro JS por `metaDados.targetType`), o `take: limit+1` do banco não garante que o slice filtrado terá `limit+1` itens. `hasMore = filtered.length > limit` pode retornar `false` incorretamente se o filtro descartou itens do batch. Solução: mover filtro para WHERE Prisma (JSON path filter) ou buscar sem `take` quando filtro em memória é necessário.
+- **DVincula com filtro em `metaDados` Json**: Prisma suporta JSON path filter para PostgreSQL: `where: { metaDados: { path: ['targetType'], equals: value } }`. Isso move o filtro para o banco, resolve o bug de paginação e é mais eficiente que filtro JS. Pattern confirmado em `node_modules/@prisma/client` — aceitar como solução principal.
+- **Deduplicacao upsert-safe com `findMany` sem filtro `excluido`**: buscar tanto registros ativos quanto soft-deleted em uma única query (`findMany` sem `excluido` no WHERE) + distinguir em JS é mais eficiente que 2 queries separadas. Aceitar como padrão para deduplicação com reativação.
+- **`$transaction` desnecessário em operações atômicas únicas**: `create`, `update`, `findFirst + update` em campos da mesma tabela não precisam de `$transaction`. Apenas multi-tabela ou dependência entre writes exige. Não penalizar ausência de transaction em operações simples de DVincula.
+
 ## PADRÕES VIOLADOS RECORRENTES (atualizar após cada review)
 
 | Padrão | Frequência | Como abordar |
@@ -409,6 +419,8 @@ Detalhes: [F2 scores](project_f2_scores.md) | [F3 scores](project_f3_scores.md) 
 | ScheduleModule.forRoot() duplicado (app.module + feature module) | F6 (ExecutionsModule) | Feature modules com @Cron devem usar ScheduleModule.forFeature(), nunca forRoot() |
 | Testes de integração (banco real) ausentes mas plano exigia | F6 (executions.integration.spec.ts) | Plano com I1-I4 explícitos = integração obrigatória; unit tests não substituem para concorrência real |
 | (op as any).chcriacao acesso a campo protegido do Engine | F6 (ExecutionsService) | Engine deve expor getter público getChave(): bigint para evitar any cast |
+| `@IsString()` em DTO onde plano especifica `@IsNumberString()` | D1 (bookmarks) | Todo campo de ID numérico como string DEVE ter @IsNumberString(). Padrão aplicado em todos os outros DTOs do projeto. |
+| `hasMore` calculado sobre array pós-filtro em vez de pré-filtro | D1 (bookmarks) | Quando filtro em memória JS é aplicado após `findMany`, `hasMore` deve refletir dados do banco, não do slice filtrado. Mover filtro para WHERE Prisma ou ajustar lógica. |
 
 ---
 

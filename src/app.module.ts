@@ -47,6 +47,8 @@ import { AutomationModule } from './automation/automation.module';
 
 // Feature transversal — Convite de membros por email (ADR-V2-028)
 import { InvitesModule } from './invites/invites.module';
+// Feature transversal — Bookmarks/Favoritos (ADR-V2-051 DClasse -187)
+import { BookmarksModule } from './bookmarks/bookmarks.module';
 
 /**
  * AppModule raiz do Scrumban-Backend-V2.
@@ -126,6 +128,8 @@ import { InvitesModule } from './invites/invites.module';
     AutomationModule,
     // Feature transversal — Convites por email (ADR-V2-028)
     InvitesModule,
+    // Feature transversal — Bookmarks/Favoritos (ADR-V2-051 DClasse -187)
+    BookmarksModule,
   ],
   providers: [
     // LoggingInterceptor global — loga method, path, statusCode, durationMs, correlationId
