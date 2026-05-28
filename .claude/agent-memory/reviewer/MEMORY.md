@@ -201,6 +201,7 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 | (2026-05-26) | prompt-builder | Pós-F13 | **7.2** | **NEEDS_CHANGES** | C1: CommandValidator.DANGEROUS_CHARS rejeita `()` no prompt placeholder (feature disfuncional em produção); masked por mock no integration test |
 | (2026-05-26) re-review | prompt-builder | Pós-F13 | **8.8** | **APPROVED** | C1 fix Opção B (placeholder simbólico); C2/M1 teste REAL detectou variante `<` `>`; R1 dupla camada anti-enum; R2 @Matches `^\d+$`; gate CEO 8.5 atingido |
 | Task D2 | bookmarks-validacao | Pós-D1 | **9.0** | **APPROVED** | 16/16 specs; assertTargetExists 1 query O(1) por tipo; doc=501 correto; M1: gap futuro se TargetType crescer (exists=null→404); M2: folder/list tests nao verificam idClasse correto na query |
+| Task B.2 | ai-chat-backend (Nexus) | Frente B | **8.3** | **APPROVED** | gate 8.0; MEDIUM-1: topPendingTasks filtro em memória (findMany sem status filter → pode retornar []); MEDIUM-2: timer leak setTimeout sem clearTimeout no GeminiProvider; MINOR-1: commentário "fire-and-forget" diverge do comportamento await allSettled; zero specs aceito como débito; tenant isolation sólido; arquitetura exemplar |
 
 ## PADRÕES APRENDIDOS: PROMPT BUILDER (2026-05-26)
 
