@@ -6,6 +6,7 @@ import { TasksModule } from '../tasks/tasks.module';
 import { AiChatController } from './ai-chat.controller';
 import { AiChatService } from './ai-chat.service';
 import { ChatMessagesService } from './chat-messages.service';
+import { ContextBuilderService } from './context-builder.service';
 import { GeminiApiKeyService } from './gemini-api-key.service';
 import { GeminiProvider } from './providers/gemini.provider';
 import { CreateCommentTool } from './tools/create-comment.tool';
@@ -52,6 +53,7 @@ import { ToolRegistry } from './tools/tool-registry';
   providers: [
     AiChatService,
     ChatMessagesService,
+    ContextBuilderService,
     GeminiApiKeyService,
     GeminiProvider,
     ToolRegistry,

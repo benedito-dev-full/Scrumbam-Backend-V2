@@ -3,6 +3,7 @@ import { CorrelationIdService } from '../common/services/correlation-id.service'
 import { EventProducerService } from '../eventos/core/event-producer.service';
 import { EVENT_TYPES } from '../eventos/core/event-types';
 import { ChatMessagesService, PersistedChatMessage } from './chat-messages.service';
+import { ContextBuilderService } from './context-builder.service';
 import { SendMessageDto } from './dto/send-message.dto';
 import { ChatMessageResponseDto, ChatToolCallDto } from './dto/chat-message-response.dto';
 import { GeminiProvider } from './providers/gemini.provider';
@@ -53,6 +54,7 @@ export class AiChatService {
     private readonly gemini: GeminiProvider,
     private readonly eventProducer: EventProducerService,
     private readonly correlationId: CorrelationIdService,
+    private readonly contextBuilder: ContextBuilderService,
   ) {}
 
   /**
@@ -98,9 +100,14 @@ export class AiChatService {
       ...(organizationId ? { organizationId } : {}),
     });
 
+    // 3.5. Montar bloco de contexto runtime (Etapa A — nome, org, data,
+    //      projetos recentes). Cache 60s em memoria — ver ContextBuilderService.
+    const contextBlock = await this.contextBuilder.build(userEntidadeId, organizationId);
+    const finalSystemPrompt = `${SYSTEM_PROMPT_NEXUS}\n\n${contextBlock}`;
+
     // 4. Chamar Gemini — erros sao traduzidos pelo provider (Http exceptions).
     const result = await this.gemini.chat({
-      systemPrompt: SYSTEM_PROMPT_NEXUS,
+      systemPrompt: finalSystemPrompt,
       messages: providerMessages,
       tools,
       maxToolIterations: MAX_TOOL_ITERATIONS,
@@ -119,6 +126,18 @@ export class AiChatService {
         ...(result.finishReason ? { finishReason: result.finishReason } : {}),
       },
     });
+
+    // 5.5. B5 — invalidacao event-driven do bloco de contexto runtime.
+    //      Se alguma tool foi executada (criou task, comment, etc.), o
+    //      bloco do `ContextBuilderService` ficou stale (contadores de
+    //      unread, projetos recentes, etc.). Limpa todas as entradas do
+    //      user para forcar recomputacao na proxima mensagem. TTL de 60s
+    //      continua como fallback geral. Chamado APOS persistencia do
+    //      assistant message e ANTES dos eventos de audit para garantir
+    //      ordem consistente.
+    if (result.toolCallsExecuted.length > 0) {
+      this.contextBuilder.invalidate(userEntidadeId);
+    }
 
     // 6. Audit events — APOS persistencia. Aguarda persistencia do evento
     //    (modo sincrono atual do EventProducer). Em futuro modo assincrono,
