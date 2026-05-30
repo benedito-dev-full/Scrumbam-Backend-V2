@@ -12,6 +12,18 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Fixed
+
+- **Cascade soft-delete de TASKs normais** (Task 1, V2 pós-F5/F8, Score 8.8/10)
+  - Bug: Deletar TASK normal (-154) com subtarefas NÃO cascateava — filhas viravam "órfãs vivas" (excluido=false apontando para mãe excluido=true)
+  - Solução: Default de cascade mudou de `isPhase` para `true` — agora TODA task com filhas cascateia por padrão
+  - `?cascade=false` é o escape para desvincular (caso raro documentado)
+  - Evento audit: `task.deleted` (DEvento -498) emitido sempre que TASK normal é deletada (ambos ramos)
+  - Payload: `{ taskId, projectId, cascade: boolean, affected: number }`
+  - Script de saneamento: `scripts/fix-orphan-tasks.sql` — CTE recursiva idempotente para corrigir órfãs existentes (execução manual exclusiva do CEO)
+  - Pilares: Pilar 2 (endpoint /tasks/:id com `?cascade` param), Pilar 3 (zero DClasse nova)
+  - ADRs: ADR-V2-047 Q6 (atualizado — default mudou), ADR-V2-001 (zero tabela), ADR-V2-042 (tenant scope preservado)
+
 ### Added — Frente B: Nexus IA Chat v1
 - **Backend `src/ai/` (14 arquivos novos):**
   - `AiChatController` com POST/GET/DELETE `/ai/chat[/history]`

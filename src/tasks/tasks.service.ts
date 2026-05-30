@@ -1240,16 +1240,23 @@ export class TasksService {
   }
 
   /**
-   * Soft-delete de task. Cascade opcional para fases (ADR-V2-047).
+   * Soft-delete de task. Cascade por padrao para TODA task (ADR-V2-047 Q6).
    *
    * Comportamento de `cascade`:
-   * - `undefined` (default): cascade = true se task eh PHASE (idClasse=-200);
-   *   false caso contrario.
-   * - `true`: cascade explicito — usa `PhaseHierarchyService.softDeleteCascade`
-   *   (CTE recursiva — 1 statement marca task + descendentes como `excluido=true`).
-   * - `false`: soft-delete somente da task; descendentes ficam orfaos
-   *   (`idPai` aponta para task deletada — comportamento intencional para
-   *   cenarios de "desvincular" sem destruir).
+   * - `undefined` (default): **cascade = true sempre** — a raiz e todos os
+   *   descendentes (filhas, netos, ...) sao marcados `excluido=true` via
+   *   `PhaseHierarchyService.softDeleteCascade` (CTE recursiva, 1 statement).
+   *   Fecha na origem o bug de "orfas vivas" (filha viva apontando para mae
+   *   deletada). Cobre tanto TASK normal (-154) quanto PHASE (-200).
+   * - `true`: cascade explicito (mesmo efeito do default).
+   * - `false`: desvincular — soft-delete somente da raiz; descendentes ficam
+   *   com `idPai` apontando para a task deletada. Caso raro/escape; use apenas
+   *   quando intencionalmente quiser preservar as filhas.
+   *
+   * Auditoria (DEvento):
+   * - PHASE (-200) emite `phase.deleted` (DEvento -498, inalterado).
+   * - TASK normal (-154) emite `task.deleted` (DEvento -498) em AMBOS os ramos
+   *   (cascade e desvincular), apos a persistencia.
    *
    * @param id - Chave BigInt da task (string)
    * @param accessibleProjectIds - Scope tenant (ADR-V2-042)
@@ -1260,11 +1267,11 @@ export class TasksService {
    *
    * @example
    * ```typescript
-   * // Default: cascade ligado se for PHASE
+   * // Default: cascateia a raiz + descendentes (TASK ou PHASE)
    * await service.delete('7');
    *
-   * // Cascade explicito
-   * await service.delete('7', undefined, { cascade: true });
+   * // Desvincular (escape): apaga so a raiz, mantem as filhas
+   * await service.delete('7', undefined, { cascade: false });
    * ```
    */
   async delete(
@@ -1293,9 +1300,13 @@ export class TasksService {
 
     // Decisao de cascade:
     //   options.cascade definido → respeitar valor explicito
-    //   omitido → default = true se task eh PHASE, false caso contrario
+    //   omitido → default = true SEMPRE (fecha o bug de orfas vivas; cobre
+    //             TASK e PHASE). `?cascade=false` e o escape para desvincular.
+    //   (CEO 2026-05-30 / ADR-V2-047 Q6 — default cascade ratificado.)
+    // `isPhase` permanece apenas para decidir QUAL evento de audit emitir.
     const isPhase = existing.idClasse === ID_CLASSE_PHASE;
-    const cascade = options?.cascade !== undefined ? options.cascade : isPhase;
+    const cascade = options?.cascade !== undefined ? options.cascade : true;
+    const projectId = existing.idProject?.toString() ?? null;
 
     if (cascade) {
       const result = await this.phaseHierarchy.softDeleteCascade(taskId);
@@ -1303,14 +1314,26 @@ export class TasksService {
         `Task ${taskId} deletada com cascade (isPhase=${isPhase}); afetados=${result.affected}`,
       );
 
-      // ADR-V2-047 Fase 8: phase.deleted. Emite quando a raiz da árvore
-      // deletada é uma fase (cascade=true && isPhase é o caso padrão).
+      // Audit (ADR-V2-008 / ADR-V2-047 Q6) — emitir APOS a persistencia.
+      // PHASE → phase.deleted (inalterado). TASK normal → task.deleted.
       if (isPhase) {
         await this.eventProducer.addInternalEvent(
           'phase.deleted',
           {
             phaseId: taskId.toString(),
-            projectId: existing.idProject?.toString() ?? null,
+            projectId,
+            cascade: true,
+            affected: result.affected,
+          },
+          this.correlationIdService.getOrGenerate(),
+          { source: TasksService.name },
+        );
+      } else {
+        await this.eventProducer.addInternalEvent(
+          'task.deleted',
+          {
+            taskId: taskId.toString(),
+            projectId,
             cascade: true,
             affected: result.affected,
           },
@@ -1327,16 +1350,28 @@ export class TasksService {
       data: { excluido: true },
     });
 
-    this.logger.log(`Task ${taskId} deletada (soft delete sem cascade)`);
+    this.logger.log(`Task ${taskId} deletada (soft delete sem cascade — desvincular)`);
 
-    // ADR-V2-047 Fase 8: phase.deleted sem cascade — ainda emite se a task
-    // deletada é uma fase. cascade=false signaliza que descendentes ficaram.
+    // Audit sem cascade (desvincular) — descendentes permanecem.
+    // PHASE → phase.deleted. TASK normal → task.deleted. cascade=false.
     if (isPhase) {
       await this.eventProducer.addInternalEvent(
         'phase.deleted',
         {
           phaseId: taskId.toString(),
-          projectId: existing.idProject?.toString() ?? null,
+          projectId,
+          cascade: false,
+          affected: 1,
+        },
+        this.correlationIdService.getOrGenerate(),
+        { source: TasksService.name },
+      );
+    } else {
+      await this.eventProducer.addInternalEvent(
+        'task.deleted',
+        {
+          taskId: taskId.toString(),
+          projectId,
           cascade: false,
           affected: 1,
         },

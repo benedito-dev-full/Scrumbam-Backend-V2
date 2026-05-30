@@ -1,6 +1,78 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-27 (Frente B — Nexus IA Chat v1 COMPLETO — Score médio 8.92/10)
+**Ultima atualizacao:** 2026-05-30 (Task 1 — Cascade soft-delete + script saneamento COMPLETO — Score 8.8/10)
+
+---
+
+## ✅ TASK 1 — CASCADE SOFT-DELETE + LIMPEZA DE ORFAS (V2 PÓS-F5/F8) — COMPLETE
+
+**Module:** core (DTask — domínio estrutural)
+**Task:** Cascade soft-delete de TASKs normais com evento de auditoria + script de saneamento de órfãs
+**Status:** COMPLETO
+**Date:** 2026-05-30
+**Duration:** ~3h total (Strategist planning + Implementer ~2h + Reviewer 40m + Documenter 30m)
+**Quality Score:** 8.8/10 APPROVED (gate CEO 8.0)
+
+**Agents Performance:**
+| Agent | Phase | Duration | Quality |
+|-------|-------|----------|---------|
+| Strategist | Planning: Analysis A/B/C + 3 Soluções | — | — |
+| Implementer | Service (default cascade) + Controller (@Query) + Tests (6) | ~2h | Default ratificado, evento task.deleted MUST-HAVE |
+| Reviewer | Review: Service + Controller + Script SQL | — | 8.8/10 APPROVED — M1 (JSDoc controller) rápido fix |
+| Documenter | JSDoc improvements + ROADMAP + CHANGELOG + STATUS + commit | 30m | — |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DTask é cadastro estrutural (Prisma direto, não Engine)
+- Pilar 2 (Endpoints): REUTILIZA DELETE /tasks/:id, apenas adiciona `?cascade` param
+- Pilar 3 (Seed): ZERO DClasse nova. Usa -154 (SCRUMBAN_TASK) e -200 (PHASE) existentes
+
+**Deliverables:**
+- [x] Service: Default cascade mudou de `isPhase` para `true`; evento `task.deleted` emitido (ambos ramos)
+- [x] Controller: `@Query('cascade')` exposto; JSDoc com @throws/@example (minor fix M1)
+- [x] Tests: 6 unit tests delete() — cascadeBool conversion, event emission, PHASE regressão
+- [x] Script SQL: `scripts/fix-orphan-tasks.sql` — CTE recursiva idempotente (diagnóstico + fix + verify)
+- [x] Documentation: JSDoc, ROADMAP, CHANGELOG, STATUS, commit Conventional
+- [x] Build: PASS (npm run build, tsc 0 errors, eslint 0 warnings)
+
+**Metrics:**
+- Queries/request: +0 (softDeleteCascade já existente, reutilizado)
+- N+1 Queries: ZERO (CTE uma passada)
+- Tests: 6 unit + 108 telegram handler PASS (regressão zero)
+- Script saneamento: Entregue, **NÃO EXECUTADO no fluxo automático** (CEO 2026-05-30)
+
+**Quality Gate:**
+- APPROVED 8.8/10 (gate CEO 8.0 superado)
+
+**ADRs:**
+- ADR-V2-047 Q6: Atualizada seção Consequências/Implementação (default de cascade ratificado)
+- ADR-V2-001: Respeitado (zero tabela nova)
+- ADR-V2-042: Preservado (tenant scope via accessibleProjectIds)
+
+**Procedimento de Saneamento (Manual CEO):**
+```sql
+-- 1. Diagnóstico
+SELECT COUNT(*) AS orfas_antes FROM "DTask" f
+  JOIN "DTask" p ON f."idPai" = p.chave
+  WHERE f.excluido = false AND p.excluido = true;
+
+-- 2. Correção (dentro de BEGIN/COMMIT)
+WITH RECURSIVE orfas AS (
+  SELECT f.chave FROM "DTask" f
+  JOIN "DTask" p ON f."idPai" = p.chave
+  WHERE f.excluido = false AND p.excluido = true
+  UNION ALL
+  SELECT t.chave FROM "DTask" t
+  JOIN orfas o ON t."idPai" = o.chave
+  WHERE t.excluido = false
+)
+UPDATE "DTask" SET excluido = true, "atualizadoEm" = NOW()
+WHERE chave IN (SELECT chave FROM orfas);
+
+-- 3. Verificação (deve retornar 0)
+SELECT COUNT(*) AS orfas_depois FROM "DTask" f
+  JOIN "DTask" p ON f."idPai" = p.chave
+  WHERE f.excluido = false AND p.excluido = true;
+```
 
 ---
 

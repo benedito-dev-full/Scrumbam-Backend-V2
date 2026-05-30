@@ -8,6 +8,60 @@
 
 ---
 
+## Task 1: Cascade soft-delete de TASKs normais + limpeza de órfãs ✅ COMPLETA
+
+**Status:** ✅ **COMPLETA** — Soft-delete com cascade default, evento task.deleted, script de saneamento entregue
+**Módulo V2:** core (DTask — domínio estrutural)
+**Fase V2:** Pós-F5/F8 (ADR-V2-047 Q6 — soft-delete recursivo configurável + audit)
+**Tempo Real:** ~3h (Strategist planning + Implementer ~2h + Reviewer 40m + Documenter 30m)
+**Completado em:** 2026-05-30
+**Quality Score:** 8.8/10 APPROVED (gate CEO 8.0)
+
+**O Que Foi Feito:**
+
+**Engine — Default cascade ratificado, evento task.deleted MUST-HAVE:**
+- Service `tasks.service.ts`:
+  * Linha 1308: default de cascade trocado de `isPhase` para `true` (ratificado CEO 2026-05-30)
+  * `?cascade=false` é o escape para desvincular (preserva filhas)
+  * Emissão `task.deleted` (DEvento idClasse=-498) em AMBOS ramos (cascade e desvincular)
+  * Payload `{ taskId, projectId, cascade, affected }` — auditoria completa
+  * JSDoc reescrito com novo behavior e exemplos
+- Controller `tasks.controller.ts`:
+  * `@Query('cascade') cascade: string | undefined` expõe param
+  * `@ApiQuery` documentado (Swagger)
+  * JSDoc completo com @throws/@example (corrige minor M1 do Reviewer)
+- Tests em `tasks.service.spec.ts`:
+  * 6 casos de delete() — default cascade, explicit true/false, evento task.deleted emitido, regressão PHASE
+  * 100% PASS
+
+**Script de Saneamento — Entregue, NÃO EXECUTADO no fluxo automático:**
+- `scripts/fix-orphan-tasks.sql` — CTE recursiva idempotente
+  * Diagnóstico: SELECT count antes
+  * Correção: UPDATE recursivo (pega cadeias inteiras numa passada)
+  * Verificação: SELECT count depois = 0
+  * Dentro de `BEGIN/COMMIT` para segurança
+  * **Execução é ação manual exclusiva do CEO (CEO 2026-05-30)** — fora do fluxo automático
+  * Procedimento sugerido: rodar diagnóstico → conferir `orfas_antes` → executar → confirmar `orfas_depois=0`
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — DTask é tabela estrutural (cadastro), não transacional. Usa Prisma direto (correto).
+- Pilar 2 (Endpoints): Reutiliza DELETE /tasks/:id existente. Apenas adiciona `?cascade` param.
+- Pilar 3 (Seed): ZERO DClasse nova. Reusa -154 (SCRUMBAN_TASK) e -200 (PHASE) já canônicas.
+
+**Métricas:**
+- Build: ✅ PASS (npm run build, tsc 0 errors, eslint 0 warnings)
+- Tests: ✅ 6 unit + 108 telegram handler PASS (regressão zero)
+- Queries: +0 (soft-delete via UPDATE + CTE já existente)
+- N+1: ZERO (CTE uma passada, idempotente)
+
+**ADRs:**
+- ADR-V2-047 Q6 (soft-delete recursivo configurável + audit) — ratificado
+- Nota adicionada em ADR-V2-047: default de cascade passou de `isPhase` para `true`
+- ADR-V2-001 (zero tabela nova) — respeitado
+- ADR-V2-042 (tenant scope) — preservado
+
+---
+
 ## Notifications Integration — Frontend (Sino + Inbox Real) ✅ COMPLETA
 
 **Status:** ✅ **COMPLETA** — Feature entregue, Reviewer APPROVED 8.5/10 pós-fixes

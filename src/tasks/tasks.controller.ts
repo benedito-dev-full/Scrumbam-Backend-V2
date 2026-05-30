@@ -383,18 +383,54 @@ export class TasksController {
   }
 
   /**
-   * Soft-delete de task.
+   * Soft-delete de task com cascade configurável.
    *
-   * @param id - ID da task
+   * Por padrão cascateia o soft-delete para todas as subtarefas (filhas,
+   * netos, ...), fechando o bug de "orfãs vivas". Use `?cascade=false` para
+   * desvincular (apaga só a raiz, mantém as filhas) — caso raro e justificado.
+   *
+   * Emite eventos de auditoria (DEvento):
+   * - PHASE (idClasse=-200): `phase.deleted` com payload {phaseId, projectId, cascade, affected}
+   * - TASK normal (idClasse=-154): `task.deleted` com payload {taskId, projectId, cascade, affected}
+   *
+   * @param id - ID da task (chave BigInt como string)
+   * @param cascade - 'true' | 'false' (opcional). Default: true (cascateia automaticamente).
+   * @param req - JWT request com user context para tenant isolation (ADR-V2-042)
+   * @returns Promise<void> — retorna 204 No Content em sucesso
+   *
+   * @throws {NotFoundException} Se task não encontrada ou fora do tenant scope
+   *
+   * @example
+   * ```bash
+   * # Delete com cascade automático (default — recomendado)
+   * curl -X DELETE http://localhost:3000/api/v1/tasks/7 \
+   *   -H "Authorization: Bearer {token}"
+   *
+   * # Delete com desvincular (escape — apenas filhas desvinculadas)
+   * curl -X DELETE "http://localhost:3000/api/v1/tasks/7?cascade=false" \
+   *   -H "Authorization: Bearer {token}"
+   * ```
    */
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Deletar task (soft delete)' })
   @ApiParam({ name: 'id', description: 'ID da task' })
+  @ApiQuery({
+    name: 'cascade',
+    required: false,
+    type: Boolean,
+    description:
+      'Cascateia soft-delete para subtarefas. Default: true. false = desvincular (mantém filhas).',
+  })
   @ApiResponse({ status: 204, description: 'Task deletada' })
   @ApiResponse({ status: 404, description: 'Task não encontrada ou fora do scope' })
-  async delete(@Param('id') id: string, @Request() req: JwtRequest): Promise<void> {
+  async delete(
+    @Param('id') id: string,
+    @Query('cascade') cascade: string | undefined,
+    @Request() req: JwtRequest,
+  ): Promise<void> {
     const allowed = await this.resolveScopedProjectIds(req);
-    await this.tasksService.delete(id, allowed);
+    const cascadeBool = cascade === undefined ? undefined : cascade === 'true';
+    await this.tasksService.delete(id, allowed, { cascade: cascadeBool });
   }
 }

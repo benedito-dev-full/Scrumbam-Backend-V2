@@ -69,6 +69,7 @@ describe('TasksService', () => {
   let identifierService: { getNextIdentifier: jest.Mock };
   let eventProducer: { addInternalEvent: jest.Mock };
   let phaseMetrics: { compute: jest.Mock };
+  let phaseHierarchy: { softDeleteCascade: jest.Mock };
 
   beforeEach(async () => {
     const prismaMock = {
@@ -141,8 +142,10 @@ describe('TasksService', () => {
     identifierService = module.get(TasksIdentifierService) as typeof identifierService;
     eventProducer = module.get(EventProducerService) as typeof eventProducer;
     phaseMetrics = module.get(PhaseMetricsService) as typeof phaseMetrics;
+    phaseHierarchy = module.get(PhaseHierarchyService) as typeof phaseHierarchy;
     void eventProducer; // referenciado para silenciar warns sem strict
     void phaseMetrics; // usado nos testes de phase.completed detector
+    void phaseHierarchy; // usado nos testes de delete() cascade
   });
 
   afterEach(() => {
@@ -919,18 +922,23 @@ describe('TasksService', () => {
       });
     });
 
-    describe('delete() — phase.deleted', () => {
-      it('deve emitir phase.deleted quando task é PHASE (default cascade)', async () => {
+    describe('delete() — cascade default + audit (phase.deleted / task.deleted)', () => {
+      it('PHASE: default cascade emite phase.deleted (cascade=true) e NÃO task.deleted', async () => {
         prisma.dTask.findFirst.mockResolvedValue({
           chave: BigInt(42),
           idProject: BigInt(1),
           idClasse: BigInt(-200),
         });
+        phaseHierarchy.softDeleteCascade.mockResolvedValue({ affected: 3 });
 
         await service.delete('42');
 
+        // cascade aplicado via softDeleteCascade
+        expect(phaseHierarchy.softDeleteCascade).toHaveBeenCalledWith(BigInt(42));
+
         const emitted = eventProducer.addInternalEvent.mock.calls.map((c) => c[0]);
         expect(emitted).toContain('phase.deleted');
+        expect(emitted).not.toContain('task.deleted');
 
         const call = eventProducer.addInternalEvent.mock.calls.find(
           (c) => c[0] === 'phase.deleted',
@@ -939,10 +947,61 @@ describe('TasksService', () => {
           phaseId: '42',
           projectId: '1',
           cascade: true,
+          affected: 3,
         });
       });
 
-      it('NÃO deve emitir phase.deleted quando task não é PHASE', async () => {
+      it('TASK normal (-154): default agora cascateia e emite task.deleted (cascade=true), NÃO phase.deleted', async () => {
+        prisma.dTask.findFirst.mockResolvedValue({
+          chave: BigInt(7),
+          idProject: BigInt(1),
+          idClasse: BigInt(-154),
+        });
+        phaseHierarchy.softDeleteCascade.mockResolvedValue({ affected: 2 });
+
+        const result = await service.delete('7');
+
+        // (a) cascade aplicado via softDeleteCascade com a chave
+        expect(phaseHierarchy.softDeleteCascade).toHaveBeenCalledWith(BigInt(7));
+        // update simples NÃO é usado no ramo cascade
+        expect(prisma.dTask.update).not.toHaveBeenCalled();
+        expect(result).toEqual({ affected: 2 });
+
+        const emitted = eventProducer.addInternalEvent.mock.calls.map((c) => c[0]);
+        // (b) phase.deleted NÃO é emitido para TASK normal
+        expect(emitted).not.toContain('phase.deleted');
+        // (c) task.deleted É emitido com payload correto
+        expect(emitted).toContain('task.deleted');
+
+        const call = eventProducer.addInternalEvent.mock.calls.find(
+          (c) => c[0] === 'task.deleted',
+        );
+        expect(call?.[1]).toMatchObject({
+          taskId: '7',
+          projectId: '1',
+          cascade: true,
+          affected: 2,
+        });
+      });
+
+      it('TASK normal com filhas cascateia por padrão (sem param)', async () => {
+        prisma.dTask.findFirst.mockResolvedValue({
+          chave: BigInt(7),
+          idProject: BigInt(1),
+          idClasse: BigInt(-154),
+        });
+        phaseHierarchy.softDeleteCascade.mockResolvedValue({ affected: 4 });
+
+        await service.delete('7');
+
+        expect(phaseHierarchy.softDeleteCascade).toHaveBeenCalledWith(BigInt(7));
+        const call = eventProducer.addInternalEvent.mock.calls.find(
+          (c) => c[0] === 'task.deleted',
+        );
+        expect(call?.[1]).toMatchObject({ cascade: true, affected: 4 });
+      });
+
+      it('TASK normal com cascade=false NÃO chama softDeleteCascade, faz update simples e emite task.deleted (cascade=false, affected=1)', async () => {
         prisma.dTask.findFirst.mockResolvedValue({
           chave: BigInt(7),
           idProject: BigInt(1),
@@ -950,10 +1009,67 @@ describe('TasksService', () => {
         });
         prisma.dTask.update.mockResolvedValue({ chave: BigInt(7), excluido: true });
 
-        await service.delete('7');
+        const result = await service.delete('7', undefined, { cascade: false });
+
+        // não cascateia
+        expect(phaseHierarchy.softDeleteCascade).not.toHaveBeenCalled();
+        // update simples da raiz
+        expect(prisma.dTask.update).toHaveBeenCalledWith({
+          where: { chave: BigInt(7) },
+          data: { excluido: true },
+        });
+        expect(result).toEqual({ affected: 1 });
 
         const emitted = eventProducer.addInternalEvent.mock.calls.map((c) => c[0]);
+        expect(emitted).toContain('task.deleted');
         expect(emitted).not.toContain('phase.deleted');
+
+        const call = eventProducer.addInternalEvent.mock.calls.find(
+          (c) => c[0] === 'task.deleted',
+        );
+        expect(call?.[1]).toMatchObject({
+          taskId: '7',
+          projectId: '1',
+          cascade: false,
+          affected: 1,
+        });
+      });
+
+      it('TASK normal sem idProject: task.deleted leva projectId=null', async () => {
+        prisma.dTask.findFirst.mockResolvedValue({
+          chave: BigInt(9),
+          idProject: null,
+          idClasse: BigInt(-154),
+        });
+        phaseHierarchy.softDeleteCascade.mockResolvedValue({ affected: 1 });
+
+        await service.delete('9');
+
+        const call = eventProducer.addInternalEvent.mock.calls.find(
+          (c) => c[0] === 'task.deleted',
+        );
+        expect(call?.[1]).toMatchObject({ taskId: '9', projectId: null, cascade: true });
+      });
+
+      it('cascade=false em PHASE emite phase.deleted (cascade=false) e NÃO task.deleted (regressão)', async () => {
+        prisma.dTask.findFirst.mockResolvedValue({
+          chave: BigInt(42),
+          idProject: BigInt(1),
+          idClasse: BigInt(-200),
+        });
+        prisma.dTask.update.mockResolvedValue({ chave: BigInt(42), excluido: true });
+
+        await service.delete('42', undefined, { cascade: false });
+
+        expect(phaseHierarchy.softDeleteCascade).not.toHaveBeenCalled();
+        const emitted = eventProducer.addInternalEvent.mock.calls.map((c) => c[0]);
+        expect(emitted).toContain('phase.deleted');
+        expect(emitted).not.toContain('task.deleted');
+
+        const call = eventProducer.addInternalEvent.mock.calls.find(
+          (c) => c[0] === 'phase.deleted',
+        );
+        expect(call?.[1]).toMatchObject({ phaseId: '42', cascade: false, affected: 1 });
       });
     });
 
