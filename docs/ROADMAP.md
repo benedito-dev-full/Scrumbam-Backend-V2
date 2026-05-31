@@ -147,9 +147,75 @@
 - ADR-V2-001 (zero TABELA nova) — respeitado (DTOs são contrato, sem schema)
 - ADR-V2-043 (precedente em coluna dedicada) — padrão replicado
 
-**Fases restantes (3-7):**
-- Fase 3: PATCH `/projects/:id` para edição de schema (write direto na coluna tableFields)
-- Fase 4: PUT `/tasks/:id` para valores com validação por tipo (merge por chave em DTask.dados.fields)
+### Fase 3: PATCH `/projects/:id` com Validador de Schema — ✅ COMPLETA
+
+**Status:** ✅ **FASE 3 COMPLETA** — Validador e escrita de schema APROVADOS (Score 8.8/10)
+**Tempo Real:** ~2.5h total (Implementer validador + DTO + serviço ~2h + Reviewer 30m)
+**Completado em:** 2026-05-30
+**Quality Score:** 8.8/10 APPROVED (gate CEO 8.0 superado)
+
+**O Que Foi Feito (Fase 3 — Schema editing):**
+
+**Validador puro `validateTableFields()` criado:**
+- Arquivo `src/tasks/table-fields/table-fields.validator.ts` — função pura sem dependências de banco
+- 4 regras de validação implementadas:
+  1. Unicidade de `key` entre colunas (BadRequestException se duplicada)
+  2. Unicidade de `order` entre colunas (BadRequestException se duplicada)
+  3. Unicidade de `options[].id` DENTRO de cada coluna tipo status/dropdown (ids iguais em colunas diferentes são permitidos)
+  4. Coerência tipo↔config: status/dropdown exigem `options` não-vazio (BadRequestException caso contrário)
+- `version` apenas PERSISTIDO, sem enforcement (enforcement de concorrência otimista é Fase 7)
+- Validação de VALORES de célula (DTask.dados.fields) NÃO implementada (Fase 4)
+- JSDoc completo com exemplos de cada exceção
+
+**DTO `update-project.dto.ts` estendido:**
+- Campo novo `tableFields?: TableFieldsDto` com decoradores:
+  - `@IsOptional()` — PATCH é parcial
+  - `@ValidateNested()` — valida estrutura aninhada
+  - `@Type(() => TableFieldsDto)` — converte JSON em instância
+- Import adicionado: `ValidateNested` (class-validator), `Type` (class-transformer), `TableFieldsDto`
+- JSDoc + @ApiPropertyOptional com Swagger
+
+**Service `projects.service.ts` integrado:**
+- Import: `validateTableFields` (linha ~25)
+- No método `update()`: chamada `validateTableFields(dto.tableFields)` ANTES da transaction (read-validate-write)
+  - Se lançar exception, NADA é persistido (segurança)
+  - Validação é SÍNCRONA (pura, sem I/O)
+- Escrita no `data:` da transaction (linha ~884):
+  - Spread condicional: `...(dto.tableFields !== undefined ? { tableFields: dto.tableFields as unknown as Prisma.InputJsonValue } : {})`
+  - Escreve DIRETO na coluna (replace object inteiro), NÃO merge em `dados`
+  - Merge seletivo de `dados` preservado intacto (separação de concerns)
+
+**Testes unitários:**
+- Arquivo `src/tasks/table-fields/table-fields.validator.spec.ts`
+- 9 testes PASS 100%:
+  - Validação positiva: schema válido passou
+  - Key duplicada: BadRequestException
+  - Order duplicada: BadRequestException
+  - Options.id duplicada (status): BadRequestException
+  - Options.id duplicada (dropdown): BadRequestException
+  - Options.id duplicada (entre tipos): permitido, sem erro
+  - Status sem options: BadRequestException
+  - Dropdown sem options: BadRequestException
+  - Config type↔config válido: permitido
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — DProject é cadastro estrutural (Prisma direto)
+- Pilar 2 (Endpoints): RESPEITADO — reutiliza `PATCH /projects/:id` existente; ZERO endpoint novo
+- Pilar 3 (Seed): PRESERVADO — zero DClasse nova
+
+**Métricas:**
+- Build: ✅ PASS (npm run build, tsc 0 novos erros em arquivos tocados)
+- Tests: ✅ 9 unit tests PASS 100%
+- N+1: ZERO (validação é pura, escrita é 1 UPDATE dentro da transaction existente)
+- Queries/request: +0 (nenhuma query nova)
+
+**ADRs vinculados:**
+- ADR-V2-001 (zero TABELA nova) — respeitado
+- ADR-V2-043 (precedente repoUrl como coluna dedicada) — padrão replicado
+- ADR-V2-XXX (a redigir Fase 7): coluna dedicada `tableFields` em DProject
+
+**Fases restantes (4-7):**
+- Fase 4: PUT `/tasks/:id` para valores com validação por tipo + merge seguro por chave em DTask.dados.fields
 - Fase 5: Exposição em leitura (ProjectResponseDto + select: { tableFields: true })
 - Fase 6: Testes completos (unit validador 8 tipos, integration ciclo, concorrência, N+1)
 - Fase 7: ADR-V2-XXX + documentação finalizada

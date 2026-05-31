@@ -1,6 +1,53 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-30 (Task 1 — Cascade soft-delete + script saneamento COMPLETO — Score 8.8/10)
+**Ultima atualizacao:** 2026-05-30 (Task-Colunas Fase 3 COMPLETA — Score 8.8/10)
+
+---
+
+## ✅ TASK-COLUNAS CUSTOMIZÁVEIS — FASE 3 (V2 F5) — COMPLETE
+
+**Module:** projects (core/entidades), tasks/table-fields (novo validador)
+**Task:** Validador de schema + PATCH /projects/:id para edição de colunas customizáveis
+**Status:** COMPLETA (Fase 3 de 7)
+**Duration:** ~2.5h total (Implementer ~2h + Reviewer 30m)
+**Quality Score:** 8.8/10 APPROVED (gate CEO 8.0 superado)
+
+**Agents Performance:**
+| Agent | Phase | Duration | Quality |
+|-------|-------|----------|---------|
+| Implementer | Validador puro + DTO + Service integration | ~2h | Validador 4 regras, escrita direto em coluna |
+| Reviewer | Validador + DTO + Service + schema | — | 8.8/10 APPROVED |
+| Documenter | JSDoc + CHANGELOG + ROADMAP + STATUS + commit | ~30m | — |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DProject é cadastro estrutural (Prisma direto, não Engine)
+- Pilar 2 (Endpoints): RESPEITADO — reutiliza PATCH /projects/:id existente, ZERO endpoint novo
+- Pilar 3 (Seed): PRESERVADO — zero DClasse nova
+
+**Deliverables:**
+- [x] Validador puro: `src/tasks/table-fields/table-fields.validator.ts` (4 regras)
+- [x] Testes validador: 9 unit tests PASS 100% (`table-fields.validator.spec.ts`)
+- [x] DTO estendido: `update-project.dto.ts` com `tableFields?: TableFieldsDto`
+- [x] Service integrado: `projects.service.ts` com validação pré-transação + escrita em coluna
+- [x] Documentation: JSDoc completo (validador, DTO, service)
+- [x] Build: PASS (npm run build, tsc 0 novos erros)
+
+**Metrics:**
+- Queries/request: +0 (nenhuma query nova, validação é pura)
+- N+1 Queries: ZERO (validação síncrona, escrita 1 UPDATE na transaction existente)
+- Tests: 9 unit PASS 100%
+- Build: PASS, TypeScript 0 novos erros, ESLint N/A nesta fase
+
+**Quality Gate:**
+- APPROVED 8.8/10 (gate CEO 8.0 superado)
+
+**ADRs:**
+- ADR-V2-001: Respeitado (zero tabela nova)
+- ADR-V2-043: Padrão replicado (coluna dedicada)
+- ADR-V2-XXX: A redigir Fase 7 (coluna dedicada tableFields em DProject)
+
+**Próxima Fase:**
+- Fase 4: PUT `/tasks/:id` para valores com validação por tipo + merge seguro por chave
 
 ---
 

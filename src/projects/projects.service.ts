@@ -22,6 +22,7 @@ import {
 import { DeleteProjectResponseDto } from './dto/delete-project-response.dto';
 import { fallbackSlug, slugify } from './utils/slugify';
 import { validateNoCycle } from './utils/anti-cycle.util';
+import { validateTableFields } from '../tasks/table-fields/table-fields.validator';
 
 /** idClasse de DProject no seed F1 (classes canônicas V2). Fallback legado. */
 const ID_CLASSE_PROJECT = BigInt(-153); // SCRUMBAN_PROJECT (seed classes.seed.ts)
@@ -853,6 +854,15 @@ export class ProjectsService implements OnModuleInit {
       ...(dto.icon !== undefined ? { icon: dto.icon } : {}),
     };
 
+    // Schema de colunas customizáveis da Lista (Fase 3 — Table View).
+    // Write DIRETO na coluna própria `tableFields` (NÃO merge em `dados`):
+    // o objeto é substituído por inteiro (replace). Validamos unicidade de
+    // key/order/options.id ANTES de persistir; o `version` do envelope é
+    // apenas gravado (concorrência otimista é fase futura — decisão #4).
+    if (dto.tableFields !== undefined) {
+      validateTableFields(dto.tableFields);
+    }
+
     const updated = await this.prisma.$transaction(async (tx) => {
       // Resolver valor efetivo de idPai: undefined = não toca, null = remove pai,
       // BigInt = novo pai. A validação anti-ciclo já ocorreu antes da transaction.
@@ -871,6 +881,9 @@ export class ProjectsService implements OnModuleInit {
           ...(effectiveRepoUrl !== undefined ? { repoUrl: effectiveRepoUrl } : {}),
           ...(effectiveIdPai !== undefined ? { idPai: effectiveIdPai } : {}),
           ...(dto.privado !== undefined ? { privado: dto.privado } : {}),
+          ...(dto.tableFields !== undefined
+            ? { tableFields: dto.tableFields as unknown as Prisma.InputJsonValue }
+            : {}),
           dados: novosDados as Prisma.InputJsonValue,
         },
       });

@@ -6,10 +6,13 @@ import {
   MaxLength,
   MinLength,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 import { REPO_URL_REGEX } from '../utils/repo-url';
+import { TableFieldsDto } from '../../tasks/table-fields/column-def.dto';
 
 /**
  * DTO para atualização parcial de projeto (PATCH /projects/:id).
@@ -190,4 +193,30 @@ export class UpdateProjectDto {
   @IsString()
   @MaxLength(50)
   icon?: string | null;
+
+  /**
+   * Schema de colunas customizáveis da Lista (8 tipos — Fase 3 do plano
+   * `plan-tasks-colunas-customizaveis-8-tipos-task1.md`).
+   *
+   * Persistido na coluna PRÓPRIA `DProject.tableFields` (irmã de `dados`,
+   * espelhando `DClasse.tableFields`) — NÃO dentro de `dados`. O service
+   * faz write DIRETO/replace do objeto inteiro após validar unicidade
+   * (`key`/`order`/`options.id`) via `validateTableFields()`.
+   *
+   * A validação estrutural de cada coluna é feita por `class-validator`
+   * via `@ValidateNested` + {@link TableFieldsDto}. O campo `version` do
+   * envelope é apenas persistido nesta fase — concorrência otimista é
+   * tratada em fase futura (decisão #4 do handoff).
+   *
+   * @see TableFieldsDto
+   */
+  @ApiPropertyOptional({
+    description:
+      'Schema de colunas customizáveis da Lista (envelope { version, columns[] }). Gravado na coluna DProject.tableFields.',
+    type: TableFieldsDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => TableFieldsDto)
+  tableFields?: TableFieldsDto;
 }

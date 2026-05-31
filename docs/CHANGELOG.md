@@ -11,6 +11,26 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 ---
 
 ## [Unreleased]
+
+### Added
+
+- **Validador de schema + PATCH /projects/:id para Colunas Customizáveis — Fase 3/7** (Task Colunas, V2 F5, Score 8.8/10)
+  - Classe `validateTableFields()` pura em `src/tasks/table-fields/table-fields.validator.ts` — 4 regras de unicidade e coerência
+  - Validação no DTO: `update-project.dto.ts` com `tableFields?: TableFieldsDto` (@IsOptional @ValidateNested @Type)
+  - Escrita direto na coluna `DProject.tableFields` (replace object inteiro, NÃO merge em dados)
+  - Read-validate-write: validação roda ANTES da transaction (segurança contra race condition)
+  - 4 validações implementadas:
+    * Unicidade de `key` entre colunas
+    * Unicidade de `order` entre colunas
+    * Unicidade de `options[].id` DENTRO de cada coluna (status/dropdown apenas)
+    * Coerência tipo↔config: status/dropdown exigem ao menos uma opção
+  - `version` apenas persistido (enforcement de concorrência otimista adiado Fase 7)
+  - Valores de célula (DTask.dados.fields) validação NÃO implementada (Fase 4)
+  - JSDoc completo (validador + DTO + propriedades)
+  - 9 testes unitários PASS 100% (`table-fields.validator.spec.ts`)
+  - Pilares: Pilar 1 N/A (DProject estrutural), Pilar 2 RESPEITADO (zero endpoint novo, reutiliza PATCH /projects/:id), Pilar 3 N/A (zero DClasse nova)
+  - ADRs: ADR-V2-001 (zero tabela nova), ADR-V2-043 (precedente repoUrl como coluna dedicada)
+
 - **DTOs dos 8 tipos de coluna customizável — Fase 2/7** (Task Colunas, V2 F5, Score 8.7/10)
   - Classe `ColumnOptionDto` — opção selecionável (id, label, color?)
   - Classe `ColumnConfigDto` — configuração por tipo (currency, decimals, maxLength, options[])
@@ -21,10 +41,7 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
   - Swagger completo (@ApiProperty/@ApiPropertyOptional), JSDoc 100%
   - Espelho perfeito contrato frontend (groups-store.ts) — ZERO divergência
   - Pilares: Pilar 1 N/A (estrutural), Pilar 2 N/A (DTOs sem endpoints), Pilar 3 N/A (sem DClasses)
-  - Próximas fases: 3 (PATCH /projects), 4 (PUT /tasks), 5 (leitura), 6 (testes), 7 (ADR-V2-XXX)
-
-
-### Added
+  - Próximas fases: 4 (PUT /tasks valores), 5 (leitura exposição), 6 (testes ciclo), 7 (ADR-V2-XXX)
 
 - **Coluna `DProject.tableFields Json?` — Migration Fase 1/7 colunas customizáveis** (Task Colunas, V2 F5, Score 9.2/10)
   - Migration aditiva nullable: `20260530000000_add_table_fields_dproject` (ADD COLUMN / DROP COLUMN IF EXISTS, idempotente)
