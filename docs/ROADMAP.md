@@ -62,6 +62,52 @@
 
 ---
 
+## Task-Colunas Customizáveis — Fase 1/7 (Migration + schema `DProject.tableFields`) ✅ COMPLETA
+
+**Status:** ✅ **FASE 1 COMPLETA** — Migration aditiva aprovada (Score 9.2/10)
+**Módulo V2:** seeds (schema/migration Prisma) — toca DProject (core/entidades)
+**Fase V2:** F5 (Domínio estrutural — Org/Team/Project/Sprint/Status/Task) — Roadmap-produto Fases 3-4-5 (Table View)
+**Tempo Real:** ~3h total (Strategist planning + Implementer migration ~1h + Reviewer 30m + Documenter 30m)
+**Completado em:** 2026-05-30
+**Quality Score:** 9.2/10 APPROVED (gate CEO 8.0 superado)
+
+**O Que Foi Feito (Fase 1 — Migration):**
+
+**Coluna dedicada `DProject.tableFields Json?` adicionada:**
+- `prisma/schema.prisma` (l.419): nova coluna `tableFields Json?` após `dados Json?`, com bloco de comentário documentando propósito (schema de colunas customizáveis por Lista), citando ADR-V2-001 (coluna ≠ tabela) e ADR-V2-043 (precedente `repoUrl`)
+- Espelha precedente canônico `DClasse.tableFields Json?` (l.50)
+- Convenção: camelCase sem `@map` (consistente com `dados`/`repoUrl`/`DClasse.tableFields`)
+- Migration aditiva nullable: `20260530000000_add_table_fields_dproject/migration.sql` com `ADD COLUMN IF NOT EXISTS "tableFields" JSONB`
+- Migration reversível: `down.sql` com `DROP COLUMN IF EXISTS` (idempotente)
+- Prisma Client regenerado (v5.22.0); `DProject.tableFields` type-safe no client
+- Estrutura de dados canônica: `{ version: number, columns: [{ key, type, label, order, required?, config?, builtin? }] }`
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — DProject é cadastro estrutural (Prisma direto, não Engine)
+- Pilar 2 (Endpoints): N/A nesta fase — apenas schema/migration
+- Pilar 3 (Seed): N/A — nenhuma DClasse nova; coluna é estrutura, não taxonomia
+
+**Métricas:**
+- Build: `npx prisma generate` ✅ PASS
+- TypeScript: 0 novos erros (14 pré-existentes não relacionados a tableFields)
+- ESLint: N/A nesta fase
+- Migration: Idempotente (IF NOT EXISTS), reversível (IF EXISTS), aditiva nullable (zero dados impactados)
+
+**ADRs vinculados:**
+- ADR-V2-001 (zero TABELA nova) — respeitado (é coluna, não tabela)
+- ADR-V2-043 (precedente `repoUrl` como coluna dedicada) — replicado padrão
+- ADR-V2-XXX (a redigir em Fase 7): coluna dedicada `tableFields` em DProject (escopo por lista, Opção B da decisão CEO 2026-05-30)
+
+**Fases restantes (2-7 — em desenvolvimento posterior):**
+- Fase 2: DTOs (ColumnDefDto, ColumnConfigDto, ColumnOptionDto, TableFieldsDto) — 8 tipos
+- Fase 3: PATCH `/projects/:id` para edição de schema (write direto na coluna, sem merge em `dados`)
+- Fase 4: PUT `/tasks/:id` para valores com validação por tipo (merge por chave em `DTask.dados.fields`)
+- Fase 5: Exposição em leitura (`ProjectResponseDto` + `select: { tableFields: true }`)
+- Fase 6: Testes completos (unit validador, integration ciclo, concorrência, N+1)
+- Fase 7: ADR-V2-XXX + documentação finalizada
+
+---
+
 ## Notifications Integration — Frontend (Sino + Inbox Real) ✅ COMPLETA
 
 **Status:** ✅ **COMPLETA** — Feature entregue, Reviewer APPROVED 8.5/10 pós-fixes

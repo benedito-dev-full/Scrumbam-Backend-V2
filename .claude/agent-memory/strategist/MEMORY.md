@@ -1,10 +1,11 @@
 # Strategist Agent Memory — Scrumban-Backend-V2
 
-**Versão:** 1.3
-**Última atualização:** 2026-05-20 (Plan Fases via DTask.idPai — ADR-V2-047 proposto)
+**Versão:** 1.4
+**Última atualização:** 2026-05-30 (Plan Colunas Customizáveis 8 tipos por lista — ADR-V2-XXX proposto)
 
 **Indice de topicos:**
 - [phase-hierarchy-pattern.md](phase-hierarchy-pattern.md) — Padrao de hierarquia auto-referencial via idPai em DTask para Fases/Blocos (ADR-V2-047).
+- [dados-json-merge-conventions.md](dados-json-merge-conventions.md) — Merge seletivo (DProject) vs raso (DTask) em `dados Json`; onde responses expoem; idClasses -350..-353.
 
 **Atualizar:** ao concluir cada task. Limite ~200 linhas; acima disso, mover histórico antigo para `agent-memory/strategist/<topic>.md`.
 

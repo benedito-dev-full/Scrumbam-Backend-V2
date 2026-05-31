@@ -151,6 +151,75 @@ SELECT COUNT(*) AS orfas_depois FROM "DTask" f
 
 ---
 
+## ✅ TASK COLUNAS CUSTOMIZÁVEIS — FASE 1/7 (MIGRATION DPROJECT.TABLEFIELDS) — COMPLETE
+
+**Module:** seeds (schema/migration Prisma) — toca DProject (core/entidades)
+**Task:** Coluna `DProject.tableFields Json?` para schema de colunas customizáveis por Lista
+**Status:** COMPLETO
+**Date:** 2026-05-30
+**Duration:** ~3h total (Strategist planning + Implementer migration ~1h + Reviewer 30m + Documenter 30m)
+**Quality Score:** 9.2/10 APPROVED (gate CEO 8.0 superado)
+
+**Agents Performance:**
+| Agent | Phase | Duration | Quality |
+|-------|-------|----------|---------|
+| Strategist | Planning: Análise 3 opções (schema em dados vs coluna dedicada vs endpoint novo) | — | — |
+| Implementer | Fase 1: Migration aditiva nullable + schema update | ~1h | Adicionou coluna do zero (não havia placeholder); sem @map (consistência canônica) |
+| Reviewer | Review: Schema, migration, Prisma generation | — | 9.2/10 APPROVED — decision CEO ratificada, migration idempotente |
+| Documenter | ROADMAP + CHANGELOG + STATUS + memory + commit | 30m | — |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DProject é cadastro estrutural (Prisma direto, não Engine)
+- Pilar 2 (Endpoints): N/A nesta fase — apenas schema/migration (fases 2-4 tocam endpoints)
+- Pilar 3 (Seed): N/A — nenhuma DClasse nova; coluna é estrutura schema, não taxonomia
+
+**Deliverables:**
+- [x] `prisma/schema.prisma`: coluna `tableFields Json?` adicionada em DProject (após `dados Json?`, l.419)
+- [x] `prisma/migrations/20260530000000_add_table_fields_dproject/migration.sql`: up (`ADD COLUMN IF NOT EXISTS "tableFields" JSONB`)
+- [x] `prisma/migrations/20260530000000_add_table_fields_dproject/down.sql`: down (`DROP COLUMN IF EXISTS "tableFields"`)
+- [x] `workspace/implementations/impl-seeds-tablefields-coluna-dproject-task1.md`: impl notes (decisões, divergências do plano, testes)
+- [x] Prisma Client regenerado (v5.22.0); `DProject.tableFields` type-safe no client
+
+**Architecture:**
+- **Coluna dedicada** (Opção B da decisão CEO 2026-05-30): espelha precedente canônico `DClasse.tableFields`
+- **Escopo:** por lista (DProject, idClasse -352 LIST) — não global como DClasse.tableFields
+- **Convenção:** camelCase sem `@map` (consistência com `dados`/`repoUrl`/`DClasse.tableFields`)
+- **Estrutura JSON:** `{ version: number, columns: [{ key, type, label, order, required?, config?, builtin? }] }`
+- **Valores de célula:** permanecem em `DTask.dados.fields` (inalterado)
+- **Write:** direto na coluna (sem merge em `dados`), isolado de `prefix`/`slug`/deploy-keys
+- **Migration:** aditiva nullable, idempotente (IF NOT EXISTS), reversível
+
+**Metrics:**
+- Build: `npx prisma generate` ✅ PASS
+- TypeScript: 0 novos erros (14 pré-existentes não relacionados)
+- ESLint: N/A nesta fase (schema-only)
+- Migration: Idempotente, reversível, aditiva nullable
+- Queries: N/A nesta fase (coluna ainda sem callers — implementado nas fases 2-4)
+
+**Quality Gate:**
+- APPROVED 9.2/10 (gate CEO 8.0 superado)
+
+**ADRs:**
+- ADR-V2-001: Respeitado (coluna ≠ tabela)
+- ADR-V2-043: Precedente `repoUrl` como coluna dedicada (padrão replicado)
+- ADR-V2-XXX (a redigir): Formal da coluna dedicada `tableFields` em DProject (Fase 7)
+
+**Próximas Fases (2-7):**
+- **Fase 2:** DTOs (ColumnDefDto, ColumnConfigDto, ColumnOptionDto, TableFieldsDto) para os 8 tipos
+- **Fase 3:** PATCH `/projects/:id` para edição de schema (write direto na coluna tableFields)
+- **Fase 4:** PUT `/tasks/:id` para valores com validação por tipo (merge por chave em DTask.dados.fields)
+- **Fase 5:** Exposição em leitura (ProjectResponseDto + select: { tableFields: true })
+- **Fase 6:** Testes completos (unit validador 8 tipos, integration ciclo, concorrência version otimista, N+1)
+- **Fase 7:** ADR-V2-XXX formalização + documentação finalizada
+
+**Decisões Ratificadas:**
+1. **Coluna dedicada vs JSON-dentro-de-JSON:** CEO escolheu coluna dedicada (Opção B) — segue padrão canônico, isola schema de dados, evita lost-update cruzado
+2. **Write endpoint:** PATCH /projects/:id estendido (reuso, sem endpoint novo)
+3. **Read:** GET /projects/:id retorna tableFields; GET /tasks retorna dados.fields
+4. **Valores não-conhecidos no PUT /tasks:** ignorar silenciosamente + logar debug (robusto a corrida)
+
+---
+
 ## ✅ TASK E1 — PREFERENCIAS DE USUARIO EM DENTIDADE.DADOS.PREFERENCES — COMPLETE
 
 **Module:** auth (backend Scrumban-Backend-V2)

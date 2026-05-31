@@ -12,6 +12,19 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Added
+
+- **Coluna `DProject.tableFields Json?` — Migration Fase 1/7 colunas customizáveis** (Task Colunas, V2 F5, Score 9.2/10)
+  - Migration aditiva nullable: `20260530000000_add_table_fields_dproject` (ADD COLUMN / DROP COLUMN IF EXISTS, idempotente)
+  - Escopo: por lista (DProject, idClasse -352 LIST)
+  - Estrutura: `{ version: 1, columns: [{ key, type, label, order, required?, config? }] }`
+  - 8 tipos de coluna (text, number, date, person, status, checkbox, dropdown, link) — suporte em Fase 2+
+  - Precedente canônico: `DClasse.tableFields Json?` (escopo global); esta feature replica padrão para escopo por instância
+  - Convenção: camelCase sem `@map` (segue DProject.dados, DProject.repoUrl, DClasse.tableFields)
+  - **Próximas fases:** DTOs validadores (F2), PATCH /projects/:id + PUT /tasks (F3-F4), exposição leitura (F5), testes (F6), ADR-V2-XXX (F7)
+  - Pilares: Pilar 1 N/A (estrutural), Pilar 2 N/A (schema-only), Pilar 3 N/A (zero DClasse)
+  - ADRs: ADR-V2-001 (coluna ≠ tabela), ADR-V2-043 (precedente repoUrl)
+
 ### Fixed
 
 - **Cascade soft-delete de TASKs normais** (Task 1, V2 pós-F5/F8, Score 8.8/10)

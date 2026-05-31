@@ -410,6 +410,14 @@ model DProject {
   // Json polimórfico — git deploy keys, automation config, etc.
   dados Json?
 
+  // Schema de colunas customizáveis por Lista (8 tipos) — espelha
+  // DClasse.tableFields (template canônico). Objeto { version, columns[] }.
+  // Escopo por instância (Lista, idClasse=-352); valores de célula moram
+  // em DTask.dados.fields. Coluna dedicada (não dentro de `dados`) p/ isolar
+  // o schema de slug/prefix/deploy-keys. ADR-V2-001 (coluna ≠ tabela) +
+  // precedente ADR-V2-043 (repoUrl como coluna de primeira-classe).
+  tableFields Json?
+
   // ADR-V2-051: hierarquia self-referencial Space→Folder→List
   idPai   BigInt?  // FK para DProject pai (NULL = raiz/Space)
   privado Boolean  @default(false) // Space privado = acesso via DVincula -188
