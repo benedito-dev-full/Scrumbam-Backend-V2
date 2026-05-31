@@ -33,7 +33,7 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
     * Unicidade de `order` entre colunas
     * Unicidade de `options[].id` DENTRO de cada coluna (status/dropdown apenas)
     * Coerência tipo↔config: status/dropdown exigem ao menos uma opção
-  - `version` apenas persistido (enforcement de concorrência otimista adiado Fase 7)
+  - `version` apenas persistido (enforcement de concorrencia otimista adiado para fase futura; Fase 7 desta entrega foi ADR/docs)
   - Valores de célula (DTask.dados.fields) validação NÃO implementada (Fase 4)
   - JSDoc completo (validador + DTO + propriedades)
   - 9 testes unitários PASS 100% (`table-fields.validator.spec.ts`)

@@ -10,7 +10,7 @@
 **Task:** Valores de celulas customizaveis, leitura de `tableFields`, testes e ADR
 **Status:** COMPLETA (Fases 4, 5, 6 e 7 de 7)
 **Date:** 2026-05-31
-**Quality:** Implementacao validada localmente; review formal pendente se o fluxo multi-agent exigir
+**Quality:** Implementacao validada localmente; reviews independentes retroativos executados por fase
 
 **Pilares:**
 - Pilar 1 (Engine): N/A — DProject/DTask sao cadastros estruturais (Prisma direto)
@@ -42,6 +42,7 @@
 - `3cb888a` — Fase 4 valores + merge seguro
 - `9ee09c7` — Fase 5 leitura de `tableFields`
 - `82bf758` — Fase 6 testes
+- `735b59e` — Fase 7 ADR + docs
 
 **ADRs:** ADR-V2-001, ADR-V2-034, ADR-V2-043, ADR-V2-055
 
@@ -89,8 +90,8 @@
 - ADR-V2-043: Padrão replicado (coluna dedicada)
 - ADR-V2-055: coluna dedicada tableFields em DProject
 
-**Próxima Fase:**
-- Fase 4: PUT `/tasks/:id` para valores com validação por tipo + merge seguro por chave
+**Encadeamento:**
+- Fase 4 concluida em `3cb888a`; historico completo no bloco Fases 4-7 acima
 
 ---
 
@@ -294,12 +295,12 @@ SELECT COUNT(*) AS orfas_depois FROM "DTask" f
 - ADR-V2-043: Precedente `repoUrl` como coluna dedicada (padrão replicado)
 - ADR-V2-055: Formal da coluna dedicada `tableFields` em DProject
 
-**Próximas Fases (2-7):**
+**Historico Fases (2-7):**
 - **Fase 2:** DTOs (ColumnDefDto, ColumnConfigDto, ColumnOptionDto, TableFieldsDto) para os 8 tipos
 - **Fase 3:** PATCH `/projects/:id` para edição de schema (write direto na coluna tableFields)
 - **Fase 4:** PUT `/tasks/:id` para valores com validação por tipo (merge por chave em DTask.dados.fields)
 - **Fase 5:** Exposição em leitura (ProjectResponseDto + select: { tableFields: true })
-- **Fase 6:** Testes completos (unit validador 8 tipos, integration ciclo, concorrência version otimista, N+1)
+- **Fase 6:** Testes completos do validador de valores e merge seguro em `TasksService.update()`
 - **Fase 7:** ADR-V2-055 formalizacao + documentacao finalizada
 
 **Decisões Ratificadas:**
@@ -369,11 +370,11 @@ SELECT COUNT(*) AS orfas_depois FROM "DTask" f
 - ADR-V2-001: Respeitado (DTOs são contrato, não tabela)
 - ADR-V2-043: Padrão coluna dedicada replicado na estrutura
 
-**Próximas Fases (3-7):**
+**Historico Fases (3-7):**
 - **Fase 3:** PATCH `/projects/:id` — editar schema (write na coluna tableFields)
 - **Fase 4:** PUT `/tasks/:id` — valores com validação por tipo (merge DTask.dados.fields)
 - **Fase 5:** Exposição leitura (ProjectResponseDto + select: { tableFields: true })
-- **Fase 6:** Testes completos (unit validador 8 tipos, integration ciclo, concorrência, N+1)
+- **Fase 6:** Testes completos do validador de valores e merge seguro em `TasksService.update()`
 - **Fase 7:** ADR-V2-055 + documentacao finalizada
 
 ---

@@ -163,7 +163,7 @@
   2. Unicidade de `order` entre colunas (BadRequestException se duplicada)
   3. Unicidade de `options[].id` DENTRO de cada coluna tipo status/dropdown (ids iguais em colunas diferentes são permitidos)
   4. Coerência tipo↔config: status/dropdown exigem `options` não-vazio (BadRequestException caso contrário)
-- `version` apenas PERSISTIDO, sem enforcement (enforcement de concorrência otimista é Fase 7)
+- `version` apenas PERSISTIDO, sem enforcement (enforcement de concorrencia otimista fica para fase futura; Fase 7 desta entrega foi ADR/docs)
 - Validação de VALORES de célula (DTask.dados.fields) NÃO implementada (Fase 4)
 - JSDoc completo com exemplos de cada exceção
 
