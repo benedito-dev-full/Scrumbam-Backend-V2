@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { TableFieldsDto } from '../../tasks/table-fields/column-def.dto';
 
 /**
  * DTO de resposta de projeto.
@@ -118,6 +119,20 @@ export class ProjectResponseDto {
 
   @ApiPropertyOptional({ description: 'Ícone do espaço (emoji ou slug). Lido de dados.icon.', example: '🚀', nullable: true })
   icon?: string | null;
+
+  /**
+   * Schema versionado das colunas customizaveis da Lista.
+   *
+   * Lido da coluna dedicada `DProject.tableFields`, nao de `dados`. Para
+   * projetos sem schema ou para tipos que nao sejam Lista, retorna `null`.
+   */
+  @ApiPropertyOptional({
+    description:
+      'Schema versionado das colunas customizaveis da Lista, lido de DProject.tableFields.',
+    type: () => TableFieldsDto,
+    nullable: true,
+  })
+  tableFields!: TableFieldsDto | null;
 
   @ApiProperty({ description: 'Data de criação ISO 8601', example: '2026-05-09T00:00:00.000Z' })
   criadoEm!: string;

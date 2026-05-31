@@ -67,6 +67,22 @@ const ID_CLASSE_ORG_VIEWER = BigInt(-163);
 /** Todos os roles de org — qualquer um deles qualifica o usuário como membro. */
 const ORG_ROLE_CLASSES = [ID_CLASSE_ORG_ADMIN, ID_CLASSE_ORG_MEMBER, ID_CLASSE_ORG_VIEWER];
 
+/** Campos de DProject necessarios para montar ProjectResponseDto. */
+const PROJECT_RESPONSE_SELECT = {
+  chave: true,
+  idClasse: true,
+  idPai: true,
+  nome: true,
+  descricao: true,
+  idEstab: true,
+  dados: true,
+  repoUrl: true,
+  privado: true,
+  tableFields: true,
+  criadoEm: true,
+  atualizadoEm: true,
+} satisfies Prisma.DProjectSelect;
+
 /**
  * Opções para `findMany()`.
  *
@@ -278,6 +294,7 @@ export class ProjectsService implements OnModuleInit {
           ...(dto.privado !== undefined ? { privado: dto.privado } : {}),
           dados: dadosPayload as Prisma.InputJsonValue,
         },
+        select: PROJECT_RESPONSE_SELECT,
       });
 
       // 2. DVincula -171 (MANAGER): criador é MANAGER
@@ -523,6 +540,7 @@ export class ProjectsService implements OnModuleInit {
           ...(privado !== undefined ? { privado } : {}),
         },
         orderBy: { chave: 'desc' },
+        select: PROJECT_RESPONSE_SELECT,
       }),
       this.prisma.dVincula.groupBy({
         by: ['idLocEscritu'],
@@ -661,6 +679,7 @@ export class ProjectsService implements OnModuleInit {
     const [project, vinculo, teamLink, folderLink] = await Promise.all([
       this.prisma.dProject.findFirst({
         where: { chave: projectId, excluido: false },
+        select: PROJECT_RESPONSE_SELECT,
       }),
       this.prisma.dVincula.findFirst({
         where: {
@@ -886,6 +905,7 @@ export class ProjectsService implements OnModuleInit {
             : {}),
           dados: novosDados as Prisma.InputJsonValue,
         },
+        select: PROJECT_RESPONSE_SELECT,
       });
 
       if (teamIdProvided) {
@@ -1522,6 +1542,7 @@ export class ProjectsService implements OnModuleInit {
       dados?: unknown;
       repoUrl?: string | null;
       privado?: boolean;
+      tableFields?: unknown;
       criadoEm: Date;
       atualizadoEm: Date;
     },
@@ -1544,6 +1565,7 @@ export class ProjectsService implements OnModuleInit {
       privado: project.privado ?? false,
       color: (dados?.color as string | null) ?? null,
       icon: (dados?.icon as string | null) ?? null,
+      tableFields: (project.tableFields as ProjectResponseDto['tableFields'] | undefined) ?? null,
       teamId,
       folderId,
       criadoEm: project.criadoEm.toISOString(),
