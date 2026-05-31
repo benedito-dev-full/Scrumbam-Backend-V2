@@ -96,7 +96,7 @@
 **ADRs vinculados:**
 - ADR-V2-001 (zero TABELA nova) — respeitado (é coluna, não tabela)
 - ADR-V2-043 (precedente `repoUrl` como coluna dedicada) — replicado padrão
-- ADR-V2-XXX (a redigir em Fase 7): coluna dedicada `tableFields` em DProject (escopo por lista, Opção B da decisão CEO 2026-05-30)
+- ADR-V2-055: coluna dedicada `tableFields` em DProject (escopo por lista, Opção B da decisão CEO 2026-05-30)
 
 ### Fase 2: DTOs dos 8 Tipos — ✅ COMPLETA
 
@@ -212,13 +212,41 @@
 **ADRs vinculados:**
 - ADR-V2-001 (zero TABELA nova) — respeitado
 - ADR-V2-043 (precedente repoUrl como coluna dedicada) — padrão replicado
-- ADR-V2-XXX (a redigir Fase 7): coluna dedicada `tableFields` em DProject
+- ADR-V2-055: coluna dedicada `tableFields` em DProject
 
-**Fases restantes (4-7):**
-- Fase 4: PUT `/tasks/:id` para valores com validação por tipo + merge seguro por chave em DTask.dados.fields
-- Fase 5: Exposição em leitura (ProjectResponseDto + select: { tableFields: true })
-- Fase 6: Testes completos (unit validador 8 tipos, integration ciclo, concorrência, N+1)
-- Fase 7: ADR-V2-XXX + documentação finalizada
+### Fases 4-7: Valores, leitura, testes e ADR — ✅ COMPLETAS
+
+**Status:** ✅ **FASES 4-7 COMPLETAS** — Backend pronto para integracao da Table View real
+**Completado em:** 2026-05-31
+
+**O Que Foi Feito (Fases 4-7):**
+
+- Fase 4: `PUT /tasks/:id` valida `dados.fields` contra `DProject.tableFields` e faz merge por chave em `DTask.dados.fields`, preservando celulas existentes.
+- Fase 5: `ProjectResponseDto` e `ProjectsService.buildResponse()` expoem `tableFields`; selects de resposta incluem a coluna dedicada.
+- Fase 6: testes adicionados para os 8 tipos de valor e para merge seguro no `TasksService.update()`.
+- Fase 7: ADR formal criado em `docs/decisions/ADR-V2-055-tablefields-coluna-dproject.md`.
+
+**Regras fechadas:**
+
+- Schema das colunas: `DProject.tableFields` (coluna propria, escopo por Lista).
+- Valores das celulas: `DTask.dados.fields`.
+- Chave desconhecida em `dados.fields`: ignorada, nao persiste.
+- `null` em chave conhecida: limpa a celula opcional.
+- Valor invalido por tipo: `BadRequestException` antes do update.
+- `version`: persistido sem enforcement de concorrencia nesta entrega.
+
+**Validacao local:**
+
+- `npx tsc --noEmit`: 0 erros novos; baseline local segue com 14 erros pre-existentes nao relacionados.
+- `npx jest src/tasks/table-fields/field-value.validator.spec.ts --runInBand`: 14/14 PASS.
+- `npx jest src/tasks/__tests__/tasks.service.custom-fields.spec.ts --runInBand`: 4/4 PASS.
+
+**ADRs vinculados:**
+
+- ADR-V2-001 (zero tabela nova)
+- ADR-V2-034 (precedente de lookups por projeto; options custom inline no MVP)
+- ADR-V2-043 (precedente `repoUrl` como coluna dedicada)
+- ADR-V2-055 (`tableFields` como coluna em `DProject`)
 
 ---
 

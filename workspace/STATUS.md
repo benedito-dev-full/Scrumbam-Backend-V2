@@ -1,6 +1,49 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-30 (Task-Colunas Fase 3 COMPLETA — Score 8.8/10)
+**Ultima atualizacao:** 2026-05-31 (Task-Colunas Fases 4-7 COMPLETAS)
+
+---
+
+## ✅ TASK-COLUNAS CUSTOMIZAVEIS — FASES 4-7 (V2 F5) — COMPLETE
+
+**Module:** tasks, projects, docs
+**Task:** Valores de celulas customizaveis, leitura de `tableFields`, testes e ADR
+**Status:** COMPLETA (Fases 4, 5, 6 e 7 de 7)
+**Date:** 2026-05-31
+**Quality:** Implementacao validada localmente; review formal pendente se o fluxo multi-agent exigir
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DProject/DTask sao cadastros estruturais (Prisma direto)
+- Pilar 2 (Endpoints): RESPEITADO — reutiliza `PATCH /projects/:id` e `PUT /tasks/:id`, zero endpoint novo
+- Pilar 3 (Seed): PRESERVADO — zero DClasse nova
+
+**Deliverables:**
+- [x] Fase 4: `field-value.validator.ts` valida os 8 tipos e `TasksService.update()` faz merge por chave em `DTask.dados.fields`
+- [x] Fase 5: `ProjectResponseDto` expõe `tableFields`; `ProjectsService` inclui a coluna nos selects de resposta
+- [x] Fase 6: specs novos para validador e merge de `dados.fields`
+- [x] Fase 7: ADR `docs/decisions/ADR-V2-055-tablefields-coluna-dproject.md`
+- [x] Docs: ROADMAP, CHANGELOG e STATUS atualizados
+
+**Regras canônicas fechadas:**
+- Schema por Lista: `DProject.tableFields`
+- Valores por task: `DTask.dados.fields`
+- Chave desconhecida no PUT: ignorada e nao persistida
+- `null`: limpa celula opcional
+- Valor invalido: `BadRequestException`
+- `version`: persistido, sem enforcement nesta entrega
+
+**Validacao local:**
+- `npx tsc --noEmit`: apenas baseline conhecido de 14 erros pre-existentes
+- `npx jest src/tasks/table-fields/field-value.validator.spec.ts --runInBand`: 14/14 PASS
+- `npx jest src/tasks/__tests__/tasks.service.custom-fields.spec.ts --runInBand`: 4/4 PASS
+- Observacao: specs monoliticos `tasks.service.spec.ts` e `projects.service.spec.ts` possuem falhas pre-existentes/fora do escopo em state machine e paginacao/cursor
+
+**Commits:**
+- `3cb888a` — Fase 4 valores + merge seguro
+- `9ee09c7` — Fase 5 leitura de `tableFields`
+- `82bf758` — Fase 6 testes
+
+**ADRs:** ADR-V2-001, ADR-V2-034, ADR-V2-043, ADR-V2-055
 
 ---
 
@@ -44,7 +87,7 @@
 **ADRs:**
 - ADR-V2-001: Respeitado (zero tabela nova)
 - ADR-V2-043: Padrão replicado (coluna dedicada)
-- ADR-V2-XXX: A redigir Fase 7 (coluna dedicada tableFields em DProject)
+- ADR-V2-055: coluna dedicada tableFields em DProject
 
 **Próxima Fase:**
 - Fase 4: PUT `/tasks/:id` para valores com validação por tipo + merge seguro por chave
@@ -249,7 +292,7 @@ SELECT COUNT(*) AS orfas_depois FROM "DTask" f
 **ADRs:**
 - ADR-V2-001: Respeitado (coluna ≠ tabela)
 - ADR-V2-043: Precedente `repoUrl` como coluna dedicada (padrão replicado)
-- ADR-V2-XXX (a redigir): Formal da coluna dedicada `tableFields` em DProject (Fase 7)
+- ADR-V2-055: Formal da coluna dedicada `tableFields` em DProject
 
 **Próximas Fases (2-7):**
 - **Fase 2:** DTOs (ColumnDefDto, ColumnConfigDto, ColumnOptionDto, TableFieldsDto) para os 8 tipos
@@ -257,7 +300,7 @@ SELECT COUNT(*) AS orfas_depois FROM "DTask" f
 - **Fase 4:** PUT `/tasks/:id` para valores com validação por tipo (merge por chave em DTask.dados.fields)
 - **Fase 5:** Exposição em leitura (ProjectResponseDto + select: { tableFields: true })
 - **Fase 6:** Testes completos (unit validador 8 tipos, integration ciclo, concorrência version otimista, N+1)
-- **Fase 7:** ADR-V2-XXX formalização + documentação finalizada
+- **Fase 7:** ADR-V2-055 formalizacao + documentacao finalizada
 
 **Decisões Ratificadas:**
 1. **Coluna dedicada vs JSON-dentro-de-JSON:** CEO escolheu coluna dedicada (Opção B) — segue padrão canônico, isola schema de dados, evita lost-update cruzado
@@ -331,7 +374,7 @@ SELECT COUNT(*) AS orfas_depois FROM "DTask" f
 - **Fase 4:** PUT `/tasks/:id` — valores com validação por tipo (merge DTask.dados.fields)
 - **Fase 5:** Exposição leitura (ProjectResponseDto + select: { tableFields: true })
 - **Fase 6:** Testes completos (unit validador 8 tipos, integration ciclo, concorrência, N+1)
-- **Fase 7:** ADR-V2-XXX + documentação finalizada
+- **Fase 7:** ADR-V2-055 + documentacao finalizada
 
 ---
 

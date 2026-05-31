@@ -14,6 +14,15 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Colunas Customizaveis - Fases 4-7/7 completas** (Task Colunas, V2 F5, 2026-05-31)
+  - `PUT /tasks/:id` agora valida `dados.fields` contra o schema da Lista em `DProject.tableFields` antes de persistir.
+  - Merge seguro por chave em `DTask.dados.fields`: celulas existentes sao preservadas; `null` limpa celula opcional; chave desconhecida e ignorada e nao persiste.
+  - Validador puro `field-value.validator.ts` cobre os 8 tipos: text, number, date, person, status, checkbox, dropdown, link.
+  - `ProjectResponseDto` e `ProjectsService.buildResponse()` expoem `tableFields`; selects de resposta incluem a coluna dedicada.
+  - Testes adicionados: `field-value.validator.spec.ts` (14 specs) e `tasks.service.custom-fields.spec.ts` (4 specs).
+  - ADR criado: `docs/decisions/ADR-V2-055-tablefields-coluna-dproject.md`.
+  - Pilares: Pilar 1 N/A (DProject/DTask estruturais), Pilar 2 respeitado (reuso de PATCH /projects e PUT /tasks), Pilar 3 preservado (zero DClasse nova).
+
 - **Validador de schema + PATCH /projects/:id para Colunas Customizáveis — Fase 3/7** (Task Colunas, V2 F5, Score 8.8/10)
   - Classe `validateTableFields()` pura em `src/tasks/table-fields/table-fields.validator.ts` — 4 regras de unicidade e coerência
   - Validação no DTO: `update-project.dto.ts` com `tableFields?: TableFieldsDto` (@IsOptional @ValidateNested @Type)
@@ -41,7 +50,7 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
   - Swagger completo (@ApiProperty/@ApiPropertyOptional), JSDoc 100%
   - Espelho perfeito contrato frontend (groups-store.ts) — ZERO divergência
   - Pilares: Pilar 1 N/A (estrutural), Pilar 2 N/A (DTOs sem endpoints), Pilar 3 N/A (sem DClasses)
-  - Próximas fases: 4 (PUT /tasks valores), 5 (leitura exposição), 6 (testes ciclo), 7 (ADR-V2-XXX)
+  - Fases 4-7 concluídas em 2026-05-31; ADR formal: ADR-V2-055
 
 - **Coluna `DProject.tableFields Json?` — Migration Fase 1/7 colunas customizáveis** (Task Colunas, V2 F5, Score 9.2/10)
   - Migration aditiva nullable: `20260530000000_add_table_fields_dproject` (ADD COLUMN / DROP COLUMN IF EXISTS, idempotente)
@@ -50,7 +59,7 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
   - 8 tipos de coluna (text, number, date, person, status, checkbox, dropdown, link) — suporte em Fase 2+
   - Precedente canônico: `DClasse.tableFields Json?` (escopo global); esta feature replica padrão para escopo por instância
   - Convenção: camelCase sem `@map` (segue DProject.dados, DProject.repoUrl, DClasse.tableFields)
-  - **Próximas fases:** DTOs validadores (F2), PATCH /projects/:id + PUT /tasks (F3-F4), exposição leitura (F5), testes (F6), ADR-V2-XXX (F7)
+  - **Fases posteriores:** F2-F7 concluídas; ADR formal: ADR-V2-055
   - Pilares: Pilar 1 N/A (estrutural), Pilar 2 N/A (schema-only), Pilar 3 N/A (zero DClasse)
   - ADRs: ADR-V2-001 (coluna ≠ tabela), ADR-V2-043 (precedente repoUrl)
 
