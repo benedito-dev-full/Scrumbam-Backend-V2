@@ -4966,6 +4966,64 @@ Plano `workspace/plans/plan-orphan-workspace.md`. Ciclo completo Strategist → 
 
 ---
 
+## Task — Colunas Customizáveis — Fase 6 COMPLETADA (V2 F5)
+
+**Task:** Colunas Customizáveis
+**Module:** tasks (TasksService custom-fields)
+**Status:** COMPLETO — Pós-auditoria (2 testes adicionais)
+**Duration:** ~1h (Implementer teste + Documenter doc)
+**Quality Score:** N/A (testes apenas — comportamento já validado)
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | — |
+| Implementer | ~0.5h | — (testes) |
+| Reviewer | ~1h | 8.75/10 médio (4 Reviewers, Fases 4-7) |
+| Documenter | ~0.5h | — |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A (DTask estrutural)
+- Pilar 2 (Endpoints): Reutilizado PUT /tasks/:id existente
+- Pilar 3 (Seed): Zero DClasse nova
+
+**Deliverables:**
+- [x] Test: `rejeita null em coluna required antes de persistir update` (linha 215-230)
+- [x] Test: `rejeita dados.fields em task sem projeto (idProject null)` (linha 232-240)
+- [x] ROADMAP.md atualizado (Fase 6 specs)
+- [x] CHANGELOG.md atualizado (entry 2 testes)
+- [x] STATUS.md seção adicionada
+- [x] Git commit com Conventional Commits
+
+**Metrics:**
+- Build: PASS (npm run build)
+- TypeScript: 0 errors novos (14 pré-existentes baseline)
+- Tests: 6/6 PASS (4 originais Fase 4 + 2 pós-auditoria)
+- N+1 Queries: ZERO (mesma query base + validação acrescida)
+- Conformidade: 100% (auditoria 4 Reviewers — média 8.75/10, todas APPROVED)
+
+**Contexto:**
+Pós-auditoria por 4 Reviewers independentes (Fases 4-7, todas APPROVED, média 8.75/10), Reviewer da Fase 6 apontou 2 lacunas de TESTE (não bugs). Implementer adicionou os 2 testes faltantes. O comportamento do código já existia; cobertura foi completada.
+
+**Validações Pós-Teste:**
+- `npx jest src/tasks/__tests__/tasks.service.custom-fields.spec.ts --runInBand` = 6/6 PASS
+- `npx tsc --noEmit` = 0 novos erros
+- Build local = PASS
+
+**ADRs:**
+- ADR-V2-001 (zero tabela nova)
+- ADR-V2-043 (precedente repoUrl)
+- ADR-V2-055 (tableFields em DProject)
+
+**Notas:**
+Testes adicionais confirmam regras de validação do TasksService.update():
+1. Coluna com `required: true` não aceita `null` (BadRequestException)
+2. Task sem `idProject` (null) não aceita `dados.fields` (BadRequestException)
+
+Ambos comportamentos já estavam no código; testes documentam o contrato.
+
+---
+
 <!-- dedup:implementer:unknown -->
 ### Agent Concluído: implementer
 

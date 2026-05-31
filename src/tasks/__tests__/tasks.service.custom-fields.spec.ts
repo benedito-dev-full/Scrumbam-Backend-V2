@@ -211,4 +211,31 @@ describe('TasksService custom fields update', () => {
 
     expect(prisma.dTask.update).not.toHaveBeenCalled();
   });
+
+  it('rejeita null em coluna required antes de persistir update', async () => {
+    prisma.dTask.findFirst.mockResolvedValue(
+      makeTask({ dados: { identifier: 'DEV-7', v3: { state: 'INBOX' }, fields: {} } }),
+    );
+    prisma.dProject.findFirst.mockResolvedValue({
+      tableFields: tableFields([
+        { key: 'f_req', type: 'text', label: 'Obrigatorio', order: 0, required: true },
+      ]),
+    });
+
+    await expect(
+      service.update('7', { dados: { fields: { f_req: null } } }),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(prisma.dTask.update).not.toHaveBeenCalled();
+  });
+
+  it('rejeita dados.fields em task sem projeto (idProject null)', async () => {
+    prisma.dTask.findFirst.mockResolvedValue(makeTask({ idProject: null }));
+
+    await expect(
+      service.update('7', { dados: { fields: { f_text: 'x' } } }),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(prisma.dTask.update).not.toHaveBeenCalled();
+  });
 });

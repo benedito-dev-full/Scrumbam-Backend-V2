@@ -14,12 +14,13 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
-- **Colunas Customizaveis - Fases 4-7/7 completas** (Task Colunas, V2 F5, 2026-05-31)
+- **Colunas Customizaveis - Fases 4-7/7 completas + 2 testes pós-auditoria** (Task Colunas, V2 F5, 2026-05-31)
   - `PUT /tasks/:id` agora valida `dados.fields` contra o schema da Lista em `DProject.tableFields` antes de persistir.
   - Merge seguro por chave em `DTask.dados.fields`: celulas existentes sao preservadas; `null` limpa celula opcional; chave desconhecida e ignorada e nao persiste.
   - Validador puro `field-value.validator.ts` cobre os 8 tipos: text, number, date, person, status, checkbox, dropdown, link.
   - `ProjectResponseDto` e `ProjectsService.buildResponse()` expoem `tableFields`; selects de resposta incluem a coluna dedicada.
-  - Testes adicionados: `field-value.validator.spec.ts` (14 specs) e `tasks.service.custom-fields.spec.ts` (4 specs).
+  - Testes adicionados: `field-value.validator.spec.ts` (14 specs) e `tasks.service.custom-fields.spec.ts` (6 specs — 4 originais + 2 pós-auditoria).
+  - 2 testes adicionais (pós-auditoria dos 4 Reviewers, média 8.75/10): cenário required+null rejeita antes de persistir (400), cenário task sem projeto rejeita dados.fields (400).
   - ADR criado: `docs/decisions/ADR-V2-055-tablefields-coluna-dproject.md`.
   - Pilares: Pilar 1 N/A (DProject/DTask estruturais), Pilar 2 respeitado (reuso de PATCH /projects e PUT /tasks), Pilar 3 preservado (zero DClasse nova).
 
