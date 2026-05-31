@@ -220,6 +220,74 @@ SELECT COUNT(*) AS orfas_depois FROM "DTask" f
 
 ---
 
+## ✅ TASK COLUNAS CUSTOMIZÁVEIS — FASE 2/7 (DTOS VALIDADORES) — COMPLETE
+
+**Module:** tasks (table-fields DTOs)
+**Task:** DTOs dos 8 tipos de coluna customizável com validação aninhada e Swagger completo
+**Status:** COMPLETO
+**Date:** 2026-05-30
+**Duration:** ~2h total (Implementer DTOs + JSDoc ~1.5h + Reviewer 30m)
+**Quality Score:** 8.7/10 APPROVED (gate CEO 8.0)
+
+**Agents Performance:**
+| Agent | Phase | Duration | Quality |
+|-------|-------|----------|---------|
+| Implementer | Fase 2: 5 classes DTO + validação 3 níveis + JSDoc | ~1.5h | Validação aninhada completa, espelho perfeito frontend |
+| Reviewer | Review: Validação, Swagger, coerência frontend | — | 8.7/10 APPROVED — DTOs bem-estruturados, 4 fixes aplicados (M1/L1/L2/L3) |
+| Documenter | ROADMAP + CHANGELOG + STATUS + memory + commit | 30m | — |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DTOs estruturais, sem transação
+- Pilar 2 (Endpoints): N/A nesta fase — endpoints vêm Fases 3-4 (PATCH /projects, PUT /tasks)
+- Pilar 3 (Seed): N/A — DTOs são type-safe, sem DClasses novas
+
+**Deliverables:**
+- [x] `src/tasks/table-fields/column-def.dto.ts` (~394 linhas):
+  - `ColumnOptionDto` (id, label, color?) com @IsHexColor
+  - `ColumnConfigDto` (currency?, decimals?, maxLength?, options[]) com @ValidateNested
+  - `ColumnDefDto` (key regex, type, label, order, required?, config?, builtin?) com 2 níveis de @ValidateNested
+  - `TableFieldsDto` (version, columns[]) com @ValidateNested({ each: true })
+  - `ColumnType` type + `COLUMN_TYPES` const (8 tipos: text, number, date, person, status, checkbox, dropdown, link)
+  - `ColumnCurrency` type + `COLUMN_CURRENCIES` const (BRL, USD)
+- [x] Validação aninhada em 3 níveis:
+  - TableFieldsDto → ColumnDefDto[] via @ValidateNested({ each: true })
+  - ColumnDefDto → ColumnConfigDto via @ValidateNested + @Type
+  - ColumnConfigDto → ColumnOptionDto[] via @ValidateNested({ each: true })
+- [x] JSDoc 100% + Swagger completo:
+  - DevariJS templates aplicados (devari-jsdoc-templates.md)
+  - @ApiProperty/@ApiPropertyOptional em todos campos
+  - Descrições, exemplos, constraints documentados
+- [x] `workspace/implementations/impl-tasks-tablefields-dtos-fase2-task1.md`: impl notes
+
+**Architecture:**
+- **DTOs como contrato:** estrutura exata de `groups-store.ts` (Scrumbam-Frontend-V2)
+- **Validação por tipo:** class-validator decorators em cada nível (type, range, enum, regex)
+- **Coerência frontend:** ZERO divergência — backend e frontend compartilham schema de verdade
+- **Fonte única:** COLUMN_TYPES e COLUMN_CURRENCIES como const readonly (DRY)
+- **Scope de validação:** APENAS formato nesta fase; coerência type↔config fica Fase 3
+
+**Metrics:**
+- Build: TypeScript 0 erros novos (14 pré-existentes mantidos baseline)
+- Validação: class-validator decorators aplicados, Swagger completo
+- Manual: DTOs instanciáveis, NestJS ValidationPipe reconhece decoradores
+- Performance: N/A (DTOs são schemas, sem queries)
+
+**Quality Gate:**
+- APPROVED 8.7/10 (gate CEO 8.0 superado)
+
+**ADRs:**
+- ADR-V2-001: Respeitado (DTOs são contrato, não tabela)
+- ADR-V2-043: Padrão coluna dedicada replicado na estrutura
+
+**Próximas Fases (3-7):**
+- **Fase 3:** PATCH `/projects/:id` — editar schema (write na coluna tableFields)
+- **Fase 4:** PUT `/tasks/:id` — valores com validação por tipo (merge DTask.dados.fields)
+- **Fase 5:** Exposição leitura (ProjectResponseDto + select: { tableFields: true })
+- **Fase 6:** Testes completos (unit validador 8 tipos, integration ciclo, concorrência, N+1)
+- **Fase 7:** ADR-V2-XXX + documentação finalizada
+
+---
+
 ## ✅ TASK E1 — PREFERENCIAS DE USUARIO EM DENTIDADE.DADOS.PREFERENCES — COMPLETE
 
 **Module:** auth (backend Scrumban-Backend-V2)

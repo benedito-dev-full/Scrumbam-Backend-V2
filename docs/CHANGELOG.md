@@ -11,6 +11,18 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 ---
 
 ## [Unreleased]
+- **DTOs dos 8 tipos de coluna customizável — Fase 2/7** (Task Colunas, V2 F5, Score 8.7/10)
+  - Classe `ColumnOptionDto` — opção selecionável (id, label, color?)
+  - Classe `ColumnConfigDto` — configuração por tipo (currency, decimals, maxLength, options[])
+  - Classe `ColumnDefDto` — definição coluna (key, type, label, order, required?, config?, builtin?)
+  - Classe `TableFieldsDto` — envelope versionado (version, columns[])
+  - Types + constants: `ColumnType` (8 tipos), `ColumnCurrency` (BRL/USD)
+  - Validação aninhada @ValidateNested 3 níveis (TableFields → ColumnDef → ColumnConfig → ColumnOption)
+  - Swagger completo (@ApiProperty/@ApiPropertyOptional), JSDoc 100%
+  - Espelho perfeito contrato frontend (groups-store.ts) — ZERO divergência
+  - Pilares: Pilar 1 N/A (estrutural), Pilar 2 N/A (DTOs sem endpoints), Pilar 3 N/A (sem DClasses)
+  - Próximas fases: 3 (PATCH /projects), 4 (PUT /tasks), 5 (leitura), 6 (testes), 7 (ADR-V2-XXX)
+
 
 ### Added
 

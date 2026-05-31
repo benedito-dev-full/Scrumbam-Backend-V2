@@ -98,12 +98,60 @@
 - ADR-V2-043 (precedente `repoUrl` como coluna dedicada) — replicado padrão
 - ADR-V2-XXX (a redigir em Fase 7): coluna dedicada `tableFields` em DProject (escopo por lista, Opção B da decisão CEO 2026-05-30)
 
-**Fases restantes (2-7 — em desenvolvimento posterior):**
-- Fase 2: DTOs (ColumnDefDto, ColumnConfigDto, ColumnOptionDto, TableFieldsDto) — 8 tipos
-- Fase 3: PATCH `/projects/:id` para edição de schema (write direto na coluna, sem merge em `dados`)
-- Fase 4: PUT `/tasks/:id` para valores com validação por tipo (merge por chave em `DTask.dados.fields`)
-- Fase 5: Exposição em leitura (`ProjectResponseDto` + `select: { tableFields: true }`)
-- Fase 6: Testes completos (unit validador, integration ciclo, concorrência, N+1)
+### Fase 2: DTOs dos 8 Tipos — ✅ COMPLETA
+
+**Status:** ✅ **FASE 2 COMPLETA** — DTOs validados aprovados (Score 8.7/10)
+**Tempo Real:** ~2h total (Implementer DTOs + JSDoc ~1.5h + Reviewer 30m)
+**Completado em:** 2026-05-30
+**Quality Score:** 8.7/10 APPROVED (gate CEO 8.0)
+
+**O Que Foi Feito (Fase 2 — DTOs):**
+
+**5 Classes DTO + Types/Constants criados:**
+- `ColumnOptionDto` — opção selecionável (id, label, color?) com @IsHexColor
+- `ColumnConfigDto` — configuração por tipo (currency, decimals, maxLength, options[]) com validação aninhada
+- `ColumnDefDto` — definição de coluna (key regex ^f_[a-z0-9]{2,}$, type, label, order, required?, config?, builtin?)
+- `TableFieldsDto` — envelope versionado (version 1..1000000, columns[])
+- `ColumnType` (type) + `COLUMN_TYPES` (const) — 8 tipos exatos (text, number, date, person, status, checkbox, dropdown, link)
+- `ColumnCurrency` (type) + `COLUMN_CURRENCIES` (const) — BRL, USD
+
+**Validação aninhada (3 níveis):**
+- TableFieldsDto → ColumnDefDto[] via @ValidateNested({ each: true })
+- ColumnDefDto → ColumnConfigDto via @ValidateNested + @Type
+- ColumnConfigDto → ColumnOptionDto[] via @ValidateNested({ each: true })
+- Todas propriedades com class-validator (type, range, enum, regex)
+
+**JSDoc 100% + Swagger completo:**
+- DevariJS templates aplicados em cada classe e propriedade
+- @ApiProperty/@ApiPropertyOptional com description, example, enum, min, max
+- Comentários inline explicando propósito e constraints
+- Exemplos de uso (ex: `{ version: 1, columns: [{ key: 'f_a1b2', type: 'dropdown', ... }] }`)
+
+**Espelho perfeito contrato frontend:**
+- Estrutura exata de `groups-store.ts` (Scrumbam-Frontend-V2)
+- 8 tipos validados contra tipo ColumnType (DRY via COLUMN_TYPES const)
+- ZERO divergência — backend e frontend compartilham "schema de verdade"
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — DTOs são estruturais, sem transação
+- Pilar 2 (Endpoints): N/A — ainda sem endpoints (vêm Fases 3-4)
+- Pilar 3 (Seed): N/A — DTOs não criam DClasses; são type-safe em TypeScript
+
+**Métricas:**
+- Build: TypeScript 0 erros novos (14 pré-existentes mantidos baseline)
+- ESLint: N/A nesta fase (DTOs puros, sem lógica)
+- Validação: class-validator decorators aplicados + Swagger completo
+- Manual: DTOs instanciáveis, decoradores reconhecidos por NestJS ValidationPipe
+
+**ADRs vinculados:**
+- ADR-V2-001 (zero TABELA nova) — respeitado (DTOs são contrato, sem schema)
+- ADR-V2-043 (precedente em coluna dedicada) — padrão replicado
+
+**Fases restantes (3-7):**
+- Fase 3: PATCH `/projects/:id` para edição de schema (write direto na coluna tableFields)
+- Fase 4: PUT `/tasks/:id` para valores com validação por tipo (merge por chave em DTask.dados.fields)
+- Fase 5: Exposição em leitura (ProjectResponseDto + select: { tableFields: true })
+- Fase 6: Testes completos (unit validador 8 tipos, integration ciclo, concorrência, N+1)
 - Fase 7: ADR-V2-XXX + documentação finalizada
 
 ---
