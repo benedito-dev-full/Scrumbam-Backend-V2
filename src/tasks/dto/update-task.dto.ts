@@ -11,6 +11,12 @@ import {
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
+/** Dados extras aceitos no merge parcial de `DTask.dados`. */
+export type UpdateTaskDadosInput = Record<string, unknown | null> & {
+  /** Valores das colunas customizaveis, chaveados por `ColumnDef.key`. */
+  fields?: Record<string, unknown | null>;
+};
+
 /**
  * DTO para atualização parcial de task (PUT /tasks/:id).
  *
@@ -117,10 +123,12 @@ export class UpdateTaskDto {
   @ApiPropertyOptional({
     description:
       'Merge superficial em dados (Opção A). Aceita `{ idBloco: string | null }` ' +
-      'para vincular/desvincular a task de um bloco sem usar idPai.',
-    example: { idBloco: '42' },
+      'para vincular/desvincular a task de um bloco sem usar idPai. ' +
+      '`fields` aceita valores de colunas customizaveis e e validado contra ' +
+      'DProject.tableFields no service.',
+    example: { idBloco: '42', fields: { f_a1b2: 'o_1', f_c3d4: 42, f_e5f6: null } },
   })
   @IsOptional()
   @IsObject()
-  dados?: Record<string, unknown | null>;
+  dados?: UpdateTaskDadosInput;
 }

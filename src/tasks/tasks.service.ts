@@ -15,6 +15,11 @@ import { UpdateTaskStatusDto } from './dto/update-task-status.dto';
 import { UpdateTaskSprintDto } from './dto/update-task-sprint.dto';
 import { ListTasksQueryDto } from './dto/list-tasks-query.dto';
 import { TaskResponseDto, ListTasksResponseDto, ActiveExecutionDto } from './dto/task-response.dto';
+import { ColumnDefDto, TableFieldsDto } from './table-fields/column-def.dto';
+import {
+  assertRequiredFieldValues,
+  validateFieldValues,
+} from './table-fields/field-value.validator';
 
 /**
  * idClasse de DTask no seed F1 (classes canônicas V2).
@@ -97,6 +102,31 @@ const TABELA_CLASSE_TO_PRIORITY: Record<string, string> = {
  */
 const EXECUTION_CLASS_IDS = [BigInt(-300), BigInt(-301), BigInt(-302), BigInt(-303), BigInt(-304)];
 
+/** Retorna true quando o valor e um objeto JSON simples. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Retorna true quando o objeto possui a chave diretamente no payload. */
+function hasOwnKey(value: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+/** Extrai `columns[]` de `DProject.tableFields` com fallback seguro para schema vazio. */
+function extractTableFieldColumns(tableFields: unknown): ColumnDefDto[] {
+  if (!isRecord(tableFields)) {
+    return [];
+  }
+
+  const dto = tableFields as Partial<TableFieldsDto>;
+  return Array.isArray(dto.columns) ? (dto.columns as ColumnDefDto[]) : [];
+}
+
+/** Extrai `DTask.dados.fields` preservando valores orfaos ja existentes. */
+function extractCurrentFields(dados: Record<string, unknown>): Record<string, unknown> {
+  return isRecord(dados.fields) ? { ...dados.fields } : {};
+}
+
 /**
  * Deriva o `riskLevel` (LOW/MEDIUM/HIGH) a partir do `idClasse` do DPedido.
  * Pedidos -300 (agrupador) e -304 (reservado) caem em LOW como fallback
@@ -177,6 +207,55 @@ export class TasksService {
     private readonly phaseMetrics: PhaseMetricsService,
     private readonly timezoneService: TimezoneService,
   ) {}
+
+  /**
+   * Mescla valores de colunas customizaveis em `DTask.dados.fields`.
+   *
+   * Busca o schema da Lista uma unica vez via `DProject.tableFields`, valida os
+   * valores recebidos contra os 8 tipos suportados e retorna o objeto final de
+   * `fields`. Chaves desconhecidas no payload sao ignoradas e valores `null`
+   * removem a celula quando a coluna nao e obrigatoria.
+   *
+   * @param projectId - ID da Lista/Projeto dono da task.
+   * @param dadosAtuais - JSON atual de `DTask.dados`.
+   * @param incomingFields - Payload recebido em `dto.dados.fields`.
+   * @returns Objeto final de `DTask.dados.fields` pronto para persistencia.
+   *
+   * @throws {BadRequestException} Quando `fields` e enviado em task sem projeto
+   * ou quando algum valor conhecido viola o tipo da coluna.
+   */
+  private async mergeCustomFieldValues(
+    projectId: bigint | null,
+    dadosAtuais: Record<string, unknown>,
+    incomingFields: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    if (!projectId) {
+      throw new BadRequestException('Task sem projeto nao aceita dados.fields customizaveis');
+    }
+
+    const project = await this.prisma.dProject.findFirst({
+      where: { chave: projectId, excluido: false },
+      select: { tableFields: true },
+    });
+
+    if (!project) {
+      throw new BadRequestException(
+        `Projeto ${projectId.toString()} da task nao foi encontrado para validar fields`,
+      );
+    }
+
+    const columns = extractTableFieldColumns(project.tableFields);
+    const mergedFields = extractCurrentFields(dadosAtuais);
+    const { values, clearedKeys } = validateFieldValues(columns, incomingFields);
+
+    Object.assign(mergedFields, values);
+    for (const key of clearedKeys) {
+      delete mergedFields[key];
+    }
+
+    assertRequiredFieldValues(columns, mergedFields);
+    return mergedFields;
+  }
 
   /**
    * Cria task com identifier atômico DEV-N e estado inicial INBOX.
@@ -782,7 +861,34 @@ export class TasksService {
 
     // Merge superficial em `dados` quando taskType, assignedToAi ou dados mudar.
     // Preserva identifier, v3, telemetry, capture, automation intactos.
+    // `dados.fields` e interceptado para merge por chave e validacao por tipo.
     const dadosAtuais = (existing.dados as Record<string, unknown> | null) ?? {};
+    let dtoDadosSemFields: Record<string, unknown | null> | undefined;
+    let mergedCustomFields: Record<string, unknown> | undefined;
+
+    if (dto.dados !== undefined) {
+      if (!isRecord(dto.dados)) {
+        throw new BadRequestException('dados deve ser um objeto JSON');
+      }
+
+      dtoDadosSemFields = { ...dto.dados };
+
+      if (hasOwnKey(dto.dados, 'fields')) {
+        const incomingFields = dto.dados.fields;
+        delete dtoDadosSemFields.fields;
+
+        if (!isRecord(incomingFields)) {
+          throw new BadRequestException('dados.fields deve ser um objeto JSON');
+        }
+
+        mergedCustomFields = await this.mergeCustomFieldValues(
+          existing.idProject,
+          dadosAtuais,
+          incomingFields,
+        );
+      }
+    }
+
     const isAiAssignee = dto.assigneeId === 'ai';
     const hasDadosMerge =
       dto.taskType !== undefined ||
@@ -796,7 +902,8 @@ export class TasksService {
           ...(dto.assigneeId !== undefined ? { assignedToAi: isAiAssignee } : {}),
           ...(dto.assigneeTeamId !== undefined ? { assigneeTeamId: dto.assigneeTeamId } : {}),
           // Opção A — merge de chaves extras (ex: idBloco). null remove a chave.
-          ...(dto.dados !== undefined ? dto.dados : {}),
+          ...(dtoDadosSemFields !== undefined ? dtoDadosSemFields : {}),
+          ...(mergedCustomFields !== undefined ? { fields: mergedCustomFields } : {}),
         }
       : undefined;
 
