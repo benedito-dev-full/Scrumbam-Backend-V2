@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { LRUCache } from '../../common/helpers/lru-cache';
 import { OrgRole } from '../decorators/roles.decorator';
+import { isProjectPubliclyVisible } from '../../projects/utils/public-space.util';
 
 /** idClasses de roles de organização (ADR-V2-003). */
 const ORG_ROLE_CLASSES = {
@@ -71,11 +72,7 @@ export class RoleResolverService {
         idLocEscritu: orgId,
         idEntidade: userId,
         idClasse: {
-          in: [
-            ORG_ROLE_CLASSES.ADMIN,
-            ORG_ROLE_CLASSES.MEMBER,
-            ORG_ROLE_CLASSES.VIEWER,
-          ],
+          in: [ORG_ROLE_CLASSES.ADMIN, ORG_ROLE_CLASSES.MEMBER, ORG_ROLE_CLASSES.VIEWER],
         },
         excluido: false,
       },
@@ -132,8 +129,64 @@ export class RoleResolverService {
       else if (vinculo.idClasse === PROJECT_ROLE_CLASSES.VIEWER) role = 'VIEWER';
     }
 
+    // Fallback — acesso herdado de SPACE público (ADR-V2-051 §8, Camada A):
+    // sem DVincula de projeto, mas o SPACE raiz é público e o usuário é membro
+    // da org dona → concede MEMBER (lê + edita tasks; ops estruturais continuam
+    // exigindo MANAGER via DVincula). É o que permite operar tasks de listas em
+    // espaços públicos sem ser membro explícito do projeto.
+    if (!role) {
+      role = await this.resolvePublicSpaceRole(userId, projectId);
+    }
+
     this.projectRoleCache.set(cacheKey, role);
     return role;
+  }
+
+  /**
+   * Resolve o role herdado de SPACE público para um usuário sem DVincula de
+   * projeto (ADR-V2-051 §8, Camada A).
+   *
+   * Concede `'MEMBER'` se: (1) o SPACE raiz da hierarquia do projeto é público
+   * E (2) o usuário é membro da org dona (`DProject.idEstab`). Caso contrário,
+   * retorna `null` (sem acesso).
+   *
+   * @param userId - Chave BigInt da DEntidade do usuário
+   * @param projectId - Chave BigInt do DProject
+   * @returns `'MEMBER'` se o acesso público herdado se aplica; `null` caso contrário
+   *
+   * @see isProjectPubliclyVisible — fonte de verdade da visibilidade hierárquica
+   * @see ADR-V2-051 §8 — Visibilidade de espaços
+   */
+  private async resolvePublicSpaceRole(
+    userId: bigint,
+    projectId: bigint,
+  ): Promise<ProjectRole | null> {
+    const project = await this.prisma.dProject.findFirst({
+      where: { chave: projectId, excluido: false },
+      select: { idEstab: true },
+    });
+    if (!project?.idEstab) {
+      return null;
+    }
+
+    const publicVisible = await isProjectPubliclyVisible(this.prisma, projectId);
+    if (!publicVisible) {
+      return null;
+    }
+
+    const orgVinculo = await this.prisma.dVincula.findFirst({
+      where: {
+        idEntidade: userId,
+        idLocEscritu: project.idEstab,
+        idClasse: {
+          in: [ORG_ROLE_CLASSES.ADMIN, ORG_ROLE_CLASSES.MEMBER, ORG_ROLE_CLASSES.VIEWER],
+        },
+        excluido: false,
+      },
+      select: { chave: true },
+    });
+
+    return orgVinculo ? 'MEMBER' : null;
   }
 
   /**

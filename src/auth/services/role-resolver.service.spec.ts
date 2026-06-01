@@ -6,6 +6,10 @@ const makePrismaMock = () => ({
   dVincula: {
     findFirst: jest.fn(),
   },
+  dProject: {
+    findFirst: jest.fn(),
+  },
+  $queryRaw: jest.fn(),
 });
 
 describe('RoleResolverService', () => {
@@ -16,10 +20,7 @@ describe('RoleResolverService', () => {
     prisma = makePrismaMock();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        RoleResolverService,
-        { provide: PrismaService, useValue: prisma },
-      ],
+      providers: [RoleResolverService, { provide: PrismaService, useValue: prisma }],
     }).compile();
 
     service = module.get<RoleResolverService>(RoleResolverService);
@@ -63,6 +64,62 @@ describe('RoleResolverService', () => {
       await service.getOrgRole(BigInt(1), BigInt(10)); // deve usar cache
 
       expect(prisma.dVincula.findFirst).toHaveBeenCalledTimes(1); // só 1 query!
+    });
+  });
+
+  describe('getProjectRole', () => {
+    it('deve retornar MANAGER para DVincula idClasse=-171', async () => {
+      prisma.dVincula.findFirst.mockResolvedValue({ idClasse: BigInt(-171) });
+
+      const role = await service.getProjectRole(BigInt(1), BigInt(500));
+
+      expect(role).toBe('MANAGER');
+    });
+
+    it('deve retornar MEMBER (fallback) quando sem DVincula mas SPACE raiz público e usuário é membro da org (ADR-V2-051 §8)', async () => {
+      // 1ª findFirst: DVincula de projeto = null (sem vínculo direto).
+      // 2ª findFirst (dentro de resolvePublicSpaceRole): membro da org.
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ chave: BigInt(77) });
+      // Projeto pertence à org 50.
+      prisma.dProject.findFirst.mockResolvedValue({ idEstab: BigInt(50) });
+      // CTE: SPACE raiz público.
+      prisma.$queryRaw.mockResolvedValue([
+        { chave: BigInt(10), idClasse: BigInt(-350), privado: false },
+        { chave: BigInt(500), idClasse: BigInt(-352), privado: false },
+      ]);
+
+      const role = await service.getProjectRole(BigInt(999), BigInt(500));
+
+      expect(role).toBe('MEMBER');
+    });
+
+    it('deve retornar null quando sem DVincula e SPACE raiz é privado', async () => {
+      prisma.dVincula.findFirst.mockResolvedValueOnce(null);
+      prisma.dProject.findFirst.mockResolvedValue({ idEstab: BigInt(50) });
+      prisma.$queryRaw.mockResolvedValue([
+        { chave: BigInt(10), idClasse: BigInt(-350), privado: true },
+        { chave: BigInt(500), idClasse: BigInt(-352), privado: false },
+      ]);
+
+      const role = await service.getProjectRole(BigInt(999), BigInt(500));
+
+      expect(role).toBeNull();
+    });
+
+    it('deve retornar null quando SPACE público mas usuário NÃO é membro da org', async () => {
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce(null) // sem DVincula de projeto
+        .mockResolvedValueOnce(null); // não é membro da org
+      prisma.dProject.findFirst.mockResolvedValue({ idEstab: BigInt(50) });
+      prisma.$queryRaw.mockResolvedValue([
+        { chave: BigInt(10), idClasse: BigInt(-350), privado: false },
+      ]);
+
+      const role = await service.getProjectRole(BigInt(999), BigInt(500));
+
+      expect(role).toBeNull();
     });
   });
 });

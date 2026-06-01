@@ -22,6 +22,7 @@ import {
 import { DeleteProjectResponseDto } from './dto/delete-project-response.dto';
 import { fallbackSlug, slugify } from './utils/slugify';
 import { validateNoCycle } from './utils/anti-cycle.util';
+import { isProjectPubliclyVisible, listPublicSpaceProjectIds } from './utils/public-space.util';
 import { validateTableFields } from '../tasks/table-fields/table-fields.validator';
 import { mergeBuiltinColumns } from '../tasks/table-fields/builtin-columns';
 
@@ -454,9 +455,7 @@ export class ProjectsService implements OnModuleInit {
         idEntidade: userEntidadeId,
         idClasse: { in: PROJECT_ROLE_CLASSES },
         excluido: false,
-        ...(teamProjectIds
-          ? { idLocEscritu: { in: teamProjectIds } }
-          : {}),
+        ...(teamProjectIds ? { idLocEscritu: { in: teamProjectIds } } : {}),
       },
       select: { idLocEscritu: true },
     });
@@ -581,9 +580,7 @@ export class ProjectsService implements OnModuleInit {
       ),
     );
 
-    const nextCursor = hasMore
-      ? projectIds[projectIds.length - 1].toString()
-      : null;
+    const nextCursor = hasMore ? projectIds[projectIds.length - 1].toString() : null;
 
     return { items, pagination: { hasMore, nextCursor } };
   }
@@ -595,13 +592,19 @@ export class ProjectsService implements OnModuleInit {
    * Uso interno para callers que precisam aplicar escopo de projeto antes de
    * consultar outro agregado canonico, como tools MCP de tasks.
    *
-   * Quando `organizationId` informado, retorna apenas projetos cujo
-   * `DProject.idEstab === organizationId`. Quando omitido, retorna todos os
-   * projetos onde o usuario e membro (modo MCP / cross-org by design).
+   * Quando `organizationId` informado, retorna a UNIÃO de:
+   *  - projetos com DVincula explícita do usuário (`idEstab === organizationId`); e
+   *  - todos os projetos dentro de SPACEs públicos da org (Camada A, ADR-V2-051
+   *    §8) — se o usuário for membro da org. Isso garante que as tasks de listas
+   *    em espaços públicos sejam visíveis sem DVincula de projeto (simetria com
+   *    `findOne`). Quando omitido, retorna todos os projetos onde o usuario e
+   *    membro (modo MCP / cross-org by design — sem Camada A).
    *
    * @param userEntidadeId - Chave BigInt da DEntidade do usuario
    * @param organizationId - `DEntidade.chave` da org ativa (string com BigInt). Opcional.
    * @returns IDs de projetos acessiveis, serializados como string
+   *
+   * @see listPublicSpaceProjectIds — projetos de SPACEs públicos da org
    */
   async findAccessibleProjectIds(
     userEntidadeId: bigint,
@@ -619,7 +622,7 @@ export class ProjectsService implements OnModuleInit {
 
     const candidateIds = Array.from(new Set(vinculos.map((v) => v.idLocEscritu.toString())));
 
-    // Sem org → comportamento legado (MCP keys, callers internos).
+    // Sem org → comportamento legado (MCP keys, callers internos): sem Camada A.
     if (!organizationId) {
       return candidateIds;
     }
@@ -631,22 +634,39 @@ export class ProjectsService implements OnModuleInit {
       return [];
     }
 
-    if (candidateIds.length === 0) {
-      return [];
+    const orgIdBig = BigInt(organizationId);
+
+    // Camada B: DVincula explícita cruzada com DProject.idEstab (ZERO N+1).
+    const accessible = new Set<string>();
+    if (candidateIds.length > 0) {
+      const scoped = await this.prisma.dProject.findMany({
+        where: {
+          chave: { in: candidateIds.map((s) => BigInt(s)) },
+          idEstab: orgIdBig,
+          excluido: false,
+        },
+        select: { chave: true },
+      });
+      scoped.forEach((p) => accessible.add(p.chave.toString()));
     }
 
-    // Cruza com DProject.idEstab — UMA query batch, ZERO N+1.
-    const orgIdBig = BigInt(organizationId);
-    const scoped = await this.prisma.dProject.findMany({
+    // Camada A: projetos dentro de SPACEs públicos da org — apenas se o usuário
+    // for membro da org (qualquer role -161/-162/-163).
+    const orgVinculo = await this.prisma.dVincula.findFirst({
       where: {
-        chave: { in: candidateIds.map((s) => BigInt(s)) },
-        idEstab: orgIdBig,
+        idEntidade: userEntidadeId,
+        idLocEscritu: orgIdBig,
+        idClasse: { in: ORG_ROLE_CLASSES },
         excluido: false,
       },
       select: { chave: true },
     });
+    if (orgVinculo) {
+      const publicIds = await listPublicSpaceProjectIds(this.prisma, orgIdBig);
+      publicIds.forEach((id) => accessible.add(id.toString()));
+    }
 
-    return scoped.map((p) => p.chave.toString());
+    return Array.from(accessible);
   }
 
   /**
@@ -726,7 +746,15 @@ export class ProjectsService implements OnModuleInit {
       }
     }
     if (!vinculo) {
-      throw new ForbiddenException('Acesso negado: você não é membro deste projeto');
+      // ADR-V2-051 §8 — Camada A (espaços públicos): membros da org têm
+      // acesso a qualquer projeto cujo SPACE raiz seja público (privado=false),
+      // SEM precisar de DVincula de projeto. Simetria com list() — sem isso,
+      // listas/pastas filhas de um espaço público davam 403 ao abrir (bug de
+      // acesso negado indevidamente).
+      const publicAccess = await this.hasPublicSpaceAccess(project, userEntidadeId, organizationId);
+      if (!publicAccess) {
+        throw new ForbiddenException('Acesso negado: você não é membro deste projeto');
+      }
     }
 
     const memberCount = await this.prisma.dVincula.count({
@@ -832,9 +860,7 @@ export class ProjectsService implements OnModuleInit {
     // sempre true e apagando o idPai existente. Usar !== undefined é correto.
     const idPaiProvided = dto.idPai !== undefined;
     if (idPaiProvided) {
-      const novoPaiId = dto.idPai !== null && dto.idPai !== undefined
-        ? BigInt(dto.idPai)
-        : null;
+      const novoPaiId = dto.idPai !== null && dto.idPai !== undefined ? BigInt(dto.idPai) : null;
       await validateNoCycle(this.prisma, projectId, novoPaiId);
     }
 
@@ -883,7 +909,9 @@ export class ProjectsService implements OnModuleInit {
     if (dto.tableFields !== undefined) {
       validateTableFields(dto.tableFields);
       tableFieldsToPersist =
-        project.idClasse === ID_CLASSE_LIST ? mergeBuiltinColumns(dto.tableFields) : dto.tableFields;
+        project.idClasse === ID_CLASSE_LIST
+          ? mergeBuiltinColumns(dto.tableFields)
+          : dto.tableFields;
       validateTableFields(tableFieldsToPersist);
     }
 
@@ -892,9 +920,7 @@ export class ProjectsService implements OnModuleInit {
       // BigInt = novo pai. A validação anti-ciclo já ocorreu antes da transaction.
       let effectiveIdPai: bigint | null | undefined;
       if (idPaiProvided) {
-        effectiveIdPai = dto.idPai !== null && dto.idPai !== undefined
-          ? BigInt(dto.idPai)
-          : null;
+        effectiveIdPai = dto.idPai !== null && dto.idPai !== undefined ? BigInt(dto.idPai) : null;
       }
 
       const u = await tx.dProject.update({
@@ -1395,6 +1421,64 @@ export class ProjectsService implements OnModuleInit {
     if (!vinculo) {
       throw new ForbiddenException('Acesso negado: requer role MANAGER no projeto');
     }
+  }
+
+  /**
+   * Determina se um usuário tem acesso a um projeto por herança de espaço
+   * público (ADR-V2-051 §8 — Camada A).
+   *
+   * Sobe a hierarquia (`idPai`) via CTE recursiva até o SPACE raiz da cadeia.
+   * Se esse SPACE é público (`privado=false`) e o usuário é membro da org dona
+   * (qualquer role -161/-162/-163), o acesso é concedido SEM DVincula de
+   * projeto — exatamente como faz `list()` (Camada A). É o que garante que
+   * pastas e listas filhas de um espaço público sejam abríveis por qualquer
+   * membro do workspace, não apenas pelo criador.
+   *
+   * Se a cadeia não tem SPACE (anomalia de dados / projeto órfão), faz fallback
+   * para o flag `privado` do próprio projeto.
+   *
+   * Só se aplica quando `organizationId` está presente (paths HTTP autenticados).
+   * Callers internos/MCP sem org continuam exigindo DVincula explícita —
+   * comportamento conservador (não amplia escopo de chaves MCP).
+   *
+   * @param project - Projeto-alvo (precisa de `chave`)
+   * @param userEntidadeId - Chave BigInt da DEntidade do usuário
+   * @param organizationId - `DEntidade.chave` da org ativa (string). Opcional.
+   * @returns `true` se o acesso público herdado se aplica; `false` caso contrário
+   *
+   * @see findOne — consumidor desta verificação (Camada A)
+   * @see isProjectPubliclyVisible — fonte de verdade da visibilidade hierárquica
+   * @see ADR-V2-051 §8 — Visibilidade de espaços
+   */
+  private async hasPublicSpaceAccess(
+    project: { chave: bigint },
+    userEntidadeId: bigint,
+    organizationId?: string,
+  ): Promise<boolean> {
+    // Sem org no token → não aplica Camada A (mantém exigência de DVincula).
+    if (!organizationId || !/^-?\d+$/.test(organizationId)) {
+      return false;
+    }
+    const orgIdBig = BigInt(organizationId);
+
+    // 1) Visibilidade efetiva: o SPACE raiz da cadeia é público?
+    const publicVisible = await isProjectPubliclyVisible(this.prisma, project.chave);
+    if (!publicVisible) {
+      return false;
+    }
+
+    // 2) Usuário precisa ser membro da org dona (qualquer role de org).
+    const orgVinculo = await this.prisma.dVincula.findFirst({
+      where: {
+        idEntidade: userEntidadeId,
+        idLocEscritu: orgIdBig,
+        idClasse: { in: ORG_ROLE_CLASSES },
+        excluido: false,
+      },
+      select: { chave: true },
+    });
+
+    return orgVinculo !== null;
   }
 
   /**

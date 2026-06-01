@@ -34,6 +34,7 @@ describe('ProjectsService', () => {
       findMany: jest.Mock;
     };
     $transaction: jest.Mock;
+    $queryRaw: jest.Mock;
   }>;
   let seedBootstrap: jest.Mocked<{ seedProject: jest.Mock }>;
   let projectMembers: jest.Mocked<{
@@ -83,6 +84,7 @@ describe('ProjectsService', () => {
         findMany: jest.fn(),
       },
       $transaction: jest.fn(),
+      $queryRaw: jest.fn(),
     };
 
     const seedBootstrapMock = { seedProject: jest.fn().mockResolvedValue(10) };
@@ -358,9 +360,7 @@ describe('ProjectsService', () => {
 
       const result = await service.findOne('1', BigInt(100));
 
-      expect(result.tableFields?.columns.map((column) => column.key)).toEqual(
-        BUILTIN_COLUMN_ORDER,
-      );
+      expect(result.tableFields?.columns.map((column) => column.key)).toEqual(BUILTIN_COLUMN_ORDER);
       expect(result.tableFields?.columns.every((column) => column.builtin === true)).toBe(true);
     });
 
@@ -426,6 +426,97 @@ describe('ProjectsService', () => {
         .mockResolvedValueOnce(null);
 
       await expect(service.findOne('1', BigInt(999))).rejects.toThrow(ForbiddenException);
+    });
+
+    it('concede acesso a lista filha de SPACE público para membro da org sem DVincula (ADR-V2-051 §8 — Camada A)', async () => {
+      // LIST (-352) filha de um SPACE público, dentro da org 50.
+      const listProject = {
+        ...mockProject,
+        idClasse: BigInt(-352),
+        idPai: BigInt(10),
+        idEstab: BigInt(50),
+        privado: false,
+      };
+      prisma.dProject.findFirst.mockResolvedValue(listProject);
+      // 1ª findFirst (vínculo de projeto) = null → não é membro direto.
+      // 2ª/3ª (teamLink/folderLink) = null.
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce(null) // sem DVincula de projeto
+        .mockResolvedValueOnce(null) // teamLink
+        .mockResolvedValueOnce(null) // folderLink
+        // 4ª findFirst dentro de hasPublicSpaceAccess: membro da org.
+        .mockResolvedValueOnce({ chave: BigInt(77) });
+      // CTE recursiva (isProjectPubliclyVisible) sobe até o SPACE raiz → público.
+      prisma.$queryRaw.mockResolvedValue([
+        { chave: BigInt(10), idClasse: BigInt(-350), privado: false },
+        { chave: BigInt(1), idClasse: BigInt(-352), privado: false },
+      ]);
+      prisma.dVincula.count.mockResolvedValue(0);
+
+      const result = await service.findOne('1', BigInt(999), '50');
+
+      expect(result).toBeDefined();
+      expect(prisma.$queryRaw).toHaveBeenCalled();
+    });
+
+    it('nega acesso quando o SPACE raiz é privado mesmo sendo membro da org', async () => {
+      const listProject = {
+        ...mockProject,
+        idClasse: BigInt(-352),
+        idPai: BigInt(10),
+        idEstab: BigInt(50),
+        privado: false,
+      };
+      prisma.dProject.findFirst.mockResolvedValue(listProject);
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce(null) // sem DVincula de projeto
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
+      // SPACE raiz é PRIVADO → sem acesso herdado.
+      prisma.$queryRaw.mockResolvedValue([
+        { chave: BigInt(10), idClasse: BigInt(-350), privado: true },
+        { chave: BigInt(1), idClasse: BigInt(-352), privado: false },
+      ]);
+
+      await expect(service.findOne('1', BigInt(999), '50')).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('findAccessibleProjectIds() — Camada A espaços públicos (ADR-V2-051 §8)', () => {
+    it('inclui projetos de SPACEs públicos da org mesmo sem DVincula de projeto', async () => {
+      // Sem DVincula de projeto (Camada B vazia).
+      prisma.dVincula.findMany.mockResolvedValue([]);
+      // Usuário é membro da org.
+      prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(77) });
+      // listPublicSpaceProjectIds: SPACE público + lista filha.
+      prisma.$queryRaw.mockResolvedValue([{ chave: BigInt(10) }, { chave: BigInt(25) }]);
+
+      const ids = await service.findAccessibleProjectIds(BigInt(999), '50');
+
+      expect(ids.sort()).toEqual(['10', '25']);
+      expect(prisma.$queryRaw).toHaveBeenCalled();
+    });
+
+    it('NÃO inclui espaços públicos quando usuário não é membro da org', async () => {
+      prisma.dVincula.findMany.mockResolvedValue([]);
+      prisma.dVincula.findFirst.mockResolvedValue(null); // não é membro da org
+
+      const ids = await service.findAccessibleProjectIds(BigInt(999), '50');
+
+      expect(ids).toEqual([]);
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('une DVincula explícita (Camada B) com espaços públicos (Camada A), deduplicado', async () => {
+      prisma.dVincula.findMany.mockResolvedValue([{ idLocEscritu: BigInt(30) }]);
+      prisma.dProject.findMany.mockResolvedValue([{ chave: BigInt(30) }]);
+      prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(77) });
+      // 25 é público; 30 também aparece como público → dedup.
+      prisma.$queryRaw.mockResolvedValue([{ chave: BigInt(25) }, { chave: BigInt(30) }]);
+
+      const ids = await service.findAccessibleProjectIds(BigInt(999), '50');
+
+      expect(ids.sort()).toEqual(['25', '30']);
     });
   });
 
@@ -896,10 +987,7 @@ describe('ProjectsService', () => {
     it('deve criar projeto com idClasse=-350 (SPACE) quando dto.idClasse fornecido', async () => {
       setupTxForIdClasse(BigInt(-350));
 
-      const result = await service.create(
-        { nome: 'My Space', idClasse: '-350' },
-        BigInt(100),
-      );
+      const result = await service.create({ nome: 'My Space', idClasse: '-350' }, BigInt(100));
 
       // O response deve refletir o idClasse=-350 que o mock retornou.
       expect(result.idClasse).toBe('-350');
@@ -1019,10 +1107,7 @@ describe('ProjectsService', () => {
       });
 
       await expect(
-        service.create(
-          { nome: 'Bad Folder', idClasse: '-351', idPai: '99' },
-          BigInt(100),
-        ),
+        service.create({ nome: 'Bad Folder', idClasse: '-351', idPai: '99' }, BigInt(100)),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -1053,10 +1138,7 @@ describe('ProjectsService', () => {
       });
 
       await expect(
-        service.create(
-          { nome: 'Valid Folder', idClasse: '-351', idPai: '50' },
-          BigInt(100),
-        ),
+        service.create({ nome: 'Valid Folder', idClasse: '-351', idPai: '50' }, BigInt(100)),
       ).resolves.not.toThrow();
     });
   });
