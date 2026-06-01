@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { TableFieldsDto } from './column-def.dto';
+import { BUILTIN_COLUMN_KEYS } from './builtin-columns';
 
 /**
  * Tipos de coluna que exigem um conjunto de opções não-vazio (Fase 3).
@@ -12,6 +13,8 @@ const TYPES_REQUIRING_OPTIONS: ReadonlySet<string> = new Set([
   'status',
   'dropdown',
 ]);
+
+const CUSTOM_COLUMN_KEY_PATTERN = /^f_[a-z0-9]{2,}$/;
 
 /**
  * Valida unicidade e coerência do schema de colunas customizáveis
@@ -61,6 +64,18 @@ export function validateTableFields(dto: TableFieldsDto): void {
   const seenOrders = new Set<number>();
 
   for (const col of columns) {
+    if (col.builtin === true) {
+      if (!BUILTIN_COLUMN_KEYS.has(col.key)) {
+        throw new BadRequestException(
+          `Coluna builtin invalida: key "${col.key}" nao pertence ao conjunto canonico`,
+        );
+      }
+    } else if (!CUSTOM_COLUMN_KEY_PATTERN.test(col.key)) {
+      throw new BadRequestException(
+        'key deve ser um slug no formato f_<alfanumerico minusculo> com ao menos 2 caracteres apos o prefixo (ex.: f_a1b2)',
+      );
+    }
+
     // Regra 1: key única entre as colunas.
     if (seenKeys.has(col.key)) {
       throw new BadRequestException(

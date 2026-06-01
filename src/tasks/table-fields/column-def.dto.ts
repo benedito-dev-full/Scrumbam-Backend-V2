@@ -13,6 +13,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 
@@ -242,6 +243,7 @@ export class ColumnDefDto {
     example: 'f_a1b2',
   })
   @IsString()
+  @ValidateIf((o: ColumnDefDto) => o.builtin !== true)
   @Matches(/^f_[a-z0-9]{2,}$/, {
     message:
       'key deve ser um slug no formato f_<alfanumérico minúsculo> com ao menos 2 caracteres após o prefixo (ex.: f_a1b2)',

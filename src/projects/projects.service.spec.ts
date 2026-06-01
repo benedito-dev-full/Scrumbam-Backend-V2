@@ -6,6 +6,7 @@ import { ProjectMembersService } from './project-members.service';
 import { PrismaService } from '../prisma.service';
 import { EventProducerService } from '../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../common/services/correlation-id.service';
+import { BUILTIN_COLUMN_ORDER } from '../tasks/table-fields/builtin-columns';
 
 describe('ProjectsService', () => {
   let service: ProjectsService;
@@ -341,6 +342,67 @@ describe('ProjectsService', () => {
       const result = await service.findOne('1', BigInt(100));
 
       expect(result.teamId).toBe('200');
+    });
+
+    it('deve completar tableFields de LIST legada com as 6 builtin no GET', async () => {
+      prisma.dProject.findFirst.mockResolvedValue({
+        ...mockProject,
+        idClasse: BigInt(-352),
+        tableFields: null,
+      });
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce({ chave: BigInt(1) })
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
+      prisma.dVincula.count.mockResolvedValue(1);
+
+      const result = await service.findOne('1', BigInt(100));
+
+      expect(result.tableFields?.columns.map((column) => column.key)).toEqual(
+        BUILTIN_COLUMN_ORDER,
+      );
+      expect(result.tableFields?.columns.every((column) => column.builtin === true)).toBe(true);
+    });
+
+    it('deve devolver builtin mais custom sem duplicar para LIST com tableFields custom', async () => {
+      prisma.dProject.findFirst.mockResolvedValue({
+        ...mockProject,
+        idClasse: BigInt(-352),
+        tableFields: {
+          version: 4,
+          columns: [{ key: 'f_cliente', type: 'text', label: 'Cliente', order: 0 }],
+        },
+      });
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce({ chave: BigInt(1) })
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
+      prisma.dVincula.count.mockResolvedValue(1);
+
+      const result = await service.findOne('1', BigInt(100));
+
+      expect(result.tableFields?.version).toBe(4);
+      expect(result.tableFields?.columns.map((column) => column.key)).toEqual([
+        ...BUILTIN_COLUMN_ORDER,
+        'f_cliente',
+      ]);
+    });
+
+    it('nao aplica merge-on-read em projetos que nao sao LIST', async () => {
+      prisma.dProject.findFirst.mockResolvedValue({
+        ...mockProject,
+        idClasse: BigInt(-350),
+        tableFields: null,
+      });
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce({ chave: BigInt(1) })
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
+      prisma.dVincula.count.mockResolvedValue(1);
+
+      const result = await service.findOne('1', BigInt(100));
+
+      expect(result.tableFields).toBeNull();
     });
 
     it('deve lançar NotFoundException quando projeto não encontrado', async () => {

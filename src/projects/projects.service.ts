@@ -23,6 +23,7 @@ import { DeleteProjectResponseDto } from './dto/delete-project-response.dto';
 import { fallbackSlug, slugify } from './utils/slugify';
 import { validateNoCycle } from './utils/anti-cycle.util';
 import { validateTableFields } from '../tasks/table-fields/table-fields.validator';
+import { mergeBuiltinColumns } from '../tasks/table-fields/builtin-columns';
 
 /** idClasse de DProject no seed F1 (classes canônicas V2). Fallback legado. */
 const ID_CLASSE_PROJECT = BigInt(-153); // SCRUMBAN_PROJECT (seed classes.seed.ts)
@@ -878,8 +879,12 @@ export class ProjectsService implements OnModuleInit {
     // o objeto é substituído por inteiro (replace). Validamos unicidade de
     // key/order/options.id ANTES de persistir; o `version` do envelope é
     // apenas gravado (concorrência otimista é fase futura — decisão #4).
+    let tableFieldsToPersist: UpdateProjectDto['tableFields'];
     if (dto.tableFields !== undefined) {
       validateTableFields(dto.tableFields);
+      tableFieldsToPersist =
+        project.idClasse === ID_CLASSE_LIST ? mergeBuiltinColumns(dto.tableFields) : dto.tableFields;
+      validateTableFields(tableFieldsToPersist);
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -900,8 +905,8 @@ export class ProjectsService implements OnModuleInit {
           ...(effectiveRepoUrl !== undefined ? { repoUrl: effectiveRepoUrl } : {}),
           ...(effectiveIdPai !== undefined ? { idPai: effectiveIdPai } : {}),
           ...(dto.privado !== undefined ? { privado: dto.privado } : {}),
-          ...(dto.tableFields !== undefined
-            ? { tableFields: dto.tableFields as unknown as Prisma.InputJsonValue }
+          ...(tableFieldsToPersist !== undefined
+            ? { tableFields: tableFieldsToPersist as unknown as Prisma.InputJsonValue }
             : {}),
           dados: novosDados as Prisma.InputJsonValue,
         },
@@ -1565,7 +1570,10 @@ export class ProjectsService implements OnModuleInit {
       privado: project.privado ?? false,
       color: (dados?.color as string | null) ?? null,
       icon: (dados?.icon as string | null) ?? null,
-      tableFields: (project.tableFields as ProjectResponseDto['tableFields'] | undefined) ?? null,
+      tableFields:
+        project.idClasse === ID_CLASSE_LIST
+          ? mergeBuiltinColumns(project.tableFields)
+          : ((project.tableFields as ProjectResponseDto['tableFields'] | undefined) ?? null),
       teamId,
       folderId,
       criadoEm: project.criadoEm.toISOString(),

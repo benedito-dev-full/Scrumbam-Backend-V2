@@ -1,4 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
+import { BUILTIN_COLUMN_ORDER, BUILTIN_COLUMNS_TEMPLATE } from './builtin-columns';
 import { validateTableFields } from './table-fields.validator';
 import { ColumnDefDto, TableFieldsDto, ColumnType } from './column-def.dto';
 
@@ -59,8 +62,8 @@ describe('validateTableFields', () => {
 
   it('lança quando há order duplicado', () => {
     const dto = envelope([
-      col({ key: 'f_a', order: 5 }),
-      col({ key: 'f_b', order: 5 }),
+      col({ key: 'f_aa', order: 5 }),
+      col({ key: 'f_bb', order: 5 }),
     ]);
     expect(() => validateTableFields(dto)).toThrow(BadRequestException);
     expect(() => validateTableFields(dto)).toThrow(/order 5/);
@@ -114,5 +117,63 @@ describe('validateTableFields', () => {
       }),
     ]);
     expect(() => validateTableFields(dto)).not.toThrow();
+  });
+
+  it('nao lanca para schema misturando builtin e custom', () => {
+    const dto = envelope([
+      ...BUILTIN_COLUMNS_TEMPLATE,
+      col({ key: 'f_cliente', type: 'text', label: 'Cliente', order: 6 }),
+    ] as ColumnDefDto[]);
+
+    expect(() => validateTableFields(dto)).not.toThrow();
+  });
+
+  it.each(BUILTIN_COLUMN_ORDER)('aceita a key builtin %s quando builtin=true', (key) => {
+    const builtin = BUILTIN_COLUMNS_TEMPLATE.find((column) => column.key === key);
+
+    expect(builtin).toBeDefined();
+    expect(() => validateTableFields(envelope([builtin as ColumnDefDto]))).not.toThrow();
+  });
+
+  it('rejeita builtin=true fora do conjunto canonico', () => {
+    const dto = envelope([
+      col({ key: 'f_fake', type: 'text', label: 'Fake', order: 0, builtin: true }),
+    ]);
+
+    expect(() => validateTableFields(dto)).toThrow(BadRequestException);
+    expect(() => validateTableFields(dto)).toThrow(/builtin invalida/);
+  });
+
+  it('mantem regex f_* para coluna custom', () => {
+    const dto = envelope([col({ key: 'status', type: 'text', label: 'Status', order: 0 })]);
+
+    expect(() => validateTableFields(dto)).toThrow(BadRequestException);
+    expect(() => validateTableFields(dto)).toThrow(/formato f_/);
+  });
+});
+
+describe('ColumnDefDto key validation', () => {
+  it('isenta key builtin do regex do DTO quando builtin=true', () => {
+    const dto = plainToInstance(ColumnDefDto, {
+      key: '__nome',
+      type: 'text',
+      label: 'Tarefa',
+      order: 0,
+      builtin: true,
+    });
+
+    expect(validateSync(dto)).toHaveLength(0);
+  });
+
+  it('continua rejeitando key fora do regex quando builtin=false', () => {
+    const dto = plainToInstance(ColumnDefDto, {
+      key: 'status',
+      type: 'text',
+      label: 'Status',
+      order: 0,
+      builtin: false,
+    });
+
+    expect(validateSync(dto).some((error) => error.property === 'key')).toBe(true);
   });
 });
