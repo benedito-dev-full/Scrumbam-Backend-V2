@@ -99,8 +99,7 @@ export class ColumnOptionDto {
    * @example 'o_1'
    */
   @ApiProperty({
-    description:
-      'Identificador estável da opção, gravado na célula da task quando selecionada.',
+    description: 'Identificador estável da opção, gravado na célula da task quando selecionada.',
     example: 'o_1',
   })
   @IsString()
@@ -340,6 +339,28 @@ export class ColumnDefDto {
   builtin?: boolean;
 
   /**
+   * Indica que a coluna está arquivada (oculta na grade de forma reversível).
+   *
+   * Quando `true`, a coluna não aparece no board mas permanece no schema
+   * persistido — o campo continua existindo e pode ser restaurado via
+   * `PATCH /projects/:id` com `hidden: false`. Aplica-se tanto a colunas
+   * custom quanto a builtin (exceto que builtins não podem ser removidas,
+   * apenas arquivadas). Opcional (default falso).
+   *
+   * @example false
+   */
+  @ApiPropertyOptional({
+    description:
+      'Coluna arquivada (oculta na grade, reversível). Quando true, a coluna não aparece ' +
+      'no board mas permanece no schema e pode ser restaurada. Funciona para builtin e custom. ' +
+      'Default false.',
+    example: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  hidden?: boolean;
+
+  /**
    * Indica coluna builtin READ-ONLY, cujo valor é computado server-side e NÃO é
    * editável pelo usuário. Opcional (default falso).
    *
@@ -387,8 +408,7 @@ export class TableFieldsDto {
    * @example 1
    */
   @ApiProperty({
-    description:
-      'Número de versão do schema (entre 1 e 1.000.000), para concorrência otimista.',
+    description: 'Número de versão do schema (entre 1 e 1.000.000), para concorrência otimista.',
     minimum: 1,
     maximum: 1000000,
     example: 1,

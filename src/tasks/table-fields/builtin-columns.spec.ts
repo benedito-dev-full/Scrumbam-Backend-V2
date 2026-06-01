@@ -176,6 +176,104 @@ describe('mergeBuiltinColumns', () => {
     expect(twice).toEqual(once);
   });
 
+  it('preserva hidden:true em builtin arquivada apos merge (nao perde o flag)', () => {
+    // Cenario: usuario arquivou a coluna "responsavel" (hidden:true).
+    // O merge nao deve restaurar hidden para false nem omiti-lo.
+    const stored: TableFieldsDto = {
+      version: 2,
+      columns: [
+        { key: '__nome', type: 'text', label: 'Tarefa', order: 0, builtin: true },
+        { key: 'status', type: 'status', label: 'Status', order: 1, builtin: true },
+        { key: 'identifier', type: 'text', label: 'ID', order: 2, builtin: true },
+        // responsavel arquivada: hidden:true deve sobreviver
+        {
+          key: 'responsavel',
+          type: 'person',
+          label: 'Resp.',
+          order: 3,
+          builtin: true,
+          hidden: true,
+        },
+        { key: 'prioridade', type: 'dropdown', label: 'Prioridade', order: 4, builtin: true },
+        { key: 'dueDate', type: 'date', label: 'Data', order: 5, builtin: true },
+        {
+          key: 'timeSpent',
+          type: 'text',
+          label: 'Tempo gasto',
+          order: 6,
+          builtin: true,
+          readOnly: true,
+        },
+      ],
+    };
+
+    const result = mergeBuiltinColumns(stored);
+
+    const responsavel = result.columns.find((c) => c.key === 'responsavel');
+    expect(responsavel).toBeDefined();
+    expect(responsavel?.hidden).toBe(true);
+    expect(responsavel?.builtin).toBe(true);
+    // Nenhuma builtin deve ter sido perdida ou duplicada.
+    expect(result.columns).toHaveLength(7);
+  });
+
+  it('preserva label customizado de builtin (rename) apos merge', () => {
+    // Cenario: usuario renomeou "__nome" de "Tarefa" para "Atividade".
+    // O merge via {...base, ...existing} deve manter o label do existing.
+    const stored: TableFieldsDto = {
+      version: 3,
+      columns: [
+        { key: '__nome', type: 'text', label: 'Atividade', order: 0, builtin: true },
+        { key: 'status', type: 'status', label: 'Status', order: 1, builtin: true },
+        { key: 'identifier', type: 'text', label: 'ID', order: 2, builtin: true },
+        { key: 'responsavel', type: 'person', label: 'Resp.', order: 3, builtin: true },
+        { key: 'prioridade', type: 'dropdown', label: 'Prioridade', order: 4, builtin: true },
+        { key: 'dueDate', type: 'date', label: 'Data', order: 5, builtin: true },
+        {
+          key: 'timeSpent',
+          type: 'text',
+          label: 'Tempo gasto',
+          order: 6,
+          builtin: true,
+          readOnly: true,
+        },
+      ],
+    };
+
+    const result = mergeBuiltinColumns(stored);
+
+    const nome = result.columns.find((c) => c.key === '__nome');
+    expect(nome?.label).toBe('Atividade');
+    expect(nome?.builtin).toBe(true);
+    // key e type vem do template (imutaveis).
+    expect(nome?.key).toBe('__nome');
+    expect(nome?.type).toBe('text');
+  });
+
+  it('preserva label customizado de builtin NAO-__nome (status/prioridade) apos merge', () => {
+    // Garante que o rename vale para QUALQUER builtin, nao so o titulo —
+    // o label do existing prevalece, mas key/type/options vem do template.
+    const stored: TableFieldsDto = {
+      version: 2,
+      columns: [
+        { key: 'status', type: 'status', label: 'Situacao', order: 1, builtin: true },
+        { key: 'prioridade', type: 'dropdown', label: 'Urgencia', order: 4, builtin: true },
+        { key: 'responsavel', type: 'person', label: 'Dono', order: 3, builtin: true },
+      ],
+    };
+
+    const result = mergeBuiltinColumns(stored);
+
+    const status = result.columns.find((c) => c.key === 'status');
+    expect(status?.label).toBe('Situacao');
+    expect(status?.type).toBe('status');
+    // options canonicas continuam vindo do template mesmo apos rename.
+    expect(status?.config?.options?.length ?? 0).toBeGreaterThan(0);
+
+    expect(result.columns.find((c) => c.key === 'prioridade')?.label).toBe('Urgencia');
+    expect(result.columns.find((c) => c.key === 'responsavel')?.label).toBe('Dono');
+  });
+
   it('inclui options canonicas para status e prioridade', () => {
     const result = mergeBuiltinColumns(null);
     const status = result.columns.find((column) => column.key === 'status');
