@@ -22,6 +22,13 @@ export const EVENT_TYPES = {
   TASK_DELETED: 'task.deleted',
   TASK_COMMENT_CREATED: 'task.comment.created',
   TASK_COMMENT_DELETED: 'task.comment.deleted',
+  // ============== TIMER MANUAL (ADR-V2-057) ==============
+  // Auditoria do timer manual de tempo por tarefa. Emitidos APÓS persistência
+  // pelo TaskTimerService no pause/stop. Reusam -489 AUDIT_GENERIC (fallback)
+  // via TYPE_TO_CLASSE — ZERO DClasse nova. metaDados carrega taskId, userId,
+  // durationMs.
+  TIMER_PAUSED: 'timer.paused',
+  TIMER_STOPPED: 'timer.stopped',
 
   // ============== PHASES (ADR-V2-047 — Fase 8: webhooks phase.*) ==============
   // Fases são DTask com idClasse=-200 (PHASE) — não tabela própria.

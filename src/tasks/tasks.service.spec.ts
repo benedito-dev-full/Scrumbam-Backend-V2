@@ -4,6 +4,7 @@ import { TasksService } from './tasks.service';
 import { TasksIdentifierService } from './tasks-identifier.service';
 import { PhaseHierarchyService } from './services/phase-hierarchy.service';
 import { PhaseMetricsService } from './services/phase-metrics.service';
+import { TaskTimerService } from './services/task-timer.service';
 import { PrismaService } from '../prisma.service';
 import { EventProducerService } from '../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../common/services/correlation-id.service';
@@ -62,7 +63,7 @@ describe('TasksService', () => {
       update: jest.Mock;
     };
     dTabela: { findFirst: jest.Mock; findMany: jest.Mock; create: jest.Mock; update: jest.Mock };
-    dEntidade: { findFirst: jest.Mock };
+    dEntidade: { findFirst: jest.Mock; findMany: jest.Mock };
     dPedido: { findMany: jest.Mock };
     $transaction: jest.Mock;
   };
@@ -87,7 +88,11 @@ describe('TasksService', () => {
         update: jest.fn(),
       },
       // Necessário porque TasksService.create() hidrata creator via dEntidade.findFirst.
-      dEntidade: { findFirst: jest.fn().mockResolvedValue({ nome: 'Tester' }) },
+      // findMany: usado por TaskTimerService.hydrateUserNames (batch de nomes — ADR-V2-057).
+      dEntidade: {
+        findFirst: jest.fn().mockResolvedValue({ nome: 'Tester' }),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       // findActiveExecutionsForTasks roda em findMany/findOne — default = [] (sem locks).
       dPedido: { findMany: jest.fn().mockResolvedValue([]) },
       $transaction: jest.fn(),
@@ -125,6 +130,9 @@ describe('TasksService', () => {
         { provide: CorrelationIdService, useValue: correlationIdMock },
         { provide: PhaseHierarchyService, useValue: phaseHierarchyMock },
         { provide: PhaseMetricsService, useValue: phaseMetricsMock },
+        // TaskTimerService real (ADR-V2-057): só depende de prisma/event/correlation,
+        // todos já mockados. buildResponse/list/findOne usam seus métodos puros.
+        TaskTimerService,
         {
           provide: TimezoneService,
           useValue: {
@@ -668,6 +676,54 @@ describe('TasksService', () => {
       expect(telemetry.doneAt).toBeDefined();
       expect(typeof telemetry.cycleTime).toBe('number');
       expect(typeof telemetry.leadTime).toBe('number');
+    });
+
+    // ─── REGRESSÃO CRÍTICA (ADR-V2-057): timer manual NÃO contamina fluxo IA ───
+    it('timer manual ABERTO durante EXECUTING→DONE NÃO afeta cycleTime/leadTime/workSessions', async () => {
+      const readyAt = new Date('2026-05-09T01:00:00Z');
+      // manualTimers com 1 sessão ABERTA (humano cronometrando) coexistindo
+      // com 1 workSession de IA aberta. O DONE deve fechar só a workSession.
+      const openManual = { userId: '42', startedAt: '2026-05-09T01:30:00.000Z' };
+      const iaSession = { startedAt: readyAt.toISOString() };
+      const task = makeTask({
+        dados: {
+          identifier: 'DEV-7',
+          v3: { state: 'EXECUTING' },
+          telemetry: {
+            readyAt: readyAt.toISOString(),
+            workSessions: [iaSession],
+            manualTimers: [openManual],
+          },
+        },
+        criadoEm: new Date('2026-05-09T00:00:00Z'),
+      });
+      prisma.dTask.findFirst.mockResolvedValue(task);
+      prisma.dTabela.findFirst.mockResolvedValue(null);
+
+      let capturedData: Record<string, unknown> = {};
+      prisma.dTask.update.mockImplementation(({ data }: { data: Record<string, unknown> }) => {
+        capturedData = data;
+        return Promise.resolve({ ...task, dados: data.dados });
+      });
+
+      await service.updateStatus('7', { status: 'DONE' });
+
+      const dados = capturedData.dados as Record<string, unknown>;
+      const telemetry = dados.telemetry as Record<string, unknown>;
+
+      // Fluxo IA derivou normalmente
+      expect(typeof telemetry.cycleTime).toBe('number');
+      expect(typeof telemetry.leadTime).toBe('number');
+      const workSessions = telemetry.workSessions as Array<Record<string, unknown>>;
+      expect(workSessions).toHaveLength(1);
+      expect(workSessions[0].endedAt).toBeDefined(); // IA fechou sua sessão
+
+      // O timer MANUAL permaneceu INTACTO — ainda aberto, sem durationMs.
+      const manualTimers = telemetry.manualTimers as Array<Record<string, unknown>>;
+      expect(manualTimers).toHaveLength(1);
+      expect(manualTimers[0]).toEqual(openManual);
+      expect(manualTimers[0].endedAt).toBeUndefined();
+      expect(manualTimers[0].durationMs).toBeUndefined();
     });
   });
 
@@ -1324,7 +1380,10 @@ describe('TasksService', () => {
           create: jest.fn(),
           update: jest.fn(),
         },
-        dEntidade: { findFirst: jest.fn().mockResolvedValue({ nome: 'Tester' }) },
+        dEntidade: {
+          findFirst: jest.fn().mockResolvedValue({ nome: 'Tester' }),
+          findMany: jest.fn().mockResolvedValue([]),
+        },
         dPedido: { findMany: jest.fn().mockResolvedValue([]) },
         $transaction: jest.fn(),
       };
@@ -1332,6 +1391,7 @@ describe('TasksService', () => {
       const module = await Test.createTestingModule({
         providers: [
           TasksService,
+          TaskTimerService,
           { provide: PrismaService, useValue: prismaMock },
           { provide: TasksIdentifierService, useValue: identifierServiceMock },
           { provide: EventProducerService, useValue: { addInternalEvent: jest.fn() } },

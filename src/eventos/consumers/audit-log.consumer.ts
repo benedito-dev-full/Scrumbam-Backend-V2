@@ -31,6 +31,11 @@ const TYPE_TO_CLASSE: Readonly<Record<string, bigint>> = Object.freeze({
   'task.comment.created': BigInt(-507), // TASK_COMMENT (seed Fase 1 — ia-tools-backend)
   'task.comment.deleted': BigInt(-507), // TASK_COMMENT (seed Fase 1 — ia-tools-backend)
 
+  // Timer manual (ADR-V2-057). Reusa -489 AUDIT_GENERIC — ZERO DClasse nova.
+  // Distinção via type + metaDados (taskId, userId, durationMs).
+  'timer.paused': BigInt(-489),
+  'timer.stopped': BigInt(-489),
+
   // Phases (ADR-V2-047 — Fase 8). Reusa -489 AUDIT_GENERIC (padrão ADR-V2-027 —
   // sem DClasse semântica dedicada). Distinção via metaDados._meta.action.
   'phase.created': BigInt(-489),

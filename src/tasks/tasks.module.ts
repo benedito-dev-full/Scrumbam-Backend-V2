@@ -7,6 +7,7 @@ import { TasksIdentifierService } from './tasks-identifier.service';
 import { PhaseHierarchyService } from './services/phase-hierarchy.service';
 import { PhaseTreeService } from './services/phase-tree.service';
 import { PhaseMetricsService } from './services/phase-metrics.service';
+import { TaskTimerService } from './services/task-timer.service';
 
 /**
  * TasksModule — Domínio de tasks (DTask + V3 Intentions) V2.
@@ -21,6 +22,8 @@ import { PhaseMetricsService } from './services/phase-metrics.service';
  *   (ADR-V2-047 — Fases via DTask.idPai)
  * - PhaseTreeService: CTE recursiva real (Fase 5 — ADR-V2-047)
  * - PhaseMetricsService: % conclusão via CTE recursiva (Fase 5 — ADR-V2-047)
+ * - TaskTimerService: timer manual de tempo por tarefa (ADR-V2-057) — Prisma
+ *   direto em dados.telemetry.manualTimers; aritmética server-side anti-fraude.
  *
  * Imports:
  * - `AuthModule` (forwardRef) — `AuthCompositeGuard` no controller (ADR-V2-042).
@@ -42,6 +45,7 @@ import { PhaseMetricsService } from './services/phase-metrics.service';
     PhaseHierarchyService,
     PhaseTreeService,
     PhaseMetricsService,
+    TaskTimerService,
   ],
   exports: [TasksService, PhaseTreeService],
 })

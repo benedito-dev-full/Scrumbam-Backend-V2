@@ -33,7 +33,10 @@ function makePrisma() {
     dProject: { findFirst: jest.fn(), findMany: jest.fn() },
     dTask: { findFirst: jest.fn(), findMany: jest.fn() },
     dTabela: { findMany: jest.fn(), findFirst: jest.fn() },
-    dEntidade: { findFirst: jest.fn(), findMany: jest.fn() },
+    dEntidade: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+    // findActiveExecutionsForTasks (lock UI) e TaskTimerService consultam estas
+    // tabelas no findMany/findOne — default vazio (sem locks, sem timers).
+    dPedido: { findMany: jest.fn().mockResolvedValue([]) },
     $transaction: jest.fn(),
   };
   return prisma as unknown as {
@@ -42,9 +45,20 @@ function makePrisma() {
     dTask: { findFirst: jest.Mock; findMany: jest.Mock };
     dTabela: { findMany: jest.Mock; findFirst: jest.Mock };
     dEntidade: { findFirst: jest.Mock; findMany: jest.Mock };
+    dPedido: { findMany: jest.Mock };
     $transaction: jest.Mock;
   };
 }
+
+/**
+ * Stub do TaskTimerService (ADR-V2-057). Os cenários aqui usam tasks sem
+ * `manualTimers`, então `buildTimerStateMap` retorna mapa vazio e `buildTimerState`
+ * retorna null — não há agregação a testar neste arquivo.
+ */
+const timerStub = {
+  buildTimerStateMap: jest.fn().mockResolvedValue(new Map()),
+  buildTimerState: jest.fn().mockReturnValue(null),
+};
 
 describe('Tenant Isolation — Adversarial Scenarios (ADR-V2-042)', () => {
   // ───────────────────────────────────────────────────────────────────────────
@@ -130,6 +144,8 @@ describe('Tenant Isolation — Adversarial Scenarios (ADR-V2-042)', () => {
         {} as never,
         {} as never,
         {} as never,
+        {} as never,
+        timerStub as never,
       );
 
       // accessibleProjectIds = [PA] (scope JWT(orgId=A))
@@ -170,6 +186,8 @@ describe('Tenant Isolation — Adversarial Scenarios (ADR-V2-042)', () => {
         {} as never,
         {} as never,
         {} as never,
+        {} as never,
+        timerStub as never,
       );
 
       const result = await svc.findMany({}, [PA.toString()]);
@@ -191,6 +209,8 @@ describe('Tenant Isolation — Adversarial Scenarios (ADR-V2-042)', () => {
         {} as never,
         {} as never,
         {} as never,
+        {} as never,
+        timerStub as never,
       );
 
       const result = await svc.findMany({}, []);
@@ -248,6 +268,8 @@ describe('Tenant Isolation — Adversarial Scenarios (ADR-V2-042)', () => {
         {} as never,
         {} as never,
         {} as never,
+        {} as never,
+        timerStub as never,
       );
 
       prisma.dTask.findMany.mockResolvedValue([]);
@@ -349,6 +371,8 @@ describe('Tenant Isolation — Adversarial Scenarios (ADR-V2-042)', () => {
         {} as never,
         {} as never,
         {} as never,
+        {} as never,
+        timerStub as never,
       );
 
       await expect(
@@ -396,6 +420,8 @@ describe('Tenant Isolation — Adversarial Scenarios (ADR-V2-042)', () => {
         {} as never,
         {} as never,
         {} as never,
+        {} as never,
+        timerStub as never,
       );
 
       await expect(svc.findOne('700', [PA.toString()])).rejects.toThrow(NotFoundException);

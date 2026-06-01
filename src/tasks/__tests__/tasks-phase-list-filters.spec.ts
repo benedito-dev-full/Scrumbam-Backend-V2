@@ -3,6 +3,7 @@ import { TasksService } from '../tasks.service';
 import { TasksIdentifierService } from '../tasks-identifier.service';
 import { PhaseHierarchyService } from '../services/phase-hierarchy.service';
 import { PhaseMetricsService } from '../services/phase-metrics.service';
+import { TaskTimerService } from '../services/task-timer.service';
 import { PrismaService } from '../../prisma.service';
 import { EventProducerService } from '../../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../../common/services/correlation-id.service';
@@ -112,7 +113,8 @@ describe('Tasks Fase 4 — filtros hierárquicos (ADR-V2-047)', () => {
           create: jest.fn(),
           update: jest.fn(),
         },
-        dEntidade: { findFirst: jest.fn() },
+        dEntidade: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+        dPedido: { findMany: jest.fn().mockResolvedValue([]) },
         $transaction: jest.fn(),
         $queryRaw: jest.fn(),
       };
@@ -120,6 +122,7 @@ describe('Tasks Fase 4 — filtros hierárquicos (ADR-V2-047)', () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           TasksService,
+          TaskTimerService,
           { provide: PrismaService, useValue: prismaMock },
           { provide: TasksIdentifierService, useValue: { getNextIdentifier: jest.fn() } },
           {

@@ -7,7 +7,11 @@ import { TimezoneService } from '../common/services/timezone.service';
 import { TasksIdentifierService } from './tasks-identifier.service';
 import { PhaseHierarchyService } from './services/phase-hierarchy.service';
 import { validateTransition, isValidState } from './tasks-state-machine';
-import { TaskStatus, buildInitialTaskDados } from './schemas/task-dados.schema';
+import {
+  TaskStatus,
+  buildInitialTaskDados,
+  ManualTimerSession,
+} from './schemas/task-dados.schema';
 import { PhaseMetricsService } from './services/phase-metrics.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
@@ -15,6 +19,8 @@ import { UpdateTaskStatusDto } from './dto/update-task-status.dto';
 import { UpdateTaskSprintDto } from './dto/update-task-sprint.dto';
 import { ListTasksQueryDto } from './dto/list-tasks-query.dto';
 import { TaskResponseDto, ListTasksResponseDto, ActiveExecutionDto } from './dto/task-response.dto';
+import { TaskTimerStateDto } from './dto/task-timer-response.dto';
+import { TaskTimerService, TimerAction } from './services/task-timer.service';
 import { ColumnDefDto, TableFieldsDto } from './table-fields/column-def.dto';
 import {
   assertRequiredFieldValues,
@@ -206,6 +212,7 @@ export class TasksService {
     private readonly phaseHierarchy: PhaseHierarchyService,
     private readonly phaseMetrics: PhaseMetricsService,
     private readonly timezoneService: TimezoneService,
+    private readonly taskTimerService: TaskTimerService,
   ) {}
 
   /**
@@ -769,7 +776,11 @@ export class TasksService {
     // Filtra DPedido idClasse=-300..-304 com baixado=false cujo dados.taskId
     // pertence ao lote. Quando ausente, frontend trata task como editável.
     const executionsMap = await this.findActiveExecutionsForTasks(pageTasks.map((t) => t.chave));
-    const items = pageTasks.map((t) => this.buildResponse(t, priorityMap, executionsMap));
+    // ADR-V2-057: timer agregado por usuário — 1 query batch de nomes (ZERO N+1).
+    const timerMap = await this.taskTimerService.buildTimerStateMap(pageTasks);
+    const items = pageTasks.map((t) =>
+      this.buildResponse(t, priorityMap, executionsMap, timerMap),
+    );
     const nextCursor = hasMore ? pageTasks[pageTasks.length - 1].chave.toString() : null;
 
     return { items, pagination: { hasMore, nextCursor } };
@@ -815,7 +826,9 @@ export class TasksService {
     // Lookup de execução ativa para esta task (1 query — N+1 inexistente).
     // Quando presente, sinaliza que a UI deve travar a task (read-only).
     const executionsMap = await this.findActiveExecutionsForTasks([task.chave]);
-    return this.buildResponse(task, priorityMap, executionsMap);
+    // ADR-V2-057: timer agregado (1 query batch de nomes — ZERO N+1).
+    const timerMap = await this.taskTimerService.buildTimerStateMap([task]);
+    return this.buildResponse(task, priorityMap, executionsMap, timerMap);
   }
 
   /**
@@ -1775,6 +1788,47 @@ export class TasksService {
   }
 
   /**
+   * Aplica uma ação de timer manual (start/pause/resume/stop) a uma task.
+   *
+   * Delega a lógica de domínio (tenant gate, regra 1-timer, aritmética
+   * server-side anti-fraude, agregação batch, DEvento de auditoria pós-commit)
+   * ao {@link TaskTimerService} e reconstrói o `TaskResponseDto` completo via
+   * `findOne` (mesma hidratação de priority/execution/timer da leitura normal).
+   *
+   * **NÃO toca `cycleTime`/`leadTime`/`workSessions`** — esses derivam SÓ do
+   * fluxo de IA em `updateStatus` (ADR-V2-057, separação manual × IA).
+   *
+   * @param id - chave BigInt da task (string)
+   * @param action - 'start' | 'pause' | 'resume' | 'stop'
+   * @param actorId - DEntidade.chave do usuário (vem do JWT, nunca do body)
+   * @param accessibleProjectIds - scope tenant (ADR-V2-042)
+   * @returns TaskResponseDto com o `timer` agregado atualizado
+   *
+   * @throws {NotFoundException} task inexistente ou fora do scope
+   * @throws {ConflictException} timer já aberto (start/resume) ou inexistente (pause/stop)
+   *
+   * @example
+   * ```typescript
+   * const task = await service.timer('7', 'start', BigInt(42), allowedIds);
+   * // task.timer.running === true
+   * ```
+   */
+  async timer(
+    id: string,
+    action: TimerAction,
+    actorId: bigint,
+    accessibleProjectIds?: string[],
+  ): Promise<TaskResponseDto> {
+    if (action === 'start' || action === 'resume') {
+      await this.taskTimerService.start(id, actorId, accessibleProjectIds, action);
+    } else {
+      await this.taskTimerService.close(id, actorId, accessibleProjectIds, action);
+    }
+    // Reconstrói o response completo (tenant gate já garantido na mutação).
+    return this.findOne(id, accessibleProjectIds);
+  }
+
+  /**
    * Constrói TaskResponseDto a partir de registro DTask.
    *
    * Extrai campos polimórficos de `dados` JSON (identifier, taskType, assigneeTeamId, v3).
@@ -1813,6 +1867,7 @@ export class TasksService {
     },
     priorityMap?: Map<string, string>,
     executionsMap?: Map<string, ActiveExecutionDto>,
+    timerMap?: Map<string, TaskTimerStateDto>,
   ): TaskResponseDto {
     const dados = task.dados as Record<string, unknown> | null;
     const v3 = dados?.v3 as { state?: string } | null;
@@ -1844,6 +1899,17 @@ export class TasksService {
       dueDate: task.dueDate ? task.dueDate.toISOString() : null,
       dados,
       activeExecution: executionsMap?.get(taskIdStr) ?? null,
+      // ADR-V2-057: timer manual agregado. Quando o timerMap não é fornecido
+      // (caller que não hidrata nomes em batch) ou a task nunca teve timer,
+      // o campo fica null. Derivação síncrona via buildTimerState como fallback
+      // garante o estado correto mesmo sem o map pré-computado (sem nomes).
+      timer:
+        timerMap?.get(taskIdStr) ??
+        this.taskTimerService.buildTimerState(
+          (dados?.telemetry as Record<string, unknown> | null)?.manualTimers as
+            | ManualTimerSession[]
+            | undefined,
+        ),
       criadoEm: task.criadoEm.toISOString(),
       atualizadoEm: task.atualizadoEm.toISOString(),
     };

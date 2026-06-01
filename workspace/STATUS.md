@@ -1,6 +1,59 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-05-31 (Task-Colunas Fases 4-7 COMPLETAS)
+**Ultima atualizacao:** 2026-06-01 (Task 57 Timer — Fase 1 COMPLETA)
+
+---
+
+## ✅ TASK 57 — TIMER MANUAL DE TEMPO POR TAREFA (V2 F5) — PHASE 1 COMPLETE
+
+**Module:** tasks, core
+**Task:** Timer manual com play/pause/resume/stop (server-side anti-fraude)
+**Status:** PHASE 1 COMPLETA (Backend entregue; Fases 2-3 pendentes)
+**Date:** 2026-06-01
+**Duration:** ~12h (Strategist 2h + Implementer 7h + Reviewer 1h30m + Documenter 1h30m)
+**Quality:** 8.7/10 APPROVED (gate CEO 8.0)
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DTask é estrutural (Prisma direto)
+- Pilar 2 (Endpoints): RESPEITADO — reutiliza `/tasks` controller, zero novo
+- Pilar 3 (Seed): PRESERVADO — zero DClasse nova (metadado em Json)
+
+**Deliverables (Fase 1):**
+- [x] Schema: `ManualTimerSession` + `manualTimers?` em `TelemetryData` (DTask.dados)
+- [x] Service: `TaskTimerService` (start/pause/resume/stop com Prisma + tenant gate)
+- [x] DTOs: `TaskTimerStateDto`, `TaskTimerUserTotalDto` (timer + aggregação)
+- [x] Controller: 4 endpoints `/timer/{start,pause,resume,stop}` (200, 409, 404)
+- [x] Tests: 14 unit + 6 integration (20/20 PASS, regressão IA zero)
+- [x] Build: tsc 0 errors, eslint 0 warnings
+- [x] Docs: ADR-V2-057 redigido, ROADMAP/CHANGELOG/STATUS atualizado
+
+**Invariantes de Negócio:**
+- `workSessions[]` intocado (IA flow EXECUTING/DONE preservado)
+- `durationMs` calculado server-side SEMPRE (anti-fraude)
+- `userId` do JWT, nunca do body (impossível falsificar usuário)
+- 1 timer aberto por task (409 se tenta 2º)
+- Agregação batch: N usuarios hidratados em 1 query (ZERO N+1)
+
+**Regras Canônicas:**
+- Timer em `DTask.dados.telemetry` (coluna existente)
+- Anti-fraude: servidor calcula duração (não cliente)
+- Persistência imediata em pause/stop (não acumula)
+- Total por usuario: somatório de `durationMs` das sessões fechadas
+
+**Validacao Local:**
+- `npx tsc --noEmit`: apenas baseline de 14 erros pré-existentes
+- `npx jest src/tasks/services/task-timer.service.spec.ts`: 14/14 PASS
+- `npx jest src/tasks/__tests__/task-timer.integration.spec.ts`: 6/6 PASS
+- Regressão de IA (cycleTime/leadTime): PASS — métricas IA inalteradas
+
+**Commits:**
+- (commit hash — será preenchido após git commit Fase 1)
+
+**ADRs:** ADR-V2-057, ADR-V2-001, ADR-V2-005, ADR-V2-006
+
+**Proximas Fases:**
+- Fase 2 (Frontend): painel cronômetro visual no sidebar (pendente aval CEO Fase 1)
+- Fase 3 (Grade): coluna builtin read-only "Tempo gasto" (estende ADR-V2-056)
 
 ---
 

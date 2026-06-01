@@ -13,12 +13,55 @@ export type TaskStatus =
   | 'VALIDATED';
 
 /**
- * Sessão de trabalho (workSession) de uma task.
+ * Sessão de trabalho automática (workSession) de uma task — **fluxo de IA**.
+ *
+ * **SEMÂNTICA (ADR-V2-057):** `workSessions[]` é manipulado EXCLUSIVAMENTE pelo
+ * fluxo automático de IA em `TasksService.updateStatus` (transições
+ * EXECUTING → DONE). É a fonte de `cycleTime`/`leadTime`. **NÃO** representa
+ * tempo manual de humano — para isso existe {@link ManualTimerSession}
+ * (`telemetry.manualTimers[]`), array totalmente separado.
+ *
+ * @see ManualTimerSession — sessão manual por humano (timer play/pause/stop)
  */
 export interface WorkSession {
   startedAt: string;
   endedAt?: string;
   agentId?: string;
+}
+
+/**
+ * Sessão de timer **manual** de uma task — **fluxo humano** (ADR-V2-057).
+ *
+ * Representa um intervalo cronometrado por um humano via botões
+ * play/pause/resume/stop no drawer da task. Diferente de {@link WorkSession}
+ * (IA), uma `ManualTimerSession`:
+ * - Vive em `telemetry.manualTimers[]` (array dedicado, separado de
+ *   `workSessions[]`) — JAMAIS contamina `cycleTime`/`leadTime`.
+ * - É manipulada APENAS pelos endpoints `/tasks/:id/timer/*`
+ *   (`TaskTimerService`), nunca pelo fluxo de status V3.
+ * - Carrega `userId` (DEntidade.chave do humano), capturado SEMPRE do JWT
+ *   (`req.user.entidadeId`), nunca do body — anti-fraude.
+ *
+ * **Anti-fraude (aritmética server-side):** `endedAt` e `durationMs` são
+ * gravados pelo servidor no momento do pause/stop (`Date` do servidor). O
+ * cliente nunca envia duração; o cronômetro do front é puramente visual e usa
+ * `startedAt` como offset.
+ *
+ * Uma sessão "aberta" tem `endedAt`/`durationMs` ausentes. A regra atual é
+ * de **1 timer aberto por task** (qualquer usuário) — segunda abertura → 409.
+ *
+ * @see WorkSession — sessão automática de IA (NÃO usar para tempo humano)
+ * @see ADR-V2-057 — timer manual via dados.telemetry.manualTimers
+ */
+export interface ManualTimerSession {
+  /** DEntidade.chave (string) do humano dono da sessão — vem do JWT. */
+  userId: string;
+  /** ISO 8601 — início, gravado server-side no start/resume. */
+  startedAt: string;
+  /** ISO 8601 — fim, gravado server-side no pause/stop. Ausente = sessão aberta. */
+  endedAt?: string;
+  /** Duração em ms = endedAt − startedAt, calculada server-side (anti-fraude). */
+  durationMs?: number;
 }
 
 /**
@@ -49,6 +92,12 @@ export interface AutomationData {
 
 /**
  * Telemetria de ciclo de vida da task.
+ *
+ * **Dois arrays de sessão coexistem com semânticas DISTINTAS (ADR-V2-057):**
+ * - `workSessions[]` — sessões automáticas de **IA** (EXECUTING/DONE). Fonte de
+ *   `cycleTime`/`leadTime`. Manipulado só por `updateStatus`.
+ * - `manualTimers[]` — sessões manuais por **humano** (timer play/pause/stop).
+ *   Nunca alimenta `cycleTime`/`leadTime`. Manipulado só por `TaskTimerService`.
  */
 export interface TelemetryData {
   readyAt?: string;
@@ -56,7 +105,10 @@ export interface TelemetryData {
   doneAt?: string;
   cycleTime?: number;
   leadTime?: number;
+  /** Sessões automáticas de IA — base de cycleTime/leadTime. NÃO é tempo humano. */
   workSessions?: WorkSession[];
+  /** Sessões manuais por humano (timer). Separado de workSessions — ADR-V2-057. */
+  manualTimers?: ManualTimerSession[];
 }
 
 /**

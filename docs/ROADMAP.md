@@ -4190,6 +4190,71 @@ Remoção cirúrgica do write-path dual entre `DProject.repoUrl` (coluna canôni
 
 ---
 
+## Task 57: Timer Manual de Tempo por Tarefa (ADR-V2-057) — Fase 1 ✅ COMPLETA
+
+**Status:** ✅ **FASE 1 COMPLETA** — Backend entregue com 4 endpoints + aggregação server-side
+**Módulo V2:** tasks (DTask — domínio estrutural)
+**Fase V2:** F5 (Domínio estrutural) — Integração frontend hierarquia
+**Tempo Real:** ~12h total (Strategist planning ~2h + Implementer ~7h + Reviewer 1h30m + Documenter 1h30m)
+**Completado em:** 2026-06-01
+**Quality Score:** 8.7/10 APPROVED (gate CEO 8.0)
+
+**O Que Foi Feito (Fase 1 — Backend):**
+
+**Estrutura de Dados (ZERO tabela nova):**
+- `ManualTimerSession` e `manualTimers?` adicionados em `TelemetryData` (Json em coluna DTask.dados existente — ADR-V2-001)
+- Separação semântica clara: `workSessions[]` = IA (flow EXECUTING/DONE intacto), `manualTimers[]` = humano (novo)
+- Campos: `userId` (JWT, nunca body), `startedAt` (ISO server-side), `endedAt`?, `durationMs`? (anti-fraude)
+- JSDoc extenso explicando invariante (workSessions NUNCA tocado pelo timer manual)
+
+**Serviço TaskTimerService:**
+- Métodos: `start()`, `pause()`, `resume()`, `stop()` com Prisma direto (DTask é estrutural)
+- Regra 1-timer-por-task: 409 Conflict se sessão já aberta
+- Anti-fraude: `durationMs = server Date no pause/stop`, userId do JWT
+- Agregação batch de nomes: `DEntidade.findMany` para N usuários — ZERO N+1
+- Tenant gate igual a updateStatus (resolveScopedProjectIds)
+
+**DTOs:**
+- `TaskTimerStateDto`: running (bool), runningUserId, runningStartedAt, totalsByUser[]
+- `TaskTimerUserTotalDto`: userId, userName, totalMs (server-side sum)
+- Adicionado `timer: TaskTimerStateDto | null` em `TaskResponseDto`
+
+**Endpoints (sob `/tasks` — Pilar 2 respeitado):**
+- `POST /tasks/:id/timer/start` — abre sessão
+- `POST /tasks/:id/timer/pause` — fecha, grava durationMs
+- `POST /tasks/:id/timer/resume` — abre nova (alias start)
+- `POST /tasks/:id/timer/stop` — fecha (equals pause)
+- Resposta: `TaskResponseDto` com `timer` agregado
+- Validações: 409 (1-timer), 404 (tenant scope)
+
+**Testes:**
+- 14 unit tests `task-timer.service.spec.ts` (aritmética, 1-timer, 409s, agregação) — 100% PASS
+- 6 integration tests `task-timer.integration.spec.ts` (endpoints HTTP, tenant, regressão cycleTime/leadTime) — 100% PASS
+- Teste de regressão obrigatório: timer manual aberto durante EXECUTING→DONE não corrompe métricas IA
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — DTask é tabela estrutural (Prisma direto + Service)
+- Pilar 2 (Endpoints): Reutiliza `/tasks` controller. Zero controller novo.
+- Pilar 3 (Seed): ZERO DClasse nova. Metadado em Json (dados.telemetry).
+
+**Métricas:**
+- Build: ✅ PASS (npm run build, tsc 0 errors, eslint 0 warnings)
+- Tests: ✅ 14 unit + 6 integration PASS (regressão zero)
+- Queries: ZERO nova query (Prisma direto, batch lookup)
+- N+1: ZERO (batch findMany para hidratar nomes)
+
+**ADRs:**
+- ADR-V2-057 (novo — timer manual via dados.telemetry.manualTimers) — ACEITO
+- ADR-V2-001 (zero tabela nova) — respeitado
+- ADR-V2-005/006 (Engine exclusivo DPedido) — timer não toca DPedido
+- ADR-V2-047 (soft-delete audit) — padrão DEvento (SHOULD-HAVE para timer audit)
+
+**Fases Pendentes:**
+- Fase 2 (Frontend): painel no sidebar com cronômetro visual (pendente aval CEO Fase 1)
+- Fase 3 (Grade Blocos): coluna builtin read-only "Tempo gasto" (estende ADR-V2-056)
+
+---
+
 ## Proximas fases (preview)
 
 | Fase | Nome | Pilar dominante |

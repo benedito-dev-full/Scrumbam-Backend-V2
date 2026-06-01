@@ -383,6 +383,134 @@ export class TasksController {
   }
 
   /**
+   * Inicia o timer manual de tempo para o usuário autenticado (ADR-V2-057).
+   *
+   * Abre uma sessão manual em `DTask.dados.telemetry.manualTimers[]`. O `userId`
+   * é capturado do JWT (`req.user.entidadeId`), nunca do body — anti-fraude.
+   * Regra "1 timer aberto por task": se já houver sessão aberta (deste ou de
+   * outro usuário), retorna 409. Não toca o fluxo de IA (workSessions/cycleTime).
+   *
+   * @param id - ID da task
+   * @returns TaskResponseDto com `timer.running = true`
+   *
+   * @example
+   * ```bash
+   * curl -X POST http://localhost:3000/api/v1/tasks/7/timer/start \
+   *   -H "Authorization: Bearer {token}"
+   * ```
+   */
+  @Post(':id/timer/start')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Iniciar timer manual de tempo (ADR-V2-057)',
+    description:
+      'Abre uma sessão manual de timer. userId vem do JWT. 409 se já há timer ' +
+      'aberto na task (regra 1-timer-por-task).',
+  })
+  @ApiParam({ name: 'id', description: 'ID da task' })
+  @ApiResponse({ status: 200, description: 'Timer iniciado', type: TaskResponseDto })
+  @ApiResponse({ status: 409, description: 'Já existe um timer em andamento nesta task' })
+  @ApiResponse({ status: 404, description: 'Task não encontrada ou fora do scope' })
+  async timerStart(
+    @Param('id') id: string,
+    @Request() req: JwtRequest,
+  ): Promise<TaskResponseDto> {
+    const allowed = await this.resolveScopedProjectIds(req);
+    return this.tasksService.timer(id, 'start', BigInt(req.user.entidadeId), allowed);
+  }
+
+  /**
+   * Pausa o timer manual do usuário autenticado (ADR-V2-057).
+   *
+   * Fecha a sessão aberta do usuário, gravando `endedAt` + `durationMs`
+   * server-side (anti-fraude — o body nunca carrega duração). Persiste
+   * imediatamente e emite DEvento `timer.paused` pós-commit. 409 se não há
+   * sessão aberta deste usuário.
+   *
+   * @param id - ID da task
+   * @returns TaskResponseDto com o total atualizado em `timer.totalsByUser`
+   */
+  @Post(':id/timer/pause')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Pausar timer manual de tempo (ADR-V2-057)',
+    description:
+      'Fecha a sessão aberta do usuário. durationMs calculado server-side ' +
+      '(anti-fraude). 409 se não há timer em andamento para o usuário.',
+  })
+  @ApiParam({ name: 'id', description: 'ID da task' })
+  @ApiResponse({ status: 200, description: 'Timer pausado', type: TaskResponseDto })
+  @ApiResponse({ status: 409, description: 'Nenhum timer em andamento para este usuário' })
+  @ApiResponse({ status: 404, description: 'Task não encontrada ou fora do scope' })
+  async timerPause(
+    @Param('id') id: string,
+    @Request() req: JwtRequest,
+  ): Promise<TaskResponseDto> {
+    const allowed = await this.resolveScopedProjectIds(req);
+    return this.tasksService.timer(id, 'pause', BigInt(req.user.entidadeId), allowed);
+  }
+
+  /**
+   * Retoma o timer manual do usuário autenticado (ADR-V2-057).
+   *
+   * Alias semântico de `start` — abre uma nova sessão manual. Mantido explícito
+   * para clareza de UI ("continuar trabalhando"). Mesma regra 1-timer (409 se
+   * já há sessão aberta).
+   *
+   * @param id - ID da task
+   * @returns TaskResponseDto com `timer.running = true`
+   */
+  @Post(':id/timer/resume')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Retomar timer manual de tempo (ADR-V2-057)',
+    description:
+      'Alias semântico de start — abre nova sessão manual. userId vem do JWT. ' +
+      '409 se já há timer aberto na task.',
+  })
+  @ApiParam({ name: 'id', description: 'ID da task' })
+  @ApiResponse({ status: 200, description: 'Timer retomado', type: TaskResponseDto })
+  @ApiResponse({ status: 409, description: 'Já existe um timer em andamento nesta task' })
+  @ApiResponse({ status: 404, description: 'Task não encontrada ou fora do scope' })
+  async timerResume(
+    @Param('id') id: string,
+    @Request() req: JwtRequest,
+  ): Promise<TaskResponseDto> {
+    const allowed = await this.resolveScopedProjectIds(req);
+    return this.tasksService.timer(id, 'resume', BigInt(req.user.entidadeId), allowed);
+  }
+
+  /**
+   * Encerra o timer manual do usuário autenticado (ADR-V2-057).
+   *
+   * Igual a `pause` na mecânica (grava `endedAt` + `durationMs` server-side),
+   * com semântica de "encerrei o trabalho agora". Emite DEvento `timer.stopped`
+   * pós-commit. 409 se não há sessão aberta deste usuário.
+   *
+   * @param id - ID da task
+   * @returns TaskResponseDto com o total atualizado em `timer.totalsByUser`
+   */
+  @Post(':id/timer/stop')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Encerrar timer manual de tempo (ADR-V2-057)',
+    description:
+      'Fecha a sessão aberta do usuário (durationMs server-side). 409 se não há ' +
+      'timer em andamento para o usuário.',
+  })
+  @ApiParam({ name: 'id', description: 'ID da task' })
+  @ApiResponse({ status: 200, description: 'Timer encerrado', type: TaskResponseDto })
+  @ApiResponse({ status: 409, description: 'Nenhum timer em andamento para este usuário' })
+  @ApiResponse({ status: 404, description: 'Task não encontrada ou fora do scope' })
+  async timerStop(
+    @Param('id') id: string,
+    @Request() req: JwtRequest,
+  ): Promise<TaskResponseDto> {
+    const allowed = await this.resolveScopedProjectIds(req);
+    return this.tasksService.timer(id, 'stop', BigInt(req.user.entidadeId), allowed);
+  }
+
+  /**
    * Soft-delete de task com cascade configurável.
    *
    * Por padrão cascateia o soft-delete para todas as subtarefas (filhas,

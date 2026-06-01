@@ -14,6 +14,22 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Timer Manual de Tempo por Tarefa — Fase 1 Backend (V2 F5, 2026-06-01)** (Task 57, ADR-V2-057, Score 8.7/10)
+  - 4 endpoints REST `/tasks/:id/timer/{start,pause,resume,stop}` — play/pause/resume/stop via sidebar
+  - `ManualTimerSession` + `manualTimers?` em `DTask.dados.telemetry` (Json — zero tabela nova)
+  - Separação semântica: `workSessions[]` = IA (EXECUTING/DONE intacto), `manualTimers[]` = humano (novo)
+  - Anti-fraude: `durationMs` sempre calculado server-side via Date do servidor (not client clock)
+  - `userId` do JWT, nunca do body — impossível falsificar usuário
+  - Agregação batch de nomes: `totalsByUser[]` com 1 query para N usuários (ZERO N+1)
+  - `TaskResponseDto.timer` novo: running (bool), runningUserId, runningStartedAt, totalsByUser[] (totalMs per user)
+  - Regra: 1 timer aberto por task (409 Conflict se tenta abrir 2º)
+  - Teste de regressão: cycleTime/leadTime derivam SÓ de workSessions[] mesmo com timer manual aberto
+  - Pilares: Pilar 1 N/A (estrutural), Pilar 2 reutiliza /tasks, Pilar 3 zero DClasse nova
+  - Build PASS, tsc 0 errors, eslint 0 warnings; 20 tests PASS (14 unit + 6 integration)
+  - ADRs: ADR-V2-057 (novo — timer manual), ADR-V2-001 (zero tabela), ADR-V2-005/006 (Engine preservado)
+
+### Added
+
 - **Colunas Customizaveis - Fases 4-7/7 completas + 2 testes pós-auditoria** (Task Colunas, V2 F5, 2026-05-31)
   - `PUT /tasks/:id` agora valida `dados.fields` contra o schema da Lista em `DProject.tableFields` antes de persistir.
   - Merge seguro por chave em `DTask.dados.fields`: celulas existentes sao preservadas; `null` limpa celula opcional; chave desconhecida e ignorada e nao persiste.

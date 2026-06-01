@@ -4,6 +4,7 @@ import { TasksService } from '../tasks.service';
 import { TasksIdentifierService } from '../tasks-identifier.service';
 import { PhaseHierarchyService } from '../services/phase-hierarchy.service';
 import { PhaseMetricsService } from '../services/phase-metrics.service';
+import { TaskTimerService } from '../services/task-timer.service';
 import { PrismaService } from '../../prisma.service';
 import { EventProducerService } from '../../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../../common/services/correlation-id.service';
@@ -72,7 +73,7 @@ describe('TasksService.create() — ramo PHASE (ADR-V2-050)', () => {
     dProject: { findFirst: jest.Mock };
     dTask: { create: jest.Mock; findFirst: jest.Mock; findMany: jest.Mock; update: jest.Mock };
     dTabela: { findFirst: jest.Mock; findMany: jest.Mock; create: jest.Mock; update: jest.Mock };
-    dEntidade: { findFirst: jest.Mock };
+    dEntidade: { findFirst: jest.Mock; findMany: jest.Mock };
     $transaction: jest.Mock;
   };
   let identifierService: { getNextIdentifier: jest.Mock };
@@ -99,7 +100,10 @@ describe('TasksService.create() — ramo PHASE (ADR-V2-050)', () => {
         create: jest.fn(),
         update: jest.fn(),
       },
-      dEntidade: { findFirst: jest.fn().mockResolvedValue({ nome: 'Tester' }) },
+      dEntidade: {
+        findFirst: jest.fn().mockResolvedValue({ nome: 'Tester' }),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       $transaction: jest.fn(),
     };
 
@@ -129,6 +133,7 @@ describe('TasksService.create() — ramo PHASE (ADR-V2-050)', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TasksService,
+        TaskTimerService,
         { provide: PrismaService, useValue: prismaMock },
         { provide: TasksIdentifierService, useValue: identifierMock },
         { provide: EventProducerService, useValue: eventProducerMock },

@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { TaskTimerStateDto } from './task-timer-response.dto';
 
 /**
  * Estado de execução ativa de uma task (DPedido idClasse=-300..-304 com
@@ -170,6 +171,18 @@ export class TaskResponseDto {
     nullable: true,
   })
   activeExecution!: ActiveExecutionDto | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Estado agregado do timer manual de tempo por usuário (ADR-V2-057). ' +
+      'Deriva de `DTask.dados.telemetry.manualTimers[]`. `null` quando a task ' +
+      'nunca teve timer manual. Toda a aritmética é server-side (anti-fraude); ' +
+      'o cronômetro do frontend é apenas visual e usa `runningStartedAt` como ' +
+      'offset.',
+    type: () => TaskTimerStateDto,
+    nullable: true,
+  })
+  timer!: TaskTimerStateDto | null;
 
   @ApiProperty({ description: 'Data de criação ISO 8601' })
   criadoEm!: string;
