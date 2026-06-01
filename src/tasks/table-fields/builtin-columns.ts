@@ -49,7 +49,7 @@ export const BUILTIN_COLUMNS_TEMPLATE: readonly ColumnDefDto[] = [
       ],
     },
   },
-  { key: 'dueDate', type: 'date', label: 'Data', order: 5, builtin: true },
+  { key: 'dueDate', type: 'date', label: 'Data limite', order: 5, builtin: true },
   // 7ª builtin (Fase 3 — ADR-V2-057): "Tempo gasto" read-only. O VALOR é o total
   // agregado server-side por task (soma de durationMs de manualTimers de todos os
   // usuários, já formatado em "Xh Ymin" / "—"). NÃO é editável, NÃO grava em
