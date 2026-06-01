@@ -16,7 +16,7 @@ describe('mergeBuiltinColumns', () => {
     expect(result.columns.map((column) => column.order)).toEqual([0, 1, 2, 3, 4, 5]);
   });
 
-  it('preserva custom depois das builtin em ordem deterministica', () => {
+  it('injeta builtin ausentes ao final de um legado so-custom (ordem por order)', () => {
     const stored: TableFieldsDto = {
       version: 3,
       columns: [
@@ -28,12 +28,45 @@ describe('mergeBuiltinColumns', () => {
     const result = mergeBuiltinColumns(stored);
 
     expect(result.version).toBe(3);
+    // Custom ja existentes vem primeiro (order 10/20), builtin injetadas ao final.
     expect(result.columns.map((column) => column.key)).toEqual([
-      ...BUILTIN_COLUMN_ORDER,
       'f_a',
       'f_b',
+      ...BUILTIN_COLUMN_ORDER,
     ]);
     expect(result.columns.map((column) => column.order)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(result.columns).toHaveLength(8);
+  });
+
+  it('PRESERVA a ordem reordenada das builtin (regressao do bug de reorder)', () => {
+    // Cenario do usuario: arrastou "status" para DEPOIS de uma custom.
+    // O front grava a nova `order`; o merge NAO pode forcar builtin ao inicio.
+    const stored: TableFieldsDto = {
+      version: 5,
+      columns: [
+        { key: '__nome', type: 'text', label: 'Tarefa', order: 0, builtin: true },
+        { key: 'identifier', type: 'text', label: 'ID', order: 1, builtin: true },
+        { key: 'f_cliente', type: 'text', label: 'Cliente', order: 2 },
+        { key: 'status', type: 'status', label: 'Status', order: 3, builtin: true },
+        { key: 'responsavel', type: 'person', label: 'Resp.', order: 4, builtin: true },
+        { key: 'prioridade', type: 'dropdown', label: 'Prioridade', order: 5, builtin: true },
+        { key: 'dueDate', type: 'date', label: 'Data', order: 6, builtin: true },
+      ],
+    };
+
+    const result = mergeBuiltinColumns(stored);
+
+    // status PERMANECE depois de f_cliente — a reordenacao foi respeitada.
+    expect(result.columns.map((column) => column.key)).toEqual([
+      '__nome',
+      'identifier',
+      'f_cliente',
+      'status',
+      'responsavel',
+      'prioridade',
+      'dueDate',
+    ]);
+    expect(result.columns.map((column) => column.order)).toEqual([0, 1, 2, 3, 4, 5, 6]);
   });
 
   it('nao duplica builtin ja armazenada e completa as ausentes', () => {
@@ -48,13 +81,20 @@ describe('mergeBuiltinColumns', () => {
     const result = mergeBuiltinColumns(stored);
 
     expect(result.columns.filter((column) => column.key === 'status')).toHaveLength(1);
+    // status(order 9) e f_cliente(order 10) vem primeiro; builtin ausentes ao final.
     expect(result.columns.map((column) => column.key)).toEqual([
-      ...BUILTIN_COLUMN_ORDER,
+      'status',
       'f_cliente',
+      '__nome',
+      'identifier',
+      'responsavel',
+      'prioridade',
+      'dueDate',
     ]);
+    expect(result.columns).toHaveLength(7);
   });
 
-  it('renumera colisao de order entre builtin e custom no conjunto inteiro', () => {
+  it('renumera colisao de order entre custom no conjunto inteiro', () => {
     const stored: TableFieldsDto = {
       version: 1,
       columns: [
@@ -66,7 +106,12 @@ describe('mergeBuiltinColumns', () => {
     const result = mergeBuiltinColumns(stored);
 
     expect(result.columns.map((column) => column.order)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
-    expect(result.columns.slice(6).map((column) => column.key)).toEqual(['f_cliente', 'f_valor']);
+    // Custom (order 0, desempate estavel) primeiro; builtin injetadas ao final.
+    expect(result.columns.slice(0, 2).map((column) => column.key)).toEqual([
+      'f_cliente',
+      'f_valor',
+    ]);
+    expect(result.columns.slice(2).map((column) => column.key)).toEqual([...BUILTIN_COLUMN_ORDER]);
   });
 
   it('e idempotente', () => {

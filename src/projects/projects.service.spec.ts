@@ -382,10 +382,14 @@ describe('ProjectsService', () => {
       const result = await service.findOne('1', BigInt(100));
 
       expect(result.tableFields?.version).toBe(4);
+      // Fase 4 (reorder de TUDO): o merge preserva a `order` armazenada e injeta
+      // builtin ausentes ao FINAL. A custom (order:0) vem antes das 6 builtin.
       expect(result.tableFields?.columns.map((column) => column.key)).toEqual([
-        ...BUILTIN_COLUMN_ORDER,
         'f_cliente',
+        ...BUILTIN_COLUMN_ORDER,
       ]);
+      // Não duplica e completa as 6 builtin.
+      expect(result.tableFields?.columns).toHaveLength(7);
     });
 
     it('nao aplica merge-on-read em projetos que nao sao LIST', async () => {

@@ -113,36 +113,68 @@ function getColumns(stored: unknown): ColumnDefDto[] {
   return stored.columns.filter(isRecord) as unknown as ColumnDefDto[];
 }
 
+/**
+ * Completa o schema com as 6 colunas builtin SEM impor uma ordem fixa.
+ *
+ * Regras (Fase 4 — reordenar TUDO):
+ * - Builtin JÁ armazenada: preserva sua `order` (foi o usuário que reordenou);
+ *   só completa campos do template (type/options/builtin:true via mergeBuiltinColumn).
+ * - Builtin AUSENTE (lista legada / null): injeta do template ao FINAL do schema
+ *   atual (não força ao início) na ordem canônica do template, idempotente.
+ * - Custom: preserva como está.
+ * - A ordem final do conjunto INTEIRO é decidida por `order` (com desempate
+ *   estável pelo índice original) e depois renumerada contígua. Assim o reorder
+ *   enviado pelo front (que define `order` por posição) é respeitado no GET.
+ *
+ * @param stored - tableFields cru do banco (objeto, null, ou malformado)
+ * @returns TableFieldsDto com as 6 builtin garantidas + custom, ordem preservada
+ */
 export function mergeBuiltinColumns(stored: unknown): TableFieldsDto {
   const columns = getColumns(stored);
-  const builtinByKey = new Map<string, ColumnDefDto>();
+  const storedBuiltinByKey = new Map<string, ColumnDefDto>();
 
   for (const column of columns) {
-    if (BUILTIN_COLUMN_KEYS.has(column.key) && !builtinByKey.has(column.key)) {
-      builtinByKey.set(column.key, column);
+    if (BUILTIN_COLUMN_KEYS.has(column.key) && !storedBuiltinByKey.has(column.key)) {
+      storedBuiltinByKey.set(column.key, column);
     }
   }
 
-  const builtinColumns = BUILTIN_COLUMNS_TEMPLATE.map((template, index) => ({
-    ...mergeBuiltinColumn(template, builtinByKey.get(template.key)),
-    order: index,
-    builtin: true,
-  }));
+  // `order` base para builtin ausentes: depois da maior order existente, para
+  // não colidir nem "puxar" colunas existentes ao serem injetadas em legados.
+  const maxStoredOrder = columns.reduce(
+    (max, column) => (Number.isFinite(column.order) ? Math.max(max, column.order) : max),
+    -1,
+  );
 
+  // 1) Builtin: preserva a coluna armazenada (com sua `order`) ou injeta do
+  //    template ao final, na ordem canônica do template.
+  let nextInjectedOrder = maxStoredOrder + 1;
+  const builtinColumns: ColumnDefDto[] = BUILTIN_COLUMNS_TEMPLATE.map((template) => {
+    const existing = storedBuiltinByKey.get(template.key);
+    const merged = mergeBuiltinColumn(template, existing);
+    if (existing && Number.isFinite(existing.order)) {
+      return { ...merged, order: existing.order, builtin: true };
+    }
+    return { ...merged, order: nextInjectedOrder++, builtin: true };
+  });
+
+  // 2) Custom: preserva como está (com sua `order`).
   const customColumns = columns
-    .map((column, originalIndex) => ({ column, originalIndex }))
-    .filter(({ column }) => !BUILTIN_COLUMN_KEYS.has(column.key))
+    .filter((column) => !BUILTIN_COLUMN_KEYS.has(column.key))
+    .map((column) => cloneColumn(column as ColumnLike));
+
+  // 3) Ordena o conjunto INTEIRO por `order`, desempate estável por índice de
+  //    inserção, e renumera contíguo pela posição final.
+  const columnsSorted = [...builtinColumns, ...customColumns]
+    .map((column, insertionIndex) => ({ column, insertionIndex }))
     .sort((a, b) => {
       const orderDiff = a.column.order - b.column.order;
-      return orderDiff !== 0 ? orderDiff : a.originalIndex - b.originalIndex;
+      return orderDiff !== 0 ? orderDiff : a.insertionIndex - b.insertionIndex;
     })
-    .map(({ column }) => cloneColumn(column as ColumnLike));
+    .map(({ column }, order) => ({ ...column, order }));
 
   return {
     version: getVersion(stored),
-    columns: [...builtinColumns, ...customColumns].map((column, index) => ({
-      ...column,
-      order: index,
-    })),
+    columns: columnsSorted,
   };
 }
