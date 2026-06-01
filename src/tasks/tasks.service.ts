@@ -1881,6 +1881,15 @@ export class TasksService {
     const idClasseStr = task.idClasse?.toString() ?? '-154';
     const taskIdStr = task.chave.toString();
 
+    // ADR-V2-057 (Fase 3): total de tempo manual JÁ FORMATADO para a coluna
+    // builtin read-only "Tempo gasto". Mesma fonte server-side do painel do
+    // sidebar (totalMs agrega todos os usuários); o front nunca recalcula.
+    const manualTimers = (dados?.telemetry as Record<string, unknown> | null)
+      ?.manualTimers as ManualTimerSession[] | undefined;
+    const timeSpentLabel = this.taskTimerService.formatTotalLabel(
+      this.taskTimerService.totalMs(manualTimers),
+    );
+
     return {
       id: taskIdStr,
       nome: task.nome,
@@ -1905,11 +1914,8 @@ export class TasksService {
       // garante o estado correto mesmo sem o map pré-computado (sem nomes).
       timer:
         timerMap?.get(taskIdStr) ??
-        this.taskTimerService.buildTimerState(
-          (dados?.telemetry as Record<string, unknown> | null)?.manualTimers as
-            | ManualTimerSession[]
-            | undefined,
-        ),
+        this.taskTimerService.buildTimerState(manualTimers),
+      timeSpentLabel,
       criadoEm: task.criadoEm.toISOString(),
       atualizadoEm: task.atualizadoEm.toISOString(),
     };

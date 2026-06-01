@@ -243,6 +243,42 @@ export class TaskTimerService {
   }
 
   /**
+   * Formata uma duração em milissegundos como rótulo humano "Xh Ymin".
+   *
+   * Fonte ÚNICA de formatação da coluna "Tempo gasto" (Fase 3 — ADR-V2-057):
+   * o backend devolve a string pronta e o frontend apenas a exibe (NUNCA soma
+   * no cliente). Regras:
+   * - `0` (ou negativo/NaN) → `'—'` (travessão, "sem tempo registrado").
+   * - `< 1 min` → `'<1min'` (evita exibir "0h 0min" para sessões muito curtas).
+   * - `< 1 h`   → `'Ymin'` (ex.: "45min").
+   * - `>= 1 h`  → `'Xh'` (minutos zero) ou `'Xh Ymin'` (ex.: "2h", "2h 45min").
+   *
+   * @param totalMs - total agregado em milissegundos
+   * @returns rótulo formatado para exibição
+   */
+  formatTotalLabel(totalMs: number): string {
+    if (!Number.isFinite(totalMs) || totalMs <= 0) {
+      return '—';
+    }
+
+    const totalMinutes = Math.floor(totalMs / 60000);
+    if (totalMinutes === 0) {
+      return '<1min';
+    }
+
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+
+    if (hours === 0) {
+      return `${minutes}min`;
+    }
+    if (minutes === 0) {
+      return `${hours}h`;
+    }
+    return `${hours}h ${minutes}min`;
+  }
+
+  /**
    * Constrói um mapa taskChave → TaskTimerStateDto para um lote de tasks,
    * hidratando nomes de usuário em UMA query batch (ZERO N+1).
    *

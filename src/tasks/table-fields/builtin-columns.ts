@@ -7,6 +7,7 @@ export const BUILTIN_COLUMN_ORDER = [
   'responsavel',
   'prioridade',
   'dueDate',
+  'timeSpent',
 ] as const;
 
 export type BuiltinColumnKey = (typeof BUILTIN_COLUMN_ORDER)[number];
@@ -49,6 +50,11 @@ export const BUILTIN_COLUMNS_TEMPLATE: readonly ColumnDefDto[] = [
     },
   },
   { key: 'dueDate', type: 'date', label: 'Data', order: 5, builtin: true },
+  // 7ª builtin (Fase 3 — ADR-V2-057): "Tempo gasto" read-only. O VALOR é o total
+  // agregado server-side por task (soma de durationMs de manualTimers de todos os
+  // usuários, já formatado em "Xh Ymin" / "—"). NÃO é editável, NÃO grava em
+  // dados.fields[key]; usa type 'text' + readOnly para não inflar os 8 ColumnType.
+  { key: 'timeSpent', type: 'text', label: 'Tempo gasto', order: 6, builtin: true, readOnly: true },
 ];
 
 type ColumnLike = ColumnDefDto & { key: string; order: number };
@@ -84,6 +90,10 @@ function mergeBuiltinColumn(template: ColumnDefDto, existing?: ColumnDefDto): Co
     key: template.key,
     type: template.type,
     builtin: true,
+    // O flag read-only é determinado pelo TEMPLATE (server-side), não pelo que o
+    // cliente eventualmente persistiu — uma builtin read-only (ex.: timeSpent)
+    // nunca pode virar editável por reorder/merge.
+    ...(template.readOnly !== undefined ? { readOnly: template.readOnly } : {}),
     config:
       template.config || existing.config
         ? {
@@ -114,7 +124,7 @@ function getColumns(stored: unknown): ColumnDefDto[] {
 }
 
 /**
- * Completa o schema com as 6 colunas builtin SEM impor uma ordem fixa.
+ * Completa o schema com as 7 colunas builtin SEM impor uma ordem fixa.
  *
  * Regras (Fase 4 — reordenar TUDO):
  * - Builtin JÁ armazenada: preserva sua `order` (foi o usuário que reordenou);
@@ -127,7 +137,7 @@ function getColumns(stored: unknown): ColumnDefDto[] {
  *   enviado pelo front (que define `order` por posição) é respeitado no GET.
  *
  * @param stored - tableFields cru do banco (objeto, null, ou malformado)
- * @returns TableFieldsDto com as 6 builtin garantidas + custom, ordem preservada
+ * @returns TableFieldsDto com as 7 builtin garantidas + custom, ordem preservada
  */
 export function mergeBuiltinColumns(stored: unknown): TableFieldsDto {
   const columns = getColumns(stored);

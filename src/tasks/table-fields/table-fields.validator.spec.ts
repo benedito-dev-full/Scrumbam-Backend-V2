@@ -122,7 +122,7 @@ describe('validateTableFields', () => {
   it('nao lanca para schema misturando builtin e custom', () => {
     const dto = envelope([
       ...BUILTIN_COLUMNS_TEMPLATE,
-      col({ key: 'f_cliente', type: 'text', label: 'Cliente', order: 6 }),
+      col({ key: 'f_cliente', type: 'text', label: 'Cliente', order: 7 }),
     ] as ColumnDefDto[]);
 
     expect(() => validateTableFields(dto)).not.toThrow();

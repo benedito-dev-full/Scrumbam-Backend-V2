@@ -29,6 +29,7 @@ const makeResultWith = (count: number, hasMore = false) => ({
     idPai: null, // ADR-V2-047
     activeExecution: null, // lock UI: null quando não há execução IA ativa
     timer: null, // ADR-V2-057 — campo obrigatório no TaskResponseDto
+    timeSpentLabel: '—', // Fase 3 — campo obrigatório no TaskResponseDto
     criadoEm: new Date().toISOString(),
     atualizadoEm: new Date().toISOString(),
   })),

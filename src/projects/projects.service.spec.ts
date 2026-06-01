@@ -344,7 +344,7 @@ describe('ProjectsService', () => {
       expect(result.teamId).toBe('200');
     });
 
-    it('deve completar tableFields de LIST legada com as 6 builtin no GET', async () => {
+    it('deve completar tableFields de LIST legada com as 7 builtin no GET', async () => {
       prisma.dProject.findFirst.mockResolvedValue({
         ...mockProject,
         idClasse: BigInt(-352),
@@ -383,13 +383,14 @@ describe('ProjectsService', () => {
 
       expect(result.tableFields?.version).toBe(4);
       // Fase 4 (reorder de TUDO): o merge preserva a `order` armazenada e injeta
-      // builtin ausentes ao FINAL. A custom (order:0) vem antes das 6 builtin.
+      // builtin ausentes ao FINAL. A custom (order:0) vem antes das 7 builtin
+      // (Fase 3 — timeSpent passou a ser a 7ª builtin).
       expect(result.tableFields?.columns.map((column) => column.key)).toEqual([
         'f_cliente',
         ...BUILTIN_COLUMN_ORDER,
       ]);
-      // Não duplica e completa as 6 builtin.
-      expect(result.tableFields?.columns).toHaveLength(7);
+      // Não duplica e completa as 7 builtin.
+      expect(result.tableFields?.columns).toHaveLength(8);
     });
 
     it('nao aplica merge-on-read em projetos que nao sao LIST', async () => {

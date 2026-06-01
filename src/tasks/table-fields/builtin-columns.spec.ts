@@ -6,14 +6,56 @@ import {
 import { TableFieldsDto } from './column-def.dto';
 
 describe('mergeBuiltinColumns', () => {
-  it('materializa as 6 builtin quando tableFields e null', () => {
+  it('materializa as 7 builtin quando tableFields e null', () => {
     const result = mergeBuiltinColumns(null);
 
     expect(result.version).toBe(1);
-    expect(result.columns).toHaveLength(6);
+    expect(result.columns).toHaveLength(7);
     expect(result.columns.map((column) => column.key)).toEqual(BUILTIN_COLUMN_ORDER);
     expect(result.columns.every((column) => column.builtin === true)).toBe(true);
-    expect(result.columns.map((column) => column.order)).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(result.columns.map((column) => column.order)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  });
+
+  it('materializa timeSpent (7a builtin) como text read-only ao final', () => {
+    const result = mergeBuiltinColumns(null);
+
+    const timeSpent = result.columns.find((column) => column.key === 'timeSpent');
+    expect(timeSpent).toBeDefined();
+    expect(timeSpent?.type).toBe('text');
+    expect(timeSpent?.label).toBe('Tempo gasto');
+    expect(timeSpent?.builtin).toBe(true);
+    expect(timeSpent?.readOnly).toBe(true);
+    // É a última builtin na ordem canônica.
+    expect(result.columns[result.columns.length - 1].key).toBe('timeSpent');
+    // BUILTIN_COLUMN_ORDER inclui timeSpent como 7º item.
+    expect(BUILTIN_COLUMN_ORDER).toContain('timeSpent');
+    expect(BUILTIN_COLUMN_ORDER).toHaveLength(7);
+  });
+
+  it('força readOnly:true em timeSpent mesmo se um legado o persistiu sem o flag', () => {
+    // Legado materializou timeSpent antes do flag existir (sem readOnly) e ainda
+    // o reordenou. O merge deve RESTAURAR readOnly:true a partir do template,
+    // sem deixar a coluna virar editável.
+    const stored: TableFieldsDto = {
+      version: 4,
+      columns: [
+        { key: '__nome', type: 'text', label: 'Tarefa', order: 0, builtin: true },
+        { key: 'status', type: 'status', label: 'Status', order: 1, builtin: true },
+        { key: 'identifier', type: 'text', label: 'ID', order: 2, builtin: true },
+        { key: 'responsavel', type: 'person', label: 'Resp.', order: 3, builtin: true },
+        { key: 'prioridade', type: 'dropdown', label: 'Prioridade', order: 4, builtin: true },
+        { key: 'dueDate', type: 'date', label: 'Data', order: 5, builtin: true },
+        // timeSpent persistido SEM readOnly (legado).
+        { key: 'timeSpent', type: 'text', label: 'Tempo gasto', order: 6, builtin: true },
+      ],
+    };
+
+    const result = mergeBuiltinColumns(stored);
+
+    const timeSpent = result.columns.find((column) => column.key === 'timeSpent');
+    expect(timeSpent?.readOnly).toBe(true);
+    expect(timeSpent?.builtin).toBe(true);
+    expect(result.columns).toHaveLength(7);
   });
 
   it('injeta builtin ausentes ao final de um legado so-custom (ordem por order)', () => {
@@ -34,8 +76,8 @@ describe('mergeBuiltinColumns', () => {
       'f_b',
       ...BUILTIN_COLUMN_ORDER,
     ]);
-    expect(result.columns.map((column) => column.order)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
-    expect(result.columns).toHaveLength(8);
+    expect(result.columns.map((column) => column.order)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(result.columns).toHaveLength(9);
   });
 
   it('PRESERVA a ordem reordenada das builtin (regressao do bug de reorder)', () => {
@@ -57,6 +99,8 @@ describe('mergeBuiltinColumns', () => {
     const result = mergeBuiltinColumns(stored);
 
     // status PERMANECE depois de f_cliente — a reordenacao foi respeitada.
+    // timeSpent (7a builtin AUSENTE neste legado) é injetada ao FINAL, sem
+    // perturbar a ordem reordenada das demais.
     expect(result.columns.map((column) => column.key)).toEqual([
       '__nome',
       'identifier',
@@ -65,8 +109,10 @@ describe('mergeBuiltinColumns', () => {
       'responsavel',
       'prioridade',
       'dueDate',
+      'timeSpent',
     ]);
-    expect(result.columns.map((column) => column.order)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    expect(result.columns.map((column) => column.order)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(result.columns.find((column) => column.key === 'timeSpent')?.readOnly).toBe(true);
   });
 
   it('nao duplica builtin ja armazenada e completa as ausentes', () => {
@@ -90,8 +136,9 @@ describe('mergeBuiltinColumns', () => {
       'responsavel',
       'prioridade',
       'dueDate',
+      'timeSpent',
     ]);
-    expect(result.columns).toHaveLength(7);
+    expect(result.columns).toHaveLength(8);
   });
 
   it('renumera colisao de order entre custom no conjunto inteiro', () => {
@@ -105,7 +152,7 @@ describe('mergeBuiltinColumns', () => {
 
     const result = mergeBuiltinColumns(stored);
 
-    expect(result.columns.map((column) => column.order)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(result.columns.map((column) => column.order)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
     // Custom (order 0, desempate estavel) primeiro; builtin injetadas ao final.
     expect(result.columns.slice(0, 2).map((column) => column.key)).toEqual([
       'f_cliente',

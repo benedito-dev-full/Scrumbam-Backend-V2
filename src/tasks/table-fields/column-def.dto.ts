@@ -338,6 +338,28 @@ export class ColumnDefDto {
   @IsOptional()
   @IsBoolean()
   builtin?: boolean;
+
+  /**
+   * Indica coluna builtin READ-ONLY, cujo valor é computado server-side e NÃO é
+   * editável pelo usuário. Opcional (default falso).
+   *
+   * Diferente de uma builtin editável (status/prioridade/data, que gravam via
+   * campos dedicados da task), uma builtin read-only (ex.: `timeSpent`, "Tempo
+   * gasto" — Fase 3 / ADR-V2-057) apenas EXIBE um valor derivado (o total de
+   * tempo manual agregado). O frontend NÃO deve abrir editor inline ao clicar
+   * nem gravar em `DTask.dados.fields[key]`.
+   *
+   * @example true
+   */
+  @ApiPropertyOptional({
+    description:
+      'Indica coluna builtin read-only computada server-side: o frontend não abre editor inline ' +
+      'nem grava em DTask.dados.fields[key] (ex.: timeSpent — Tempo gasto). Default falso.',
+    example: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  readOnly?: boolean;
 }
 
 /**

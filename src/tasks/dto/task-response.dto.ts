@@ -184,6 +184,17 @@ export class TaskResponseDto {
   })
   timer!: TaskTimerStateDto | null;
 
+  @ApiProperty({
+    description:
+      'Total de tempo manual gasto na task, agregado server-side (soma de ' +
+      'durationMs de todas as sessões fechadas em dados.telemetry.manualTimers[], ' +
+      'de todos os usuários) e JÁ FORMATADO como rótulo humano ("2h 45min", "45min", ' +
+      '"—" quando zero). Fonte da coluna builtin read-only "Tempo gasto" (timeSpent) ' +
+      'da grade Blocos — Fase 3 / ADR-V2-057. O frontend NUNCA recalcula: apenas exibe.',
+    example: '2h 45min',
+  })
+  timeSpentLabel!: string;
+
   @ApiProperty({ description: 'Data de criação ISO 8601' })
   criadoEm!: string;
 

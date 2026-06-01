@@ -272,6 +272,50 @@ describe('TaskTimerService', () => {
     });
   });
 
+  // ─── totalMs / formatTotalLabel (coluna "Tempo gasto" — Fase 3) ───────────────
+
+  describe('totalMs()', () => {
+    it('soma durationMs de todas as sessões fechadas (todos os usuários)', () => {
+      const timers: ManualTimerSession[] = [
+        { userId: '42', startedAt: 'x', endedAt: 'y', durationMs: 1000 },
+        { userId: '43', startedAt: 'x', endedAt: 'y', durationMs: 2000 },
+        { userId: '43', startedAt: 'open' }, // aberta → não conta
+      ];
+      expect(service.totalMs(timers)).toBe(3000);
+    });
+
+    it('retorna 0 para undefined/null/vazio', () => {
+      expect(service.totalMs(undefined)).toBe(0);
+      expect(service.totalMs(null)).toBe(0);
+      expect(service.totalMs([])).toBe(0);
+    });
+  });
+
+  describe('formatTotalLabel()', () => {
+    it('retorna travessão para zero/negativo/NaN', () => {
+      expect(service.formatTotalLabel(0)).toBe('—');
+      expect(service.formatTotalLabel(-100)).toBe('—');
+      expect(service.formatTotalLabel(Number.NaN)).toBe('—');
+    });
+
+    it('retorna <1min para durações abaixo de 1 minuto', () => {
+      expect(service.formatTotalLabel(30_000)).toBe('<1min');
+    });
+
+    it('retorna apenas minutos quando < 1 hora', () => {
+      expect(service.formatTotalLabel(45 * 60_000)).toBe('45min');
+    });
+
+    it('retorna apenas horas quando minutos == 0', () => {
+      expect(service.formatTotalLabel(2 * 3_600_000)).toBe('2h');
+    });
+
+    it('retorna "Xh Ymin" para horas + minutos', () => {
+      // 2h 45min = 9_900_000 ms
+      expect(service.formatTotalLabel(2 * 3_600_000 + 45 * 60_000)).toBe('2h 45min');
+    });
+  });
+
   // ─── buildTimerStateMap (batch ZERO N+1) ──────────────────────────────────────
 
   describe('buildTimerStateMap()', () => {

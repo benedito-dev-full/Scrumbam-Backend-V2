@@ -22,6 +22,7 @@ const makeTaskResponse = () => ({
   idPai: null, // ADR-V2-047 — campo obrigatório no TaskResponseDto
   activeExecution: null, // lock UI: null quando não há execução IA ativa
   timer: null, // ADR-V2-057 — campo obrigatório no TaskResponseDto
+  timeSpentLabel: '—', // Fase 3 — campo obrigatório no TaskResponseDto
   criadoEm: new Date().toISOString(),
   atualizadoEm: new Date().toISOString(),
 });
