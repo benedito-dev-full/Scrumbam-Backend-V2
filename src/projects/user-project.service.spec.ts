@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../prisma.service';
 import { UserProjectService } from './user-project.service';
+import { ProjectRefService } from './project-ref.service';
 
 describe('UserProjectService', () => {
   let service: UserProjectService;
@@ -18,10 +19,21 @@ describe('UserProjectService', () => {
       dProject: { findFirst: jest.fn() },
     };
 
+    // ADR-V2-058/059: refsToProjectIds mapeia handles → projectIds. No teste,
+    // passthrough legacy (handle já é o projectId) — converte BigInt → string.
+    const projectRefMock = {
+      refsToProjectIds: jest.fn((handles: Array<bigint | null>) =>
+        Promise.resolve(
+          Array.from(new Set(handles.filter((h): h is bigint => h !== null).map((h) => h.toString()))),
+        ),
+      ),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UserProjectService,
         { provide: PrismaService, useValue: prisma },
+        { provide: ProjectRefService, useValue: projectRefMock },
       ],
     }).compile();
 

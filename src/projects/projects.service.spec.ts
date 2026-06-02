@@ -6,6 +6,7 @@ import { ProjectMembersService } from './project-members.service';
 import { PrismaService } from '../prisma.service';
 import { EventProducerService } from '../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../common/services/correlation-id.service';
+import { ProjectRefService } from './project-ref.service';
 import { BUILTIN_COLUMN_ORDER } from '../tasks/table-fields/builtin-columns';
 
 describe('ProjectsService', () => {
@@ -97,6 +98,29 @@ describe('ProjectsService', () => {
     };
     const eventProducerMock = { addInternalEvent: jest.fn().mockResolvedValue(undefined) };
     const correlationIdMock = { getOrGenerate: jest.fn().mockReturnValue('test-corr-id') };
+    // ADR-V2-058/059: espelho -158. ensureEntidadeRef devolve um refId (E) fixo;
+    // resolveEntidadeRef/resolveProjectId fazem passthrough nos testes.
+    const projectRefMock = {
+      // Espelho devolve a própria chave do projeto nos testes (E=P), de modo
+      // que as asserções de idEntidade/idLocEscritu legadas continuem válidas.
+      ensureEntidadeRef: jest.fn((_tx: unknown, proj: { chave: bigint }) =>
+        Promise.resolve(proj.chave),
+      ),
+      ensureEntidadeRefById: jest.fn((id: bigint) => Promise.resolve(id)),
+      resolveEntidadeRef: jest.fn((id: bigint) => Promise.resolve(id)),
+      resolveProjectId: jest.fn((id: bigint) => Promise.resolve(id)),
+      // Passthrough legacy-safe: handle É o projectId nos testes.
+      resolveEntidadeRefs: jest.fn((ids: bigint[]) =>
+        Promise.resolve(new Map(ids.map((id) => [id.toString(), id]))),
+      ),
+      refsToProjectIds: jest.fn((handles: Array<bigint | null>) =>
+        Promise.resolve(
+          Array.from(
+            new Set(handles.filter((h): h is bigint => h !== null).map((h) => h.toString())),
+          ),
+        ),
+      ),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -106,6 +130,7 @@ describe('ProjectsService', () => {
         { provide: ProjectMembersService, useValue: projectMembersMock },
         { provide: EventProducerService, useValue: eventProducerMock },
         { provide: CorrelationIdService, useValue: correlationIdMock },
+        { provide: ProjectRefService, useValue: projectRefMock },
       ],
     }).compile();
 

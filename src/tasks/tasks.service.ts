@@ -5,6 +5,7 @@ import { EventProducerService } from '../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../common/services/correlation-id.service';
 import { TimezoneService } from '../common/services/timezone.service';
 import { TasksIdentifierService } from './tasks-identifier.service';
+import { ProjectRefService } from '../projects/project-ref.service';
 import { PhaseHierarchyService } from './services/phase-hierarchy.service';
 import { validateTransition, isValidState } from './tasks-state-machine';
 import {
@@ -213,6 +214,7 @@ export class TasksService {
     private readonly phaseMetrics: PhaseMetricsService,
     private readonly timezoneService: TimezoneService,
     private readonly taskTimerService: TaskTimerService,
+    private readonly projectRef: ProjectRefService,
   ) {}
 
   /**
@@ -438,11 +440,14 @@ export class TasksService {
 
         dadosPayload = taskDados;
 
-        // Buscar idStatus para INBOX (DTabela -441 do projeto)
+        // Buscar idStatus para INBOX (DTabela -441 do projeto).
+        // ADR-V2-058/059: statuses são gravados com a DEntidade-espelho (E);
+        // resolver P→E (legacy-safe: devolve P para projetos sem espelho).
+        const inboxScope = await this.projectRef.resolveEntidadeRef(projectId);
         const inboxStatus = await tx.dTabela.findFirst({
           where: {
             idClasse: BigInt(-441),
-            dEntidadeId: projectId,
+            dEntidadeId: inboxScope,
             excluido: false,
           },
           select: { chave: true },
@@ -707,12 +712,17 @@ export class TasksService {
         .map((status) => STATUS_TO_TABELA_CLASSE[status])
         .filter((statusClass): statusClass is bigint => statusClass !== undefined);
       if (statusClasses.length > 0) {
-        // Buscar todas as DTabelas deste status (podem ser de múltiplos projetos)
+        // Buscar todas as DTabelas deste status (podem ser de múltiplos projetos).
+        // ADR-V2-058/059: filtro por projeto usa a DEntidade-espelho (E);
+        // resolver P→E (legacy-safe) antes de filtrar dEntidadeId.
+        const statusScope = query.projectId
+          ? await this.projectRef.resolveEntidadeRef(BigInt(query.projectId))
+          : null;
         const statusTabelas = await this.prisma.dTabela.findMany({
           where: {
             idClasse: { in: statusClasses },
             excluido: false,
-            ...(query.projectId ? { dEntidadeId: BigInt(query.projectId) } : {}),
+            ...(statusScope !== null ? { dEntidadeId: statusScope } : {}),
           },
           select: { chave: true },
         });
@@ -1146,13 +1156,16 @@ export class TasksService {
         break;
     }
 
-    // Buscar idStatus da DTabela correspondente (no projeto da task)
+    // Buscar idStatus da DTabela correspondente (no projeto da task).
+    // ADR-V2-058/059: statuses gravados com a DEntidade-espelho (E);
+    // resolver P→E (legacy-safe) antes de filtrar dEntidadeId.
     let newIdStatus = task.idStatus;
     if (task.idProject) {
+      const statusScope = await this.projectRef.resolveEntidadeRef(task.idProject);
       const statusTabela = await this.prisma.dTabela.findFirst({
         where: {
           idClasse: STATUS_TO_TABELA_CLASSE[toStatus],
-          dEntidadeId: task.idProject,
+          dEntidadeId: statusScope,
           excluido: false,
         },
         select: { chave: true },
@@ -1635,10 +1648,13 @@ export class TasksService {
       );
     }
 
+    // ADR-V2-058/059: priorities gravadas com a DEntidade-espelho (E);
+    // resolver P→E (legacy-safe) antes de filtrar dEntidadeId.
+    const priorityScope = await this.projectRef.resolveEntidadeRef(projectId);
     const tabela = await tx.dTabela.findFirst({
       where: {
         idClasse: idClassePriority,
-        dEntidadeId: projectId,
+        dEntidadeId: priorityScope,
         excluido: false,
       },
       select: { chave: true },

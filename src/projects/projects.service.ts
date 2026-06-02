@@ -314,8 +314,13 @@ export class ProjectsService implements OnModuleInit {
       // 4. Seed: 9 statuses V3 + 1 sprint default — apenas para LIST (ADR-V2-051 §12).
       //    SPACE (-350) e FOLDER (-351) são contêineres estruturais e não precisam
       //    de seed de statuses/sprint. Apenas LIST (-352) contém tasks.
+      //    ADR-V2-058/059: DTabela.dEntidadeId é FK para DEntidade.chave — gravar
+      //    `refId` (E, a DEntidade-espelho criada na etapa 2), NÃO `proj.chave` (P),
+      //    senão a FK DTabela_dEntidadeId_fkey é violada (500 em POST /projects).
+      //    A leitura desses lookups (tasks.service) resolve P→E via ProjectRefService,
+      //    mantendo escrita e leitura no mesmo espaço.
       if (proj.idClasse === ID_CLASSE_LIST) {
-        await this.seedBootstrap.seedProject(tx, proj.chave);
+        await this.seedBootstrap.seedProject(tx, refId);
       }
 
       // 5. (opcional) Vincular ao time (ADR-V2-029).

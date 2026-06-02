@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException } from '@nes
 import { Prisma } from '@prisma/client';
 import { Response } from 'express';
 import { PrismaService } from '../prisma.service';
+import { ProjectRefService } from '../projects/project-ref.service';
 import { LRUCache } from '../common/helpers/lru-cache';
 import { validarClasse } from '../common/helpers/validar-classe.helper';
 import { buildTabelaWhereClause } from './helpers/build-where-clause';
@@ -17,6 +18,36 @@ const classeAliasCacheTabela = new LRUCache<string, bigint>(200, 300_000);
 
 /** Data de sunset do alias ?classe=NOME (2 sprints ≈ 4 semanas a partir de F2). */
 const CLASSE_ALIAS_SUNSET = new Date('2026-06-05T00:00:00.000Z').toISOString();
+
+/**
+ * idClasses de DTabela cujo `dEntidadeId` é o **escopo do projeto** (ADR-V2-058/059).
+ *
+ * Esses lookups são gravados pelo seed/bootstrap com a chave da DEntidade-espelho
+ * (`E`), mas os consumidores (frontend, MCP) passam `dEntidadeId={projectId}` (`P`)
+ * na query. Para esses idClasses — e SOMENTE esses — o `dEntidadeId` recebido é
+ * resolvido `P→E` antes de filtrar (legacy-safe). idClasses org/user-scoped
+ * (API Keys -471, MCP Keys -472) NÃO entram aqui — seu `dEntidadeId` já é uma
+ * DEntidade real (org/user) e resolver quebraria o filtro.
+ */
+const PROJECT_SCOPED_TABELA_CLASSES: ReadonlySet<bigint> = new Set<bigint>([
+  BigInt(-400), // SPRINT
+  BigInt(-420), // PRIORITY (agrupador)
+  BigInt(-421), // PRIORITY HIGH
+  BigInt(-422), // PRIORITY MEDIUM
+  BigInt(-423), // PRIORITY LOW
+  BigInt(-424), // PRIORITY URGENT
+  BigInt(-430), // TASK TYPE
+  BigInt(-440), // STATUS V3 (agrupador)
+  BigInt(-441), // INBOX
+  BigInt(-442), // READY
+  BigInt(-443), // EXECUTING
+  BigInt(-444), // DONE
+  BigInt(-445), // FAILED
+  BigInt(-446), // CANCELLED
+  BigInt(-447), // DISCARDED
+  BigInt(-448), // VALIDATING
+  BigInt(-449), // VALIDATED
+]);
 
 /**
  * Service canônico para DTabela (Pilar 2 — Endpoints Genéricos).
@@ -35,7 +66,10 @@ const CLASSE_ALIAS_SUNSET = new Date('2026-06-05T00:00:00.000Z').toISOString();
 export class TabelaService {
   private readonly logger = new Logger(TabelaService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly projectRef: ProjectRefService,
+  ) {}
 
   /**
    * Resolve idClasse a partir do query (canônico ou alias deprecated).
@@ -127,6 +161,15 @@ export class TabelaService {
 
     const take = Math.min(query.pageSize ?? 20, 100);
     const where = buildTabelaWhereClause(idClasse, query);
+
+    // ADR-V2-058/059: para lookups project-scoped (statuses, sprint, priorities,
+    // task types), o `dEntidadeId` recebido é o projectId (P); o seed grava com a
+    // DEntidade-espelho (E). Resolver P→E (legacy-safe) para que o filtro encontre
+    // os registros. NÃO aplicar a idClasses org/user-scoped (API/MCP keys).
+    if (query.dEntidadeId && PROJECT_SCOPED_TABELA_CLASSES.has(idClasse)) {
+      const handle = await this.projectRef.resolveEntidadeRef(BigInt(query.dEntidadeId));
+      where.dEntidadeId = handle;
+    }
 
     this.logger.debug(`listarPorClasse (tabela) idClasse=${idClasse} take=${take}`);
 

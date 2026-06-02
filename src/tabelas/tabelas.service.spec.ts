@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { TabelaService } from './tabelas.service';
 import { PrismaService } from '../prisma.service';
+import { ProjectRefService } from '../projects/project-ref.service';
 
 /** Mock de DTabela retornado pelo Prisma */
 const mockTabela = {
@@ -41,10 +42,17 @@ describe('TabelaService', () => {
       },
     };
 
+    // ADR-V2-058/059: resolveEntidadeRef devolve a chave recebida (passthrough),
+    // suficiente para os testes — nenhum usa idClasse project-scoped + dEntidadeId.
+    const mockProjectRef = {
+      resolveEntidadeRef: jest.fn((id: bigint) => Promise.resolve(id)),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TabelaService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: ProjectRefService, useValue: mockProjectRef },
       ],
     }).compile();
 
