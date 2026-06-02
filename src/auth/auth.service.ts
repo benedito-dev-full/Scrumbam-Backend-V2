@@ -106,6 +106,7 @@ export class AuthService {
         data: {
           idClasse: ID_CLASSE_USER_GROUP,
           usuario: dto.email.toLowerCase(),
+          email: dto.email.toLowerCase(),
           senha: senhaHash,
           nome: dto.name,
           dados: {} as Prisma.InputJsonValue,

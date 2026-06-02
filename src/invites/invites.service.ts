@@ -494,6 +494,7 @@ export class InvitesService {
           data: {
             idClasse: ID_CLASSE_USER_GROUP,
             usuario: emailLower,
+            email: emailLower,
             senha: senhaHash,
             nome: dto.name,
             dados: {} as Prisma.InputJsonValue,
