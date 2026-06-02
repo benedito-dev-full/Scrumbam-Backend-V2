@@ -1223,5 +1223,42 @@ describe('ProjectsService', () => {
         expect.objectContaining({ source: 'ProjectsService' }),
       );
     });
+
+    it('deve permitir delete por ORG_ADMIN (-161) da org mesmo sem DVincula MANAGER (-171)', async () => {
+      // 1ª findFirst (tenant peek): projeto pertence à org 50.
+      // 2ª findFirst (requireManagerRole MANAGER): null — não é MANAGER explícito.
+      // 3ª findFirst (requireManagerRole ORG_ADMIN): vínculo -161 encontrado.
+      // 4ª findFirst (carrega projeto para soft-delete).
+      prisma.dProject.findFirst
+        .mockResolvedValueOnce({ idEstab: BigInt(50) }) // tenant peek
+        .mockResolvedValueOnce({ chave: BigInt(1), nome: 'Test' }); // load projeto
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce(null) // sem MANAGER -171
+        .mockResolvedValueOnce({ chave: BigInt(7) }); // ORG_ADMIN -161
+
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        return fn({
+          $queryRaw: jest.fn().mockResolvedValue([{ chave: BigInt(1) }]),
+          dTask: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+          dVincula: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+          dProject: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        });
+      });
+
+      const result = await service.delete('1', BigInt(999), '50');
+
+      expect(result.deleted).toBe(true);
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('deve REJEITAR delete quando não é MANAGER nem ORG_ADMIN (ForbiddenException)', async () => {
+      prisma.dProject.findFirst.mockResolvedValueOnce({ idEstab: BigInt(50) }); // tenant peek
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce(null) // sem MANAGER -171
+        .mockResolvedValueOnce(null); // sem ORG_ADMIN -161
+
+      await expect(service.delete('1', BigInt(999), '50')).rejects.toThrow(ForbiddenException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
   });
 });

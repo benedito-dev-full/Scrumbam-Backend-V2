@@ -897,7 +897,7 @@ export class ProjectsService implements OnModuleInit {
       }
     }
 
-    await this.requireManagerRole(projectId, userEntidadeId);
+    await this.requireManagerRole(projectId, userEntidadeId, organizationId);
 
     const project = await this.prisma.dProject.findFirst({
       where: { chave: projectId, excluido: false },
@@ -1154,7 +1154,7 @@ export class ProjectsService implements OnModuleInit {
       }
     }
 
-    await this.requireManagerRole(projectId, userEntidadeId);
+    await this.requireManagerRole(projectId, userEntidadeId, organizationId);
 
     const project = await this.prisma.dProject.findFirst({
       where: { chave: projectId, excluido: false },
@@ -1199,7 +1199,11 @@ export class ProjectsService implements OnModuleInit {
 
       // 3. Cascade: DVincula de membros (-171/-172/-173) — idLocEscritu = E.
       const membersResult = await tx.dVincula.updateMany({
-        where: { idLocEscritu: { in: refIds }, idClasse: { in: PROJECT_ROLE_CLASSES }, excluido: false },
+        where: {
+          idLocEscritu: { in: refIds },
+          idClasse: { in: PROJECT_ROLE_CLASSES },
+          excluido: false,
+        },
         data: { excluido: true },
       });
 
@@ -1473,18 +1477,36 @@ export class ProjectsService implements OnModuleInit {
   // ─── Helpers privados ─────────────────────────────────────────────────────
 
   /**
-   * Valida que o usuário é MANAGER do projeto.
+   * Valida que o usuário pode gerir o projeto (update, delete, etc.).
    *
-   * Helper para autorização. Usado em operações que alteram projeto
-   * (update, delete, etc.). Lança ForbiddenException se não é MANAGER.
+   * Helper para autorização. Concede acesso por DUAS vias:
+   *
+   *  1. **MANAGER explícito** — DVincula -171 (PROJECT_MANAGER) do usuário
+   *     naquele projeto (criador do projeto, ou promovido a manager).
+   *  2. **Herança ORG_ADMIN → MANAGER** — admin da workspace (DVincula -161
+   *     ORG_ADMIN na org informada) tem poder de gestão sobre TODOS os projetos
+   *     da própria org, mesmo sem vínculo -171 explícito. Só se aplica quando
+   *     `organizationId` está presente (paths HTTP autenticados); como os
+   *     callers (`update`/`delete`) já validaram tenant (`idEstab === org`)
+   *     ANTES desta chamada, o projeto comprovadamente pertence à org — logo o
+   *     ORG_ADMIN dessa org é legítimo gestor. Callers internos/MCP sem org
+   *     continuam exigindo -171 explícito (comportamento conservador).
+   *
+   * Lança ForbiddenException se nenhuma via concede acesso.
    *
    * @param projectId - Chave BigInt do projeto
    * @param userId - Chave BigInt do usuário
-   * @throws {ForbiddenException} Se não é MANAGER
+   * @param organizationId - (Opcional) DEntidade.chave da org ativa (JWT). Habilita
+   *   a herança ORG_ADMIN → MANAGER quando presente e numérico.
+   * @throws {ForbiddenException} Se não é MANAGER nem ORG_ADMIN da org
    *
    * @private
    */
-  private async requireManagerRole(projectId: bigint, userId: bigint): Promise<void> {
+  private async requireManagerRole(
+    projectId: bigint,
+    userId: bigint,
+    organizationId?: string,
+  ): Promise<void> {
     // ADR-V2-058: handle do projeto em DVincula = chave da espelho (-158).
     const refId = await this.projectRef.resolveEntidadeRef(projectId);
     const vinculo = await this.prisma.dVincula.findFirst({
@@ -1497,9 +1519,28 @@ export class ProjectsService implements OnModuleInit {
       select: { chave: true },
     });
 
-    if (!vinculo) {
-      throw new ForbiddenException('Acesso negado: requer role MANAGER no projeto');
+    if (vinculo) {
+      return;
     }
+
+    // Herança ORG_ADMIN → MANAGER: admin da workspace gere qualquer projeto da org.
+    if (organizationId && /^-?\d+$/.test(organizationId)) {
+      const orgAdmin = await this.prisma.dVincula.findFirst({
+        where: {
+          idEntidade: userId,
+          idLocEscritu: BigInt(organizationId),
+          idClasse: ID_CLASSE_ORG_ADMIN,
+          excluido: false,
+        },
+        select: { chave: true },
+      });
+
+      if (orgAdmin) {
+        return;
+      }
+    }
+
+    throw new ForbiddenException('Acesso negado: requer role MANAGER no projeto');
   }
 
   /**
