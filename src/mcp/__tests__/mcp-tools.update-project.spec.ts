@@ -58,7 +58,6 @@ describe('MCP update_project tool', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       new UpdateProjectTool(projectsService as never),
     );
   });

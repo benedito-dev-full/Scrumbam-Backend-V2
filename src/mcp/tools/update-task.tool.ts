@@ -31,11 +31,10 @@ type PriorityValue = (typeof PRIORITY_VALUES)[number];
  *
  * - `tasksService.update` — para `name` / `description` / `priority` /
  *   `assigneeId` (campos basicos).
- * - `tasksService.updateSprint` — para `sprintId` (transferencia entre sprints).
  * - `tasksService.updateStatus` — para `status` V3 (state machine + telemetria).
  *
  * Ordem de execucao quando multiplos campos sao enviados:
- *   update → updateSprint → updateStatus
+ *   update → updateStatus
  *
  * Status por ultimo minimiza side-effects de transicao invalida em
  * estado intermediario (ex: assignee atualizado antes da transicao
@@ -79,7 +78,7 @@ export class UpdateTaskTool implements McpTool {
 
   readonly name = 'update_task';
   readonly description =
-    'Atualiza qualquer combinacao de campos de uma task (name, description, priority, assigneeId, sprintId, status). Use update_status se for atualizar APENAS o status.';
+    'Atualiza qualquer combinacao de campos de uma task (name, description, priority, assigneeId, status). Use update_status se for atualizar APENAS o status.';
   readonly inputSchema = {
     type: 'object',
     required: ['taskId'],
@@ -102,10 +101,6 @@ export class UpdateTaskTool implements McpTool {
         description:
           'Codigo V3: INBOX|READY|EXECUTING|DONE|FAILED|CANCELLED|DISCARDED|VALIDATING|VALIDATED',
       },
-      sprintId: {
-        type: 'string',
-        description: 'ID do sprint (DTabela -400) para mover a task',
-      },
     },
     anyOf: [
       { required: ['name'] },
@@ -113,7 +108,6 @@ export class UpdateTaskTool implements McpTool {
       { required: ['priority'] },
       { required: ['assigneeId'] },
       { required: ['status'] },
-      { required: ['sprintId'] },
     ],
   };
 
@@ -132,7 +126,7 @@ export class UpdateTaskTool implements McpTool {
    *    redundancia em relacao ao `anyOf` do schema, mas necessaria caso
    *    o cliente envie sem validar contra o schema).
    * 4. Resolve `accessibleProjectIds` para o caller.
-   * 5. Executa em ordem: update(basicos) → updateSprint → updateStatus.
+   * 5. Executa em ordem: update(basicos) → updateStatus.
    * 6. Re-hidrata via `findOne` e retorna snapshot final.
    *
    * Excecoes nao tratadas (`NotFoundException`, `BadRequestException`,
@@ -157,17 +151,15 @@ export class UpdateTaskTool implements McpTool {
     const priority = this.extractOptionalEnum(input, 'priority', PRIORITY_VALUES);
     const assigneeId = this.extractOptionalStringOrNull(input, 'assigneeId');
     const status = this.extractOptionalEnum(input, 'status', V3_STATUS_CODES);
-    const sprintId = this.extractOptionalString(input, 'sprintId');
 
     const hasBasicUpdate =
       name !== undefined ||
       description !== undefined ||
       priority !== undefined ||
       assigneeId !== undefined;
-    const hasSprintUpdate = sprintId !== undefined;
     const hasStatusUpdate = status !== undefined;
 
-    if (!hasBasicUpdate && !hasSprintUpdate && !hasStatusUpdate) {
+    if (!hasBasicUpdate && !hasStatusUpdate) {
       throw new McpToolError(MCP_ERROR_CODES.INVALID_PARAMS, 'Invalid params', {
         field: 'arguments',
         issue: 'at least one field to update is required',
@@ -190,15 +182,6 @@ export class UpdateTaskTool implements McpTool {
         ...(assigneeId !== undefined ? { assigneeId: assigneeId ?? '' } : {}),
       };
       await this.tasksService.update(taskId, basicDto as never, accessibleProjectIds);
-    }
-
-    if (hasSprintUpdate) {
-      this.logger.debug(`update_task ${taskId} — sprint=${sprintId}`);
-      await this.tasksService.updateSprint(
-        taskId,
-        { sprintId: sprintId as string },
-        accessibleProjectIds,
-      );
     }
 
     if (hasStatusUpdate) {

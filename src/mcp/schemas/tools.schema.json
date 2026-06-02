@@ -55,9 +55,6 @@
           },
           "assigneeId": {
             "type": "string"
-          },
-          "sprintId": {
-            "type": "string"
           }
         }
       }
@@ -98,28 +95,6 @@
       }
     },
     {
-      "name": "list_sprints",
-      "description": "Lista sprints de um projeto.",
-      "inputSchema": {
-        "type": "object",
-        "required": ["projectId"],
-        "properties": {
-          "projectId": {
-            "type": "string"
-          },
-          "limit": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 50,
-            "default": 20
-          },
-          "cursor": {
-            "type": "string"
-          }
-        }
-      }
-    },
-    {
       "name": "get_task",
       "description": "Busca uma task por ID, escopada aos projetos acessiveis ao usuario MCP.",
       "inputSchema": {
@@ -134,7 +109,7 @@
     },
     {
       "name": "update_task",
-      "description": "Atualiza qualquer combinacao de campos de uma task (name, description, priority, assigneeId, sprintId, status). Use update_status se for atualizar APENAS o status.",
+      "description": "Atualiza qualquer combinacao de campos de uma task (name, description, priority, assigneeId, status). Use update_status se for atualizar APENAS o status.",
       "inputSchema": {
         "type": "object",
         "required": ["taskId"],
@@ -165,10 +140,6 @@
               "VALIDATED"
             ],
             "description": "Codigo V3: INBOX|READY|EXECUTING|DONE|FAILED|CANCELLED|DISCARDED|VALIDATING|VALIDATED"
-          },
-          "sprintId": {
-            "type": "string",
-            "description": "ID do sprint (DTabela -400) para mover a task"
           }
         },
         "anyOf": [
@@ -176,8 +147,7 @@
           { "required": ["description"] },
           { "required": ["priority"] },
           { "required": ["assigneeId"] },
-          { "required": ["status"] },
-          { "required": ["sprintId"] }
+          { "required": ["status"] }
         ]
       }
     },
@@ -196,7 +166,7 @@
     },
     {
       "name": "get_project",
-      "description": "Busca dados de um projeto por ID. Suporta include opcional (members, sprints, stats) para reduzir round-trips do LLM.",
+      "description": "Busca dados de um projeto por ID. Suporta include opcional (members, stats) para reduzir round-trips do LLM.",
       "inputSchema": {
         "type": "object",
         "required": ["projectId"],
@@ -204,9 +174,9 @@
           "projectId": { "type": "string" },
           "include": {
             "type": "array",
-            "items": { "type": "string", "enum": ["members", "sprints", "stats"] },
+            "items": { "type": "string", "enum": ["members", "stats"] },
             "uniqueItems": true,
-            "description": "Campos opcionais a incluir no payload de resposta. Valores: members | sprints | stats."
+            "description": "Campos opcionais a incluir no payload de resposta. Valores: members | stats."
           }
         }
       }

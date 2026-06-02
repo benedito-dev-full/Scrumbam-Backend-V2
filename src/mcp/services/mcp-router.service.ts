@@ -18,7 +18,6 @@ import { ListMembersTool } from '../tools/list-members.tool';
 import { ListNotificationsTool } from '../tools/list-notifications.tool';
 import { ListPhasesTool } from '../tools/list-phases.tool';
 import { ListProjectsTool } from '../tools/list-projects.tool';
-import { ListSprintsTool } from '../tools/list-sprints.tool';
 import { ListTasksTool } from '../tools/list-tasks.tool';
 import { McpTool, McpToolError } from '../tools/tool.interface';
 import { SearchTasksTool } from '../tools/search-tasks.tool';
@@ -65,7 +64,6 @@ export class McpRouterService {
     createTaskTool?: CreateTaskTool,
     updateStatusTool?: UpdateStatusTool,
     listProjectsTool?: ListProjectsTool,
-    listSprintsTool?: ListSprintsTool,
     getTaskTool?: GetTaskTool,
     updateTaskTool?: UpdateTaskTool,
     listMembersTool?: ListMembersTool,
@@ -84,7 +82,6 @@ export class McpRouterService {
       createTaskTool,
       updateStatusTool,
       listProjectsTool,
-      listSprintsTool,
       getTaskTool,
       updateTaskTool,
       listMembersTool,

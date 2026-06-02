@@ -51,7 +51,6 @@ describe('MCP get_task tool', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       new GetTaskTool(tasksService as never, projectsService as never),
     );
   });

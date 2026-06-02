@@ -1,7 +1,6 @@
 import { McpRouterService } from '../services/mcp-router.service';
 import { CreateTaskTool } from '../tools/create-task.tool';
 import { ListProjectsTool } from '../tools/list-projects.tool';
-import { ListSprintsTool } from '../tools/list-sprints.tool';
 import { ListTasksTool } from '../tools/list-tasks.tool';
 import { UpdateStatusTool } from '../tools/update-status.tool';
 
@@ -26,7 +25,6 @@ describe('MCP Bloco B tools', () => {
     findAccessibleProjectIds: jest.Mock;
     findOne: jest.Mock;
   };
-  let tabelaService: { listarPorClasse: jest.Mock };
   let router: McpRouterService;
 
   beforeEach(() => {
@@ -52,22 +50,15 @@ describe('MCP Bloco B tools', () => {
       findAccessibleProjectIds: jest.fn().mockResolvedValue([unsafeId]),
       findOne: jest.fn().mockResolvedValue({ id: unsafeId, nome: 'Projeto' }),
     };
-    tabelaService = {
-      listarPorClasse: jest
-        .fn()
-        .mockResolvedValue({ items: [], pagination: { hasMore: false, nextCursor: null } }),
-    };
-
     router = new McpRouterService(
       new ListTasksTool(tasksService as never, projectsService as never),
       new CreateTaskTool(tasksService as never, projectsService as never),
       new UpdateStatusTool(tasksService as never, projectsService as never),
       new ListProjectsTool(projectsService as never),
-      new ListSprintsTool(tabelaService as never, projectsService as never),
     );
   });
 
-  it('lista as 5 tools em tools/list', async () => {
+  it('lista as tools de Bloco B em tools/list', async () => {
     await expect(router.dispatch('tools/list', undefined, userCtx)).resolves.toEqual({
       result: {
         tools: expect.arrayContaining([
@@ -75,7 +66,6 @@ describe('MCP Bloco B tools', () => {
           expect.objectContaining({ name: 'create_task' }),
           expect.objectContaining({ name: 'update_status' }),
           expect.objectContaining({ name: 'list_projects' }),
-          expect.objectContaining({ name: 'list_sprints' }),
         ]),
       },
     });
@@ -150,7 +140,6 @@ describe('MCP Bloco B tools', () => {
           titulo: 'Task criada via MCP',
           descricao: 'Descricao',
           assigneeId: '9007199254740997',
-          sprintId: '9007199254740999',
           createdBy: '1',
         },
       },
@@ -163,7 +152,6 @@ describe('MCP Bloco B tools', () => {
         nome: 'Task criada via MCP',
         descricao: 'Descricao',
         assigneeId: '9007199254740997',
-        sprintId: '9007199254740999',
         source: 'mcp',
       },
       userCtx.dEntidadeId,
@@ -266,25 +254,6 @@ describe('MCP Bloco B tools', () => {
     });
   });
 
-  it('list_sprints usa TabelaService.listarPorClasse para DTabela -400', async () => {
-    await router.dispatch(
-      'tools/call',
-      {
-        name: 'list_sprints',
-        arguments: { projectId: unsafeId, cursor: '9007199254740999', limit: 25 },
-      },
-      userCtx,
-    );
-
-    expect(tabelaService.listarPorClasse).toHaveBeenCalledWith({
-      idClasse: '-400',
-      dEntidadeId: unsafeId,
-      cursor: '9007199254740999',
-      pageSize: 25,
-    });
-    expect(projectsService.findOne).toHaveBeenCalledWith(unsafeId, userCtx.dEntidadeId);
-  });
-
   it('retorna -32602 para IDs invalidos sem chamar service canonico', async () => {
     const result = await router.dispatch(
       'tools/call',
@@ -302,7 +271,7 @@ describe('MCP Bloco B tools', () => {
     expect(tasksService.findMany).not.toHaveBeenCalled();
   });
 
-  it('valida params invalidos nas 5 tools antes de chamar services canonicos', async () => {
+  it('valida params invalidos nas tools antes de chamar services canonicos', async () => {
     await expect(
       router.dispatch(
         'tools/call',
@@ -359,22 +328,10 @@ describe('MCP Bloco B tools', () => {
       }),
     );
 
-    await expect(
-      router.dispatch('tools/call', { name: 'list_sprints', arguments: { limit: 20 } }, userCtx),
-    ).resolves.toEqual(
-      expect.objectContaining({
-        error: expect.objectContaining({
-          code: -32602,
-          data: { field: 'projectId', issue: 'required string' },
-        }),
-      }),
-    );
-
     expect(tasksService.findMany).not.toHaveBeenCalled();
     expect(tasksService.create).not.toHaveBeenCalled();
     expect(tasksService.updateStatus).not.toHaveBeenCalled();
     expect(projectsService.findMany).not.toHaveBeenCalled();
-    expect(tabelaService.listarPorClasse).not.toHaveBeenCalled();
   });
 
   it('bloqueia side effects quando membership do projeto e negada', async () => {
@@ -399,16 +356,6 @@ describe('MCP Bloco B tools', () => {
       ),
     ).rejects.toThrow(forbidden);
     expect(tasksService.create).not.toHaveBeenCalled();
-
-    projectsService.findOne.mockRejectedValueOnce(forbidden);
-    await expect(
-      router.dispatch(
-        'tools/call',
-        { name: 'list_sprints', arguments: { projectId: unsafeId } },
-        userCtx,
-      ),
-    ).rejects.toThrow(forbidden);
-    expect(tabelaService.listarPorClasse).not.toHaveBeenCalled();
 
     tasksService.findOne.mockResolvedValueOnce({
       id: unsafeId,

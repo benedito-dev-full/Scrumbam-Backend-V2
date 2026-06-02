@@ -70,7 +70,6 @@ describe('MCP search_tasks tool', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       new SearchTasksTool(projectsService as never, searchService as never),
     );
   });

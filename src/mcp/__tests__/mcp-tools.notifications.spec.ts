@@ -39,7 +39,9 @@ describe('MCP tools de notificacoes (list_notifications, update_notification, ge
   const notificationId = '1000000000000001';
 
   const mockListResult = {
-    items: [{ id: notificationId, descricao: 'Test', isRead: false, criadoEm: new Date().toISOString() }],
+    items: [
+      { id: notificationId, descricao: 'Test', isRead: false, criadoEm: new Date().toISOString() },
+    ],
     pagination: { hasMore: false, nextCursor: null },
   };
 
@@ -64,7 +66,6 @@ describe('MCP tools de notificacoes (list_notifications, update_notification, ge
     };
 
     router = new McpRouterService(
-      undefined,
       undefined,
       undefined,
       undefined,
@@ -236,7 +237,9 @@ describe('MCP tools de notificacoes (list_notifications, update_notification, ge
   });
 
   it('(h2) update_notification NotFoundException (notificacao nao encontrada) — propagada como exception', async () => {
-    notificationsService.markAsRead.mockRejectedValueOnce(new NotFoundException('Notification not found'));
+    notificationsService.markAsRead.mockRejectedValueOnce(
+      new NotFoundException('Notification not found'),
+    );
 
     await expect(
       router.dispatch(
@@ -265,11 +268,7 @@ describe('MCP tools de notificacoes (list_notifications, update_notification, ge
   });
 
   it('(k) get_unread_count verifica que dEntidadeId e passado corretamente (bigint)', async () => {
-    await router.dispatch(
-      'tools/call',
-      { name: 'get_unread_count', arguments: {} },
-      userCtx,
-    );
+    await router.dispatch('tools/call', { name: 'get_unread_count', arguments: {} }, userCtx);
 
     const callArgs = notificationsService.getUnreadCount.mock.calls[0];
     expect(callArgs[0]).toBe(userCtx.dEntidadeId);

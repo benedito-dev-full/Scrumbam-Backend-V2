@@ -9,9 +9,8 @@ import { GetProjectTool } from '../tools/get-project.tool';
  * Cobre:
  * (a) happy path sem include — retorna apenas projeto base
  * (b) include=['members'] — adiciona campo members
- * (c) include=['sprints'] — adiciona campo sprints
  * (d) include=['stats'] — adiciona campo stats
- * (e) include múltiplo (['members','sprints','stats']) — todos services chamados 1× em paralelo
+ * (e) include múltiplo (['members','stats']) — todos services chamados 1× em paralelo
  * (f) projectId missing → INVALID_PARAMS, nenhum service chamado
  * (g) projectId BigInt inválido → INVALID_PARAMS
  * (h) include com valor fora do enum → INVALID_PARAMS
@@ -49,11 +48,6 @@ describe('MCP get_project tool', () => {
     ],
   };
 
-  const sprintsPayload = {
-    items: [{ chave: '1', nome: 'Sprint 1' }],
-    hasMore: false,
-  };
-
   const statsPayload = {
     statusCounts: { INBOX: 3, DONE: 1 },
     totalTasks: 4,
@@ -65,7 +59,6 @@ describe('MCP get_project tool', () => {
     getStats: jest.Mock;
   };
   let projectMembersService: { getMembers: jest.Mock };
-  let tabelaService: { listarPorClasse: jest.Mock };
   let router: McpRouterService;
 
   beforeEach(() => {
@@ -77,9 +70,6 @@ describe('MCP get_project tool', () => {
     projectMembersService = {
       getMembers: jest.fn().mockResolvedValue(membersPayload),
     };
-    tabelaService = {
-      listarPorClasse: jest.fn().mockResolvedValue(sprintsPayload),
-    };
 
     router = new McpRouterService(
       undefined,
@@ -89,12 +79,7 @@ describe('MCP get_project tool', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
-      new GetProjectTool(
-        projectsService as never,
-        projectMembersService as never,
-        tabelaService as never,
-      ),
+      new GetProjectTool(projectsService as never, projectMembersService as never),
     );
   });
 
@@ -108,7 +93,6 @@ describe('MCP get_project tool', () => {
     expect(projectsService.findAccessibleProjectIds).toHaveBeenCalledWith(userCtx.dEntidadeId);
     expect(projectsService.findOne).toHaveBeenCalledWith(projectId, userCtx.dEntidadeId);
     expect(projectMembersService.getMembers).not.toHaveBeenCalled();
-    expect(tabelaService.listarPorClasse).not.toHaveBeenCalled();
     expect(projectsService.getStats).not.toHaveBeenCalled();
 
     expect(response.result).toEqual({
@@ -130,7 +114,6 @@ describe('MCP get_project tool', () => {
 
     expect(projectMembersService.getMembers).toHaveBeenCalledTimes(1);
     expect(projectMembersService.getMembers).toHaveBeenCalledWith(projectId);
-    expect(tabelaService.listarPorClasse).not.toHaveBeenCalled();
     expect(projectsService.getStats).not.toHaveBeenCalled();
 
     expect(response.result).toEqual({
@@ -138,32 +121,6 @@ describe('MCP get_project tool', () => {
         {
           type: 'text',
           text: JSON.stringify({ ...projectBase, members: membersPayload }),
-        },
-      ],
-    });
-  });
-
-  it('(c) include=["sprints"] — adiciona campo sprints', async () => {
-    const response = await router.dispatch(
-      'tools/call',
-      { name: 'get_project', arguments: { projectId, include: ['sprints'] } },
-      userCtx,
-    );
-
-    expect(tabelaService.listarPorClasse).toHaveBeenCalledTimes(1);
-    expect(tabelaService.listarPorClasse).toHaveBeenCalledWith({
-      idClasse: '-400',
-      dEntidadeId: projectId,
-      pageSize: 20,
-    });
-    expect(projectMembersService.getMembers).not.toHaveBeenCalled();
-    expect(projectsService.getStats).not.toHaveBeenCalled();
-
-    expect(response.result).toEqual({
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({ ...projectBase, sprints: sprintsPayload }),
         },
       ],
     });
@@ -179,7 +136,6 @@ describe('MCP get_project tool', () => {
     expect(projectsService.getStats).toHaveBeenCalledTimes(1);
     expect(projectsService.getStats).toHaveBeenCalledWith(projectId, userCtx.dEntidadeId);
     expect(projectMembersService.getMembers).not.toHaveBeenCalled();
-    expect(tabelaService.listarPorClasse).not.toHaveBeenCalled();
 
     expect(response.result).toEqual({
       content: [
@@ -209,12 +165,6 @@ describe('MCP get_project tool', () => {
       callOrder.push('getMembers:end');
       return membersPayload;
     });
-    tabelaService.listarPorClasse.mockImplementation(async () => {
-      callOrder.push('listarPorClasse:start');
-      await new Promise((resolve) => setImmediate(resolve));
-      callOrder.push('listarPorClasse:end');
-      return sprintsPayload;
-    });
     projectsService.getStats.mockImplementation(async () => {
       callOrder.push('getStats:start');
       await new Promise((resolve) => setImmediate(resolve));
@@ -226,22 +176,21 @@ describe('MCP get_project tool', () => {
       'tools/call',
       {
         name: 'get_project',
-        arguments: { projectId, include: ['members', 'sprints', 'stats'] },
+        arguments: { projectId, include: ['members', 'stats'] },
       },
       userCtx,
     );
 
-    // Todos os 4 services chamados exatamente 1×.
+    // Todos os 3 services chamados exatamente 1×.
     expect(projectsService.findOne).toHaveBeenCalledTimes(1);
     expect(projectMembersService.getMembers).toHaveBeenCalledTimes(1);
-    expect(tabelaService.listarPorClasse).toHaveBeenCalledTimes(1);
     expect(projectsService.getStats).toHaveBeenCalledTimes(1);
 
     // Paralelizacao: TODOS os :start ocorrem antes de QUALQUER :end.
     const starts = callOrder.filter((c) => c.endsWith(':start'));
     const firstEndIdx = callOrder.findIndex((c) => c.endsWith(':end'));
     const lastStartIdx = callOrder.lastIndexOf(starts[starts.length - 1]);
-    expect(starts).toHaveLength(4);
+    expect(starts).toHaveLength(3);
     expect(lastStartIdx).toBeLessThan(firstEndIdx);
 
     expect(response.result).toEqual({
@@ -251,7 +200,6 @@ describe('MCP get_project tool', () => {
           text: JSON.stringify({
             ...projectBase,
             members: membersPayload,
-            sprints: sprintsPayload,
             stats: statsPayload,
           }),
         },
@@ -276,7 +224,6 @@ describe('MCP get_project tool', () => {
     expect(projectsService.findAccessibleProjectIds).not.toHaveBeenCalled();
     expect(projectsService.findOne).not.toHaveBeenCalled();
     expect(projectMembersService.getMembers).not.toHaveBeenCalled();
-    expect(tabelaService.listarPorClasse).not.toHaveBeenCalled();
     expect(projectsService.getStats).not.toHaveBeenCalled();
   });
 
@@ -309,7 +256,7 @@ describe('MCP get_project tool', () => {
         code: -32602,
         data: {
           field: 'include',
-          issue: 'each item must be one of: members, sprints, stats',
+          issue: 'each item must be one of: members, stats',
         },
       }),
     );
@@ -344,7 +291,7 @@ describe('MCP get_project tool', () => {
         'tools/call',
         {
           name: 'get_project',
-          arguments: { projectId, include: ['members', 'sprints', 'stats'] },
+          arguments: { projectId, include: ['members', 'stats'] },
         },
         userCtx,
       ),
@@ -353,7 +300,6 @@ describe('MCP get_project tool', () => {
     expect(projectsService.findAccessibleProjectIds).toHaveBeenCalledWith(userCtx.dEntidadeId);
     expect(projectsService.findOne).not.toHaveBeenCalled();
     expect(projectMembersService.getMembers).not.toHaveBeenCalled();
-    expect(tabelaService.listarPorClasse).not.toHaveBeenCalled();
     expect(projectsService.getStats).not.toHaveBeenCalled();
   });
 
@@ -380,7 +326,7 @@ describe('MCP get_project tool', () => {
         expect.objectContaining({
           name: 'get_project',
           description:
-            'Busca dados de um projeto por ID. Suporta include opcional (members, sprints, stats) para reduzir round-trips do LLM.',
+            'Busca dados de um projeto por ID. Suporta include opcional (members, stats) para reduzir round-trips do LLM.',
         }),
       ]),
     });

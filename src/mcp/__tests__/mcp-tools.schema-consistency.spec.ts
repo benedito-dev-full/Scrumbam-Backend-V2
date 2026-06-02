@@ -8,7 +8,6 @@ import { ListMembersTool } from '../tools/list-members.tool';
 import { ListNotificationsTool } from '../tools/list-notifications.tool';
 import { ListPhasesTool } from '../tools/list-phases.tool';
 import { ListProjectsTool } from '../tools/list-projects.tool';
-import { ListSprintsTool } from '../tools/list-sprints.tool';
 import { ListTasksTool } from '../tools/list-tasks.tool';
 import { McpTool } from '../tools/tool.interface';
 import { SearchTasksTool } from '../tools/search-tasks.tool';
@@ -52,11 +51,10 @@ function buildRegisteredTools(): McpTool[] {
     new CreateTaskTool(noop, noop),
     new UpdateStatusTool(noop, noop),
     new ListProjectsTool(noop),
-    new ListSprintsTool(noop, noop),
     new GetTaskTool(noop, noop),
     new UpdateTaskTool(noop, noop),
     new ListMembersTool(noop, noop),
-    new GetProjectTool(noop, noop, noop),
+    new GetProjectTool(noop, noop),
     new UpdateProjectTool(noop),
     new ListNotificationsTool(noop),
     new UpdateNotificationTool(noop),

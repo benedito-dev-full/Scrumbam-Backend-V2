@@ -9,16 +9,15 @@ import { UpdateTaskTool } from '../tools/update-task.tool';
  * Cobre:
  * (a) sucesso so com `name` (basicos) — chama update + findOne
  * (b) sucesso so com `status` — chama updateStatus + findOne
- * (c) sucesso so com `sprintId` — chama updateSprint + findOne
  * (d) sucesso combinando 2 campos (name + status) — chama update + updateStatus
- * (e) sucesso combinando 3+ campos (name + status + sprintId)
+ * (e) sucesso combinando 3+ campos (name + description + priority + assignee + status)
  * (f) erro: nenhum campo de update enviado (so taskId) → INVALID_PARAMS
  * (g) erro: taskId missing → INVALID_PARAMS
  * (h) erro: taskId nao parseavel como BigInt → INVALID_PARAMS
  * (i) erro: priority com enum invalido
  * (j) tenant isolation — NotFoundException propagada (task de outro tenant)
  * (k) ctx.dEntidadeId (bigint) propagado para findAccessibleProjectIds
- * (l) ordem de chamada: update → updateSprint → updateStatus → findOne
+ * (l) ordem de chamada: update → updateStatus → findOne
  *
  * Casos extras de qualidade:
  * (m) assigneeId === null → traduzido em '' (semantica "limpar")
@@ -48,7 +47,6 @@ describe('MCP update_task tool', () => {
   let tasksService: {
     update: jest.Mock;
     updateStatus: jest.Mock;
-    updateSprint: jest.Mock;
     findOne: jest.Mock;
   };
   let projectsService: { findAccessibleProjectIds: jest.Mock };
@@ -58,7 +56,6 @@ describe('MCP update_task tool', () => {
     tasksService = {
       update: jest.fn().mockResolvedValue({ id: taskId }),
       updateStatus: jest.fn().mockResolvedValue({ id: taskId }),
-      updateSprint: jest.fn().mockResolvedValue({ id: taskId }),
       findOne: jest.fn().mockResolvedValue(finalTask),
     };
     projectsService = {
@@ -71,14 +68,13 @@ describe('MCP update_task tool', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       new UpdateTaskTool(tasksService as never, projectsService as never),
     );
   });
 
   // ── Casos de sucesso ──────────────────────────────────────────────────
 
-  it('(a) sucesso so com `name` — chama update + findOne, NAO chama updateStatus/updateSprint', async () => {
+  it('(a) sucesso so com `name` — chama update + findOne, NAO chama updateStatus', async () => {
     const response = await router.dispatch(
       'tools/call',
       { name: 'update_task', arguments: { taskId, name: 'Novo nome' } },
@@ -87,7 +83,6 @@ describe('MCP update_task tool', () => {
 
     expect(tasksService.update).toHaveBeenCalledWith(taskId, { nome: 'Novo nome' }, [projectId]);
     expect(tasksService.updateStatus).not.toHaveBeenCalled();
-    expect(tasksService.updateSprint).not.toHaveBeenCalled();
     expect(tasksService.findOne).toHaveBeenCalledWith(taskId, [projectId]);
 
     expect(response.result).toEqual({
@@ -95,7 +90,7 @@ describe('MCP update_task tool', () => {
     });
   });
 
-  it('(b) sucesso so com `status` — chama updateStatus + findOne, NAO chama update/updateSprint', async () => {
+  it('(b) sucesso so com `status` — chama updateStatus + findOne, NAO chama update', async () => {
     await router.dispatch(
       'tools/call',
       { name: 'update_task', arguments: { taskId, status: 'READY' } },
@@ -103,26 +98,12 @@ describe('MCP update_task tool', () => {
     );
 
     expect(tasksService.update).not.toHaveBeenCalled();
-    expect(tasksService.updateSprint).not.toHaveBeenCalled();
     expect(tasksService.updateStatus).toHaveBeenCalledWith(
       taskId,
       { status: 'READY', movedBy: userCtx.dEntidadeId.toString() },
       userCtx.dEntidadeId,
       [projectId],
     );
-    expect(tasksService.findOne).toHaveBeenCalledWith(taskId, [projectId]);
-  });
-
-  it('(c) sucesso so com `sprintId` — chama updateSprint + findOne, NAO chama update/updateStatus', async () => {
-    await router.dispatch(
-      'tools/call',
-      { name: 'update_task', arguments: { taskId, sprintId: '42' } },
-      userCtx,
-    );
-
-    expect(tasksService.update).not.toHaveBeenCalled();
-    expect(tasksService.updateStatus).not.toHaveBeenCalled();
-    expect(tasksService.updateSprint).toHaveBeenCalledWith(taskId, { sprintId: '42' }, [projectId]);
     expect(tasksService.findOne).toHaveBeenCalledWith(taskId, [projectId]);
   });
 
@@ -143,11 +124,10 @@ describe('MCP update_task tool', () => {
       userCtx.dEntidadeId,
       [projectId],
     );
-    expect(tasksService.updateSprint).not.toHaveBeenCalled();
     expect(tasksService.findOne).toHaveBeenCalledTimes(1);
   });
 
-  it('(e) sucesso combinando 3+ campos (name + sprintId + status)', async () => {
+  it('(e) sucesso combinando 3+ campos (name + description + priority + assignee + status)', async () => {
     await router.dispatch(
       'tools/call',
       {
@@ -158,7 +138,6 @@ describe('MCP update_task tool', () => {
           description: 'D',
           priority: 'HIGH',
           assigneeId: '999',
-          sprintId: '42',
           status: 'READY',
         },
       },
@@ -170,7 +149,6 @@ describe('MCP update_task tool', () => {
       { nome: 'X', descricao: 'D', priority: 'HIGH', assigneeId: '999' },
       [projectId],
     );
-    expect(tasksService.updateSprint).toHaveBeenCalledWith(taskId, { sprintId: '42' }, [projectId]);
     expect(tasksService.updateStatus).toHaveBeenCalledWith(
       taskId,
       { status: 'READY', movedBy: userCtx.dEntidadeId.toString() },
@@ -198,7 +176,6 @@ describe('MCP update_task tool', () => {
     );
     expect(tasksService.update).not.toHaveBeenCalled();
     expect(tasksService.updateStatus).not.toHaveBeenCalled();
-    expect(tasksService.updateSprint).not.toHaveBeenCalled();
     expect(tasksService.findOne).not.toHaveBeenCalled();
     expect(projectsService.findAccessibleProjectIds).not.toHaveBeenCalled();
   });
@@ -288,14 +265,10 @@ describe('MCP update_task tool', () => {
     expect(callArg).toBe(userCtx.dEntidadeId);
   });
 
-  it('(l) ordem de chamada: update → updateSprint → updateStatus → findOne', async () => {
+  it('(l) ordem de chamada: update → updateStatus → findOne', async () => {
     const callOrder: string[] = [];
     tasksService.update.mockImplementationOnce(async () => {
       callOrder.push('update');
-      return { id: taskId };
-    });
-    tasksService.updateSprint.mockImplementationOnce(async () => {
-      callOrder.push('updateSprint');
       return { id: taskId };
     });
     tasksService.updateStatus.mockImplementationOnce(async () => {
@@ -311,12 +284,12 @@ describe('MCP update_task tool', () => {
       'tools/call',
       {
         name: 'update_task',
-        arguments: { taskId, name: 'X', sprintId: '42', status: 'READY' },
+        arguments: { taskId, name: 'X', status: 'READY' },
       },
       userCtx,
     );
 
-    expect(callOrder).toEqual(['update', 'updateSprint', 'updateStatus', 'findOne']);
+    expect(callOrder).toEqual(['update', 'updateStatus', 'findOne']);
   });
 
   // ── Casos extras de qualidade ─────────────────────────────────────────

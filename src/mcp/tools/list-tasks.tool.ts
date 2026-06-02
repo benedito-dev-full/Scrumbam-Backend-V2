@@ -23,7 +23,7 @@ import {
  *
  * **Filtro novo F7:** `idClasse` (string numérica negativa ou positiva)
  * — filtra por tipo de task (Pilar 3 — polimorfismo DTask):
- *   - `-200`: PHASE — agrupador de sprints/fases
+ *   - `-200`: PHASE — agrupador de tasks (chamado "Bloco" no frontend)
  *   - `-154`: SCRUMBAN_TASK — task concreta
  *   - Ou qualquer outro tipo definido no seed (domínio específico)
  *
@@ -117,7 +117,7 @@ export class ListTasksTool implements McpTool {
    *   "items": [
    *     {
    *       "chave": "200",
-   *       "nome": "Sprint 1",
+   *       "nome": "Fase 1",
    *       "descricao": null,
    *       "idClasse": "-200",
    *       "idProject": "100",

@@ -73,7 +73,6 @@ describe('MCP get_phase_tree tool', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       new GetPhaseTreeTool(
         tasksService as never,
         projectsService as never,

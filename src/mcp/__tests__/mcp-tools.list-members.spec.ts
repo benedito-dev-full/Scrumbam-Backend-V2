@@ -63,7 +63,6 @@ describe('MCP list_members tool', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       new ListMembersTool(projectMembersService as never, projectsService as never),
     );
   });

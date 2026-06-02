@@ -57,13 +57,12 @@ describe('MCP Bloco D - compatibilidade, timeout, metricas e doc', () => {
       id: 'tools',
       result: { tools: toolsSchema.tools },
     });
-    expect(toolsSchema.tools).toHaveLength(16);
+    expect(toolsSchema.tools).toHaveLength(15);
     expect(toolsSchema.tools.map((tool) => tool.name)).toEqual([
       'list_tasks',
       'create_task',
       'update_status',
       'list_projects',
-      'list_sprints',
       'get_task',
       'update_task',
       'list_members',
@@ -104,7 +103,6 @@ describe('MCP Bloco D - compatibilidade, timeout, metricas e doc', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       { get: jest.fn().mockReturnValue('5') } as never,
     );
 
@@ -129,7 +127,6 @@ describe('MCP Bloco D - compatibilidade, timeout, metricas e doc', () => {
 
   it('timeout nao se aplica a initialize nem tools/list', async () => {
     const router = new McpRouterService(
-      undefined,
       undefined,
       undefined,
       undefined,

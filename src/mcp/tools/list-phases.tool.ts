@@ -97,7 +97,7 @@ export class ListPhasesTool implements McpTool {
    * // Response (page 2 de fases, 5 itens)
    * {
    *   "items": [
-   *     { "chave": "43", "nome": "Sprint 2", "idClasse": "-200", "idPai": "100", ... },
+   *     { "chave": "43", "nome": "Fase 2", "idClasse": "-200", "idPai": "100", ... },
    *     ...
    *   ],
    *   "pagination": {

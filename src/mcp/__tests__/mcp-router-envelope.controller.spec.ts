@@ -3,7 +3,6 @@ import { McpJsonRpcService } from '../services/mcp-json-rpc.service';
 import { McpRouterService } from '../services/mcp-router.service';
 import { CreateTaskTool } from '../tools/create-task.tool';
 import { ListProjectsTool } from '../tools/list-projects.tool';
-import { ListSprintsTool } from '../tools/list-sprints.tool';
 import { ListTasksTool } from '../tools/list-tasks.tool';
 import { UpdateStatusTool } from '../tools/update-status.tool';
 
@@ -20,35 +19,35 @@ describe('MCP JSON-RPC envelope e router', () => {
 
   beforeEach(() => {
     const tasksService = {
-      findMany: jest.fn().mockResolvedValue({ items: [], pagination: { hasMore: false, nextCursor: null } }),
+      findMany: jest
+        .fn()
+        .mockResolvedValue({ items: [], pagination: { hasMore: false, nextCursor: null } }),
       create: jest.fn(),
       findOne: jest.fn(),
       updateStatus: jest.fn(),
     };
     const projectsService = {
-      findMany: jest.fn().mockResolvedValue({ items: [], pagination: { hasMore: false, nextCursor: null } }),
+      findMany: jest
+        .fn()
+        .mockResolvedValue({ items: [], pagination: { hasMore: false, nextCursor: null } }),
       findAccessibleProjectIds: jest.fn().mockResolvedValue([]),
       findOne: jest.fn(),
     };
-    const tabelaService = { listarPorClasse: jest.fn() };
-
     controller = new McpController(
-        new McpJsonRpcService(),
-        new McpRouterService(
+      new McpJsonRpcService(),
+      new McpRouterService(
         new ListTasksTool(tasksService as never, projectsService as never),
         new CreateTaskTool(tasksService as never, projectsService as never),
         new UpdateStatusTool(tasksService as never, projectsService as never),
         new ListProjectsTool(projectsService as never),
-        new ListSprintsTool(tabelaService as never, projectsService as never),
       ),
     );
   });
 
   it('processa single initialize', async () => {
-    const result = await controller.handle(
-      { jsonrpc: '2.0', method: 'initialize', id: 'init-1' },
-      { userCtx } as never,
-    );
+    const result = await controller.handle({ jsonrpc: '2.0', method: 'initialize', id: 'init-1' }, {
+      userCtx,
+    } as never);
 
     expect(result).toEqual(
       expect.objectContaining({
@@ -104,10 +103,9 @@ describe('MCP JSON-RPC envelope e router', () => {
     ]);
 
     await expect(
-      controller.handle(
-        { jsonrpc: '2.0', method: 'missing/method', id: 'x' },
-        { userCtx } as never,
-      ),
+      controller.handle({ jsonrpc: '2.0', method: 'missing/method', id: 'x' }, {
+        userCtx,
+      } as never),
     ).resolves.toEqual(
       expect.objectContaining({
         id: 'x',
@@ -118,10 +116,9 @@ describe('MCP JSON-RPC envelope e router', () => {
 
   it('retorna Unauthorized JSON-RPC quando guard marcou erro', async () => {
     await expect(
-      controller.handle(
-        { jsonrpc: '2.0', method: 'initialize', id: 'auth' },
-        { mcpAuthError: { code: -32001, message: 'Unauthorized' } } as never,
-      ),
+      controller.handle({ jsonrpc: '2.0', method: 'initialize', id: 'auth' }, {
+        mcpAuthError: { code: -32001, message: 'Unauthorized' },
+      } as never),
     ).resolves.toEqual(
       expect.objectContaining({
         id: 'auth',

@@ -112,7 +112,7 @@ export class GetPhaseTreeTool implements McpTool {
    * {
    *   "root": {
    *     "chave": "100",
-   *     "nome": "Sprint 1",
+   *     "nome": "Fase 1",
    *     "children": [
    *       {"chave": "101", "nome": "Feature A", "children": [], "metrics": null},
    *       {"chave": "102", "nome": "Feature B", "children": [], "metrics": null}

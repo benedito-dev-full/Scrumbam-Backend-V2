@@ -25,7 +25,6 @@ export class CreateTaskTool implements McpTool {
       titulo: { type: 'string', maxLength: 500 },
       descricao: { type: 'string', maxLength: 5000 },
       assigneeId: { type: 'string' },
-      sprintId: { type: 'string' },
     },
   };
 
@@ -38,7 +37,6 @@ export class CreateTaskTool implements McpTool {
     const input = assertRecord(params);
     const projectId = requiredString(input, 'projectId');
     const assigneeId = optionalString(input, 'assigneeId');
-    const sprintId = optionalString(input, 'sprintId');
     const titulo = requiredString(input, 'titulo');
     const descricao = optionalString(input, 'descricao');
 
@@ -51,9 +49,6 @@ export class CreateTaskTool implements McpTool {
     if (assigneeId) {
       parseBigIntParam(assigneeId, 'assigneeId');
     }
-    if (sprintId) {
-      parseBigIntParam(sprintId, 'sprintId');
-    }
 
     await this.projectsService.findOne(projectId, ctx.dEntidadeId);
 
@@ -63,7 +58,6 @@ export class CreateTaskTool implements McpTool {
         nome: titulo,
         ...(descricao ? { descricao } : {}),
         ...(assigneeId ? { assigneeId } : {}),
-        ...(sprintId ? { sprintId } : {}),
         source: 'mcp',
       },
       ctx.dEntidadeId,

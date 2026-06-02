@@ -54,7 +54,6 @@ describe('MCP list_phases tool', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       new ListPhasesTool(tasksService as never, projectsService as never),
     );
   });

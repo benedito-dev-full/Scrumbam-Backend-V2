@@ -26,7 +26,6 @@ import { ListMembersTool } from './tools/list-members.tool';
 import { ListNotificationsTool } from './tools/list-notifications.tool';
 import { ListPhasesTool } from './tools/list-phases.tool';
 import { ListProjectsTool } from './tools/list-projects.tool';
-import { ListSprintsTool } from './tools/list-sprints.tool';
 import { ListTasksTool } from './tools/list-tasks.tool';
 import { SearchTasksTool } from './tools/search-tasks.tool';
 import { UpdateNotificationTool } from './tools/update-notification.tool';
@@ -57,7 +56,6 @@ import { UpdateTaskTool } from './tools/update-task.tool';
     CreateTaskTool,
     UpdateStatusTool,
     ListProjectsTool,
-    ListSprintsTool,
     GetTaskTool,
     UpdateTaskTool,
     ListMembersTool,

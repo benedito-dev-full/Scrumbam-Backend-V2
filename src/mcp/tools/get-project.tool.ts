@@ -2,7 +2,6 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 
 import { ProjectMembersService } from '../../projects/project-members.service';
 import { ProjectsService } from '../../projects/projects.service';
-import { TabelaService } from '../../tabelas/tabelas.service';
 import { McpUserContext } from '../interfaces/mcp.types';
 import { McpTool, McpToolResult } from './tool.interface';
 import {
@@ -18,26 +17,22 @@ import {
  *
  * Cada include adiciona um campo opcional ao payload de resposta:
  *  - `members` → adiciona `members: ListProjectMembersResponseDto`
- *  - `sprints` → adiciona `sprints: ListTabelaResponseDto` (primeira pagina, 20 itens)
  *  - `stats`   → adiciona `stats: ProjectStatsDto` (contagem por status V3)
  *
  * `activity` foi EXCLUIDO desta task (Strategist §4.4 — adiado).
  */
-const ALLOWED_INCLUDES = ['members', 'sprints', 'stats'] as const;
+const ALLOWED_INCLUDES = ['members', 'stats'] as const;
 type GetProjectInclude = (typeof ALLOWED_INCLUDES)[number];
-
-const SPRINT_CLASS_ID = '-400';
-const SPRINTS_PAGE_SIZE = 20;
 
 /**
  * Tool MCP `get_project` — busca dados completos de um projeto, com campos
- * opcionais via `include[]` (`members`, `sprints`, `stats`).
+ * opcionais via `include[]` (`members`, `stats`).
  *
  * Tenant isolation (ADR-V2-042 — defense in depth):
  * 1. Resolve `accessibleProjectIds` via `ProjectsService.findAccessibleProjectIds`.
  * 2. Se `projectId` NAO esta no scope autorizado, lanca `NotFoundException`
  *    com mensagem identica a "projeto nao encontrado" (anti enumeration attack).
- *    Esse gate uniforme tambem garante que `members`/`sprints`/`stats` NAO sao
+ *    Esse gate uniforme tambem garante que `members`/`stats` NAO sao
  *    chamados quando o usuario nao tem acesso (cortocircuito antes do Promise.all).
  * 3. Apos o gate, executa em PARALELO (Promise.all):
  *    - dados base via `ProjectsService.findOne(projectId, ctx.dEntidadeId)`
@@ -85,7 +80,7 @@ export class GetProjectTool implements McpTool {
 
   readonly name = 'get_project';
   readonly description =
-    'Busca dados de um projeto por ID. Suporta include opcional (members, sprints, stats) para reduzir round-trips do LLM.';
+    'Busca dados de um projeto por ID. Suporta include opcional (members, stats) para reduzir round-trips do LLM.';
   readonly inputSchema = {
     type: 'object',
     required: ['projectId'],
@@ -95,8 +90,7 @@ export class GetProjectTool implements McpTool {
         type: 'array',
         items: { type: 'string', enum: [...ALLOWED_INCLUDES] },
         uniqueItems: true,
-        description:
-          'Campos opcionais a incluir no payload de resposta. Valores: members | sprints | stats.',
+        description: 'Campos opcionais a incluir no payload de resposta. Valores: members | stats.',
       },
     },
   };
@@ -104,7 +98,6 @@ export class GetProjectTool implements McpTool {
   constructor(
     private readonly projectsService: ProjectsService,
     private readonly projectMembersService: ProjectMembersService,
-    private readonly tabelaService: TabelaService,
   ) {}
 
   /**
@@ -119,7 +112,6 @@ export class GetProjectTool implements McpTool {
    * 5. Executa em PARALELO via Promise.all:
    *    - `findOne(projectId, dEntidadeId)` (sempre — dados base)
    *    - `getMembers(projectId)` se `include` contem `members`
-   *    - `listarPorClasse({ idClasse: '-400', dEntidadeId: projectId })` se `sprints`
    *    - `getStats(projectId, dEntidadeId)` se `stats`
    * 6. Compoe resultado mesclando apenas as keys solicitadas.
    *
@@ -152,19 +144,11 @@ export class GetProjectTool implements McpTool {
     // Promise.all com placeholders condicionais. Garante paralelizacao real
     // dos includes quando o LLM pede multiplos campos em uma so chamada.
     const wantsMembers = include.includes('members');
-    const wantsSprints = include.includes('sprints');
     const wantsStats = include.includes('stats');
 
-    const [project, members, sprints, stats] = await Promise.all([
+    const [project, members, stats] = await Promise.all([
       this.projectsService.findOne(projectId, ctx.dEntidadeId),
       wantsMembers ? this.projectMembersService.getMembers(projectId) : Promise.resolve(undefined),
-      wantsSprints
-        ? this.tabelaService.listarPorClasse({
-            idClasse: SPRINT_CLASS_ID,
-            dEntidadeId: projectId,
-            pageSize: SPRINTS_PAGE_SIZE,
-          })
-        : Promise.resolve(undefined),
       wantsStats
         ? this.projectsService.getStats(projectId, ctx.dEntidadeId)
         : Promise.resolve(undefined),
@@ -175,9 +159,6 @@ export class GetProjectTool implements McpTool {
     const result: Record<string, unknown> = { ...project };
     if (wantsMembers) {
       result.members = members;
-    }
-    if (wantsSprints) {
-      result.sprints = sprints;
     }
     if (wantsStats) {
       result.stats = stats;
@@ -193,7 +174,7 @@ export class GetProjectTool implements McpTool {
    *
    * Aceita:
    *  - `undefined` ou ausente → array vazio (so retorna projeto base)
-   *  - `array` de strings dentro do enum (`members` | `sprints` | `stats`)
+   *  - `array` de strings dentro do enum (`members` | `stats`)
    *
    * Rejeita (com INVALID_PARAMS):
    *  - Valor nao-array (ex: string, object, number)
@@ -218,7 +199,7 @@ export class GetProjectTool implements McpTool {
     const allowed: ReadonlySet<string> = new Set(ALLOWED_INCLUDES);
     for (const item of raw) {
       if (typeof item !== 'string' || !allowed.has(item)) {
-        throw invalidParams('include', 'each item must be one of: members, sprints, stats');
+        throw invalidParams('include', 'each item must be one of: members, stats');
       }
     }
 
