@@ -3,6 +3,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { v4 as uuidv4 } from 'uuid';
 import { PrismaService } from '../../prisma.service';
+import { ProjectRefService } from '../../projects/project-ref.service';
 import { EventRouterService } from '../../eventos/core/event-router.service';
 import { SUPPORTED_EVENTS } from '../constants/supported-events';
 import { WEBHOOK_DISPATCH_QUEUE, WebhookDispatchJobData, StoredWebhookDados } from '../types/webhook-dispatch-job';
@@ -24,6 +25,7 @@ export class WebhooksHookService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventRouter: EventRouterService,
+    private readonly projectRef: ProjectRefService,
     @InjectQueue(WEBHOOK_DISPATCH_QUEUE)
     private readonly queue: Queue<WebhookDispatchJobData>,
   ) {}
@@ -51,12 +53,16 @@ export class WebhooksHookService implements OnModuleInit {
       return;
     }
 
+    // ADR-V2-058/059: webhooks são gravados com o handle canônico (DEntidade-
+    // espelho -158, ou P legado). Resolvemos o handle antes de filtrar.
+    const handle = await this.projectRef.resolveEntidadeRef(BigInt(projectId));
+
     // Buscar webhooks ativos para este projeto e tipo de evento
-    // Query: DTabela idClasse=-470 AND dEntidadeId=projectId
+    // Query: DTabela idClasse=-470 AND dEntidadeId=handle
     const webhooks = await this.prisma.dTabela.findMany({
       where: {
         idClasse: WEBHOOK_CLASS_ID,
-        dEntidadeId: BigInt(projectId),
+        dEntidadeId: handle,
         excluido: false,
       },
       select: {

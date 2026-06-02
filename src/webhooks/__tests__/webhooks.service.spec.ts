@@ -12,6 +12,11 @@ describe('WebhooksService', () => {
   };
   let signing: { generateSecret: jest.Mock; encrypt: jest.Mock };
   let ssrf: { validateUrl: jest.Mock };
+  let projectRef: {
+    ensureEntidadeRefById: jest.Mock;
+    resolveEntidadeRef: jest.Mock;
+    resolveProjectId: jest.Mock;
+  };
   let service: WebhooksService;
 
   const storedDados = {
@@ -40,7 +45,19 @@ describe('WebhooksService', () => {
       encrypt: jest.fn().mockReturnValue('encrypted-secret'),
     };
     ssrf = { validateUrl: jest.fn().mockResolvedValue(undefined) };
-    service = new WebhooksService(prisma as never, signing as never, ssrf as never);
+    // ADR-V2-058/059: handle canônico. Passthrough nos testes (E=P) — mantém
+    // as asserções de dEntidadeId/projectId válidas.
+    projectRef = {
+      ensureEntidadeRefById: jest.fn((id: bigint) => Promise.resolve(id)),
+      resolveEntidadeRef: jest.fn((id: bigint) => Promise.resolve(id)),
+      resolveProjectId: jest.fn((id: bigint) => Promise.resolve(id)),
+    };
+    service = new WebhooksService(
+      prisma as never,
+      signing as never,
+      ssrf as never,
+      projectRef as never,
+    );
   });
 
   it('cria DTabela -470, criptografa secret e retorna plaintext somente no create', async () => {

@@ -35,7 +35,7 @@ export class WebhookOwnerGuard implements CanActivate {
       throw new ForbiddenException('Usuario nao autenticado');
     }
 
-    const projectId = await this.resolveProjectId(request);
+    const projectId = await this.resolveRequestProjectId(request);
     if (!projectId) {
       throw new ForbiddenException('Projeto do webhook nao informado');
     }
@@ -77,7 +77,23 @@ export class WebhookOwnerGuard implements CanActivate {
     return true;
   }
 
-  private async resolveProjectId(request: {
+  /**
+   * Resolve SEMPRE o `projectId` real (`DProject.chave` = P) a partir da request.
+   *
+   * Dois caminhos:
+   *  - Rota com `:id` (webhook): lê `DTabela.dEntidadeId`, que após ADR-V2-058/059
+   *    é o handle canônico (DEntidade-espelho -158, ou P legado). Convertemos
+   *    E→P via {@link ProjectRefService.resolveProjectId} (passthrough para P
+   *    legado). Isso garante que o caller (tenant isolation e RBAC) sempre
+   *    receba P, nunca o handle E.
+   *  - `query`/`body.projectId`: já é P — retornado direto.
+   *
+   * Ambos os usos de `canActivate` (tenant isolation via `dProject.findFirst`
+   * por `chave`, e RBAC via `resolveEntidadeRef`) esperam P e funcionam.
+   *
+   * @returns `projectId` (P) ou `null` se não informado.
+   */
+  private async resolveRequestProjectId(request: {
     params?: Record<string, string>;
     query?: Record<string, string>;
     body?: Record<string, unknown>;
@@ -92,7 +108,11 @@ export class WebhookOwnerGuard implements CanActivate {
         },
         select: { dEntidadeId: true },
       });
-      return webhook?.dEntidadeId ?? null;
+      if (!webhook?.dEntidadeId) {
+        return null;
+      }
+      // dEntidadeId é o handle (E ou P-legado) → resolver para P.
+      return this.projectRef.resolveProjectId(webhook.dEntidadeId);
     }
 
     const projectId = request.query?.projectId ?? request.body?.projectId;

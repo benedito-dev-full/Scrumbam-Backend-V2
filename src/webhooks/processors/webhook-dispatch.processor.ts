@@ -6,6 +6,7 @@ import { Prisma } from '@prisma/client';
 import { Job, Queue } from 'bullmq';
 import { EventProducerService } from '../../eventos/core/event-producer.service';
 import { PrismaService } from '../../prisma.service';
+import { ProjectRefService } from '../../projects/project-ref.service';
 import { WEBHOOK_CLASS_ID } from '../services/webhooks.service';
 import { WebhooksSigningService } from '../services/webhooks-signing.service';
 import { WebhooksSsrfService } from '../services/webhooks-ssrf.service';
@@ -61,6 +62,7 @@ export class WebhookDispatchProcessor extends WorkerHost {
     private readonly retryService: WebhooksRetryService,
     private readonly configService: ConfigService,
     private readonly eventProducer: EventProducerService,
+    private readonly projectRef: ProjectRefService,
     @InjectQueue(WEBHOOK_DISPATCH_QUEUE)
     private readonly queue: Queue<WebhookDispatchJobData>,
   ) {
@@ -100,12 +102,18 @@ export class WebhookDispatchProcessor extends WorkerHost {
       return;
     }
 
+    // ADR-V2-058/059: dEntidadeId é o handle canônico (E ou P-legado). O payload
+    // entregue ao consumidor externo DEVE expor o projectId real (P).
+    const externalProjectId = config.dEntidadeId
+      ? (await this.projectRef.resolveProjectId(config.dEntidadeId)).toString()
+      : null;
+
     const result = await this.dispatchHttp(dados, {
       eventType,
       eventId,
       payload,
       deliveryId,
-      projectId: config.dEntidadeId?.toString() ?? null,
+      projectId: externalProjectId,
     });
     const durationMs = Date.now() - startedAt;
     this.trackMetrics(result, durationMs);
@@ -322,11 +330,16 @@ export class WebhookDispatchProcessor extends WorkerHost {
     failureCount: number,
   ): Promise<void> {
     try {
+      // projectId exposto = P (real); idEntidade = handle E (FK DEntidade.chave).
+      const externalProjectId = config.dEntidadeId
+        ? (await this.projectRef.resolveProjectId(config.dEntidadeId)).toString()
+        : null;
+
       await this.eventProducer.addInternalEvent(
         'webhook.auto_disabled',
         {
           webhookId: config.chave.toString(),
-          projectId: config.dEntidadeId?.toString() ?? null,
+          projectId: externalProjectId,
           idEntidade: config.dEntidadeId?.toString() ?? null,
           eventType: jobData.eventType,
           eventId: BigInt(jobData.eventId).toString(),

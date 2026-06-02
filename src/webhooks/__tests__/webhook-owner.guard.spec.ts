@@ -8,6 +8,7 @@ describe('WebhookOwnerGuard', () => {
     dVincula: { findFirst: jest.Mock };
   };
   let entidadeService: { getEntidadeIdFromUserGroup: jest.Mock };
+  let projectRef: { resolveProjectId: jest.Mock; resolveEntidadeRef: jest.Mock };
   let guard: WebhookOwnerGuard;
 
   beforeEach(() => {
@@ -18,7 +19,17 @@ describe('WebhookOwnerGuard', () => {
     entidadeService = {
       getEntidadeIdFromUserGroup: jest.fn().mockResolvedValue(BigInt(900)),
     };
-    guard = new WebhookOwnerGuard(prisma as never, entidadeService as never);
+    // ADR-V2-058/059: handle canônico. Passthrough (E=P) nos testes — mantém
+    // as asserções de idLocEscritu/projectId válidas.
+    projectRef = {
+      resolveProjectId: jest.fn((id: bigint) => Promise.resolve(id)),
+      resolveEntidadeRef: jest.fn((id: bigint) => Promise.resolve(id)),
+    };
+    guard = new WebhookOwnerGuard(
+      prisma as never,
+      entidadeService as never,
+      projectRef as never,
+    );
   });
 
   it('usa EntidadeService para converter DUserGroup e valida vinculo do projeto do body', async () => {

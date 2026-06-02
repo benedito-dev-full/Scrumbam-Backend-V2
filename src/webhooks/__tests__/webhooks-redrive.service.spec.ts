@@ -55,11 +55,17 @@ describe('WebhooksRedriveService', () => {
     };
     ssrf = { validateUrl: jest.fn().mockResolvedValue(undefined) };
     config = { get: jest.fn().mockReturnValue('10000') };
+    // ADR-V2-058/059: resolveProjectId passthrough (E=P) nos testes.
+    const projectRef = {
+      resolveProjectId: jest.fn((id: bigint) => Promise.resolve(id)),
+      resolveEntidadeRef: jest.fn((id: bigint) => Promise.resolve(id)),
+    };
     service = new WebhooksRedriveService(
       prisma as never,
       signing as never,
       ssrf as never,
       config as never,
+      projectRef as never,
     );
     jest.spyOn(global, 'fetch').mockResolvedValue({ status: 204 } as Response);
   });

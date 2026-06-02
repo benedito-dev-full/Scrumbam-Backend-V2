@@ -14,6 +14,21 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Fixed
 
+- **DTabela↔DProject: FK `dEntidadeId` — handle de projeto em webhooks (V2 pós-F5, 2026-06-02)** (ADR-V2-058/059 passo 4, Score 8.2/10)
+  - Estende ADR-V2-058 (DVincula) à FK irmã `DTabela_dEntidadeId_fkey` no módulo webhooks
+  - Causa-raiz: `DTabela.dEntidadeId` é FK para `DEntidade.chave`, mas webhooks gravavam `DProject.chave` (P) — viola a FK ao criar webhook (mesmo bug que travava `POST /projects`)
+  - ESCRITA: `WebhooksService.create` grava o handle E (`ensureEntidadeRefById`); LEITURA: `list` e `webhooks-hook.service` filtram por `resolveEntidadeRef` (legacy-safe P→E)
+  - READ-BACK: `toResponse`/`buildResponse`, payload HTTP do dispatch, evento `webhook.auto_disabled`, payload de teste (redrive) e `listAttempts` expõem o `projectId` real (P) via `resolveProjectId` — contrato HTTP preservado
+  - `WebhookOwnerGuard.resolveRequestProjectId` converte E→P para que tenant isolation (`dProject.findFirst` por chave=P) e RBAC (`resolveEntidadeRef`) recebam P — sem regressão de acesso
+  - `DEvento.idEntidade` (attempts) mantém o handle E DE PROPÓSITO (FK para DEntidade.chave); apenas o `projectId` exposto é convertido para P
+  - ZERO tabela/coluna/DClasse nova; N+1 ZERO (projectId resolvido 1x por listagem); legacy-safe
+  - Tests: 9 suites webhooks, 29 testes verdes (mocks `ProjectRefService` passthrough)
+
+- **DTabela↔DProject: FK `dEntidadeId` — statuses/sprint/priorities (V2 pós-F5, 2026-06-02)** (ADR-V2-058/059 passos 1-2, Score — fast-fix, commit `0c68dbb`)
+  - Corrige `Foreign key constraint violated: DTabela_dEntidadeId_fkey` em `POST /projects` (LIST)
+  - ESCRITA: `seedProject` grava o handle E (`refId`) em vez de `proj.chave` (P); LEITURA: `tasks.service` (criar/mover task, filtro, priority) e o endpoint genérico `/tabelas` resolvem P→E só para idClasses project-scoped (statuses -440..-449, sprint -400, priorities -420..-424, task type -430) — org/user-scoped (API/MCP keys) intocados
+  - ZERO tabela/coluna/DClasse nova; legacy-safe (passthrough P sem espelho)
+
 - **DVincula↔DProject: FK violada ao criar projeto — DEntidade-espelho (V2 pós-F5, 2026-06-02)** (ADR-V2-058, Score 8.5/10)
   - Corrige `Foreign key constraint violated: DVincula_idLocEscritu_fkey` em `POST /projects`
   - Causa-raiz: `DVincula.idLocEscritu`/`idEntidade` têm FK para `DEntidade`, mas projetos gravavam `DProject.chave` (sequências separadas) — quebrava quando IDs não coincidiam; quando coincidiam, apontava para DEntidade aleatória (corrupção silenciosa de RBAC)

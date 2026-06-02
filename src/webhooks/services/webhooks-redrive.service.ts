@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma.service';
+import { ProjectRefService } from '../../projects/project-ref.service';
 import { SupportedEvent } from '../constants/supported-events';
 import { ListAttemptsQueryDto } from '../dto/list-attempts-query.dto';
 import { TestWebhookDto } from '../dto/test-webhook.dto';
@@ -46,6 +47,7 @@ export class WebhooksRedriveService {
     private readonly signingService: WebhooksSigningService,
     private readonly ssrfService: WebhooksSsrfService,
     private readonly configService: ConfigService,
+    private readonly projectRef: ProjectRefService,
   ) {}
 
   async test(id: string, dto: TestWebhookDto = {}): Promise<TestWebhookResponseDto> {
@@ -58,6 +60,11 @@ export class WebhooksRedriveService {
     const eventType =
       dto.eventType ?? (dados.events[0] as SupportedEvent | undefined) ?? 'task.created';
     const deliveryId = `test-${randomUUID()}`;
+    // ADR-V2-058/059: dEntidadeId é o handle canônico (E ou P-legado). O payload
+    // de teste entregue ao endpoint externo expõe o projectId real (P).
+    const externalProjectId = config.dEntidadeId
+      ? (await this.projectRef.resolveProjectId(config.dEntidadeId)).toString()
+      : null;
     const bodyString = JSON.stringify({
       id: deliveryId,
       type: eventType,
@@ -68,7 +75,7 @@ export class WebhooksRedriveService {
         webhookId: webhookId.toString(),
         ...(dto.payload ?? {}),
       },
-      projectId: config.dEntidadeId?.toString() ?? null,
+      projectId: externalProjectId,
     });
     const signature = this.signingService.sign(
       this.signingService.decrypt(dados.secretEncrypted),
@@ -150,7 +157,16 @@ export class WebhooksRedriveService {
     query: ListAttemptsQueryDto,
   ): Promise<ListWebhookAttemptsResponseDto> {
     const webhookId = BigInt(id);
-    await this.findWebhookOrThrow(webhookId);
+    const webhook = await this.findWebhookOrThrow(webhookId);
+
+    // ADR-V2-058/059: DEvento.idEntidade armazena o handle canônico (E). O campo
+    // `projectId` exposto na resposta DEVE ser o DProject.chave (P). Todas as
+    // tentativas pertencem ao mesmo webhook (mesmo dEntidadeId), então resolvemos
+    // E→P uma única vez — N+1 ZERO.
+    const externalProjectId =
+      webhook.dEntidadeId !== null
+        ? (await this.projectRef.resolveProjectId(webhook.dEntidadeId)).toString()
+        : null;
 
     const limit = Math.min(query.limit ?? 20, 100);
     const cursor = query.cursor ? BigInt(query.cursor) : undefined;
@@ -167,7 +183,9 @@ export class WebhooksRedriveService {
       LIMIT ${limit + 1}
     `;
 
-    const items = rows.slice(0, limit).map((row) => this.toAttemptResponse(row));
+    const items = rows
+      .slice(0, limit)
+      .map((row) => this.toAttemptResponse(row, externalProjectId));
     const hasMore = rows.length > limit;
 
     return {
@@ -252,11 +270,16 @@ export class WebhooksRedriveService {
     };
   }
 
-  private toAttemptResponse(row: AttemptRow): WebhookAttemptResponseDto {
+  private toAttemptResponse(
+    row: AttemptRow,
+    externalProjectId: string | null,
+  ): WebhookAttemptResponseDto {
     return {
       id: row.chave.toString(),
       idClasse: row.idClasse.toString(),
-      projectId: row.idEntidade?.toString() ?? null,
+      // ADR-V2-058/059: `projectId` exposto = DProject.chave (P), resolvido pelo
+      // chamador (E→P). NÃO usar row.idEntidade (handle E) diretamente.
+      projectId: externalProjectId,
       descricao: row.descricao,
       identificadorExterno: row.identificadorExterno,
       criadoEm: row.criadoEm.toISOString(),

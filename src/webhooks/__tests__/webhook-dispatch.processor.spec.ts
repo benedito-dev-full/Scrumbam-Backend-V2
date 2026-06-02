@@ -67,6 +67,10 @@ describe('WebhookDispatchProcessor', () => {
     config = { get: jest.fn().mockReturnValue('10000') };
     eventProducer = { addInternalEvent: jest.fn().mockResolvedValue(undefined) };
     queue = { add: jest.fn().mockResolvedValue({}) };
+    // ADR-V2-058/059: resolveProjectId passthrough (E=P) nos testes.
+    const projectRef = {
+      resolveProjectId: jest.fn((id: bigint) => Promise.resolve(id)),
+    };
     processor = new WebhookDispatchProcessor(
       prisma as never,
       signing as never,
@@ -74,6 +78,7 @@ describe('WebhookDispatchProcessor', () => {
       retry as never,
       config as never,
       eventProducer as never,
+      projectRef as never,
       queue as never,
     );
     jest.spyOn(global, 'fetch').mockResolvedValue({ status: 204 } as Response);

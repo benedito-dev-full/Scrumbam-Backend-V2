@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
+import { ProjectRefService } from '../../projects/project-ref.service';
 import { SupportedEvent } from '../constants/supported-events';
 import { CreateWebhookDto } from '../dto/create-webhook.dto';
 import { ListWebhooksQueryDto } from '../dto/list-webhooks-query.dto';
@@ -43,12 +44,18 @@ export class WebhooksService {
     private readonly prisma: PrismaService,
     private readonly signingService: WebhooksSigningService,
     private readonly ssrfService: WebhooksSsrfService,
+    private readonly projectRef: ProjectRefService,
   ) {}
 
   async create(dto: CreateWebhookDto): Promise<WebhookCreatedResponseDto> {
     const projectId = BigInt(dto.projectId);
     await this.ensureProjectExists(projectId);
     await this.ssrfService.validateUrl(dto.url);
+
+    // ADR-V2-058/059: DTabela.dEntidadeId é FK para DEntidade.chave. Gravar
+    // DProject.chave (P) viola a FK. Resolvemos o handle canônico (DEntidade-
+    // espelho -158, ou P legado via passthrough) antes de persistir.
+    const handle = await this.projectRef.ensureEntidadeRefById(projectId);
 
     const secret = this.signingService.generateSecret();
     const secretEncrypted = this.signingService.encrypt(secret);
@@ -59,7 +66,7 @@ export class WebhooksService {
     const tabela = await this.prisma.dTabela.create({
       data: {
         idClasse: WEBHOOK_CLASS_ID,
-        dEntidadeId: projectId,
+        dEntidadeId: handle,
         nome: dto.url,
         dados: {
           url: dto.url,
@@ -82,7 +89,7 @@ export class WebhooksService {
     });
 
     return {
-      ...this.toResponse(tabela),
+      ...(await this.toResponse(tabela)),
       secret,
     };
   }
@@ -91,10 +98,14 @@ export class WebhooksService {
     const projectId = BigInt(query.projectId);
     const take = query.limit ?? 20;
 
+    // ADR-V2-058/059: filtra pelo handle (E se há espelho, P legado caso
+    // contrário) — read-safe via resolveEntidadeRef.
+    const handle = await this.projectRef.resolveEntidadeRef(projectId);
+
     const webhooks = await this.prisma.dTabela.findMany({
       where: {
         idClasse: WEBHOOK_CLASS_ID,
-        dEntidadeId: projectId,
+        dEntidadeId: handle,
         excluido: false,
         ...(query.cursor ? { chave: { lt: BigInt(query.cursor) } } : {}),
       },
@@ -113,8 +124,12 @@ export class WebhooksService {
     const items = hasMore ? webhooks.slice(0, take) : webhooks;
     const nextCursor = hasMore ? items[items.length - 1].chave.toString() : null;
 
+    // Todos os itens pertencem ao mesmo projeto (filtrados por handle acima),
+    // então o projectId externo (P) é único — resolvemos uma vez. N+1 ZERO.
+    const externalProjectId = (await this.projectRef.resolveProjectId(handle)).toString();
+
     return {
-      items: items.map((webhook) => this.toResponse(webhook)),
+      items: items.map((webhook) => this.buildResponse(webhook, externalProjectId)),
       pagination: { hasMore, nextCursor },
     };
   }
@@ -209,12 +224,42 @@ export class WebhooksService {
     }
   }
 
-  private toResponse(webhook: WebhookTabela): WebhookResponseDto {
+  /**
+   * Monta a resposta do webhook resolvendo o `projectId` externo (P).
+   *
+   * `dEntidadeId` armazena o handle canônico (DEntidade-espelho -158, ou P
+   * legado). O mundo externo espera o `DProject.chave` (P), então convertemos
+   * E→P via {@link ProjectRefService.resolveProjectId} (legacy-safe: passthrough
+   * para handles que já são P). Webhooks legados com `dEntidadeId` null mantêm
+   * o fallback `''`.
+   *
+   * @param webhook - Linha da DTabela (-470) do webhook.
+   * @returns Resposta com `projectId` externo (P).
+   */
+  private async toResponse(webhook: WebhookTabela): Promise<WebhookResponseDto> {
+    const externalProjectId =
+      webhook.dEntidadeId !== null
+        ? (await this.projectRef.resolveProjectId(webhook.dEntidadeId)).toString()
+        : '';
+
+    return this.buildResponse(webhook, externalProjectId);
+  }
+
+  /**
+   * Versão síncrona de {@link toResponse} — recebe o `projectId` externo (P) já
+   * resolvido pelo chamador. Usada em `list` para resolver o projectId uma única
+   * vez (N+1 ZERO), já que todos os itens pertencem ao mesmo projeto.
+   *
+   * @param webhook - Linha da DTabela (-470) do webhook.
+   * @param externalProjectId - `DProject.chave` (P) já resolvido.
+   * @returns Resposta com `projectId` externo.
+   */
+  private buildResponse(webhook: WebhookTabela, externalProjectId: string): WebhookResponseDto {
     const dados = this.parseDados(webhook.dados);
 
     return {
       id: webhook.chave.toString(),
-      projectId: webhook.dEntidadeId?.toString() ?? '',
+      projectId: externalProjectId,
       url: dados.url,
       events: dados.events,
       disabled: dados.disabled,
