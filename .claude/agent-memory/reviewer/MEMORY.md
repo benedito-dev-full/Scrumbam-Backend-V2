@@ -198,6 +198,7 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 
 | Task | Módulo | Fase | Score | Decisão | Issue principal |
 |------|--------|------|-------|---------|-----------------|
+| (2026-06-01) | rename-archive-builtin-columns | Frontend+Backend | **8.5** | **APPROVED** | Gate CEO 8.0 atingido; MINOR-1: spec de rename testa só __nome, não cobre status/responsavel/etc. explicitamente; MINOR-2: edge case "arquivar todas as colunas" produz board vazio (sem guard de mínimo); MINOR-3: `applySetColumnHidden` silencioso quando key não existe no schema |
 | (2026-05-26) | prompt-builder | Pós-F13 | **7.2** | **NEEDS_CHANGES** | C1: CommandValidator.DANGEROUS_CHARS rejeita `()` no prompt placeholder (feature disfuncional em produção); masked por mock no integration test |
 | (2026-05-26) re-review | prompt-builder | Pós-F13 | **8.8** | **APPROVED** | C1 fix Opção B (placeholder simbólico); C2/M1 teste REAL detectou variante `<` `>`; R1 dupla camada anti-enum; R2 @Matches `^\d+$`; gate CEO 8.5 atingido |
 | Task D2 | bookmarks-validacao | Pós-D1 | **9.0** | **APPROVED** | 16/16 specs; assertTargetExists 1 query O(1) por tipo; doc=501 correto; M1: gap futuro se TargetType crescer (exists=null→404); M2: folder/list tests nao verificam idClasse correto na query |
