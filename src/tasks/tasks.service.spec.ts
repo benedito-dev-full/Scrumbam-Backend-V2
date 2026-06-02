@@ -5,6 +5,7 @@ import { TasksIdentifierService } from './tasks-identifier.service';
 import { PhaseHierarchyService } from './services/phase-hierarchy.service';
 import { PhaseMetricsService } from './services/phase-metrics.service';
 import { TaskTimerService } from './services/task-timer.service';
+import { ProjectRefService } from '../projects/project-ref.service';
 import { PrismaService } from '../prisma.service';
 import { EventProducerService } from '../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../common/services/correlation-id.service';
@@ -133,6 +134,16 @@ describe('TasksService', () => {
         // TaskTimerService real (ADR-V2-057): só depende de prisma/event/correlation,
         // todos já mockados. buildResponse/list/findOne usam seus métodos puros.
         TaskTimerService,
+        {
+          // ADR-V2-058/059: resolveEntidadeRef passthrough (P→P) nos testes —
+          // mantém asserts de getNextIdentifier/status que esperam o projectId cru.
+          provide: ProjectRefService,
+          useValue: {
+            resolveEntidadeRef: jest.fn((id: bigint) => Promise.resolve(id)),
+            resolveProjectId: jest.fn((id: bigint) => Promise.resolve(id)),
+            ensureEntidadeRefById: jest.fn((id: bigint) => Promise.resolve(id)),
+          },
+        },
         {
           provide: TimezoneService,
           useValue: {
@@ -1029,9 +1040,7 @@ describe('TasksService', () => {
         // (c) task.deleted É emitido com payload correto
         expect(emitted).toContain('task.deleted');
 
-        const call = eventProducer.addInternalEvent.mock.calls.find(
-          (c) => c[0] === 'task.deleted',
-        );
+        const call = eventProducer.addInternalEvent.mock.calls.find((c) => c[0] === 'task.deleted');
         expect(call?.[1]).toMatchObject({
           taskId: '7',
           projectId: '1',
@@ -1051,9 +1060,7 @@ describe('TasksService', () => {
         await service.delete('7');
 
         expect(phaseHierarchy.softDeleteCascade).toHaveBeenCalledWith(BigInt(7));
-        const call = eventProducer.addInternalEvent.mock.calls.find(
-          (c) => c[0] === 'task.deleted',
-        );
+        const call = eventProducer.addInternalEvent.mock.calls.find((c) => c[0] === 'task.deleted');
         expect(call?.[1]).toMatchObject({ cascade: true, affected: 4 });
       });
 
@@ -1080,9 +1087,7 @@ describe('TasksService', () => {
         expect(emitted).toContain('task.deleted');
         expect(emitted).not.toContain('phase.deleted');
 
-        const call = eventProducer.addInternalEvent.mock.calls.find(
-          (c) => c[0] === 'task.deleted',
-        );
+        const call = eventProducer.addInternalEvent.mock.calls.find((c) => c[0] === 'task.deleted');
         expect(call?.[1]).toMatchObject({
           taskId: '7',
           projectId: '1',
@@ -1101,9 +1106,7 @@ describe('TasksService', () => {
 
         await service.delete('9');
 
-        const call = eventProducer.addInternalEvent.mock.calls.find(
-          (c) => c[0] === 'task.deleted',
-        );
+        const call = eventProducer.addInternalEvent.mock.calls.find((c) => c[0] === 'task.deleted');
         expect(call?.[1]).toMatchObject({ taskId: '9', projectId: null, cascade: true });
       });
 
@@ -1392,6 +1395,14 @@ describe('TasksService', () => {
         providers: [
           TasksService,
           TaskTimerService,
+          {
+            provide: ProjectRefService,
+            useValue: {
+              resolveEntidadeRef: jest.fn((id: bigint) => Promise.resolve(id)),
+              resolveProjectId: jest.fn((id: bigint) => Promise.resolve(id)),
+              ensureEntidadeRefById: jest.fn((id: bigint) => Promise.resolve(id)),
+            },
+          },
           { provide: PrismaService, useValue: prismaMock },
           { provide: TasksIdentifierService, useValue: identifierServiceMock },
           { provide: EventProducerService, useValue: { addInternalEvent: jest.fn() } },

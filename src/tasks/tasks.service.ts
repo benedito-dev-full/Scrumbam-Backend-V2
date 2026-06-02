@@ -8,11 +8,7 @@ import { TasksIdentifierService } from './tasks-identifier.service';
 import { ProjectRefService } from '../projects/project-ref.service';
 import { PhaseHierarchyService } from './services/phase-hierarchy.service';
 import { validateTransition, isValidState } from './tasks-state-machine';
-import {
-  TaskStatus,
-  buildInitialTaskDados,
-  ManualTimerSession,
-} from './schemas/task-dados.schema';
+import { TaskStatus, buildInitialTaskDados, ManualTimerSession } from './schemas/task-dados.schema';
 import { PhaseMetricsService } from './services/phase-metrics.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
@@ -406,7 +402,13 @@ export class TasksService {
         dadosPayload = buildPhaseDados(creatorId.toString());
       } else {
         // Ramo TASK — comportamento legado preservado.
-        const identifier = await this.identifierService.getNextIdentifier(tx, projectId, prefix);
+        // ADR-V2-058/059: o counter -475 também grava DTabela.dEntidadeId
+        // (FK → DEntidade.chave). Resolver P→E (legacy-safe) — mesma correção
+        // aplicada a statuses/sprint/priorities no passo 1-2; este write-site
+        // ficou fora do escopo daquele commit e quebrava a FK ao criar o
+        // counter de um projeto NOVO (cujo P não existe em DEntidade).
+        const counterScope = await this.projectRef.resolveEntidadeRef(projectId);
+        const identifier = await this.identifierService.getNextIdentifier(tx, counterScope, prefix);
         createdIdentifier = identifier;
 
         // Construir dados V3 iniciais
@@ -788,9 +790,7 @@ export class TasksService {
     const executionsMap = await this.findActiveExecutionsForTasks(pageTasks.map((t) => t.chave));
     // ADR-V2-057: timer agregado por usuário — 1 query batch de nomes (ZERO N+1).
     const timerMap = await this.taskTimerService.buildTimerStateMap(pageTasks);
-    const items = pageTasks.map((t) =>
-      this.buildResponse(t, priorityMap, executionsMap, timerMap),
-    );
+    const items = pageTasks.map((t) => this.buildResponse(t, priorityMap, executionsMap, timerMap));
     const nextCursor = hasMore ? pageTasks[pageTasks.length - 1].chave.toString() : null;
 
     return { items, pagination: { hasMore, nextCursor } };
@@ -1900,8 +1900,9 @@ export class TasksService {
     // ADR-V2-057 (Fase 3): total de tempo manual JÁ FORMATADO para a coluna
     // builtin read-only "Tempo gasto". Mesma fonte server-side do painel do
     // sidebar (totalMs agrega todos os usuários); o front nunca recalcula.
-    const manualTimers = (dados?.telemetry as Record<string, unknown> | null)
-      ?.manualTimers as ManualTimerSession[] | undefined;
+    const manualTimers = (dados?.telemetry as Record<string, unknown> | null)?.manualTimers as
+      | ManualTimerSession[]
+      | undefined;
     const timeSpentLabel = this.taskTimerService.formatTotalLabel(
       this.taskTimerService.totalMs(manualTimers),
     );
@@ -1928,9 +1929,7 @@ export class TasksService {
       // (caller que não hidrata nomes em batch) ou a task nunca teve timer,
       // o campo fica null. Derivação síncrona via buildTimerState como fallback
       // garante o estado correto mesmo sem o map pré-computado (sem nomes).
-      timer:
-        timerMap?.get(taskIdStr) ??
-        this.taskTimerService.buildTimerState(manualTimers),
+      timer: timerMap?.get(taskIdStr) ?? this.taskTimerService.buildTimerState(manualTimers),
       timeSpentLabel,
       criadoEm: task.criadoEm.toISOString(),
       atualizadoEm: task.atualizadoEm.toISOString(),
