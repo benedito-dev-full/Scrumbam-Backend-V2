@@ -494,6 +494,31 @@ export class AuthService {
       throw new NotFoundException('Perfil de usuário não encontrado');
     }
 
+    // Troca de senha: se newPassword vier, currentPassword é obrigatória e
+    // validada via bcrypt contra DUserGroup.senha. O hash da nova é calculado
+    // ANTES da transaction (bcrypt é CPU-bound — não prolongar lock de DB).
+    let novaSenhaHash: string | null = null;
+    if (dto.newPassword) {
+      if (!dto.currentPassword) {
+        throw new UnauthorizedException('Senha atual é obrigatória para trocar a senha');
+      }
+
+      const userGroup = await this.prisma.dUserGroup.findUnique({
+        where: { chave: userGroupId },
+        select: { senha: true },
+      });
+      if (!userGroup) {
+        throw new NotFoundException('Credenciais não encontradas');
+      }
+
+      const senhaValida = await bcrypt.compare(dto.currentPassword, userGroup.senha);
+      if (!senhaValida) {
+        throw new UnauthorizedException('Senha atual incorreta');
+      }
+
+      novaSenhaHash = await bcrypt.hash(dto.newPassword, BCRYPT_ROUNDS);
+    }
+
     const dadosAtuais = (entidade.dados as Record<string, unknown>) ?? {};
     const prefsAtuais = (dadosAtuais.preferences as Record<string, unknown>) ?? {};
 
@@ -530,13 +555,30 @@ export class AuthService {
         },
       });
 
+      // Atualiza DUserGroup quando email (login) e/ou senha mudam.
+      const userGroupData: Prisma.DUserGroupUpdateInput = {};
       if (dto.email !== undefined) {
+        userGroupData.usuario = dto.email.toLowerCase();
+        userGroupData.email = dto.email.toLowerCase();
+      }
+      if (novaSenhaHash) {
+        userGroupData.senha = novaSenhaHash;
+      }
+      if (Object.keys(userGroupData).length > 0) {
         await tx.dUserGroup.update({
           where: { chave: userGroupId },
-          data: { usuario: dto.email.toLowerCase() },
+          data: userGroupData,
         });
       }
     });
+
+    // Após trocar a senha, revoga o refresh token vigente — invalida sessões
+    // antigas, forçando re-login (segurança). Fora da transaction porque
+    // revoke() faz sua própria leitura/escrita do DUserGroup.dados.
+    if (novaSenhaHash) {
+      await this.refreshTokenService.revoke(userGroupId);
+      this.logger.log(`Senha alterada e refresh token revogado userGroupId=${userGroupId}`);
+    }
 
     return this.getMe(userGroupId);
   }

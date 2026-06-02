@@ -6,6 +6,8 @@ import {
   IsOptional,
   IsString,
   MaxLength,
+  MinLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { UserPreferencesDto } from './user-preferences.dto';
@@ -81,4 +83,29 @@ export class UpdateMeDto {
   @ValidateNested()
   @Type(() => UserPreferencesDto)
   preferences?: UserPreferencesDto;
+
+  /**
+   * Senha atual — obrigatória apenas quando `newPassword` é fornecido.
+   * Validada via bcrypt no service antes de aplicar a troca.
+   */
+  @ApiPropertyOptional({
+    description: 'Senha atual (obrigatória se trocar senha)',
+    example: 'senhaAtual123',
+  })
+  @ValidateIf((o: UpdateMeDto) => o.newPassword !== undefined)
+  @IsString()
+  @MinLength(8, { message: 'Senha atual deve ter pelo menos 8 caracteres' })
+  currentPassword?: string;
+
+  /**
+   * Nova senha (mín. 8 caracteres). Exige `currentPassword` para validação.
+   */
+  @ApiPropertyOptional({
+    description: 'Nova senha (mínimo 8 caracteres)',
+    example: 'novaSenha456',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(8, { message: 'Nova senha deve ter pelo menos 8 caracteres' })
+  newPassword?: string;
 }
