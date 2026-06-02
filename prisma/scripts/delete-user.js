@@ -1,9 +1,13 @@
 // Hard delete de usuário (anonimizando histórico) — Scrumban-Backend-V2
-// Uso:  node prisma/scripts/delete-user.js <email>
-// Ex.:  node prisma/scripts/delete-user.js beneditobittencourtt@gmail.com
+// Uso:  node prisma/scripts/delete-user.js <chave|email|usuario>
+// Ex.:  node prisma/scripts/delete-user.js 10
+//       node prisma/scripts/delete-user.js beneditobittencourtt@gmail.com
+//
+// Identifica por chave (se o argumento for numérico) ou por email/usuario.
+// RECOMENDADO em produção: passar a CHAVE (ID exato) para evitar ambiguidade.
 //
 // O que faz (tudo em $transaction — rollback automático se algo falhar):
-//   1. Acha o DUserGroup pelo email (login) e a DEntidade-pessoa ligada.
+//   1. Acha o DUserGroup (login) e a DEntidade-pessoa ligada.
 //   2. GUARD: aborta se a entidade for usada como conta/depósito (DMovDispo/DMovDepos).
 //   3. Anonimiza histórico (solta ponteiros → NULL): tasks, eventos, pedidos, títulos, tabelas.
 //   4. Apaga DVincula do usuário, DPermissao do grupo, a DEntidade-pessoa e o DUserGroup.
@@ -11,19 +15,23 @@ require('dotenv').config();
 const { PrismaClient } = require('@prisma/client');
 const p = new PrismaClient();
 
-const EMAIL = process.argv[2];
+const ARG = process.argv[2];
 const s = (v) => (typeof v === 'bigint' ? v.toString() : v);
+const isNumeric = ARG && /^\d+$/.test(ARG);
 
 (async () => {
-  if (!EMAIL) {
-    console.error('Uso: node prisma/scripts/delete-user.js <email>');
+  if (!ARG) {
+    console.error('Uso: node prisma/scripts/delete-user.js <chave|email|usuario>');
     process.exitCode = 1;
     return;
   }
   try {
     const r = await p.$transaction(async (tx) => {
-      const ug = await tx.dUserGroup.findFirst({ where: { email: EMAIL } });
-      if (!ug) throw new Error('DUserGroup nao encontrado para email ' + EMAIL);
+      const ug = isNumeric
+        ? await tx.dUserGroup.findUnique({ where: { chave: BigInt(ARG) } })
+        : await tx.dUserGroup.findFirst({ where: { OR: [{ email: ARG }, { usuario: ARG }] } });
+      if (!ug) throw new Error('DUserGroup nao encontrado para ' + ARG);
+      console.log('Alvo: chave=' + s(ug.chave) + ' usuario=' + ug.usuario + ' nome=' + ug.nome);
 
       const ent = await tx.dEntidade.findFirst({ where: { dUserGroupId: ug.chave } });
       const eid = ent ? ent.chave : null;
