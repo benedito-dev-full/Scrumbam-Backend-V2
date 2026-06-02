@@ -5,6 +5,7 @@ import { CommentTargetResolver } from './comment-target.resolver';
 import { CommentTargetType } from './dto/comment-target-type.enum';
 import { PrismaService } from '../prisma.service';
 import { ProjectsService } from '../projects/projects.service';
+import { RoleResolverService } from '../auth/services/role-resolver.service';
 import { EventProducerService } from '../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../common/services/correlation-id.service';
 import { EVENT_TYPES } from '../eventos/core/event-types';
@@ -47,6 +48,7 @@ describe('CommentsService', () => {
     };
   }>;
   let projectsService: jest.Mocked<{ findAccessibleProjectIds: jest.Mock }>;
+  let roleResolver: jest.Mocked<{ getProjectRole: jest.Mock }>;
   let eventProducer: jest.Mocked<{ addInternalEvent: jest.Mock }>;
   let correlationIdService: jest.Mocked<{ getOrGenerate: jest.Mock }>;
 
@@ -89,6 +91,9 @@ describe('CommentsService', () => {
     const projectsServiceMock = {
       findAccessibleProjectIds: jest.fn(),
     };
+    const roleResolverMock = {
+      getProjectRole: jest.fn(),
+    };
     const eventProducerMock = {
       addInternalEvent: jest.fn().mockResolvedValue(undefined),
     };
@@ -102,6 +107,7 @@ describe('CommentsService', () => {
         CommentTargetResolver,
         { provide: PrismaService, useValue: prismaMock },
         { provide: ProjectsService, useValue: projectsServiceMock },
+        { provide: RoleResolverService, useValue: roleResolverMock },
         { provide: EventProducerService, useValue: eventProducerMock },
         { provide: CorrelationIdService, useValue: correlationIdMock },
       ],
@@ -110,6 +116,7 @@ describe('CommentsService', () => {
     service = module.get<CommentsService>(CommentsService);
     prisma = module.get(PrismaService) as typeof prisma;
     projectsService = module.get(ProjectsService) as typeof projectsService;
+    roleResolver = module.get(RoleResolverService) as typeof roleResolver;
     eventProducer = module.get(EventProducerService) as typeof eventProducer;
     correlationIdService = module.get(CorrelationIdService) as typeof correlationIdService;
     void correlationIdService;
@@ -193,12 +200,12 @@ describe('CommentsService', () => {
       );
     });
 
-    it('#2 cria comentário em PROJECT (DVincula membership)', async () => {
+    it('#2 cria comentário em PROJECT (acesso via RoleResolverService)', async () => {
       prisma.dProject.findFirst.mockResolvedValue({
         chave: BigInt(200),
         idEstab: ORG_ID_BIG,
       });
-      prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(9999) });
+      roleResolver.getProjectRole.mockResolvedValue('MEMBER');
       prisma.dEvento.create.mockResolvedValue(
         buildEvento({
           chave: BigInt(1001),
@@ -217,17 +224,8 @@ describe('CommentsService', () => {
       expect(result.targetType).toBe(CommentTargetType.PROJECT);
       expect(result.targetId).toBe('200');
 
-      // Resolver fez membership check via DVincula com idClasse in [-171,-172,-173]
-      expect(prisma.dVincula.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            idLocEscritu: BigInt(200),
-            idEntidade: REQUESTER_ID,
-            idClasse: { in: [BigInt(-171), BigInt(-172), BigInt(-173)] },
-            excluido: false,
-          }),
-        }),
-      );
+      // Resolver delega acesso ao resolvedor central (herda público + ORG_ADMIN).
+      expect(roleResolver.getProjectRole).toHaveBeenCalledWith(REQUESTER_ID, BigInt(200));
     });
 
     it('#3 cria comentário em FOLDER (idClasse=-351)', async () => {
@@ -235,7 +233,7 @@ describe('CommentsService', () => {
         chave: BigInt(351),
         idEstab: ORG_ID_BIG,
       });
-      prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(9999) });
+      roleResolver.getProjectRole.mockResolvedValue('MEMBER');
       prisma.dEvento.create.mockResolvedValue(
         buildEvento({ chave: BigInt(1002), identificadorExterno: '351' }),
       );
@@ -266,7 +264,7 @@ describe('CommentsService', () => {
         chave: BigInt(352),
         idEstab: ORG_ID_BIG,
       });
-      prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(9999) });
+      roleResolver.getProjectRole.mockResolvedValue('MEMBER');
       prisma.dEvento.create.mockResolvedValue(
         buildEvento({ chave: BigInt(1003), identificadorExterno: '352' }),
       );
@@ -349,12 +347,12 @@ describe('CommentsService', () => {
       expect(prisma.dEvento.create).not.toHaveBeenCalled();
     });
 
-    it('#7b lança ForbiddenException em project quando DVincula não retorna membership', async () => {
+    it('#7b lança ForbiddenException em project quando getProjectRole retorna null (sem acesso)', async () => {
       prisma.dProject.findFirst.mockResolvedValue({
         chave: BigInt(200),
         idEstab: ORG_ID_BIG,
       });
-      prisma.dVincula.findFirst.mockResolvedValue(null);
+      roleResolver.getProjectRole.mockResolvedValue(null);
 
       await expect(
         service.create(

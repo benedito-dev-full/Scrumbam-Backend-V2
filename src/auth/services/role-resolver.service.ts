@@ -146,8 +146,47 @@ export class RoleResolverService {
       role = await this.resolvePublicSpaceRole(userId, projectId);
     }
 
+    // Fallback — herança ORG_ADMIN → MANAGER (decisão CEO 2026-06-02):
+    // o ADMIN da org dona do projeto (`DProject.idEstab`) é MANAGER em QUALQUER
+    // projeto da org, inclusive privado e sem DVincula de projeto. Centraliza o
+    // acesso de admin: todos os consumidores de getProjectRole (guards de
+    // mutação, comentários, folders, etc.) passam a respeitar isso de uma vez.
+    if (!role) {
+      role = await this.resolveOrgAdminRole(userId, projectId);
+    }
+
     this.projectRoleCache.set(cacheKey, role);
     return role;
+  }
+
+  /**
+   * Resolve o role herdado por ADMIN da organização dona do projeto
+   * (herança ORG_ADMIN → MANAGER — decisão CEO 2026-06-02).
+   *
+   * Concede `'MANAGER'` se o usuário é ADMIN (`-161`) da org `DProject.idEstab`.
+   * Diferente de {@link resolvePublicSpaceRole}, NÃO exige que o espaço seja
+   * público — o admin da org gere todos os projetos dela, públicos ou privados.
+   * O escopo de tenant é garantido por usar `project.idEstab` como org-alvo
+   * (admin da org A nunca herda em projeto da org B).
+   *
+   * @param userId - Chave BigInt da DEntidade do usuário
+   * @param projectId - Chave BigInt do DProject
+   * @returns `'MANAGER'` se ADMIN da org dona; `null` caso contrário
+   */
+  private async resolveOrgAdminRole(
+    userId: bigint,
+    projectId: bigint,
+  ): Promise<ProjectRole | null> {
+    const project = await this.prisma.dProject.findFirst({
+      where: { chave: projectId, excluido: false },
+      select: { idEstab: true },
+    });
+    if (!project?.idEstab) {
+      return null;
+    }
+
+    const orgRole = await this.getOrgRole(userId, project.idEstab);
+    return orgRole === 'ADMIN' ? 'MANAGER' : null;
   }
 
   /**

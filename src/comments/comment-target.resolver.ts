@@ -9,7 +9,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { ProjectsService } from '../projects/projects.service';
-import { ProjectRefService } from '../projects/project-ref.service';
+import { RoleResolverService } from '../auth/services/role-resolver.service';
 import { CommentTargetType } from './dto/comment-target-type.enum';
 
 /** idClasse de FOLDER no seed Scrumban (DProject filho de SPACE). */
@@ -20,14 +20,6 @@ const ID_CLASSE_LIST = BigInt(-352);
 
 /** idClasses de FOLDER e LIST — excluídos quando targetType=PROJECT. */
 const FOLDER_AND_LIST_CLASSES = [ID_CLASSE_FOLDER, ID_CLASSE_LIST];
-
-/**
- * idClasses DVincula que indicam membership em projeto (RBAC seed F1).
- *
- * MANAGER (-171), MEMBER (-172), VIEWER (-173) — qualquer um basta para
- * ler/comentar. Mesmas constantes definidas em ProjectMembersService.
- */
-const PROJECT_MEMBERSHIP_CLASSES = [BigInt(-171), BigInt(-172), BigInt(-173)];
 
 /**
  * Resolve e autoriza acesso a um alvo polimórfico de comentário.
@@ -72,7 +64,7 @@ export class CommentTargetResolver {
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => ProjectsService))
     private readonly projectsService: ProjectsService,
-    private readonly projectRef: ProjectRefService,
+    private readonly roleResolver: RoleResolverService,
   ) {}
 
   /**
@@ -239,23 +231,15 @@ export class CommentTargetResolver {
       }
     }
 
-    // Membership check: qualquer role (MANAGER/MEMBER/VIEWER) basta para
-    // comentar e ler comentários. Query direta evita duplicar listagem
-    // do ProjectMembersService.
-    // ADR-V2-058: handle do projeto em DVincula = chave da espelho (-158) ou
-    // P legado (passthrough). Read-safe.
-    const projectHandle = await this.projectRef.resolveEntidadeRef(project.chave);
-    const vinculo = await this.prisma.dVincula.findFirst({
-      where: {
-        idLocEscritu: projectHandle,
-        idEntidade: requesterEntidadeId,
-        idClasse: { in: PROJECT_MEMBERSHIP_CLASSES },
-        excluido: false,
-      },
-      select: { chave: true },
-    });
+    // Membership check via resolvedor CENTRAL (RoleResolverService): qualquer
+    // role de projeto (MANAGER/MEMBER/VIEWER) basta para comentar e ler. Usar
+    // getProjectRole — em vez de query direta — herda automaticamente as duas
+    // camadas centralizadas: acesso por SPACE público (ADR-V2-051 §8) e herança
+    // ORG_ADMIN → MANAGER (admin da org acessa todos os projetos dela). Também
+    // resolve P→E internamente (ADR-V2-058, read-safe).
+    const role = await this.roleResolver.getProjectRole(requesterEntidadeId, project.chave);
 
-    if (!vinculo) {
+    if (!role) {
       throw new ForbiddenException(`Sem acesso ao ${targetType} ${targetId}`);
     }
   }
