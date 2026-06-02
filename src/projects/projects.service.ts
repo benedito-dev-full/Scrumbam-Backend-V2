@@ -563,41 +563,87 @@ export class ProjectsService implements OnModuleInit {
     //    listados em memberships mas pertencentes a outra org NAO entram
     //    no resultado.
     //    ADR-V2-FOLDERS-001: folderId resolvido via DVincula -183 em batch.
-    const [projects, memberCounts, teamLinks, folderMap] = await Promise.all([
-      this.prisma.dProject.findMany({
-        where: {
-          chave: { in: projectIds },
-          excluido: false,
-          ...(orgIdBig !== undefined ? { idEstab: orgIdBig } : {}),
-          // ADR-V2-051: filtro hierárquico por tipo (SPACE/FOLDER/LIST/DOC)
-          ...(idClasse !== undefined ? { idClasse: BigInt(idClasse) } : {}),
-          // ADR-V2-051: filtro por pai direto (ex: FOLDERs de um SPACE)
-          ...(idPai !== undefined ? { idPai: BigInt(idPai) } : {}),
-          // C5: filtro de privacidade — apenas quando explicitamente enviado
-          ...(privado !== undefined ? { privado } : {}),
-        },
-        orderBy: { chave: 'desc' },
-        select: PROJECT_RESPONSE_SELECT,
-      }),
-      this.prisma.dVincula.groupBy({
-        by: ['idLocEscritu'],
-        where: {
-          idLocEscritu: { in: pageRefIds },
-          idClasse: { in: PROJECT_ROLE_CLASSES },
-          excluido: false,
-        },
-        _count: { chave: true },
-      }),
-      this.prisma.dVincula.findMany({
-        where: {
-          idEntidade: { in: pageRefIds },
-          idClasse: ID_CLASSE_PROJECT_TEAM_LINK,
-          excluido: false,
-        },
-        select: { idEntidade: true, idLocEscritu: true },
-      }),
-      this.resolveFolderIdsForProjects(projectIds),
-    ]);
+    const [projects, memberCounts, teamLinks, folderMap, totalCounts, doneStatusRows] =
+      await Promise.all([
+        this.prisma.dProject.findMany({
+          where: {
+            chave: { in: projectIds },
+            excluido: false,
+            ...(orgIdBig !== undefined ? { idEstab: orgIdBig } : {}),
+            // ADR-V2-051: filtro hierárquico por tipo (SPACE/FOLDER/LIST/DOC)
+            ...(idClasse !== undefined ? { idClasse: BigInt(idClasse) } : {}),
+            // ADR-V2-051: filtro por pai direto (ex: FOLDERs de um SPACE)
+            ...(idPai !== undefined ? { idPai: BigInt(idPai) } : {}),
+            // C5: filtro de privacidade — apenas quando explicitamente enviado
+            ...(privado !== undefined ? { privado } : {}),
+          },
+          orderBy: { chave: 'desc' },
+          select: PROJECT_RESPONSE_SELECT,
+        }),
+        this.prisma.dVincula.groupBy({
+          by: ['idLocEscritu'],
+          where: {
+            idLocEscritu: { in: pageRefIds },
+            idClasse: { in: PROJECT_ROLE_CLASSES },
+            excluido: false,
+          },
+          _count: { chave: true },
+        }),
+        this.prisma.dVincula.findMany({
+          where: {
+            idEntidade: { in: pageRefIds },
+            idClasse: ID_CLASSE_PROJECT_TEAM_LINK,
+            excluido: false,
+          },
+          select: { idEntidade: true, idLocEscritu: true },
+        }),
+        this.resolveFolderIdsForProjects(projectIds),
+        // Progresso: total de tarefas por projeto (N+1 ZERO — 1 groupBy em batch).
+        this.prisma.dTask.groupBy({
+          by: ['idProject'],
+          where: { idProject: { in: projectIds }, excluido: false },
+          _count: { chave: true },
+        }),
+        // Progresso: DTask.idStatus aponta para DTabela (status por projeto).
+        // Buscamos as chaves das DTabelas DONE(-444)/VALIDATED(-449) destes
+        // projetos para depois contar as tasks concluídas por elas.
+        this.prisma.dTabela.findMany({
+          where: {
+            dEntidadeId: { in: projectIds },
+            idClasse: { in: [BigInt(-444), BigInt(-449)] },
+            excluido: false,
+          },
+          select: { chave: true },
+        }),
+      ]);
+
+    // Progresso: contagem de tarefas concluídas por projeto (DONE/VALIDATED).
+    // Depende das chaves resolvidas acima — 1 groupBy adicional, ainda em batch.
+    const doneStatusChaves = doneStatusRows.map((r) => r.chave);
+    const doneCounts = doneStatusChaves.length
+      ? await this.prisma.dTask.groupBy({
+          by: ['idProject'],
+          where: {
+            idProject: { in: projectIds },
+            idStatus: { in: doneStatusChaves },
+            excluido: false,
+          },
+          _count: { chave: true },
+        })
+      : [];
+
+    const totalTaskMap = new Map<string, number>();
+    for (const tc of totalCounts) {
+      if (tc.idProject != null) {
+        totalTaskMap.set(tc.idProject.toString(), tc._count.chave);
+      }
+    }
+    const doneTaskMap = new Map<string, number>();
+    for (const dc of doneCounts) {
+      if (dc.idProject != null) {
+        doneTaskMap.set(dc.idProject.toString(), dc._count.chave);
+      }
+    }
 
     // countMap e teamMap são chaveados por projectId (P) — invertendo E→P.
     const countMap = new Map<string, number>();
@@ -622,6 +668,8 @@ export class ProjectsService implements OnModuleInit {
         countMap.get(p.chave.toString()) ?? 0,
         teamMap.get(p.chave.toString()) ?? null,
         folderMap.get(p.chave.toString()) ?? null,
+        doneTaskMap.get(p.chave.toString()) ?? 0,
+        totalTaskMap.get(p.chave.toString()) ?? 0,
       ),
     );
 
@@ -1758,6 +1806,8 @@ export class ProjectsService implements OnModuleInit {
     memberCount: number,
     teamId: string | null,
     folderId: string | null = null,
+    doneCount?: number,
+    totalCount?: number,
   ): ProjectResponseDto {
     const dados = project.dados as Record<string, unknown> | null;
 
@@ -1770,6 +1820,10 @@ export class ProjectsService implements OnModuleInit {
       description: (dados?.description as string | null | undefined) ?? project.descricao ?? null,
       orgId: project.idEstab?.toString() ?? null,
       memberCount,
+      // Progresso: preenchido apenas pela listagem (findMany). undefined em
+      // respostas de item único — JSON.stringify omite os campos nesse caso.
+      doneCount,
+      totalCount,
       repoUrl: project.repoUrl ?? null,
       privado: project.privado ?? false,
       color: (dados?.color as string | null) ?? null,

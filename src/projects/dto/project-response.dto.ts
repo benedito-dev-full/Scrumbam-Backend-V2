@@ -35,7 +35,8 @@ export class ProjectResponseDto {
    * Serializado como string (BigInt).
    */
   @ApiProperty({
-    description: 'idClasse do DProject (tipo hierárquico). -350=SPACE, -351=FOLDER, -352=LIST, -353=DOC.',
+    description:
+      'idClasse do DProject (tipo hierárquico). -350=SPACE, -351=FOLDER, -352=LIST, -353=DOC.',
     example: '-350',
   })
   idClasse!: string;
@@ -64,6 +65,24 @@ export class ProjectResponseDto {
 
   @ApiProperty({ description: 'Número de membros', example: 1 })
   memberCount!: number;
+
+  /**
+   * Progresso da Lista — tarefas concluídas (DONE + VALIDATED) sobre o total.
+   *
+   * Preenchido apenas na listagem (`GET /projects`). Para SPACE/FOLDER fica 0
+   * (tarefas vinculam-se a Lists). Ausente em respostas de item único.
+   */
+  @ApiPropertyOptional({
+    description: 'Tarefas concluídas (DONE+VALIDATED) da Lista. Presente apenas na listagem.',
+    example: 5,
+  })
+  doneCount?: number;
+
+  @ApiPropertyOptional({
+    description: 'Total de tarefas da Lista. Presente apenas na listagem.',
+    example: 12,
+  })
+  totalCount?: number;
 
   @ApiPropertyOptional({
     description: 'URL canônica do repositório git (DProject.repoUrl — ADR-V2-043)',
@@ -114,10 +133,18 @@ export class ProjectResponseDto {
   })
   privado!: boolean;
 
-  @ApiPropertyOptional({ description: 'Cor hex do espaço (#RRGGBB). Lida de dados.color.', example: '#3b82f6', nullable: true })
+  @ApiPropertyOptional({
+    description: 'Cor hex do espaço (#RRGGBB). Lida de dados.color.',
+    example: '#3b82f6',
+    nullable: true,
+  })
   color?: string | null;
 
-  @ApiPropertyOptional({ description: 'Ícone do espaço (emoji ou slug). Lido de dados.icon.', example: '🚀', nullable: true })
+  @ApiPropertyOptional({
+    description: 'Ícone do espaço (emoji ou slug). Lido de dados.icon.',
+    example: '🚀',
+    nullable: true,
+  })
   icon?: string | null;
 
   /**
