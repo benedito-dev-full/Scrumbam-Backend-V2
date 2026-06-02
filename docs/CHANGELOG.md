@@ -12,6 +12,16 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Added
+
+- **Backfill PROJECT_REF para DTabela legada (V2 pós-F5, 2026-06-02)** (ADR-V2-058/059 passo 5, Score 9.0/10)
+  - `prisma/scripts/backfill-project-ref-dtabelas.ts` — script idempotente que corrige os DADOS legados: DTabelas project-scoped cujo `dEntidadeId` foi gravado como `DProject.chave` (P) são reescritas para o handle canônico (DEntidade-espelho -158, E)
+  - Contraparte de DTabela do `backfill-project-ref-entidades.ts` (Fase 3 / DVincula). Fase A garante espelhos; Fase B repara `dEntidadeId: P→E` SOMENTE para idClasses project-scoped (statuses -440..-449, sprint -400, priorities -420..-424, task type -430, webhooks -470)
+  - **Dry-run por padrão** (ZERO escrita sem `--apply`); detecção de colisão histórica (`classifyValue`) — valores ambíguos ou anômalos NÃO são reparados, vão a relatório de suspeitos (decisão do CEO); reparo atômico (update + DEvento AUDIT -489 na mesma transação); idempotente
+  - **Org/user/team-scoped intocados:** API Keys -471, MCP Keys -472, ISSUE_COUNTER -475 e catálogos globais (dEntidadeId NULL) ficam de fora do filtro por design
+  - `docs/runbook-backfill-project-ref-dtabelas.md` — runbook de cutover (backup → dry-run → revisar suspeitos → --apply → validar → rollback). Cutover é responsabilidade do CEO (banco dev offline)
+  - ZERO tabela/coluna/DClasse nova
+
 ### Fixed
 
 - **DTabela↔DProject: FK `dEntidadeId` — handle de projeto em webhooks (V2 pós-F5, 2026-06-02)** (ADR-V2-058/059 passo 4, Score 8.2/10)
