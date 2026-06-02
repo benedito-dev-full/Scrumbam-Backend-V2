@@ -12,19 +12,10 @@ import {
   Request,
   UseGuards,
 } from '@nestjs/common';
-import {
-  ApiBearerAuth,
-  ApiOperation,
-  ApiParam,
-  ApiResponse,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ProjectMembersService } from './project-members.service';
-import {
-  AddProjectMemberDto,
-  UpdateProjectMemberDto,
-} from './dto/add-project-member.dto';
+import { AddProjectMemberDto, UpdateProjectMemberDto } from './dto/add-project-member.dto';
 import { ListProjectMembersResponseDto } from './dto/project-response.dto';
 
 /**
@@ -60,7 +51,11 @@ export class ProjectMembersController {
   @Get()
   @ApiOperation({ summary: 'Listar membros do projeto' })
   @ApiParam({ name: 'id', description: 'ID do projeto' })
-  @ApiResponse({ status: 200, description: 'Lista de membros', type: ListProjectMembersResponseDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Lista de membros',
+    type: ListProjectMembersResponseDto,
+  })
   async getMembers(@Param('id') id: string): Promise<ListProjectMembersResponseDto> {
     this.logger.debug(`GET /projects/${id}/members`);
     return this.projectMembersService.getMembers(id);
@@ -91,10 +86,15 @@ export class ProjectMembersController {
   async addMember(
     @Param('id') id: string,
     @Body() dto: AddProjectMemberDto,
-    @Request() req: { user: { entidadeId: string } },
+    @Request() req: { user: { entidadeId: string; organizationId?: string } },
   ): Promise<void> {
     this.logger.debug(`POST /projects/${id}/members — adding user=${dto.userId}`);
-    await this.projectMembersService.addMember(id, dto, BigInt(req.user.entidadeId));
+    await this.projectMembersService.addMember(
+      id,
+      dto,
+      BigInt(req.user.entidadeId),
+      req.user.organizationId,
+    );
   }
 
   /**
@@ -117,9 +117,15 @@ export class ProjectMembersController {
     @Param('id') id: string,
     @Param('userId') userId: string,
     @Body() dto: UpdateProjectMemberDto,
-    @Request() req: { user: { entidadeId: string } },
+    @Request() req: { user: { entidadeId: string; organizationId?: string } },
   ): Promise<void> {
-    await this.projectMembersService.updateMember(id, userId, dto, BigInt(req.user.entidadeId));
+    await this.projectMembersService.updateMember(
+      id,
+      userId,
+      dto,
+      BigInt(req.user.entidadeId),
+      req.user.organizationId,
+    );
   }
 
   /**
@@ -142,8 +148,13 @@ export class ProjectMembersController {
   async removeMember(
     @Param('id') id: string,
     @Param('userId') userId: string,
-    @Request() req: { user: { entidadeId: string } },
+    @Request() req: { user: { entidadeId: string; organizationId?: string } },
   ): Promise<void> {
-    await this.projectMembersService.removeMember(id, userId, BigInt(req.user.entidadeId));
+    await this.projectMembersService.removeMember(
+      id,
+      userId,
+      BigInt(req.user.entidadeId),
+      req.user.organizationId,
+    );
   }
 }

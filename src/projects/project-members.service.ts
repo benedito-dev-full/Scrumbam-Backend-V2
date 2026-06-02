@@ -8,19 +8,16 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { ProjectRefService } from './project-ref.service';
-import {
-  AddProjectMemberDto,
-  UpdateProjectMemberDto,
-} from './dto/add-project-member.dto';
-import {
-  ListProjectMembersResponseDto,
-  ProjectMemberDto,
-} from './dto/project-response.dto';
+import { AddProjectMemberDto, UpdateProjectMemberDto } from './dto/add-project-member.dto';
+import { ListProjectMembersResponseDto, ProjectMemberDto } from './dto/project-response.dto';
 
 /** idClasses DVincula para RBAC de projeto (seed F1). */
 const ID_CLASSE_PROJECT_MANAGER = BigInt(-171);
 const ID_CLASSE_PROJECT_MEMBER = BigInt(-172);
 const ID_CLASSE_PROJECT_VIEWER = BigInt(-173);
+
+/** idClasse DVincula ORG_ADMIN (admin da workspace) — herda MANAGER de projeto. */
+const ID_CLASSE_ORG_ADMIN = BigInt(-161);
 
 const PROJECT_ROLE_CLASSES = [
   ID_CLASSE_PROJECT_MANAGER,
@@ -89,7 +86,6 @@ export class ProjectMembersService {
     // Espaço público: retorna todos os membros da org
     if (project && !project.privado && project.idEstab) {
       const orgId = project.idEstab;
-      const ID_CLASSE_ORG_ADMIN = BigInt(-161);
       const ID_CLASSE_ORG_MEMBER = BigInt(-162);
       const ID_CLASSE_ORG_VIEWER = BigInt(-163);
       const ORG_ROLE_CLASSES = [ID_CLASSE_ORG_ADMIN, ID_CLASSE_ORG_MEMBER, ID_CLASSE_ORG_VIEWER];
@@ -177,9 +173,10 @@ export class ProjectMembersService {
     projectId: string,
     dto: AddProjectMemberDto,
     requesterId: bigint,
+    organizationId?: string,
   ): Promise<void> {
     const projectIdBigInt = BigInt(projectId);
-    await this.requireManagerRole(projectIdBigInt, requesterId);
+    await this.requireManagerRole(projectIdBigInt, requesterId, organizationId);
 
     // ADR-V2-058 (write-safe): garante a DEntidade-espelho (-158) — para
     // projeto legado cria sob demanda, evitando gravar idLocEscritu=P (FK 500).
@@ -245,9 +242,10 @@ export class ProjectMembersService {
     userId: string,
     dto: UpdateProjectMemberDto,
     requesterId: bigint,
+    organizationId?: string,
   ): Promise<void> {
     const projectIdBigInt = BigInt(projectId);
-    await this.requireManagerRole(projectIdBigInt, requesterId);
+    await this.requireManagerRole(projectIdBigInt, requesterId, organizationId);
 
     const refId = await this.projectRef.resolveEntidadeRef(projectIdBigInt);
     const userIdBigInt = BigInt(userId);
@@ -307,9 +305,10 @@ export class ProjectMembersService {
     projectId: string,
     userId: string,
     requesterId: bigint,
+    organizationId?: string,
   ): Promise<void> {
     const projectIdBigInt = BigInt(projectId);
-    await this.requireManagerRole(projectIdBigInt, requesterId);
+    await this.requireManagerRole(projectIdBigInt, requesterId, organizationId);
 
     const refId = await this.projectRef.resolveEntidadeRef(projectIdBigInt);
     const userIdBigInt = BigInt(userId);
@@ -386,7 +385,26 @@ export class ProjectMembersService {
 
   // ─── Helpers privados ─────────────────────────────────────────────────────
 
-  private async requireManagerRole(projectId: bigint, userId: bigint): Promise<void> {
+  /**
+   * Valida que o usuário pode gerir membros do projeto. Concede por duas vias:
+   *
+   *  1. **MANAGER explícito** — DVincula -171 (PROJECT_MANAGER) no projeto.
+   *  2. **Herança ORG_ADMIN → MANAGER** — admin da workspace (DVincula -161 na
+   *     org) gere membros de qualquer projeto DA PRÓPRIA ORG. Como este service
+   *     NÃO faz tenant check próprio, validamos aqui que o projeto pertence à
+   *     org informada (`idEstab === organizationId`) antes de conceder — evita
+   *     escalonamento cross-org. Só ativa quando `organizationId` presente.
+   *
+   * @param projectId - Chave BigInt do projeto
+   * @param userId - Chave BigInt do requester
+   * @param organizationId - (Opcional) DEntidade.chave da org ativa (JWT)
+   * @throws {ForbiddenException} Se não é MANAGER nem ORG_ADMIN da org dona
+   */
+  private async requireManagerRole(
+    projectId: bigint,
+    userId: bigint,
+    organizationId?: string,
+  ): Promise<void> {
     const refId = await this.projectRef.resolveEntidadeRef(projectId);
     const vinculo = await this.prisma.dVincula.findFirst({
       where: {
@@ -398,8 +416,35 @@ export class ProjectMembersService {
       select: { chave: true },
     });
 
-    if (!vinculo) {
-      throw new ForbiddenException('Acesso negado: requer role MANAGER no projeto');
+    if (vinculo) {
+      return;
     }
+
+    // Herança ORG_ADMIN → MANAGER (com guarda de tenant — ver JSDoc).
+    if (organizationId && /^-?\d+$/.test(organizationId)) {
+      const orgIdBig = BigInt(organizationId);
+      const project = await this.prisma.dProject.findFirst({
+        where: { chave: projectId, excluido: false },
+        select: { idEstab: true },
+      });
+
+      if (project && project.idEstab === orgIdBig) {
+        const orgAdmin = await this.prisma.dVincula.findFirst({
+          where: {
+            idEntidade: userId,
+            idLocEscritu: orgIdBig,
+            idClasse: ID_CLASSE_ORG_ADMIN,
+            excluido: false,
+          },
+          select: { chave: true },
+        });
+
+        if (orgAdmin) {
+          return;
+        }
+      }
+    }
+
+    throw new ForbiddenException('Acesso negado: requer role MANAGER no projeto');
   }
 }
