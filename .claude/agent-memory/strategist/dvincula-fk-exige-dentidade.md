@@ -1,8 +1,12 @@
 ---
 name: dvincula-fk-exige-dentidade
-description: DVincula.idLocEscritu e idEntidade têm FK obrigatória para DEntidade.chave — NUNCA gravar DProject.chave (ou DTask/DPedido) nesses campos; usar DEntidade-espelho
+description: DVincula.idLocEscritu/idEntidade E DTabela.dEntidadeId têm FK para DEntidade.chave — NUNCA gravar DProject.chave nesses campos; usar DEntidade-espelho (-158)
 metadata:
   type: project
+---
+
+**FK irmã — DTabela.dEntidadeId (mesmo bug, descoberto 2026-06-02 no dev do CEO):** `DTabela.dEntidadeId` também é FK para DEntidade.chave (migration `initial_canonical:544`). O V2 grava `DProject.chave` (P) ali como "escopo do projeto" em statuses -441..-449, sprint -400, priorities -421..-424 (`seed-bootstrap.service.ts`, `workflow-statuses.service.ts`), API keys -471 (`api-key.service.ts`), webhooks -470 (`webhooks/*`). Sintoma: `POST /projects` (LIST) 500 `DTabela_dEntidadeId_fkey` em `SeedBootstrapService.seedProject`. ADR-V2-058 corrigiu SÓ DVincula — esta FK ficou de fora. Fix = mesma solução (handle E via `ProjectRefService`), escrita+leitura no mesmo espaço, backfill espelhando o da Fase 3. **Cuidado de contrato:** endpoint genérico `/tabelas?dEntidadeId=P` (frontend/MCP passam P) deve resolver P→E internamente. NÃO tocar DTabela user-scoped (MCP_KEY) nem team-scoped (ISSUE_COUNTER -475) — já são DEntidade real. Plano: `workspace/plans/plan-core-dtabela-dproject-fk-fix-task1.md`. ADR a ratificar: ADR-V2-059 (estende -058).
+
 ---
 
 DVincula tem FK física para DEntidade nos DOIS lados de relação: `idLocEscritu` (FK obrigatória `VinculaLocEscritu → DEntidade.chave`) e `idEntidade` (FK opcional `VinculaEntidade → DEntidade.chave`). Schema `prisma/schema.prisma` linhas 221-223.
