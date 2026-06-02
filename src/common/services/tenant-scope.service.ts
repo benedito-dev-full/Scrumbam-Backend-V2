@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
+import { ProjectRefService } from '../../projects/project-ref.service';
 
 /**
  * Classes DVincula que representam membership de usuario em projeto
@@ -45,7 +46,10 @@ const ID_CLASSE_AGENT = BigInt(-156);
 export class TenantScopeService {
   private readonly logger = new Logger(TenantScopeService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly projectRef: ProjectRefService,
+  ) {}
 
   /**
    * Lista os `DProject.chave` de projetos onde o usuario E membro
@@ -94,8 +98,10 @@ export class TenantScopeService {
       select: { idLocEscritu: true },
     });
 
-    const candidateProjectIds = Array.from(
-      new Set(vinculos.map((v) => v.idLocEscritu.toString())),
+    // ADR-V2-058: idLocEscritu é a chave da espelho (-158). Reverter E→P para
+    // obter os DProject.chave reais (legados sem espelho: passthrough P).
+    const candidateProjectIds = (
+      await this.projectRef.refsToProjectIds(vinculos.map((v) => v.idLocEscritu))
     ).map((s) => BigInt(s));
 
     if (candidateProjectIds.length === 0) {

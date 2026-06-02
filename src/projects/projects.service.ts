@@ -12,6 +12,7 @@ import { EventProducerService } from '../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../common/services/correlation-id.service';
 import { SeedBootstrapService } from './seed-bootstrap.service';
 import { ProjectMembersService } from './project-members.service';
+import { ProjectRefService } from './project-ref.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import {
@@ -177,6 +178,7 @@ export class ProjectsService implements OnModuleInit {
     private readonly projectMembers: ProjectMembersService,
     private readonly eventProducer: EventProducerService,
     private readonly correlationIdService: CorrelationIdService,
+    private readonly projectRef: ProjectRefService,
   ) {}
 
   /**
@@ -299,17 +301,26 @@ export class ProjectsService implements OnModuleInit {
         select: PROJECT_RESPONSE_SELECT,
       });
 
-      // 2. DVincula -171 (MANAGER): criador é MANAGER
-      await this.projectMembers.createManagerLink(tx, proj.chave, userEntidadeId);
+      // 2. DEntidade-espelho -158 PROJECT_REF (handle canônico em DVincula).
+      //    ADR-V2-058: DVincula.idLocEscritu/idEntidade são FKs para
+      //    DEntidade.chave — gravar DProject.chave ali quebrava a FK (500) ou
+      //    colidia silenciosamente. O espelho é criado ANTES de qualquer
+      //    vínculo project-scoped, na MESMA transação. `E` é a chave da espelho.
+      const refId = await this.projectRef.ensureEntidadeRef(tx, proj);
 
-      // 3. Seed: 9 statuses V3 + 1 sprint default — apenas para LIST (ADR-V2-051 §12).
+      // 3. DVincula -171 (MANAGER): criador é MANAGER — aponta para E, não P.
+      await this.projectMembers.createManagerLink(tx, refId, userEntidadeId);
+
+      // 4. Seed: 9 statuses V3 + 1 sprint default — apenas para LIST (ADR-V2-051 §12).
       //    SPACE (-350) e FOLDER (-351) são contêineres estruturais e não precisam
       //    de seed de statuses/sprint. Apenas LIST (-352) contém tasks.
       if (proj.idClasse === ID_CLASSE_LIST) {
         await this.seedBootstrap.seedProject(tx, proj.chave);
       }
 
-      // 4. (opcional) Vincular ao time (ADR-V2-029)
+      // 5. (opcional) Vincular ao time (ADR-V2-029).
+      //    idLocEscritu = teamId (DEntidade -180, já canônico).
+      //    idEntidade = E (espelho do projeto), não P — ADR-V2-058.
       if (dto.teamId) {
         await this.validateTeamForLink(
           tx,
@@ -321,7 +332,7 @@ export class ProjectsService implements OnModuleInit {
           data: {
             idClasse: ID_CLASSE_PROJECT_TEAM_LINK,
             idLocEscritu: BigInt(dto.teamId),
-            idEntidade: proj.chave,
+            idEntidade: refId,
           },
         });
       }
@@ -418,7 +429,12 @@ export class ProjectsService implements OnModuleInit {
       orgIdBig = BigInt(organizationId);
     }
 
-    // 1) Se filtrado por team, pré-resolver os projectIds do time.
+    // 1) Se filtrado por team, pré-resolver os projetos do time.
+    //    ADR-V2-058: o -182 grava idEntidade = chave da espelho (-158), não
+    //    DProject.chave. `teamRefIds` (E) é usado em filtros DVincula;
+    //    `teamProjectIds` (P) é usado em filtros DProject (.chave) — derivado
+    //    via reverse E→P.
+    let teamRefIds: bigint[] | undefined;
     let teamProjectIds: bigint[] | undefined;
     if (teamId) {
       const teamLinks = await this.prisma.dVincula.findMany({
@@ -429,8 +445,13 @@ export class ProjectsService implements OnModuleInit {
         },
         select: { idEntidade: true },
       });
-      teamProjectIds = teamLinks.map((v) => v.idEntidade).filter((v): v is bigint => v !== null);
+      teamRefIds = teamLinks.map((v) => v.idEntidade).filter((v): v is bigint => v !== null);
 
+      if (teamRefIds.length === 0) {
+        return { items: [], pagination: { hasMore: false, nextCursor: null } };
+      }
+      const teamProjectIdStrs = await this.projectRef.refsToProjectIds(teamRefIds);
+      teamProjectIds = teamProjectIdStrs.map((s) => BigInt(s));
       if (teamProjectIds.length === 0) {
         return { items: [], pagination: { hasMore: false, nextCursor: null } };
       }
@@ -450,20 +471,21 @@ export class ProjectsService implements OnModuleInit {
     //    União das duas camadas, deduplicada via Set<string>.
 
     // Camada B: IDs de projetos com DVincula explícita do usuário.
+    //    idLocEscritu desses vínculos é a chave da espelho (E) — filtramos por
+    //    teamRefIds (E) e revertemos E→P para montar o set de projectIds.
     const vinculosExplicitos = await this.prisma.dVincula.findMany({
       where: {
         idEntidade: userEntidadeId,
         idClasse: { in: PROJECT_ROLE_CLASSES },
         excluido: false,
-        ...(teamProjectIds ? { idLocEscritu: { in: teamProjectIds } } : {}),
+        ...(teamRefIds ? { idLocEscritu: { in: teamRefIds } } : {}),
       },
       select: { idLocEscritu: true },
     });
-    const explicitSet = new Set(
-      vinculosExplicitos
-        .map((v) => v.idLocEscritu?.toString())
-        .filter((v): v is string => v !== undefined),
+    const explicitProjectIds = await this.projectRef.refsToProjectIds(
+      vinculosExplicitos.map((v) => v.idLocEscritu),
     );
+    const explicitSet = new Set(explicitProjectIds);
 
     // Camada A: espaços públicos da org (apenas quando orgIdBig está presente).
     let publicProjectIds: bigint[] = [];
@@ -521,6 +543,16 @@ export class ProjectsService implements OnModuleInit {
       return { items: [], pagination: { hasMore: false, nextCursor: null } };
     }
 
+    // ADR-V2-058: para os vínculos project-scoped (-171/-172/-173, -182) o
+    // handle é a chave da espelho (E). Resolve E para a página atual e prepara
+    // a inversão E→P (ref→project) usada na montagem dos maps.
+    const pageRefMap = await this.projectRef.resolveEntidadeRefs(projectIds);
+    const pageRefIds = Array.from(pageRefMap.values());
+    const pageRefToProject = new Map<string, string>();
+    for (const [pidStr, refId] of pageRefMap) {
+      pageRefToProject.set(refId.toString(), pidStr);
+    }
+
     // 3) Batch: DProjects + contagem de membros + vínculos de team + folder (N+1 ZERO).
     //    ADR-V2-042: aplicar filtro de org em DProject.findMany. Projetos
     //    listados em memberships mas pertencentes a outra org NAO entram
@@ -545,7 +577,7 @@ export class ProjectsService implements OnModuleInit {
       this.prisma.dVincula.groupBy({
         by: ['idLocEscritu'],
         where: {
-          idLocEscritu: { in: projectIds },
+          idLocEscritu: { in: pageRefIds },
           idClasse: { in: PROJECT_ROLE_CLASSES },
           excluido: false,
         },
@@ -553,7 +585,7 @@ export class ProjectsService implements OnModuleInit {
       }),
       this.prisma.dVincula.findMany({
         where: {
-          idEntidade: { in: projectIds },
+          idEntidade: { in: pageRefIds },
           idClasse: ID_CLASSE_PROJECT_TEAM_LINK,
           excluido: false,
         },
@@ -562,14 +594,22 @@ export class ProjectsService implements OnModuleInit {
       this.resolveFolderIdsForProjects(projectIds),
     ]);
 
-    const countMap = new Map(
-      memberCounts.map((mc) => [mc.idLocEscritu.toString(), mc._count.chave]),
-    );
-    const teamMap = new Map(
-      teamLinks
-        .filter((t) => t.idEntidade !== null)
-        .map((t) => [(t.idEntidade as bigint).toString(), t.idLocEscritu.toString()]),
-    );
+    // countMap e teamMap são chaveados por projectId (P) — invertendo E→P.
+    const countMap = new Map<string, number>();
+    for (const mc of memberCounts) {
+      const pidStr = pageRefToProject.get(mc.idLocEscritu.toString());
+      if (pidStr) {
+        countMap.set(pidStr, mc._count.chave);
+      }
+    }
+    const teamMap = new Map<string, string>();
+    for (const t of teamLinks) {
+      if (t.idEntidade === null) continue;
+      const pidStr = pageRefToProject.get((t.idEntidade as bigint).toString());
+      if (pidStr) {
+        teamMap.set(pidStr, t.idLocEscritu.toString());
+      }
+    }
 
     const items: ProjectResponseDto[] = projects.map((p) =>
       this.buildResponse(
@@ -620,7 +660,11 @@ export class ProjectsService implements OnModuleInit {
       orderBy: { idLocEscritu: 'desc' },
     });
 
-    const candidateIds = Array.from(new Set(vinculos.map((v) => v.idLocEscritu.toString())));
+    // ADR-V2-058: idLocEscritu desses vínculos é a chave da espelho (-158).
+    // Reverter E→P para obter os DProject.chave reais.
+    const candidateIds = await this.projectRef.refsToProjectIds(
+      vinculos.map((v) => v.idLocEscritu),
+    );
 
     // Sem org → comportamento legado (MCP keys, callers internos): sem Camada A.
     if (!organizationId) {
@@ -697,6 +741,10 @@ export class ProjectsService implements OnModuleInit {
   ): Promise<ProjectResponseDto> {
     const projectId = BigInt(id);
 
+    // ADR-V2-058: o handle do projeto em DVincula é a chave da DEntidade-espelho
+    // (-158), não DProject.chave. Resolve E (lazy-create idempotente p/ legados).
+    const refId = await this.projectRef.resolveEntidadeRef(projectId);
+
     const [project, vinculo, teamLink, folderLink] = await Promise.all([
       this.prisma.dProject.findFirst({
         where: { chave: projectId, excluido: false },
@@ -704,7 +752,7 @@ export class ProjectsService implements OnModuleInit {
       }),
       this.prisma.dVincula.findFirst({
         where: {
-          idLocEscritu: projectId,
+          idLocEscritu: refId,
           idEntidade: userEntidadeId,
           idClasse: { in: PROJECT_ROLE_CLASSES },
           excluido: false,
@@ -713,7 +761,7 @@ export class ProjectsService implements OnModuleInit {
       }),
       this.prisma.dVincula.findFirst({
         where: {
-          idEntidade: projectId,
+          idEntidade: refId,
           idClasse: ID_CLASSE_PROJECT_TEAM_LINK,
           excluido: false,
         },
@@ -721,7 +769,7 @@ export class ProjectsService implements OnModuleInit {
       }),
       this.prisma.dVincula.findFirst({
         where: {
-          idEntidade: projectId,
+          idEntidade: refId,
           idClasse: ID_CLASSE_FOLDER_PROJECT_LINK,
           excluido: false,
         },
@@ -759,7 +807,7 @@ export class ProjectsService implements OnModuleInit {
 
     const memberCount = await this.prisma.dVincula.count({
       where: {
-        idLocEscritu: projectId,
+        idLocEscritu: refId,
         idClasse: { in: PROJECT_ROLE_CLASSES },
         excluido: false,
       },
@@ -854,6 +902,12 @@ export class ProjectsService implements OnModuleInit {
       throw new NotFoundException(`Projeto ${id} não encontrado`);
     }
 
+    // ADR-V2-058: handle do projeto em DVincula = chave da espelho (-158).
+    // Usado nos vínculos -182 (team) e na contagem de membros -171/-172/-173.
+    // `ensureEntidadeRefById` (write-safe): garante DEntidade real mesmo para
+    // projeto legado (evita reintroduzir a violação de FK ao gravar o -182).
+    const refId = await this.projectRef.ensureEntidadeRefById(projectId);
+
     // Pré-condição: validar anti-ciclo antes de qualquer UPDATE de idPai (ADR-V2-051 §12).
     // NOTA: NÃO usar `'idPai' in dto` — com transform:true o class-transformer
     // instancia o DTO com todas as props declaradas em undefined, tornando `in`
@@ -876,7 +930,7 @@ export class ProjectsService implements OnModuleInit {
     if (teamIdProvided) {
       const existing = await this.prisma.dVincula.findFirst({
         where: {
-          idEntidade: projectId,
+          idEntidade: refId,
           idClasse: ID_CLASSE_PROJECT_TEAM_LINK,
           excluido: false,
         },
@@ -956,7 +1010,7 @@ export class ProjectsService implements OnModuleInit {
             data: {
               idClasse: ID_CLASSE_PROJECT_TEAM_LINK,
               idLocEscritu: BigInt(dto.teamId),
-              idEntidade: projectId,
+              idEntidade: refId,
             },
           });
         }
@@ -967,7 +1021,7 @@ export class ProjectsService implements OnModuleInit {
 
     const memberCount = await this.prisma.dVincula.count({
       where: {
-        idLocEscritu: projectId,
+        idLocEscritu: refId,
         idClasse: { in: PROJECT_ROLE_CLASSES },
         excluido: false,
       },
@@ -980,7 +1034,7 @@ export class ProjectsService implements OnModuleInit {
     } else {
       const current = await this.prisma.dVincula.findFirst({
         where: {
-          idEntidade: projectId,
+          idEntidade: refId,
           idClasse: ID_CLASSE_PROJECT_TEAM_LINK,
           excluido: false,
         },
@@ -1022,7 +1076,7 @@ export class ProjectsService implements OnModuleInit {
     // Resolve folderId atual para preservar a flag no response (ADR-V2-FOLDERS-001).
     const folderLink = await this.prisma.dVincula.findFirst({
       where: {
-        idEntidade: projectId,
+        idEntidade: refId,
         idClasse: ID_CLASSE_FOLDER_PROJECT_LINK,
         excluido: false,
       },
@@ -1125,23 +1179,41 @@ export class ProjectsService implements OnModuleInit {
 
       const ids = descendants.map((d) => d.chave);
 
+      // ADR-V2-058: os vínculos project-scoped (-171/-172/-173 e -182) usam a
+      // chave da DEntidade-espelho (-158), não DProject.chave. Resolver os
+      // handles E de todos os descendentes para cascatear corretamente.
+      const refMap = await this.projectRef.resolveEntidadeRefs(ids);
+      const refIds = Array.from(refMap.values());
+
       // 2. Cascade bottom-up: Tasks filhas de todas as Lists coletadas.
+      //    DTask.idProject referencia DProject.chave (P) — permanece em P.
       const tasksResult = await tx.dTask.updateMany({
         where: { idProject: { in: ids }, excluido: false },
         data: { excluido: true },
       });
 
-      // 3. Cascade: DVincula de membros de todos os projetos coletados.
+      // 3. Cascade: DVincula de membros (-171/-172/-173) — idLocEscritu = E.
       const membersResult = await tx.dVincula.updateMany({
-        where: { idLocEscritu: { in: ids }, excluido: false },
+        where: { idLocEscritu: { in: refIds }, idClasse: { in: PROJECT_ROLE_CLASSES }, excluido: false },
         data: { excluido: true },
       });
 
-      // 4. Cascade: DVincula PROJECT_TEAM_LINK de todos os projetos coletados.
+      // 4. Cascade: DVincula PROJECT_TEAM_LINK (-182) — idEntidade = E.
       await tx.dVincula.updateMany({
         where: {
-          idEntidade: { in: ids },
+          idEntidade: { in: refIds },
           idClasse: ID_CLASSE_PROJECT_TEAM_LINK,
+          excluido: false,
+        },
+        data: { excluido: true },
+      });
+
+      // 4b. Cascade: DVincula FOLDER_PROJECT_LINK (-183) — idEntidade = E.
+      //     Sem isto, ao deletar o projeto o vínculo folder→project fica zumbi.
+      await tx.dVincula.updateMany({
+        where: {
+          idEntidade: { in: refIds },
+          idClasse: ID_CLASSE_FOLDER_PROJECT_LINK,
           excluido: false,
         },
         data: { excluido: true },
@@ -1408,9 +1480,11 @@ export class ProjectsService implements OnModuleInit {
    * @private
    */
   private async requireManagerRole(projectId: bigint, userId: bigint): Promise<void> {
+    // ADR-V2-058: handle do projeto em DVincula = chave da espelho (-158).
+    const refId = await this.projectRef.resolveEntidadeRef(projectId);
     const vinculo = await this.prisma.dVincula.findFirst({
       where: {
-        idLocEscritu: projectId,
+        idLocEscritu: refId,
         idEntidade: userId,
         idClasse: ID_CLASSE_PROJECT_MANAGER,
         excluido: false,
@@ -1688,10 +1762,22 @@ export class ProjectsService implements OnModuleInit {
       map.set(pid.toString(), null);
     }
 
+    // ADR-V2-058: o -183 aponta para a espelho (-158), não DProject.chave.
+    // Resolve E de cada projeto e inverte (E→P) para remapear ao projectId.
+    const refMap = await this.projectRef.resolveEntidadeRefs(projectIds);
+    const refToProject = new Map<string, string>();
+    for (const [pidStr, refId] of refMap) {
+      refToProject.set(refId.toString(), pidStr);
+    }
+    const refIds = Array.from(refMap.values());
+    if (refIds.length === 0) {
+      return map;
+    }
+
     const links = await this.prisma.dVincula.findMany({
       where: {
         idClasse: ID_CLASSE_FOLDER_PROJECT_LINK,
-        idEntidade: { in: [...projectIds] },
+        idEntidade: { in: refIds },
         excluido: false,
       },
       select: { idEntidade: true, idLocEscritu: true },
@@ -1702,7 +1788,10 @@ export class ProjectsService implements OnModuleInit {
     if (Array.isArray(links)) {
       for (const link of links) {
         if (link.idEntidade !== null) {
-          map.set(link.idEntidade.toString(), link.idLocEscritu.toString());
+          const pidStr = refToProject.get(link.idEntidade.toString());
+          if (pidStr) {
+            map.set(pidStr, link.idLocEscritu.toString());
+          }
         }
       }
     }

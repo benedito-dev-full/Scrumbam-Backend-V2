@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma.service';
 import { LRUCache } from '../../common/helpers/lru-cache';
 import { OrgRole } from '../decorators/roles.decorator';
 import { isProjectPubliclyVisible } from '../../projects/utils/public-space.util';
+import { ProjectRefService } from '../../projects/project-ref.service';
 
 /** idClasses de roles de organização (ADR-V2-003). */
 const ORG_ROLE_CLASSES = {
@@ -46,7 +47,10 @@ export class RoleResolverService {
   /** Cache LRU de project roles: key = `proj:${projId}:${userId}`, value = ProjectRole|null */
   private readonly projectRoleCache = new LRUCache<string, ProjectRole | null>(1000, 300_000);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly projectRef: ProjectRefService,
+  ) {}
 
   /**
    * Retorna o role do usuário na organização.
@@ -106,9 +110,13 @@ export class RoleResolverService {
 
     this.logger.debug(`getProjectRole userId=${userId} projectId=${projectId}`);
 
+    // ADR-V2-058: o handle do projeto em DVincula é a chave da DEntidade-espelho
+    // (-158), ou o próprio projectId (P) para projetos legados sem espelho.
+    const projectHandle = await this.projectRef.resolveEntidadeRef(projectId);
+
     const vinculo = await this.prisma.dVincula.findFirst({
       where: {
-        idLocEscritu: projectId,
+        idLocEscritu: projectHandle,
         idEntidade: userId,
         idClasse: {
           in: [

@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Request } from 'express';
 import { PrismaService } from '../../prisma.service';
+import { ProjectRefService } from '../../projects/project-ref.service';
 
 /** idClasses de membership (qualquer nível) */
 const PROJECT_MEMBERSHIP_CLASSES = [
@@ -38,7 +39,10 @@ const EXECUTION_CLASSES = [BigInt(-301), BigInt(-302), BigInt(-303)];
 export class ExecutionAccessGuard implements CanActivate {
   private readonly logger = new Logger(ExecutionAccessGuard.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly projectRef: ProjectRefService,
+  ) {}
 
   /**
    * Verifica acesso do user à execution ou projeto.
@@ -85,17 +89,22 @@ export class ExecutionAccessGuard implements CanActivate {
 
     const requireAdmin = this._isAdminRoute(req.method, req.path);
 
+    // ADR-V2-058: o handle do projeto em DVincula é a chave da espelho (-158)
+    // ou P legado (passthrough). projectId aqui sempre é P (params/query ou
+    // DPedido.idLocEscritu). Read-safe.
+    const projectHandle = await this.projectRef.resolveEntidadeRef(BigInt(projectId));
+
     // Buscar membership
     const membershipWhere = requireAdmin
       ? {
           idClasse: { in: MANAGER_CLASSES },
-          idLocEscritu: BigInt(projectId),
+          idLocEscritu: projectHandle,
           idEntidade: BigInt(userEntidadeId),
           excluido: false,
         }
       : {
           idClasse: { in: PROJECT_MEMBERSHIP_CLASSES },
-          idLocEscritu: BigInt(projectId),
+          idLocEscritu: projectHandle,
           idEntidade: BigInt(userEntidadeId),
           excluido: false,
         };

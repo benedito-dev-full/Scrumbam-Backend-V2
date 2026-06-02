@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { EntidadeService } from '../entidades/entidades.service';
+import { ProjectRefService } from '../projects/project-ref.service';
 import {
   ExecutionResponseDto,
   serializeExecution,
@@ -36,6 +37,7 @@ export class ExecutionHistoryService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly entidadeService: EntidadeService,
+    private readonly projectRef: ProjectRefService,
   ) {}
 
   /**
@@ -71,11 +73,16 @@ export class ExecutionHistoryService {
     const limit = query.limit ?? 20;
     const userEntidadeId = await this.resolveEntidadeId(userIdFromJwt);
 
-    // Validar membership
+    // Validar membership.
+    // ADR-V2-058: RBAC do projeto em DVincula usa a chave da espelho (-158) ou
+    // P legado. `DPedido.idLocEscritu` continua sendo P (handle de execução
+    // fora do escopo da Fase 2) — por isso o filtro do dPedido abaixo usa
+    // `projectId` (P) e a checagem de membership usa `projectHandle` (E/P).
+    const projectHandle = await this.projectRef.resolveEntidadeRef(projectId);
     const membership = await this.prisma.dVincula.findFirst({
       where: {
         idClasse: { in: PROJECT_MEMBERSHIP_CLASSES },
-        idLocEscritu: projectId,
+        idLocEscritu: projectHandle,
         idEntidade: userEntidadeId,
         excluido: false,
       },
@@ -180,13 +187,16 @@ export class ExecutionHistoryService {
       throw new NotFoundException(`Execution ${executionId} não encontrada.`);
     }
 
-    // Valida acesso cross-project (security: não expor executions de outros projetos)
+    // Valida acesso cross-project (security: não expor executions de outros projetos).
+    // pedido.idLocEscritu é o handle de execução (P, DProject.chave). Resolve E
+    // (ADR-V2-058) para casar com o RBAC -171/-172/-173 já migrado.
     if (pedido.idLocEscritu) {
       const userEntidadeId = await this.resolveEntidadeId(userIdFromJwt);
+      const projectHandle = await this.projectRef.resolveEntidadeRef(pedido.idLocEscritu);
       const membership = await this.prisma.dVincula.findFirst({
         where: {
           idClasse: { in: PROJECT_MEMBERSHIP_CLASSES },
-          idLocEscritu: pedido.idLocEscritu,
+          idLocEscritu: projectHandle,
           idEntidade: userEntidadeId,
           excluido: false,
         },

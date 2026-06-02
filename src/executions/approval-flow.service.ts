@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { EntidadeService } from '../entidades/entidades.service';
+import { ProjectRefService } from '../projects/project-ref.service';
 import { EventProducerService } from '../eventos/core/event-producer.service';
 import { AUTOMATION_CLASS_IDS } from '../automation/constants/automation-class-ids';
 import { ExecutionQueueService } from './queues/execution-queue.service';
@@ -49,6 +50,7 @@ export class ApprovalFlowService {
     private readonly entidadeService: EntidadeService,
     private readonly eventProducer: EventProducerService,
     private readonly executionQueue: ExecutionQueueService,
+    private readonly projectRef: ProjectRefService,
   ) {}
 
   /**
@@ -344,10 +346,13 @@ export class ApprovalFlowService {
     userEntidadeId: bigint,
     executionId: string,
   ): Promise<void> {
+    // ADR-V2-058: projectId aqui é o handle de execução (P, DPedido.idLocEscritu).
+    // Resolve E (ou P legado) para casar com o RBAC -171/-172/-173 migrado.
+    const projectHandle = await this.projectRef.resolveEntidadeRef(projectId);
     const managerVinculo = await this.prisma.dVincula.findFirst({
       where: {
         idClasse: { in: MANAGER_CLASSES },
-        idLocEscritu: projectId,
+        idLocEscritu: projectHandle,
         idEntidade: userEntidadeId,
         excluido: false,
       },
@@ -358,7 +363,7 @@ export class ApprovalFlowService {
       const anyMembership = await this.prisma.dVincula.findFirst({
         where: {
           idClasse: { in: PROJECT_MEMBERSHIP_CLASSES },
-          idLocEscritu: projectId,
+          idLocEscritu: projectHandle,
           idEntidade: userEntidadeId,
           excluido: false,
         },

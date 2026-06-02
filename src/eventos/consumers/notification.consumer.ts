@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
+import { ProjectRefService } from '../../projects/project-ref.service';
 import { isNotificationTrigger } from './notification-triggers.const';
 import type { IEventConsumer } from '../interfaces/consumer.interface';
 import type { IEvent } from '../interfaces/event.interface';
@@ -78,7 +79,10 @@ export class NotificationConsumer implements IEventConsumer {
   readonly name = 'notification';
   private readonly logger = new Logger(NotificationConsumer.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly projectRef: ProjectRefService,
+  ) {}
 
   /**
    * Cria notificacoes para os destinatarios derivados do evento.
@@ -236,8 +240,11 @@ export class NotificationConsumer implements IEventConsumer {
     });
     if (!project) return [];
 
+    // ADR-V2-058: o RBAC -171 do projeto usa a chave da espelho (-158) ou P
+    // legado (passthrough). O filtro de ORG_ROLE_ADMIN continua por idEstab (org).
+    const projectHandle = await this.projectRef.resolveEntidadeRef(project.chave);
     const membershipFilters: Prisma.DVinculaWhereInput[] = [
-      { idLocEscritu: project.chave, idClasse: PROJECT_ROLE_MANAGER },
+      { idLocEscritu: projectHandle, idClasse: PROJECT_ROLE_MANAGER },
     ];
     if (project.idEstab) {
       membershipFilters.push({ idLocEscritu: project.idEstab, idClasse: ORG_ROLE_ADMIN });
@@ -266,9 +273,11 @@ export class NotificationConsumer implements IEventConsumer {
 
     const projectId = getPayloadId(event.payload, ['projectId', 'idProject']);
     if (projectId !== undefined) {
+      // ADR-V2-058: RBAC -171 do projeto usa a chave da espelho (-158) ou P legado.
+      const projectHandle = await this.projectRef.resolveEntidadeRef(projectId);
       const vinculos = await this.prisma.dVincula.findMany({
         where: {
-          idLocEscritu: projectId,
+          idLocEscritu: projectHandle,
           idClasse: PROJECT_ROLE_MANAGER,
           excluido: false,
         },

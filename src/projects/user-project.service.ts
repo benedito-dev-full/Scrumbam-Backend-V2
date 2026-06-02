@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
+import { ProjectRefService } from './project-ref.service';
 
 /** idClasses DVincula para RBAC de projeto (seed F1). */
 const ID_CLASSE_PROJECT_MANAGER = BigInt(-171);
@@ -23,7 +24,10 @@ const PROJECT_ROLE_CLASSES = [
 export class UserProjectService {
   private readonly logger = new Logger(UserProjectService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly projectRef: ProjectRefService,
+  ) {}
 
   /**
    * Retorna o projeto padrao mais recente do usuario, ou null se nao houver.
@@ -46,7 +50,12 @@ export class UserProjectService {
       take: 20,
     });
 
-    const projectIds = roleLinks.map((link) => link.idLocEscritu);
+    // ADR-V2-058: idLocEscritu é a chave da espelho (-158) — reverter E→P para
+    // obter os DProject.chave reais (legados sem espelho: passthrough P).
+    const projectIdStrs = await this.projectRef.refsToProjectIds(
+      roleLinks.map((link) => link.idLocEscritu),
+    );
+    const projectIds = projectIdStrs.map((s) => BigInt(s));
     if (projectIds.length === 0) {
       this.logger.debug(`Nenhum projeto associado ao userId=${userId}`);
       return null;

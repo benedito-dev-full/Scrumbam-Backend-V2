@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { RoleResolverService } from '../auth/services/role-resolver.service';
+import { ProjectRefService } from '../projects/project-ref.service';
 import { CreateFolderDto } from './dto/create-folder.dto';
 import { UpdateFolderDto } from './dto/update-folder.dto';
 import { FolderResponseDto, ListFolderResponseDto } from './dto/folder-response.dto';
@@ -52,6 +53,7 @@ export class FoldersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly roleResolver: RoleResolverService,
+    private readonly projectRef: ProjectRefService,
   ) {}
 
   /**
@@ -300,7 +302,12 @@ export class FoldersService {
       select: { idEntidade: true },
     });
 
-    const projectIds = vinculos.map((v) => v.idEntidade).filter((v): v is bigint => v !== null);
+    // ADR-V2-058: idEntidade do -183 é a chave da espelho (-158) — reverter
+    // E→P para obter os DProject.chave reais (legados: passthrough P).
+    const projectIdStrs = await this.projectRef.refsToProjectIds(
+      vinculos.map((v) => v.idEntidade),
+    );
+    const projectIds = projectIdStrs.map((s) => BigInt(s));
 
     if (projectIds.length === 0) {
       return { items: [] };
@@ -356,18 +363,28 @@ export class FoldersService {
       return { items: [] };
     }
 
-    // 2) Buscar vínculos ativos -183 para esses projects (batch — N+1 ZERO)
+    // 2) Buscar vínculos ativos -183 para esses projects (batch — N+1 ZERO).
+    //    ADR-V2-058: o -183 usa a chave da espelho (-158) em idEntidade —
+    //    resolver E de cada projeto e filtrar por esses handles; o conjunto de
+    //    "linkados" é remapeado E→P para comparar com p.chave.
     const projectIds = projects.map((p) => p.chave);
+    const refMap = await this.projectRef.resolveEntidadeRefs(projectIds);
+    const refToProject = new Map<string, string>();
+    for (const [pidStr, refId] of refMap) {
+      refToProject.set(refId.toString(), pidStr);
+    }
     const links = await this.prisma.dVincula.findMany({
       where: {
         idClasse: ID_CLASSE_FOLDER_PROJECT_LINK,
-        idEntidade: { in: projectIds },
+        idEntidade: { in: Array.from(refMap.values()) },
         excluido: false,
       },
       select: { idEntidade: true },
     });
     const linkedIds = new Set(
-      links.map((l) => l.idEntidade?.toString()).filter((s): s is string => s !== undefined),
+      links
+        .map((l) => (l.idEntidade !== null ? refToProject.get(l.idEntidade.toString()) : undefined))
+        .filter((s): s is string => s !== undefined),
     );
 
     // 3) Filtrar projects sem vínculo ativo
@@ -426,24 +443,32 @@ export class FoldersService {
 
     this.logger.log(`Movendo project=${pId} para folder=${fId} user=${userEntidadeId}`);
 
+    // ADR-V2-058 (write-safe): o -183 usa a chave da espelho (-158) em
+    // idEntidade. Garante a espelho (cria sob demanda p/ legado) ANTES de
+    // gravar — evita FK 500. Read-safe para o soft-delete do vínculo anterior:
+    // se o projeto for novo, o vínculo antigo também está em E; se legado e
+    // ainda sem espelho, ensure cria E e não há vínculo antigo em E (o antigo
+    // em P, se houver, é reconciliado no backfill da Fase 3).
+    const projectRefId = await this.projectRef.ensureEntidadeRefById(pId);
+
     await this.prisma.$transaction(async (tx) => {
       // Soft-delete qualquer vínculo ativo anterior (-183) para este project.
       // Usa updateMany para idempotência (cobre o caso "já está nessa pasta").
       await tx.dVincula.updateMany({
         where: {
           idClasse: ID_CLASSE_FOLDER_PROJECT_LINK,
-          idEntidade: pId,
+          idEntidade: projectRefId,
           excluido: false,
         },
         data: { excluido: true },
       });
 
-      // Cria novo vínculo apontando para a pasta destino
+      // Cria novo vínculo apontando para a pasta destino (idEntidade = E).
       await tx.dVincula.create({
         data: {
           idClasse: ID_CLASSE_FOLDER_PROJECT_LINK,
           idLocEscritu: fId,
-          idEntidade: pId,
+          idEntidade: projectRefId,
         },
       });
     });
@@ -471,11 +496,15 @@ export class FoldersService {
 
     this.logger.log(`Desvinculando project=${pId} da folder=${fId} user=${userEntidadeId}`);
 
+    // ADR-V2-058: soft-delete de vínculo EXISTENTE — usa o handle de leitura
+    // (E se há espelho, senão P legado) para casar com a linha gravada.
+    const projectRefId = await this.projectRef.resolveEntidadeRef(pId);
+
     await this.prisma.dVincula.updateMany({
       where: {
         idClasse: ID_CLASSE_FOLDER_PROJECT_LINK,
         idLocEscritu: fId,
-        idEntidade: pId,
+        idEntidade: projectRefId,
         excluido: false,
       },
       data: { excluido: true },
@@ -602,10 +631,18 @@ export class FoldersService {
       map.set(pid.toString(), null);
     }
 
+    // ADR-V2-058: o -183 aponta para a espelho (-158). Resolve E e inverte
+    // (E→P) para remapear ao projectId.
+    const refMap = await this.projectRef.resolveEntidadeRefs(projectIds);
+    const refToProject = new Map<string, string>();
+    for (const [pidStr, refId] of refMap) {
+      refToProject.set(refId.toString(), pidStr);
+    }
+
     const links = await this.prisma.dVincula.findMany({
       where: {
         idClasse: ID_CLASSE_FOLDER_PROJECT_LINK,
-        idEntidade: { in: [...projectIds] },
+        idEntidade: { in: Array.from(refMap.values()) },
         excluido: false,
       },
       select: { idEntidade: true, idLocEscritu: true },
@@ -613,7 +650,10 @@ export class FoldersService {
 
     for (const link of links) {
       if (link.idEntidade !== null) {
-        map.set(link.idEntidade.toString(), link.idLocEscritu.toString());
+        const pidStr = refToProject.get(link.idEntidade.toString());
+        if (pidStr) {
+          map.set(pidStr, link.idLocEscritu.toString());
+        }
       }
     }
 

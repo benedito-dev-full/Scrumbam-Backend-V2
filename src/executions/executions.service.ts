@@ -8,6 +8,7 @@ import {
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma.service';
 import { EntidadeService } from '../entidades/entidades.service';
+import { ProjectRefService } from '../projects/project-ref.service';
 import { EventProducerService } from '../eventos/core/event-producer.service';
 import { ClaudeRunnerService } from './claude-runner.service';
 import { AgentTunnelService } from '../automation/agents/agent-tunnel.service';
@@ -53,6 +54,7 @@ export class ExecutionsService {
     private readonly agentTunnelService: AgentTunnelService,
     private readonly executionQueue: ExecutionQueueService,
     private readonly promptBuilder: PromptBuilderService,
+    private readonly projectRef: ProjectRefService,
   ) {}
 
   /**
@@ -108,10 +110,14 @@ export class ExecutionsService {
       return existingExecution;
     }
 
+    // ADR-V2-058: RBAC do projeto em DVincula usa a chave da espelho (-158) ou
+    // P legado (passthrough). Read-safe. (O -185 PROJECT_AGENT e o handle de
+    // DPedido.idLocEscritu permanecem em P — fora do escopo da Fase 2.)
+    const projectHandle = await this.projectRef.resolveEntidadeRef(BigInt(projectId));
     const membership = await this.prisma.dVincula.findFirst({
       where: {
         idClasse: { in: PROJECT_MEMBERSHIP_CLASSES },
-        idLocEscritu: BigInt(projectId),
+        idLocEscritu: projectHandle,
         idEntidade: userEntidadeId,
         excluido: false,
       },

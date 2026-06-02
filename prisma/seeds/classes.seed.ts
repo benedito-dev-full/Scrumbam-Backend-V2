@@ -4,18 +4,19 @@
  * Composicao do seed (ADR-V2-019: monolitico):
  *   - 45 classes fixas universais Devari-Core (range -1..-110), via spread de
  *     `templates/classes-base-template.ts`.
- *   - 107 classes especificas Scrumban-V2 (range -150..-527), declaradas
+ *   - 108 classes especificas Scrumban-V2 (range -150..-527), declaradas
  *     neste arquivo, agrupadas por seccao (DEntidade, DVincula, DPedido,
  *     DTabela, DEvento, DTabela secundario, Fases) com comentarios `// === ... ===`.
  *
- * Total: 152 DClasses (ADR-V2-026: +1 AUDIT_GENERIC; ADR-V2-028: +6 INVITE_*;
+ * Total: 153 DClasses (ADR-V2-026: +1 AUDIT_GENERIC; ADR-V2-028: +6 INVITE_*;
  *   ADR-V2-029: +1 PROJECT_TEAM_LINK; ADR-V2-033: +2 AGENT_SESSION_*;
  *   ADR-V2-FOLDERS-001: +1 FOLDER, +1 FOLDER_PROJECT_LINK;
  *   ADR-V2-047: +1 PHASE;
  *   ADR-V2-051: +2 BOOKMARK/SPACE_PRIVATE_MEMBER, +3 SPACE/FOLDER/LIST;
  *   GAP-04: +1 DOC;
  *   GAP-COMMENT: +1 TASK_COMMENT;
- *   Frente B Nexus IA: +1 GEMINI_API_KEY (-481), +1 AI_CHAT_MESSAGE (-508)).
+ *   Frente B Nexus IA: +1 GEMINI_API_KEY (-481), +1 AI_CHAT_MESSAGE (-508);
+ *   ADR-V2-058: +1 PROJECT_REF (-158, DEntidade-espelho de DProject em DVincula)).
  *
  * Validacao automatica:
  *   `validateHierarchy(classes)` e chamado no topo deste modulo. Qualquer
@@ -80,12 +81,13 @@ function esp(
 }
 
 /**
- * Array de classes especificas Scrumban-V2 (107 entradas).
+ * Array de classes especificas Scrumban-V2 (108 entradas).
  *
  * Ordem:
- *   1. DEntidade — 8 (sub-tipos de Pessoa: USER, PLATFORM_SCRUMBAN,
- *      ORGANIZATION, SCRUMBAN_PROJECT, SCRUMBAN_TASK, AGENT, TEAM, FOLDER).
- *      ADR-V2-FOLDERS-001 (+1 FOLDER).
+ *   1. DEntidade — 9 (sub-tipos de Pessoa: USER, PLATFORM_SCRUMBAN,
+ *      ORGANIZATION, SCRUMBAN_PROJECT, SCRUMBAN_TASK, AGENT, TEAM, FOLDER,
+ *      PROJECT_REF).
+ *      ADR-V2-FOLDERS-001 (+1 FOLDER). ADR-V2-058 (+1 PROJECT_REF).
  *   2. DVincula — 15 (relacoes Org-User, Project-User, Team, Project-Agent,
  *      Telegram, Project-Team, Folder-Project, Bookmark, Space-Private-Member).
  *      ADR-V2-029 (+1 PROJECT_TEAM_LINK).
@@ -111,12 +113,13 @@ function esp(
  *      INVITE_TOKEN, INVITE_STATUS_*).
  *      ADR-V2-028 (+5 INVITE_TOKEN, INVITE_STATUS_PENDING/ACCEPTED/EXPIRED/REVOKED).
  *
- * Soma: 8 + 15 + 1 + 3 + 4 + 36 + 16 + 21 = 104.
- * Com GAP-COMMENT: +1 = 105.
- * Com Frente B Nexus IA (+1 GEMINI_API_KEY, +1 AI_CHAT_MESSAGE): +2 = 107.
+ * Soma: 9 + 15 + 1 + 3 + 4 + 36 + 16 + 21 = 105.
+ * Com GAP-COMMENT: +1 = 106.
+ * Com Frente B Nexus IA (+1 GEMINI_API_KEY, +1 AI_CHAT_MESSAGE): +2 = 108.
+ * (DEntidade subiu de 8 para 9 com ADR-V2-058 PROJECT_REF -158.)
  */
 const classesEspecificas: DClasseSeed[] = [
-  // === DEntidade — sub-tipos de Pessoa (5) + DProject/DTask (2) + FOLDER (1) ===
+  // === DEntidade — sub-tipos de Pessoa (5) + DProject/DTask (2) + FOLDER (1) + PROJECT_REF (1) ===
   // Filhos de PESSOAS (-43) ou ENTIDADES (-37)
   esp(-150, 'USER', 'Usuario Scrumban', -43),
   esp(-151, 'PLATFORM_SCRUMBAN', 'Platform Scrumban', -43),
@@ -129,6 +132,15 @@ const classesEspecificas: DClasseSeed[] = [
   // navegacao (/workspace/folders/:id). idEstab=orgId estabelece o tenant.
   esp(-155, 'FOLDER', 'Pasta (agrupamento de projetos)', -37),
   esp(-156, 'AGENT', 'Agente Claude Code', -43),
+  // ADR-V2-058: DEntidade-espelho 1:1 do DProject — handle canonico do projeto
+  // dentro do grafo DVincula. A FK de DVincula (idLocEscritu/idEntidade) aponta
+  // para DEntidade.chave; DProject tem sequencia propria e NUNCA deveria estar
+  // em DVincula. Cada DProject ganha um PROJECT_REF espelho (mesmo idEstab,
+  // dados.projectId=P; DProject.dados.entidadeRefId=E) e todos os vinculos
+  // project-scoped (-171/-172/-173, -182, -183, -188) passam a apontar para
+  // este espelho. Resolve o 500 de FK e a colisao silenciosa de IDs. Detalhe
+  // interno — NAO exposto via REST proprio. Status do ADR: pendente CEO.
+  esp(-158, 'PROJECT_REF', 'Referencia de Projeto (espelho DVincula)', -37),
   esp(-180, 'TEAM', 'Time', -43),
 
   // === DVincula — relacoes (12) ===

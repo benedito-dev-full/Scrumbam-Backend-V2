@@ -6,6 +6,7 @@
 **Indice de topicos:**
 - [phase-hierarchy-pattern.md](phase-hierarchy-pattern.md) — Padrao de hierarquia auto-referencial via idPai em DTask para Fases/Blocos (ADR-V2-047).
 - [dados-json-merge-conventions.md](dados-json-merge-conventions.md) — Merge seletivo (DProject) vs raso (DTask) em `dados Json`; onde responses expoem; idClasses -350..-353.
+- [dvincula-fk-exige-dentidade.md](dvincula-fk-exige-dentidade.md) — DVincula FK exige DEntidade nos 2 lados; NUNCA gravar DProject.chave; usar DEntidade-espelho PROJECT_REF (ADR-V2-058, plan fk-systemic-fix).
 
 **Atualizar:** ao concluir cada task. Limite ~200 linhas; acima disso, mover histórico antigo para `agent-memory/strategist/<topic>.md`.
 

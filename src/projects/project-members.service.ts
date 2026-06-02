@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
+import { ProjectRefService } from './project-ref.service';
 import {
   AddProjectMemberDto,
   UpdateProjectMemberDto,
@@ -55,7 +56,10 @@ const CLASSE_TO_ROLE: Record<string, string> = {
 export class ProjectMembersService {
   private readonly logger = new Logger(ProjectMembersService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly projectRef: ProjectRefService,
+  ) {}
 
   /**
    * Lista membros do projeto com roles.
@@ -117,10 +121,12 @@ export class ProjectMembersService {
       return { members };
     }
 
-    // Espaço privado ou sem org: retorna apenas DVinculas explícitos do projeto
+    // Espaço privado ou sem org: retorna apenas DVinculas explícitos do projeto.
+    // ADR-V2-058: handle = chave da espelho (-158) ou P legado (passthrough).
+    const refId = await this.projectRef.resolveEntidadeRef(projectIdBigInt);
     const vinculos = await this.prisma.dVincula.findMany({
       where: {
-        idLocEscritu: projectIdBigInt,
+        idLocEscritu: refId,
         idClasse: { in: PROJECT_ROLE_CLASSES },
         excluido: false,
       },
@@ -175,6 +181,9 @@ export class ProjectMembersService {
     const projectIdBigInt = BigInt(projectId);
     await this.requireManagerRole(projectIdBigInt, requesterId);
 
+    // ADR-V2-058 (write-safe): garante a DEntidade-espelho (-158) — para
+    // projeto legado cria sob demanda, evitando gravar idLocEscritu=P (FK 500).
+    const refId = await this.projectRef.ensureEntidadeRefById(projectIdBigInt);
     const targetId = BigInt(dto.userId);
 
     const targetUser = await this.prisma.dEntidade.findFirst({
@@ -187,7 +196,7 @@ export class ProjectMembersService {
 
     const existing = await this.prisma.dVincula.findFirst({
       where: {
-        idLocEscritu: projectIdBigInt,
+        idLocEscritu: refId,
         idEntidade: targetId,
         idClasse: { in: PROJECT_ROLE_CLASSES },
         excluido: false,
@@ -202,7 +211,7 @@ export class ProjectMembersService {
     await this.prisma.dVincula.create({
       data: {
         idClasse,
-        idLocEscritu: projectIdBigInt,
+        idLocEscritu: refId,
         idEntidade: targetId,
         metaDados: { role: dto.role, cargo: dto.cargo ?? null } as Prisma.InputJsonValue,
       },
@@ -240,11 +249,12 @@ export class ProjectMembersService {
     const projectIdBigInt = BigInt(projectId);
     await this.requireManagerRole(projectIdBigInt, requesterId);
 
+    const refId = await this.projectRef.resolveEntidadeRef(projectIdBigInt);
     const userIdBigInt = BigInt(userId);
 
     const vinculo = await this.prisma.dVincula.findFirst({
       where: {
-        idLocEscritu: projectIdBigInt,
+        idLocEscritu: refId,
         idEntidade: userIdBigInt,
         idClasse: { in: PROJECT_ROLE_CLASSES },
         excluido: false,
@@ -301,11 +311,12 @@ export class ProjectMembersService {
     const projectIdBigInt = BigInt(projectId);
     await this.requireManagerRole(projectIdBigInt, requesterId);
 
+    const refId = await this.projectRef.resolveEntidadeRef(projectIdBigInt);
     const userIdBigInt = BigInt(userId);
 
     const vinculo = await this.prisma.dVincula.findFirst({
       where: {
-        idLocEscritu: projectIdBigInt,
+        idLocEscritu: refId,
         idEntidade: userIdBigInt,
         idClasse: { in: PROJECT_ROLE_CLASSES },
         excluido: false,
@@ -321,7 +332,7 @@ export class ProjectMembersService {
     if (vinculo.idClasse === ID_CLASSE_PROJECT_MANAGER) {
       const managerCount = await this.prisma.dVincula.count({
         where: {
-          idLocEscritu: projectIdBigInt,
+          idLocEscritu: refId,
           idClasse: ID_CLASSE_PROJECT_MANAGER,
           excluido: false,
         },
@@ -343,24 +354,30 @@ export class ProjectMembersService {
    * Cria o DVincula inicial de MANAGER para o criador do projeto.
    * Chamado dentro de transaction em ProjectsService.create().
    *
+   * **ADR-V2-058:** `projectRefId` é a chave da DEntidade-espelho (-158) do
+   * projeto (handle canônico em DVincula), NÃO `DProject.chave`. O chamador
+   * (`ProjectsService.create`) resolve via `ProjectRefService.ensureEntidadeRef`
+   * ANTES e passa o handle aqui.
+   *
    * @param tx - Prisma transaction client
-   * @param projectId - Chave BigInt do projeto
+   * @param projectRefId - Chave BigInt da DEntidade-espelho (-158) do projeto
    * @param userEntidadeId - Chave BigInt da DEntidade do criador
    *
    * @example
    * ```typescript
-   * await this.projectMembersService.createManagerLink(tx, project.chave, creatorId);
+   * const refId = await this.projectRef.ensureEntidadeRef(tx, proj);
+   * await this.projectMembersService.createManagerLink(tx, refId, creatorId);
    * ```
    */
   async createManagerLink(
     tx: Prisma.TransactionClient,
-    projectId: bigint,
+    projectRefId: bigint,
     userEntidadeId: bigint,
   ): Promise<void> {
     await tx.dVincula.create({
       data: {
         idClasse: ID_CLASSE_PROJECT_MANAGER,
-        idLocEscritu: projectId,
+        idLocEscritu: projectRefId,
         idEntidade: userEntidadeId,
         metaDados: { role: 'MANAGER', cargo: 'Project Manager' } as Prisma.InputJsonValue,
       },
@@ -370,9 +387,10 @@ export class ProjectMembersService {
   // ─── Helpers privados ─────────────────────────────────────────────────────
 
   private async requireManagerRole(projectId: bigint, userId: bigint): Promise<void> {
+    const refId = await this.projectRef.resolveEntidadeRef(projectId);
     const vinculo = await this.prisma.dVincula.findFirst({
       where: {
-        idLocEscritu: projectId,
+        idLocEscritu: refId,
         idEntidade: userId,
         idClasse: ID_CLASSE_PROJECT_MANAGER,
         excluido: false,

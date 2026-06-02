@@ -9,6 +9,7 @@ import {
 import { PrismaService } from '../../prisma.service';
 import { JwtPayload } from '../../auth/decorators/current-user.decorator';
 import { EntidadeService } from '../../entidades/entidades.service';
+import { ProjectRefService } from '../../projects/project-ref.service';
 import { WEBHOOK_CLASS_ID } from '../services/webhooks.service';
 
 const PROJECT_ROLE_CLASSES = [BigInt(-171), BigInt(-172), BigInt(-173)];
@@ -18,6 +19,7 @@ export class WebhookOwnerGuard implements CanActivate {
   constructor(
     private readonly prisma: PrismaService,
     private readonly entidadeService: EntidadeService,
+    private readonly projectRef: ProjectRefService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -55,9 +57,12 @@ export class WebhookOwnerGuard implements CanActivate {
       BigInt(userGroupId),
     );
 
+    // ADR-V2-058: handle do projeto em DVincula = chave da espelho (-158) ou
+    // P legado (passthrough). Read-safe.
+    const projectHandle = await this.projectRef.resolveEntidadeRef(projectId);
     const vinculo = await this.prisma.dVincula.findFirst({
       where: {
-        idLocEscritu: projectId,
+        idLocEscritu: projectHandle,
         idEntidade: userEntidadeId,
         idClasse: { in: PROJECT_ROLE_CLASSES },
         excluido: false,

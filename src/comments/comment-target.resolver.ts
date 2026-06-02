@@ -9,6 +9,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { ProjectsService } from '../projects/projects.service';
+import { ProjectRefService } from '../projects/project-ref.service';
 import { CommentTargetType } from './dto/comment-target-type.enum';
 
 /** idClasse de FOLDER no seed Scrumban (DProject filho de SPACE). */
@@ -71,6 +72,7 @@ export class CommentTargetResolver {
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => ProjectsService))
     private readonly projectsService: ProjectsService,
+    private readonly projectRef: ProjectRefService,
   ) {}
 
   /**
@@ -240,9 +242,12 @@ export class CommentTargetResolver {
     // Membership check: qualquer role (MANAGER/MEMBER/VIEWER) basta para
     // comentar e ler comentários. Query direta evita duplicar listagem
     // do ProjectMembersService.
+    // ADR-V2-058: handle do projeto em DVincula = chave da espelho (-158) ou
+    // P legado (passthrough). Read-safe.
+    const projectHandle = await this.projectRef.resolveEntidadeRef(project.chave);
     const vinculo = await this.prisma.dVincula.findFirst({
       where: {
-        idLocEscritu: project.chave,
+        idLocEscritu: projectHandle,
         idEntidade: requesterEntidadeId,
         idClasse: { in: PROJECT_MEMBERSHIP_CLASSES },
         excluido: false,

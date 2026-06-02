@@ -4,6 +4,7 @@ import { CorrelationIdService } from './services/correlation-id.service';
 import { TimezoneService } from './services/timezone.service';
 import { TenantScopeService } from './services/tenant-scope.service';
 import { SensitiveDataSanitizerService } from './security/sensitive-data-sanitizer.service';
+import { ProjectRefService } from '../projects/project-ref.service';
 
 /**
  * `CommonModule` — Módulo global de serviços canônicos compartilhados.
@@ -18,6 +19,11 @@ import { SensitiveDataSanitizerService } from './security/sensitive-data-sanitiz
  *  - `TimezoneService` — manipulação de datas em America/Sao_Paulo.
  *  - `TenantScopeService` — isolamento multi-tenant (ADR-V2-042).
  *  - `SensitiveDataSanitizerService` — sanitizacao de PII em logs.
+ *  - `ProjectRefService` — handle canônico de projeto em DVincula via
+ *    DEntidade-espelho -158 PROJECT_REF (ADR-V2-058). Registrado aqui (e não
+ *    em `ProjectsModule`) por ser `@Global` e depender apenas de `PrismaService`,
+ *    permitindo injeção em executions/webhooks/auth/teams/folders sem
+ *    dependência circular. O arquivo mora em `src/projects/` por coesão.
  *
  * Reduz boilerplate em modules que precisam dos services comuns e garante
  * **uma única instância** de `CorrelationIdService` em toda a aplicação
@@ -35,6 +41,7 @@ import { SensitiveDataSanitizerService } from './security/sensitive-data-sanitiz
     TimezoneService,
     TenantScopeService,
     SensitiveDataSanitizerService,
+    ProjectRefService,
   ],
   exports: [
     PrismaService,
@@ -42,6 +49,7 @@ import { SensitiveDataSanitizerService } from './security/sensitive-data-sanitiz
     TimezoneService,
     TenantScopeService,
     SensitiveDataSanitizerService,
+    ProjectRefService,
   ],
 })
 export class CommonModule {}
