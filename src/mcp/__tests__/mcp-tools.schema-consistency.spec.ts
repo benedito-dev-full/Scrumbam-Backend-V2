@@ -1,12 +1,12 @@
 import toolsSchema from '../schemas/tools.schema.json';
 import { CreateTaskTool } from '../tools/create-task.tool';
-import { GetPhaseTreeTool } from '../tools/get-phase-tree.tool';
+import { GetBlockTreeTool } from '../tools/get-block-tree.tool';
 import { GetProjectTool } from '../tools/get-project.tool';
 import { GetTaskTool } from '../tools/get-task.tool';
 import { GetUnreadCountTool } from '../tools/get-unread-count.tool';
+import { ListBlocksTool } from '../tools/list-blocks.tool';
 import { ListMembersTool } from '../tools/list-members.tool';
 import { ListNotificationsTool } from '../tools/list-notifications.tool';
-import { ListPhasesTool } from '../tools/list-phases.tool';
 import { ListProjectsTool } from '../tools/list-projects.tool';
 import { ListTasksTool } from '../tools/list-tasks.tool';
 import { McpTool } from '../tools/tool.interface';
@@ -60,8 +60,8 @@ function buildRegisteredTools(): McpTool[] {
     new UpdateNotificationTool(noop),
     new GetUnreadCountTool(noop),
     new SearchTasksTool(noop, noop),
-    new ListPhasesTool(noop, noop),
-    new GetPhaseTreeTool(noop, noop, noop),
+    new ListBlocksTool(noop, noop),
+    new GetBlockTreeTool(noop, noop, noop),
   ];
 }
 

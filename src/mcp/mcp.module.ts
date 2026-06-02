@@ -18,13 +18,13 @@ import { McpKeyService } from './services/mcp-key.service';
 import { McpRateLimitService } from './services/mcp-rate-limit.service';
 import { McpRouterService } from './services/mcp-router.service';
 import { CreateTaskTool } from './tools/create-task.tool';
-import { GetPhaseTreeTool } from './tools/get-phase-tree.tool';
+import { GetBlockTreeTool } from './tools/get-block-tree.tool';
 import { GetProjectTool } from './tools/get-project.tool';
 import { GetTaskTool } from './tools/get-task.tool';
 import { GetUnreadCountTool } from './tools/get-unread-count.tool';
+import { ListBlocksTool } from './tools/list-blocks.tool';
 import { ListMembersTool } from './tools/list-members.tool';
 import { ListNotificationsTool } from './tools/list-notifications.tool';
-import { ListPhasesTool } from './tools/list-phases.tool';
 import { ListProjectsTool } from './tools/list-projects.tool';
 import { ListTasksTool } from './tools/list-tasks.tool';
 import { SearchTasksTool } from './tools/search-tasks.tool';
@@ -65,8 +65,8 @@ import { UpdateTaskTool } from './tools/update-task.tool';
     UpdateNotificationTool,
     GetUnreadCountTool,
     SearchTasksTool,
-    ListPhasesTool,
-    GetPhaseTreeTool,
+    ListBlocksTool,
+    GetBlockTreeTool,
   ],
   exports: [McpKeyService, McpRouterService, McpRateLimitService, McpAuditService],
 })

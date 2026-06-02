@@ -244,8 +244,8 @@
       }
     },
     {
-      "name": "list_phases",
-      "description": "Lista fases (DTask idClasse=-200) de um projeto acessivel ao usuario. Para metricas detalhadas use get_phase_tree.",
+      "name": "list_blocks",
+      "description": "Lista blocos (DTask idClasse=-200) de um projeto acessivel ao usuario. Para metricas detalhadas use get_block_tree.",
       "inputSchema": {
         "type": "object",
         "required": ["projectId"],
@@ -255,19 +255,19 @@
           "cursor": { "type": "string", "description": "Cursor de paginacao" },
           "includeMetrics": {
             "type": "boolean",
-            "description": "Aceito por compatibilidade futura — NAO computa metricas nesta versao (evita N+1). Use get_phase_tree(phaseId, includeMetrics=true) para metricas por fase."
+            "description": "Aceito por compatibilidade futura — NAO computa metricas nesta versao (evita N+1). Use get_block_tree(blockId, includeMetrics=true) para metricas por bloco."
           }
         }
       }
     },
     {
-      "name": "get_phase_tree",
-      "description": "Retorna arvore recursiva de uma fase ou task. Aceita maxDepth (1..20) e includeMetrics opcionais. Escopo automatico por tenant.",
+      "name": "get_block_tree",
+      "description": "Retorna arvore recursiva de um bloco ou task. Aceita maxDepth (1..20) e includeMetrics opcionais. Escopo automatico por tenant.",
       "inputSchema": {
         "type": "object",
-        "required": ["phaseId"],
+        "required": ["blockId"],
         "properties": {
-          "phaseId": { "type": "string", "description": "ID da fase ou task raiz (chave DTask)" },
+          "blockId": { "type": "string", "description": "ID do bloco ou task raiz (chave DTask)" },
           "maxDepth": {
             "type": "integer",
             "minimum": 1,
@@ -277,7 +277,7 @@
           "includeMetrics": {
             "type": "boolean",
             "default": false,
-            "description": "Quando true, anexa metricas (total/done/failed/inProgress/percent) em cada no de fase. ZERO N+1 (CTE agregadora)."
+            "description": "Quando true, anexa metricas (total/done/failed/inProgress/percent) em cada no de bloco. ZERO N+1 (CTE agregadora)."
           }
         }
       }

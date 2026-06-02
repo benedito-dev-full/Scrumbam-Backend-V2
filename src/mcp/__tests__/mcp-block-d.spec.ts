@@ -72,8 +72,8 @@ describe('MCP Bloco D - compatibilidade, timeout, metricas e doc', () => {
       'update_notification',
       'get_unread_count',
       'search_tasks',
-      'list_phases',
-      'get_phase_tree',
+      'list_blocks',
+      'get_block_tree',
     ]);
     for (const tool of toolsSchema.tools) {
       expect(tool.inputSchema).toEqual(expect.objectContaining({ type: 'object' }));

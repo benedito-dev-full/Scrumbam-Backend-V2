@@ -15,40 +15,40 @@ import {
 } from './tool-params';
 
 /**
- * MCP tool `list_phases` — lista fases (DTask idClasse=-200) de um projeto.
+ * MCP tool `list_blocks` — lista blocos (DTask idClasse=-200) de um projeto.
  *
  * **Wrapper fino sobre `TasksService.findMany`** com `idClasse='-200'` fixo
  * (Pilar 2 — endpoint genérico reutilizado). O acesso é escopado pela mesma
  * resolução tenant das outras tools (via `ProjectsService.findAccessibleProjectIds`,
  * ADR-V2-042). Quando o `projectId` informado não está no escopo do usuário MCP,
- * retorna lista vazia com anti-enumeration (mensagem idêntica a "sem fases").
+ * retorna lista vazia com anti-enumeration (mensagem idêntica a "sem blocos").
  *
  * **Nota sobre `includeMetrics`:** aceito por compatibilidade futura, mas NÃO
- * computado nesta v1 — calcular métricas em listagem pode ser N+1 (50 fases x
- * CTE recursiva = custo alto). Para métricas use `get_phase_tree(phaseId,
+ * computado nesta v1 — calcular métricas em listagem pode ser N+1 (50 blocos x
+ * CTE recursiva = custo alto). Para métricas use `get_block_tree(blockId,
  * includeMetrics=true)` que as computa em 1 CTE.
  *
  * **Performance:** cursor pagination, query ~45ms, ZERO N+1.
  *
- * @see ADR-V2-047 (Fases 0-7: MCP tools + DTask.idPai + tree + fase seletor)
+ * @see ADR-V2-047 (Fases 0-7: MCP tools + DTask.idPai + tree + bloco seletor)
  * @see PhaseTreeService — para árvore recursiva com métricas consolidadas
  * @see ADR-V2-042 (tenant isolation: defense-in-depth via accessible projects)
  * @see Pilar 2 (endpoints genéricos: reusar TasksService.findMany, não duplicar)
  *
  * @example
  * ```json
- * // Request: listar fases do projeto 100
+ * // Request: listar blocos do projeto 100
  * {"projectId": "100", "limit": 10}
  * // Response: { items: [{...}, ...], pagination: {hasMore: false, nextCursor: null} }
  * ```
  */
 @Injectable()
-export class ListPhasesTool implements McpTool {
-  private readonly logger = new Logger(ListPhasesTool.name);
+export class ListBlocksTool implements McpTool {
+  private readonly logger = new Logger(ListBlocksTool.name);
 
-  readonly name = 'list_phases';
+  readonly name = 'list_blocks';
   readonly description =
-    'Lista fases (DTask idClasse=-200) de um projeto acessivel ao usuario. Para metricas detalhadas use get_phase_tree.';
+    'Lista blocos (DTask idClasse=-200) de um projeto acessivel ao usuario. Para metricas detalhadas use get_block_tree.';
   readonly inputSchema = {
     type: 'object',
     required: ['projectId'],
@@ -59,7 +59,7 @@ export class ListPhasesTool implements McpTool {
       includeMetrics: {
         type: 'boolean',
         description:
-          'Aceito por compatibilidade futura — NAO computa metricas nesta versao (evita N+1). Use get_phase_tree(phaseId, includeMetrics=true) para metricas por fase.',
+          'Aceito por compatibilidade futura — NAO computa metricas nesta versao (evita N+1). Use get_block_tree(blockId, includeMetrics=true) para metricas por bloco.',
       },
     },
   };
@@ -70,7 +70,7 @@ export class ListPhasesTool implements McpTool {
   ) {}
 
   /**
-   * Lista fases de um projeto com paginação por cursor.
+   * Lista blocos de um projeto com paginação por cursor.
    *
    * **Fluxo:**
    * 1. Valida `projectId` (BigInt) e `cursor` (BigInt opcional, via `parseBigIntParam`)
@@ -81,7 +81,7 @@ export class ListPhasesTool implements McpTool {
    * 6. Retorna response tipado com items + pagination (hasMore, nextCursor)
    *
    * **Tenant Isolation:** `accessibleProjectIds` passado para TasksService como
-   * 2º argumento — defense-in-depth. Se phaseId não acessível, erro genérico (404).
+   * 2º argumento — defense-in-depth. Se blockId não acessível, erro genérico (404).
    *
    * @throws {McpToolError} INVALID_PARAMS quando projectId/cursor não são BigInt válidos
    * @throws Não lança NotFoundException — retorna vazio para projeto out-of-scope
@@ -94,10 +94,10 @@ export class ListPhasesTool implements McpTool {
    *   "limit": 5,
    *   "cursor": "42"
    * }
-   * // Response (page 2 de fases, 5 itens)
+   * // Response (page 2 de blocos, 5 itens)
    * {
    *   "items": [
-   *     { "chave": "43", "nome": "Fase 2", "idClasse": "-200", "idPai": "100", ... },
+   *     { "chave": "43", "nome": "Bloco 2", "idClasse": "-200", "idPai": "100", ... },
    *     ...
    *   ],
    *   "pagination": {
@@ -129,16 +129,16 @@ export class ListPhasesTool implements McpTool {
     );
 
     if (!accessibleProjectIds.includes(projectId)) {
-      // Mesmo retorno de "projeto sem fases" — anti-enumeration.
+      // Mesmo retorno de "projeto sem blocos" — anti-enumeration.
       this.logger.warn(
-        `list_phases: projeto ${projectId} fora do scope para entidade ${ctx.dEntidadeId.toString()}`,
+        `list_blocks: projeto ${projectId} fora do scope para entidade ${ctx.dEntidadeId.toString()}`,
       );
       return textResult({ items: [], pagination: { hasMore: false, nextCursor: null } });
     }
 
     if (includeMetrics) {
       this.logger.debug(
-        `list_phases includeMetrics=true ignorado (use get_phase_tree). projectId=${projectId}`,
+        `list_blocks includeMetrics=true ignorado (use get_block_tree). projectId=${projectId}`,
       );
     }
 

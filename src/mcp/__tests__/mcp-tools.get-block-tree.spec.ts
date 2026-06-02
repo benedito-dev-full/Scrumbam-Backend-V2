@@ -1,23 +1,23 @@
 import { NotFoundException } from '@nestjs/common';
 
 import { McpRouterService } from '../services/mcp-router.service';
-import { GetPhaseTreeTool } from '../tools/get-phase-tree.tool';
+import { GetBlockTreeTool } from '../tools/get-block-tree.tool';
 
 /**
- * Specs para a tool MCP `get_phase_tree` (F7 ADR-V2-047).
+ * Specs para a tool MCP `get_block_tree` (F7 ADR-V2-047).
  *
  * Cobre:
  * (a) happy path — chama buildTree e serializa via textResult
- * (b) phaseId ausente → INVALID_PARAMS
- * (c) phaseId BigInt invalido → INVALID_PARAMS
+ * (b) blockId ausente → INVALID_PARAMS
+ * (c) blockId BigInt invalido → INVALID_PARAMS
  * (d) maxDepth fora de range (0, 21, decimal) → INVALID_PARAMS
  * (e) includeMetrics tipo errado → INVALID_PARAMS
  * (f) tenant gate: findOne lanca NotFoundException → propaga
  * (g) scope vazio → NotFoundException (anti enumeration)
  * (h) defaults: maxDepth undefined, includeMetrics false
  */
-describe('MCP get_phase_tree tool', () => {
-  const phaseId = '7';
+describe('MCP get_block_tree tool', () => {
+  const blockId = '7';
   const projectId = '9007199254740995';
   const userCtx = {
     dEntidadeId: BigInt('9007199254740997'),
@@ -34,8 +34,8 @@ describe('MCP get_phase_tree tool', () => {
 
   const fakeTree = {
     root: {
-      id: phaseId,
-      nome: 'Fase Raiz',
+      id: blockId,
+      nome: 'Bloco Raiz',
       idClasse: '-200',
       idPai: null,
       status: null,
@@ -49,7 +49,7 @@ describe('MCP get_phase_tree tool', () => {
 
   beforeEach(() => {
     tasksService = {
-      findOne: jest.fn().mockResolvedValue({ id: phaseId, projectId }),
+      findOne: jest.fn().mockResolvedValue({ id: blockId, projectId }),
     };
     projectsService = {
       findAccessibleProjectIds: jest.fn().mockResolvedValue([projectId]),
@@ -73,7 +73,7 @@ describe('MCP get_phase_tree tool', () => {
       undefined,
       undefined,
       undefined,
-      new GetPhaseTreeTool(
+      new GetBlockTreeTool(
         tasksService as never,
         projectsService as never,
         phaseTreeService as never,
@@ -84,13 +84,13 @@ describe('MCP get_phase_tree tool', () => {
   it('(a) happy path — chama buildTree com defaults e serializa via textResult', async () => {
     const response = await router.dispatch(
       'tools/call',
-      { name: 'get_phase_tree', arguments: { phaseId } },
+      { name: 'get_block_tree', arguments: { blockId } },
       userCtx,
     );
 
     expect(projectsService.findAccessibleProjectIds).toHaveBeenCalledWith(userCtx.dEntidadeId);
-    expect(tasksService.findOne).toHaveBeenCalledWith(phaseId, [projectId]);
-    expect(phaseTreeService.buildTree).toHaveBeenCalledWith(BigInt(phaseId), {
+    expect(tasksService.findOne).toHaveBeenCalledWith(blockId, [projectId]);
+    expect(phaseTreeService.buildTree).toHaveBeenCalledWith(BigInt(blockId), {
       maxDepth: undefined,
       includeMetrics: false,
     });
@@ -100,33 +100,33 @@ describe('MCP get_phase_tree tool', () => {
     });
   });
 
-  it('(b) phaseId ausente → INVALID_PARAMS', async () => {
+  it('(b) blockId ausente → INVALID_PARAMS', async () => {
     const response = await router.dispatch(
       'tools/call',
-      { name: 'get_phase_tree', arguments: {} },
+      { name: 'get_block_tree', arguments: {} },
       userCtx,
     );
 
     expect(response.error).toEqual(
       expect.objectContaining({
         code: -32602,
-        data: expect.objectContaining({ field: 'phaseId' }),
+        data: expect.objectContaining({ field: 'blockId' }),
       }),
     );
     expect(phaseTreeService.buildTree).not.toHaveBeenCalled();
   });
 
-  it('(c) phaseId BigInt invalido → INVALID_PARAMS', async () => {
+  it('(c) blockId BigInt invalido → INVALID_PARAMS', async () => {
     const response = await router.dispatch(
       'tools/call',
-      { name: 'get_phase_tree', arguments: { phaseId: 'not-bigint' } },
+      { name: 'get_block_tree', arguments: { blockId: 'not-bigint' } },
       userCtx,
     );
 
     expect(response.error).toEqual(
       expect.objectContaining({
         code: -32602,
-        data: expect.objectContaining({ field: 'phaseId' }),
+        data: expect.objectContaining({ field: 'blockId' }),
       }),
     );
   });
@@ -134,7 +134,7 @@ describe('MCP get_phase_tree tool', () => {
   it('(d) maxDepth=0 → INVALID_PARAMS (minimo 1)', async () => {
     const response = await router.dispatch(
       'tools/call',
-      { name: 'get_phase_tree', arguments: { phaseId, maxDepth: 0 } },
+      { name: 'get_block_tree', arguments: { blockId, maxDepth: 0 } },
       userCtx,
     );
 
@@ -149,7 +149,7 @@ describe('MCP get_phase_tree tool', () => {
   it('(d2) maxDepth=21 → INVALID_PARAMS (max 20)', async () => {
     const response = await router.dispatch(
       'tools/call',
-      { name: 'get_phase_tree', arguments: { phaseId, maxDepth: 21 } },
+      { name: 'get_block_tree', arguments: { blockId, maxDepth: 21 } },
       userCtx,
     );
 
@@ -164,7 +164,7 @@ describe('MCP get_phase_tree tool', () => {
   it('(d3) maxDepth decimal → INVALID_PARAMS', async () => {
     const response = await router.dispatch(
       'tools/call',
-      { name: 'get_phase_tree', arguments: { phaseId, maxDepth: 5.5 } },
+      { name: 'get_block_tree', arguments: { blockId, maxDepth: 5.5 } },
       userCtx,
     );
 
@@ -179,7 +179,7 @@ describe('MCP get_phase_tree tool', () => {
   it('(e) includeMetrics tipo errado → INVALID_PARAMS', async () => {
     const response = await router.dispatch(
       'tools/call',
-      { name: 'get_phase_tree', arguments: { phaseId, includeMetrics: 'yes' } },
+      { name: 'get_block_tree', arguments: { blockId, includeMetrics: 'yes' } },
       userCtx,
     );
 
@@ -193,11 +193,11 @@ describe('MCP get_phase_tree tool', () => {
 
   it('(f) tenant gate: findOne lanca NotFoundException → propaga', async () => {
     tasksService.findOne.mockRejectedValueOnce(
-      new NotFoundException(`Task ${phaseId} não encontrada`),
+      new NotFoundException(`Task ${blockId} não encontrada`),
     );
 
     await expect(
-      router.dispatch('tools/call', { name: 'get_phase_tree', arguments: { phaseId } }, userCtx),
+      router.dispatch('tools/call', { name: 'get_block_tree', arguments: { blockId } }, userCtx),
     ).rejects.toThrow(NotFoundException);
 
     expect(phaseTreeService.buildTree).not.toHaveBeenCalled();
@@ -207,7 +207,7 @@ describe('MCP get_phase_tree tool', () => {
     projectsService.findAccessibleProjectIds.mockResolvedValueOnce([]);
 
     await expect(
-      router.dispatch('tools/call', { name: 'get_phase_tree', arguments: { phaseId } }, userCtx),
+      router.dispatch('tools/call', { name: 'get_block_tree', arguments: { blockId } }, userCtx),
     ).rejects.toThrow(NotFoundException);
 
     expect(tasksService.findOne).not.toHaveBeenCalled();
@@ -217,11 +217,11 @@ describe('MCP get_phase_tree tool', () => {
   it('(h) maxDepth + includeMetrics propagados corretamente', async () => {
     await router.dispatch(
       'tools/call',
-      { name: 'get_phase_tree', arguments: { phaseId, maxDepth: 5, includeMetrics: true } },
+      { name: 'get_block_tree', arguments: { blockId, maxDepth: 5, includeMetrics: true } },
       userCtx,
     );
 
-    expect(phaseTreeService.buildTree).toHaveBeenCalledWith(BigInt(phaseId), {
+    expect(phaseTreeService.buildTree).toHaveBeenCalledWith(BigInt(blockId), {
       maxDepth: 5,
       includeMetrics: true,
     });
@@ -230,13 +230,13 @@ describe('MCP get_phase_tree tool', () => {
   it('serializa BigInt do tree como string (via textResult)', async () => {
     const response = await router.dispatch(
       'tools/call',
-      { name: 'get_phase_tree', arguments: { phaseId } },
+      { name: 'get_block_tree', arguments: { blockId } },
       userCtx,
     );
 
     const text = (response.result as { content: { text: string }[] }).content[0].text;
     const parsed = JSON.parse(text);
     expect(typeof parsed.root.id).toBe('string');
-    expect(parsed.root.id).toBe(phaseId);
+    expect(parsed.root.id).toBe(blockId);
   });
 });

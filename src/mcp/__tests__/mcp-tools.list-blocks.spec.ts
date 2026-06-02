@@ -1,8 +1,8 @@
 import { McpRouterService } from '../services/mcp-router.service';
-import { ListPhasesTool } from '../tools/list-phases.tool';
+import { ListBlocksTool } from '../tools/list-blocks.tool';
 
 /**
- * Specs para a tool MCP `list_phases` (F7 ADR-V2-047).
+ * Specs para a tool MCP `list_blocks` (F7 ADR-V2-047).
  *
  * Cobre:
  * (a) happy path — chama findMany com idClasse=-200 fixo + projectId
@@ -14,7 +14,7 @@ import { ListPhasesTool } from '../tools/list-phases.tool';
  * (g) BigInt id serializado como string no payload retornado
  * (h) scope vazio retorna items vazios sem chamar findMany
  */
-describe('MCP list_phases tool', () => {
+describe('MCP list_blocks tool', () => {
   const projectId = '9007199254740995';
   const otherProjectId = '9007199254740999';
   const userCtx = {
@@ -32,7 +32,7 @@ describe('MCP list_phases tool', () => {
   beforeEach(() => {
     tasksService = {
       findMany: jest.fn().mockResolvedValue({
-        items: [{ id: '5', nome: 'Fase A', idClasse: '-200' }],
+        items: [{ id: '5', nome: 'Bloco A', idClasse: '-200' }],
         pagination: { hasMore: false, nextCursor: null },
       }),
     };
@@ -54,14 +54,14 @@ describe('MCP list_phases tool', () => {
       undefined,
       undefined,
       undefined,
-      new ListPhasesTool(tasksService as never, projectsService as never),
+      new ListBlocksTool(tasksService as never, projectsService as never),
     );
   });
 
   it('(a) happy path — chama findMany com idClasse=-200 fixo', async () => {
     const response = await router.dispatch(
       'tools/call',
-      { name: 'list_phases', arguments: { projectId } },
+      { name: 'list_blocks', arguments: { projectId } },
       userCtx,
     );
 
@@ -76,7 +76,7 @@ describe('MCP list_phases tool', () => {
         {
           type: 'text',
           text: JSON.stringify({
-            items: [{ id: '5', nome: 'Fase A', idClasse: '-200' }],
+            items: [{ id: '5', nome: 'Bloco A', idClasse: '-200' }],
             pagination: { hasMore: false, nextCursor: null },
           }),
         },
@@ -87,7 +87,7 @@ describe('MCP list_phases tool', () => {
   it('(b) projectId ausente → INVALID_PARAMS', async () => {
     const response = await router.dispatch(
       'tools/call',
-      { name: 'list_phases', arguments: {} },
+      { name: 'list_blocks', arguments: {} },
       userCtx,
     );
 
@@ -103,7 +103,7 @@ describe('MCP list_phases tool', () => {
   it('(c) projectId fora do scope → retorna lista vazia (anti enumeration)', async () => {
     const response = await router.dispatch(
       'tools/call',
-      { name: 'list_phases', arguments: { projectId: otherProjectId } },
+      { name: 'list_blocks', arguments: { projectId: otherProjectId } },
       userCtx,
     );
 
@@ -121,7 +121,7 @@ describe('MCP list_phases tool', () => {
   it('(d) cursor invalido → INVALID_PARAMS', async () => {
     const response = await router.dispatch(
       'tools/call',
-      { name: 'list_phases', arguments: { projectId, cursor: 'not-a-bigint' } },
+      { name: 'list_blocks', arguments: { projectId, cursor: 'not-a-bigint' } },
       userCtx,
     );
 
@@ -133,7 +133,7 @@ describe('MCP list_phases tool', () => {
   it('(e) includeMetrics=true — NAO computa metricas (chama findMany normal)', async () => {
     await router.dispatch(
       'tools/call',
-      { name: 'list_phases', arguments: { projectId, includeMetrics: true } },
+      { name: 'list_blocks', arguments: { projectId, includeMetrics: true } },
       userCtx,
     );
 
@@ -145,7 +145,7 @@ describe('MCP list_phases tool', () => {
   it('(f) limit fora de range → INVALID_PARAMS', async () => {
     const response = await router.dispatch(
       'tools/call',
-      { name: 'list_phases', arguments: { projectId, limit: 999 } },
+      { name: 'list_blocks', arguments: { projectId, limit: 999 } },
       userCtx,
     );
 
@@ -157,7 +157,7 @@ describe('MCP list_phases tool', () => {
   it('(g) includeMetrics tipo errado (string) → INVALID_PARAMS', async () => {
     const response = await router.dispatch(
       'tools/call',
-      { name: 'list_phases', arguments: { projectId, includeMetrics: 'true' } },
+      { name: 'list_blocks', arguments: { projectId, includeMetrics: 'true' } },
       userCtx,
     );
 
@@ -174,7 +174,7 @@ describe('MCP list_phases tool', () => {
 
     const response = await router.dispatch(
       'tools/call',
-      { name: 'list_phases', arguments: { projectId } },
+      { name: 'list_blocks', arguments: { projectId } },
       userCtx,
     );
 
@@ -190,7 +190,7 @@ describe('MCP list_phases tool', () => {
   it('cursor valido + limit customizado propagados para findMany', async () => {
     await router.dispatch(
       'tools/call',
-      { name: 'list_phases', arguments: { projectId, cursor: '42', limit: 10 } },
+      { name: 'list_blocks', arguments: { projectId, cursor: '42', limit: 10 } },
       userCtx,
     );
 
