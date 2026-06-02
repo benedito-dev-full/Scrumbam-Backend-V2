@@ -599,9 +599,16 @@ export class ProjectsService implements OnModuleInit {
         }),
         this.resolveFolderIdsForProjects(projectIds),
         // Progresso: total de tarefas por projeto (N+1 ZERO — 1 groupBy em batch).
+        // Conta apenas TASK raiz (idClasse -154, sem pai) — espelha o card que o
+        // board/lista exibe: exclui FASES/blocos (-200) e subtarefas (idPai != null).
         this.prisma.dTask.groupBy({
           by: ['idProject'],
-          where: { idProject: { in: projectIds }, excluido: false },
+          where: {
+            idProject: { in: projectIds },
+            idClasse: BigInt(-154),
+            idPai: null,
+            excluido: false,
+          },
           _count: { chave: true },
         }),
         // Progresso: DTask.idStatus aponta para DTabela (status por projeto).
@@ -625,6 +632,8 @@ export class ProjectsService implements OnModuleInit {
           by: ['idProject'],
           where: {
             idProject: { in: projectIds },
+            idClasse: BigInt(-154),
+            idPai: null,
             idStatus: { in: doneStatusChaves },
             excluido: false,
           },
