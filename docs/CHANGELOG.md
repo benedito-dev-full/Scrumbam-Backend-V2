@@ -12,6 +12,18 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Fixed
+
+- **DVincula↔DProject: FK violada ao criar projeto — DEntidade-espelho (V2 pós-F5, 2026-06-02)** (ADR-V2-058, Score 8.5/10)
+  - Corrige `Foreign key constraint violated: DVincula_idLocEscritu_fkey` em `POST /projects`
+  - Causa-raiz: `DVincula.idLocEscritu`/`idEntidade` têm FK para `DEntidade`, mas projetos gravavam `DProject.chave` (sequências separadas) — quebrava quando IDs não coincidiam; quando coincidiam, apontava para DEntidade aleatória (corrupção silenciosa de RBAC)
+  - Solução (Opção C): cada `DProject` ganha uma DEntidade-espelho `idClasse=-158 PROJECT_REF`; os 4 grupos de vínculo project-scoped (-171/-172/-173 RBAC, -182 team, -183 folder, -188 space-privado) passam a apontar para a chave da espelho (E), nunca para `DProject.chave` (P)
+  - `ProjectRefService` (CommonModule @Global): `ensureEntidadeRef`/`ensureEntidadeRefById`/`resolveEntidadeRef`/`resolveProjectId` + batch, cache LRU dual P↔E (N+1 zero), legacy-safe
+  - 27 call sites migrados P→E; espelho criado via Prisma direto em `$transaction` (Pilar 1 estrutural)
+  - Migration de índices de expressão Json + script de backfill idempotente (dry-run por padrão, detecção de colisão histórica sem reparo automático) + runbook
+  - ZERO tabela/coluna nova (usa `dados` Json + 1 DClasse). Suplanta parcialmente ADR-V2-003/029/FOLDERS-001 no handle de projeto
+  - Tests: `project-ref.service.spec.ts` (6/6 — idempotência, recriação de órfão, resolução P↔E)
+
 ### Added
 
 - **Timer Manual de Tempo por Tarefa — Fase 1 Backend (V2 F5, 2026-06-01)** (Task 57, ADR-V2-057, Score 8.7/10)

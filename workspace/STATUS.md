@@ -1,6 +1,24 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-06-01 (Task 57 Timer — Fase 1 COMPLETA)
+**Ultima atualizacao:** 2026-06-02 (DVincula↔DProject FK fix — ADR-V2-058, Fases 1-4 COMPLETAS)
+
+---
+
+## ✅ DVINCULA↔DPROJECT FK FIX — DENTIDADE-ESPELHO (-158 PROJECT_REF) — COMPLETO (cutover prod pendente)
+
+**Module:** core (transversal: projects, auth, executions, teams, folders, webhooks)
+**Bug:** `Foreign key constraint violated: DVincula_idLocEscritu_fkey` em POST /projects
+**Status:** Fases 1-4 entregues e commitadas. Execução do backfill em produção PENDENTE (runbook).
+**Date:** 2026-06-02
+**Quality:** Fase 1 8.5/10, Fase 2 8.5/10, Fase 3 8.5/10 (gate CEO 8.0)
+**ADR:** ADR-V2-058 (Aceito — ratificado pelo CEO)
+
+- Fase 1: seed -158 PROJECT_REF + ADR-V2-058
+- Fase 2: ProjectRefService + 27 call sites P→E (mata o 500)
+- Fase 3: migration de índices + backfill idempotente (dry-run) + runbook
+- Fase 4: spec do ProjectRefService (6/6) + CHANGELOG + STATUS
+
+**Pendente:** redeploy do backend + execução do backfill em prod (backup→dry-run→revisar suspeitos→--apply), conforme `docs/runbook-backfill-project-ref-entidades.md`.
 
 ---
 
