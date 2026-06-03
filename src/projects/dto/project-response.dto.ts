@@ -148,6 +148,20 @@ export class ProjectResponseDto {
   icon?: string | null;
 
   /**
+   * Categoria do template (catálogo — ADR-V2-061). Lida de `dados.categoria`.
+   *
+   * Relevante para templates -401/-402 no catálogo (`GET /projects?idClasse=-401`),
+   * onde o cliente agrupa por categoria (resposta flat). `null` para projetos
+   * normais sem categoria.
+   */
+  @ApiPropertyOptional({
+    description: 'Categoria do template (dados.categoria). null para projetos sem categoria.',
+    example: 'onboarding',
+    nullable: true,
+  })
+  categoria?: string | null;
+
+  /**
    * Schema versionado das colunas customizaveis da Lista.
    *
    * Lido da coluna dedicada `DProject.tableFields`, nao de `dados`. Para

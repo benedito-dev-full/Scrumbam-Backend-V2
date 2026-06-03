@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -8,6 +9,7 @@ import {
 import { PrismaService } from '../prisma.service';
 import { RoleResolverService } from '../auth/services/role-resolver.service';
 import { ProjectRefService } from '../projects/project-ref.service';
+import { TEMPLATE_CLASSES } from '../projects/constants/template-classes.const';
 import { CreateFolderDto } from './dto/create-folder.dto';
 import { UpdateFolderDto } from './dto/update-folder.dto';
 import { FolderResponseDto, ListFolderResponseDto } from './dto/folder-response.dto';
@@ -17,6 +19,13 @@ const ID_CLASSE_FOLDER = BigInt(-155);
 const ID_CLASSE_FOLDER_PROJECT_LINK = BigInt(-183);
 const ID_CLASSE_SCRUMBAN_PROJECT = BigInt(-153);
 const ID_CLASSE_ORGANIZATION = BigInt(-152);
+/**
+ * `TEMPLATE_CLASSES` (ADR-V2-061) é importado da fonte única
+ * `../projects/constants/template-classes.const`. Templates -401/-402 são
+ * excluídos das listagens de "trabalho" (um template org-scoped jamais deve
+ * aparecer como projeto na visão de pastas/limbo) e bloqueados no write-path de
+ * `moveProject`. Catálogo de templates é exclusivo de GET /projects.
+ */
 
 /**
  * Service de Folders (DEntidade idClasse=-155).
@@ -304,9 +313,7 @@ export class FoldersService {
 
     // ADR-V2-058: idEntidade do -183 é a chave da espelho (-158) — reverter
     // E→P para obter os DProject.chave reais (legados: passthrough P).
-    const projectIdStrs = await this.projectRef.refsToProjectIds(
-      vinculos.map((v) => v.idEntidade),
-    );
+    const projectIdStrs = await this.projectRef.refsToProjectIds(vinculos.map((v) => v.idEntidade));
     const projectIds = projectIdStrs.map((s) => BigInt(s));
 
     if (projectIds.length === 0) {
@@ -349,11 +356,13 @@ export class FoldersService {
     const orgId = BigInt(organizationId);
     await this.requireOrgAccess(orgId, userEntidadeId);
 
-    // 1) Buscar todos projects da org
+    // 1) Buscar todos projects da org (ADR-V2-061: templates -401/-402 são
+    //    excluídos — não são "trabalho" e não devem aparecer no limbo).
     const projects = await this.prisma.dProject.findMany({
       where: {
         idEstab: orgId,
         excluido: false,
+        idClasse: { notIn: TEMPLATE_CLASSES },
       },
       select: { chave: true, nome: true, idEstab: true },
       orderBy: { nome: 'asc' },
@@ -428,10 +437,18 @@ export class FoldersService {
 
     const project = await this.prisma.dProject.findFirst({
       where: { chave: pId, excluido: false },
-      select: { chave: true, idEstab: true },
+      select: { chave: true, idEstab: true, idClasse: true },
     });
     if (!project) {
       throw new NotFoundException(`Project ${projectId} não encontrado`);
+    }
+
+    // Templates -401/-402 (ADR-V2-061) NÃO são projetos de "trabalho" e jamais
+    // podem ser movidos para uma pasta (write-path guard, espelha a blindagem
+    // de leitura em listProjects/listUnassigned). Reaproveita o findFirst acima
+    // (sem N+1 novo).
+    if (TEMPLATE_CLASSES.includes(project.idClasse)) {
+      throw new BadRequestException('Templates não podem ser movidos para pastas');
     }
 
     // Project DEVE pertencer à mesma org da pasta (sem cross-tenant)

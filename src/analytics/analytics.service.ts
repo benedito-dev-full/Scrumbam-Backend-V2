@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
+import { TEMPLATE_CLASSES } from '../projects/constants/template-classes.const';
 import { TtlCacheService } from '../common/cache/ttl-cache.service';
 import { CycleTimeService } from '../flow-metrics/services/cycle-time.service';
 import { LeadTimeService } from '../flow-metrics/services/lead-time.service';
@@ -70,23 +71,16 @@ export class AnalyticsService {
         this.periodResolver.resolve(periodB),
       ];
 
-      const [
-        cycleTimeA,
-        cycleTimeB,
-        leadTimeA,
-        leadTimeB,
-        throughputA,
-        throughputB,
-        wipAge,
-      ] = await Promise.all([
-        this.cycleTimeService.calculate(projectId, periodA),
-        this.cycleTimeService.calculate(projectId, periodB),
-        this.leadTimeService.calculate(projectId, periodA),
-        this.leadTimeService.calculate(projectId, periodB),
-        this.throughputService.calculate(projectId, granularity, periodA),
-        this.throughputService.calculate(projectId, granularity, periodB),
-        this.wipAgeService.calculate(projectId),
-      ]);
+      const [cycleTimeA, cycleTimeB, leadTimeA, leadTimeB, throughputA, throughputB, wipAge] =
+        await Promise.all([
+          this.cycleTimeService.calculate(projectId, periodA),
+          this.cycleTimeService.calculate(projectId, periodB),
+          this.leadTimeService.calculate(projectId, periodA),
+          this.leadTimeService.calculate(projectId, periodB),
+          this.throughputService.calculate(projectId, granularity, periodA),
+          this.throughputService.calculate(projectId, granularity, periodB),
+          this.wipAgeService.calculate(projectId),
+        ]);
 
       const delta = {
         cycleTimeAvgPct: this.safeDeltaPct(cycleTimeA.avg, cycleTimeB.avg),
@@ -139,7 +133,9 @@ export class AnalyticsService {
 
     return this.cache.getOrSet(key, CAPACITY_CACHE_TTL_MS, async () => {
       const projects = await this.prisma.dProject.findMany({
-        where: { idEstab: orgId, excluido: false },
+        // Templates -401/-402 (ADR-V2-061) NÃO entram no forecast de capacidade —
+        // não são projetos de "trabalho" e não têm throughput histórico real.
+        where: { idEstab: orgId, excluido: false, idClasse: { notIn: TEMPLATE_CLASSES } },
         select: { chave: true, nome: true },
         orderBy: { chave: 'asc' },
         take: limitProjects,
@@ -273,7 +269,10 @@ export class AnalyticsService {
     return message.toLowerCase().includes('hist');
   }
 
-  private safeDeltaPct(previous: number | null | undefined, current: number | null | undefined): number | null {
+  private safeDeltaPct(
+    previous: number | null | undefined,
+    current: number | null | undefined,
+  ): number | null {
     if (previous === null || previous === undefined || current === null || current === undefined) {
       return null;
     }
@@ -284,7 +283,11 @@ export class AnalyticsService {
   }
 
   private buildCompareSummary(
-    delta: { cycleTimeAvgPct: number | null; leadTimeAvgPct: number | null; throughputPct: number | null },
+    delta: {
+      cycleTimeAvgPct: number | null;
+      leadTimeAvgPct: number | null;
+      throughputPct: number | null;
+    },
     throughputA: number,
     throughputB: number,
   ): string[] {
@@ -322,13 +325,17 @@ export class AnalyticsService {
     leadTimeAvgHours: number | null;
     wipTotal: number;
   }): string {
-    const cycle = snapshot.cycleTimeAvgHours === null
-      ? 'sem amostra suficiente de cycle time'
-      : `cycle time medio de ${snapshot.cycleTimeAvgHours}h`;
+    const cycle =
+      snapshot.cycleTimeAvgHours === null
+        ? 'sem amostra suficiente de cycle time'
+        : `cycle time medio de ${snapshot.cycleTimeAvgHours}h`;
     return `O projeto concluiu ${snapshot.throughputTotal} tasks no periodo, com ${snapshot.wipTotal} tasks em WIP atual e ${cycle}.`;
   }
 
-  private buildHighlights(snapshot: { throughputTotal: number; cycleTimeAvgHours: number | null }): string[] {
+  private buildHighlights(snapshot: {
+    throughputTotal: number;
+    cycleTimeAvgHours: number | null;
+  }): string[] {
     const highlights = [`${snapshot.throughputTotal} tasks concluidas no periodo.`];
     if (snapshot.cycleTimeAvgHours !== null) {
       highlights.push(`Cycle time medio observado: ${snapshot.cycleTimeAvgHours}h.`);
@@ -336,7 +343,11 @@ export class AnalyticsService {
     return highlights;
   }
 
-  private buildRisks(snapshot: { throughputTotal: number; leadTimeAvgHours: number | null; wipTotal: number }): string[] {
+  private buildRisks(snapshot: {
+    throughputTotal: number;
+    leadTimeAvgHours: number | null;
+    wipTotal: number;
+  }): string[] {
     const risks: string[] = [];
     if (snapshot.throughputTotal === 0) {
       risks.push('Sem conclusoes no periodo; validar bloqueios e priorizacao.');
@@ -347,7 +358,9 @@ export class AnalyticsService {
     if (snapshot.leadTimeAvgHours !== null && snapshot.leadTimeAvgHours > 168) {
       risks.push('Lead time medio acima de 7 dias; revisar fluxo de espera.');
     }
-    return risks.length > 0 ? risks : ['Nenhum risco quantitativo relevante nas metricas disponiveis.'];
+    return risks.length > 0
+      ? risks
+      : ['Nenhum risco quantitativo relevante nas metricas disponiveis.'];
   }
 
   private buildNextActions(snapshot: { throughputTotal: number; wipTotal: number }): string[] {

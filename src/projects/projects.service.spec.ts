@@ -2130,4 +2130,134 @@ describe('ProjectsService', () => {
       );
     });
   });
+
+  describe('findMany() — catálogo de templates + blindagem (Sub-fase 5, ADR-V2-061)', () => {
+    /** Template org-scoped (-401, org 50) com categoria. */
+    const tplListOrg = {
+      ...mockProject,
+      chave: BigInt(401),
+      idClasse: BigInt(-401),
+      idEstab: BigInt(50),
+      nome: 'Onboarding',
+      dados: { prefix: 'DEV', categoria: 'onboarding', icon: 'rocket' },
+    };
+    /** Template GLOBAL (-401, idEstab NULL) — visível a todas as orgs. */
+    const tplListGlobal = {
+      ...mockProject,
+      chave: BigInt(402),
+      idClasse: BigInt(-401),
+      idEstab: null,
+      nome: 'CRM padrão',
+      dados: { prefix: 'DEV', categoria: 'vendas' },
+    };
+    /** Template space-template (-402). */
+    const tplSpace = {
+      ...mockProject,
+      chave: BigInt(403),
+      idClasse: BigInt(-402),
+      idEstab: BigInt(50),
+      nome: 'Workspace molde',
+      dados: { prefix: 'DEV', categoria: 'geral' },
+    };
+
+    it('catálogo idClasse=-401: bypassa DVincula e retorna org-scoped + GLOBAL (idEstab NULL), com categoria exposta', async () => {
+      prisma.dProject.findMany.mockResolvedValue([tplListGlobal, tplListOrg]);
+
+      const result = await service.findMany(BigInt(100), {
+        idClasse: '-401',
+        organizationId: '50',
+      });
+
+      // Caminho de catálogo NÃO consulta membership (DVincula) — 1 query só.
+      expect(prisma.dVincula.findMany).not.toHaveBeenCalled();
+      expect(prisma.dProject.findMany).toHaveBeenCalledTimes(1);
+
+      const call = prisma.dProject.findMany.mock.calls[0][0];
+      expect(call.where.idClasse).toEqual(BigInt(-401));
+      // Acesso: org ativa OU global (idEstab NULL).
+      expect(call.where.OR).toEqual([{ idEstab: BigInt(50) }, { idEstab: null }]);
+
+      expect(result.items).toHaveLength(2);
+      const ids = result.items.map((i) => i.id);
+      expect(ids).toContain('401');
+      expect(ids).toContain('402');
+      // categoria (dados.categoria) exposta flat no item — front agrupa.
+      const org = result.items.find((i) => i.id === '401');
+      expect(org?.categoria).toBe('onboarding');
+      const global = result.items.find((i) => i.id === '402');
+      expect(global?.categoria).toBe('vendas');
+    });
+
+    it('catálogo idClasse=-401 com categoria filtra via dados->>categoria (JSON-path)', async () => {
+      prisma.dProject.findMany.mockResolvedValue([tplListOrg]);
+
+      const result = await service.findMany(BigInt(100), {
+        idClasse: '-401',
+        organizationId: '50',
+        categoria: 'onboarding',
+      });
+
+      const call = prisma.dProject.findMany.mock.calls[0][0];
+      expect(call.where.dados).toEqual({ path: ['categoria'], equals: 'onboarding' });
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].categoria).toBe('onboarding');
+    });
+
+    it('catálogo idClasse=-402 lista space-templates', async () => {
+      prisma.dProject.findMany.mockResolvedValue([tplSpace]);
+
+      const result = await service.findMany(BigInt(100), {
+        idClasse: '-402',
+        organizationId: '50',
+      });
+
+      const call = prisma.dProject.findMany.mock.calls[0][0];
+      expect(call.where.idClasse).toEqual(BigInt(-402));
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].id).toBe('403');
+      expect(result.items[0].idClasse).toBe('-402');
+    });
+
+    it('blindagem: GET /projects sem idClasse NÃO traz templates -401/-402 (notIn no where final)', async () => {
+      // Usuário é MANAGER de um projeto normal (1) e criador de um template (401):
+      // ambos têm DVincula -171. A blindagem exclui o template via notIn.
+      prisma.dVincula.findMany
+        .mockResolvedValueOnce([{ idLocEscritu: BigInt(1) }, { idLocEscritu: BigInt(401) }]) // roles
+        .mockResolvedValueOnce([]); // team links batch
+      // O DProject.findMany final aplica o notIn — só o projeto normal volta.
+      prisma.dProject.findMany.mockResolvedValue([mockProject]);
+      prisma.dVincula.groupBy.mockResolvedValue([
+        { idLocEscritu: BigInt(1), _count: { chave: 1 } },
+      ]);
+      prisma.dTask.groupBy.mockResolvedValue([]); // progresso total
+      prisma.dTabela.findMany.mockResolvedValue([]); // status DONE/VALIDATED
+
+      const result = await service.findMany(BigInt(100), {});
+
+      // where do findMany final exclui -401/-402.
+      const finalCall = prisma.dProject.findMany.mock.calls[0][0];
+      expect(finalCall.where.idClasse).toEqual({ notIn: [BigInt(-401), BigInt(-402)] });
+      // O projeto normal aparece; o template não (mock retornou só o normal).
+      expect(result.items.map((i) => i.id)).toEqual(['1']);
+    });
+
+    it('blindagem: Camada A (espaços públicos) sem idClasse também exclui templates', async () => {
+      // user é membro da org (Camada A) — público da org carrega DProjects, mas
+      // a query de públicos deve excluir -401/-402 quando idClasse ausente.
+      prisma.dVincula.findMany.mockResolvedValue([]); // sem vínculos explícitos
+      prisma.dVincula.findFirst.mockResolvedValue({ idClasse: BigInt(-162) }); // membro org
+      prisma.dProject.findMany
+        .mockResolvedValueOnce([{ chave: BigInt(7) }]) // Camada A: públicos (select chave)
+        .mockResolvedValueOnce([{ ...mockProject, chave: BigInt(7), idClasse: BigInt(-350) }]); // final
+      prisma.dVincula.groupBy.mockResolvedValue([]);
+      prisma.dTask.groupBy.mockResolvedValue([]); // progresso total
+      prisma.dTabela.findMany.mockResolvedValue([]); // status DONE/VALIDATED
+
+      await service.findMany(BigInt(100), { organizationId: '50' });
+
+      // 1ª chamada de dProject.findMany = Camada A (públicos): notIn templates.
+      const publicCall = prisma.dProject.findMany.mock.calls[0][0];
+      expect(publicCall.where.idClasse).toEqual({ notIn: [BigInt(-401), BigInt(-402)] });
+    });
+  });
 });

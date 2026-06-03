@@ -142,7 +142,8 @@ export class ProjectsController {
     name: 'idClasse',
     required: false,
     description:
-      'Filtra por idClasse do DProject. Ex: -350=SPACE, -351=FOLDER, -352=LIST, -353=DOC.',
+      'Filtra por idClasse do DProject. Ex: -350=SPACE, -351=FOLDER, -352=LIST, -353=DOC. ' +
+      '-401/-402 ativam o CATÁLOGO de templates (visibilidade dedicada: org ativa + globais).',
     example: '-350',
   })
   @ApiQuery({
@@ -158,6 +159,13 @@ export class ProjectsController {
       'Filtra pelo campo privado. true=apenas privados, false=apenas públicos. Ausente=sem filtro.',
     example: 'false',
   })
+  @ApiQuery({
+    name: 'categoria',
+    required: false,
+    description:
+      'Catálogo de templates: filtra por dados.categoria. Só aplica quando idClasse é -401/-402.',
+    example: 'onboarding',
+  })
   @ApiResponse({ status: 200, description: 'Lista de projetos', type: ListProjectResponseDto })
   async findMany(
     @Request() req: JwtRequest,
@@ -171,6 +179,7 @@ export class ProjectsController {
       idClasse: query.idClasse,
       idPai: query.idPai,
       privado: query.privado,
+      categoria: query.categoria,
     });
   }
 

@@ -1,8 +1,14 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { FoldersService } from './folders.service';
 import { PrismaService } from '../prisma.service';
 import { RoleResolverService } from '../auth/services/role-resolver.service';
+import { ProjectRefService } from '../projects/project-ref.service';
 
 /**
  * Unit tests para FoldersService (ADR-V2-FOLDERS-001).
@@ -34,6 +40,12 @@ describe('FoldersService', () => {
     $transaction: jest.Mock;
   };
   let roleResolver: { getOrgRole: jest.Mock };
+  let projectRef: {
+    ensureEntidadeRefById: jest.Mock;
+    resolveEntidadeRef: jest.Mock;
+    refsToProjectIds: jest.Mock;
+    resolveEntidadeRefs: jest.Mock;
+  };
 
   const ORG_ID = BigInt(100);
   const USER_ID = BigInt(150);
@@ -49,7 +61,8 @@ describe('FoldersService', () => {
   };
 
   const mockOrgEntity = { chave: ORG_ID };
-  const mockProjectRow = { chave: PROJECT_ID, idEstab: ORG_ID };
+  // Projeto de "trabalho" (-153 SCRUMBAN_PROJECT) — não-template.
+  const mockProjectRow = { chave: PROJECT_ID, idEstab: ORG_ID, idClasse: BigInt(-153) };
 
   beforeEach(async () => {
     prisma = {
@@ -74,12 +87,29 @@ describe('FoldersService', () => {
       $transaction: jest.fn(async (cb: (tx: typeof prisma) => Promise<unknown>) => cb(prisma)),
     };
     roleResolver = { getOrgRole: jest.fn() };
+    projectRef = {
+      // ADR-V2-058: passthrough E==P (legado) nos mocks — a espelho (-158) tem a
+      // mesma chave do DProject nos cenários de teste, então cada handle ecoa o id.
+      ensureEntidadeRefById: jest.fn().mockImplementation((id: bigint) => Promise.resolve(id)),
+      resolveEntidadeRef: jest.fn().mockImplementation((id: bigint) => Promise.resolve(id)),
+      refsToProjectIds: jest
+        .fn()
+        .mockImplementation((handles: (bigint | null)[]) =>
+          Promise.resolve(handles.filter((h): h is bigint => h !== null).map((h) => h.toString())),
+        ),
+      resolveEntidadeRefs: jest
+        .fn()
+        .mockImplementation((ids: bigint[]) =>
+          Promise.resolve(new Map(ids.map((id) => [id.toString(), id]))),
+        ),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         FoldersService,
         { provide: PrismaService, useValue: prisma },
         { provide: RoleResolverService, useValue: roleResolver },
+        { provide: ProjectRefService, useValue: projectRef },
       ],
     }).compile();
 
@@ -360,6 +390,23 @@ describe('FoldersService', () => {
       prisma.dProject.findFirst.mockResolvedValue(null);
 
       await expect(service.moveProject('500', '999', USER_ID)).rejects.toThrow(NotFoundException);
+    });
+
+    it('lança BadRequestException se project é template (-401/-402) e NÃO cria vínculo (ADR-V2-061)', async () => {
+      prisma.dEntidade.findFirst.mockResolvedValue(mockFolderRow);
+      roleResolver.getOrgRole.mockResolvedValue('ADMIN');
+      // Template org-scoped (-401 TEMPLATE_LIST) — mesma org da pasta.
+      prisma.dProject.findFirst.mockResolvedValue({
+        chave: PROJECT_ID,
+        idEstab: ORG_ID,
+        idClasse: BigInt(-401),
+      });
+
+      await expect(service.moveProject('500', '300', USER_ID)).rejects.toThrow(BadRequestException);
+      // Guard dispara ANTES de qualquer escrita do vínculo -183.
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.dVincula.create).not.toHaveBeenCalled();
+      expect(prisma.dVincula.updateMany).not.toHaveBeenCalled();
     });
   });
 

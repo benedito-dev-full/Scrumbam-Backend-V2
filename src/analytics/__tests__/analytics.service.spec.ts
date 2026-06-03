@@ -30,7 +30,14 @@ describe('AnalyticsService', () => {
     cycleTime = {
       calculate: jest
         .fn()
-        .mockResolvedValueOnce({ avg: 0, p50: null, p75: null, p90: null, samples: 0, unit: 'hours' })
+        .mockResolvedValueOnce({
+          avg: 0,
+          p50: null,
+          p75: null,
+          p90: null,
+          samples: 0,
+          unit: 'hours',
+        })
         .mockResolvedValueOnce({ avg: 5, p50: 5, p75: 6, p90: 7, samples: 2, unit: 'hours' }),
     };
     leadTime = {
@@ -43,10 +50,16 @@ describe('AnalyticsService', () => {
       calculate: jest
         .fn()
         .mockResolvedValueOnce({ series: [], total: 0, granularity: 'week' })
-        .mockResolvedValueOnce({ series: [{ date: '2026-05-05', count: 4 }], total: 4, granularity: 'week' }),
+        .mockResolvedValueOnce({
+          series: [{ date: '2026-05-05', count: 4 }],
+          total: 4,
+          granularity: 'week',
+        }),
     };
     wipAge = {
-      calculate: jest.fn().mockResolvedValue({ byStatus: [], total: 3, calculatedAt: '2026-05-10T12:00:00.000Z' }),
+      calculate: jest
+        .fn()
+        .mockResolvedValue({ byStatus: [], total: 3, calculatedAt: '2026-05-10T12:00:00.000Z' }),
     };
     forecast = {
       forecast: jest.fn(),
@@ -143,12 +156,46 @@ describe('AnalyticsService', () => {
 
     expect(prisma.dProject.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { idEstab: BigInt(10), excluido: false },
+        where: {
+          idEstab: BigInt(10),
+          excluido: false,
+          // ADR-V2-061: templates -401/-402 NÃO entram no forecast de capacidade.
+          idClasse: { notIn: [BigInt(-401), BigInt(-402)] },
+        },
         take: 25,
       }),
     );
     expect(forecast.forecast).toHaveBeenCalledTimes(2);
-    expect(result.totals).toEqual({ tasksRemaining: 7, p50Approx: 10, p75Approx: 20, p95Approx: 40 });
+    expect(result.totals).toEqual({
+      tasksRemaining: 7,
+      p50Approx: 10,
+      p75Approx: 20,
+      p95Approx: 40,
+    });
+  });
+
+  it('capacityForecast NAO inclui templates -401/-402 no forecast (ADR-V2-061)', async () => {
+    // O mock retorna apenas projetos de trabalho — assertamos que o filtro
+    // `notIn` foi aplicado na query (templates filtrados no banco, não em memória).
+    prisma.dProject.findMany.mockResolvedValue([{ chave: BigInt(1), nome: 'Projeto real' }]);
+    prisma.dTask.count.mockResolvedValue(0);
+    forecast.forecast.mockResolvedValue({
+      p50: 1,
+      p75: 2,
+      p85: 3,
+      p95: 4,
+      unit: 'days',
+      tasksRemaining: 1,
+      iterations: 1000,
+      source: 'rolling-window',
+    });
+
+    const result = await service.capacityForecast(BigInt(10), { limitProjects: 25 });
+
+    const callArg = prisma.dProject.findMany.mock.calls[0][0];
+    expect(callArg.where.idClasse).toEqual({ notIn: [BigInt(-401), BigInt(-402)] });
+    // Garante que nenhum projeto-template foi processado pelo forecast.
+    expect(result.projects.map((p) => p.projectId)).toEqual(['1']);
   });
 
   it('capacityForecast nao derruba tudo quando um projeto tem historico insuficiente', async () => {
@@ -171,8 +218,14 @@ describe('AnalyticsService', () => {
   it('stakeholderReport gera texto deterministico a partir de metricas', async () => {
     cycleTime.calculate.mockReset().mockResolvedValue({ avg: 12, samples: 2, unit: 'hours' });
     leadTime.calculate.mockReset().mockResolvedValue({ avg: 30, samples: 2, unit: 'hours' });
-    throughput.calculate.mockReset().mockResolvedValue({ series: [], total: 4, granularity: 'week' });
-    wipAge.calculate.mockResolvedValue({ byStatus: [], total: 5, calculatedAt: '2026-05-10T12:00:00.000Z' });
+    throughput.calculate
+      .mockReset()
+      .mockResolvedValue({ series: [], total: 4, granularity: 'week' });
+    wipAge.calculate.mockResolvedValue({
+      byStatus: [],
+      total: 5,
+      calculatedAt: '2026-05-10T12:00:00.000Z',
+    });
 
     const result = await service.stakeholderReport('10', projectId, { period: 'week' });
 

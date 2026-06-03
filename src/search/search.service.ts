@@ -4,6 +4,7 @@
 
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
+import { TEMPLATE_CLASSES } from '../projects/constants/template-classes.const';
 import {
   SearchResponseDto,
   TaskSearchResultDto,
@@ -14,6 +15,13 @@ import {
 
 /** idClasse DEntidade USER no V2 (seed F1 — ADR-V2-002). */
 const ID_CLASSE_USER = BigInt(-150);
+
+/**
+ * `TEMPLATE_CLASSES` (ADR-V2-061) é importado da fonte única
+ * `../projects/constants/template-classes.const`. Templates -401/-402 são
+ * excluídos da busca — não são projetos de "trabalho" navegáveis; o catálogo
+ * é exclusivo de GET /projects.
+ */
 
 /** idClasses DVincula para org RBAC (seed F1) — membros da organização. */
 const ID_CLASSE_ORG_ADMIN = BigInt(-161);
@@ -215,6 +223,8 @@ export class SearchService {
       where: {
         excluido: false,
         idEstab: BigInt(organizationId),
+        // ADR-V2-061: templates -401/-402 não aparecem na busca de projetos.
+        idClasse: { notIn: TEMPLATE_CLASSES },
         ...(cursor ? { chave: { gt: BigInt(cursor) } } : {}),
         // DA-1: ILIKE em nome
         nome: { contains: q, mode: 'insensitive' },
@@ -336,12 +346,9 @@ export class SearchService {
     limits: { taskLimit: number; projectLimit: number; peopleLimit: number },
   ): SearchCursorsDto {
     return {
-      task:
-        tasks.length === limits.taskLimit ? tasks[tasks.length - 1].chave : null,
-      project:
-        projects.length === limits.projectLimit ? projects[projects.length - 1].chave : null,
-      person:
-        people.length === limits.peopleLimit ? people[people.length - 1].chave : null,
+      task: tasks.length === limits.taskLimit ? tasks[tasks.length - 1].chave : null,
+      project: projects.length === limits.projectLimit ? projects[projects.length - 1].chave : null,
+      person: people.length === limits.peopleLimit ? people[people.length - 1].chave : null,
     };
   }
 

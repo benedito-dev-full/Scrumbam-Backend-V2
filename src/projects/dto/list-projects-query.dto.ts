@@ -112,6 +112,24 @@ export class ListProjectsQueryDto {
   idPai?: string;
 
   /**
+   * Filtra templates por categoria (catálogo — ADR-V2-061).
+   *
+   * Só tem efeito no caminho de catálogo, quando `idClasse` é um template
+   * (-401 TEMPLATE_LIST ou -402 TEMPLATE_SPACE). Filtra por `dados.categoria`
+   * (string exata). Ausente = retorna todas as categorias do catálogo.
+   *
+   * @example `GET /projects?idClasse=-401&categoria=onboarding`
+   */
+  @ApiPropertyOptional({
+    description:
+      'Filtra templates por categoria (dados.categoria). Só aplica quando idClasse é -401/-402.',
+    example: 'onboarding',
+  })
+  @IsOptional()
+  @IsString()
+  categoria?: string;
+
+  /**
    * Filtra projetos pelo campo `privado` do DProject (ADR-V2-051 §4).
    *
    * - `true` → apenas projetos marcados como privados

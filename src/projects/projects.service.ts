@@ -29,6 +29,11 @@ import { validateNoCycle } from './utils/anti-cycle.util';
 import { isProjectPubliclyVisible, listPublicSpaceProjectIds } from './utils/public-space.util';
 import { validateTableFields } from '../tasks/table-fields/table-fields.validator';
 import { mergeBuiltinColumns } from '../tasks/table-fields/builtin-columns';
+import {
+  ID_CLASSE_TEMPLATE_LIST,
+  ID_CLASSE_TEMPLATE_SPACE,
+  TEMPLATE_CLASSES,
+} from './constants/template-classes.const';
 
 /** idClasse de DProject no seed F1 (classes canônicas V2). Fallback legado. */
 const ID_CLASSE_PROJECT = BigInt(-153); // SCRUMBAN_PROJECT (seed classes.seed.ts)
@@ -47,18 +52,12 @@ const ID_CLASSE_FOLDER = BigInt(-351);
 const ID_CLASSE_LIST = BigInt(-352);
 
 /**
- * idClasse DProject TEMPLATE_LIST (ADR-V2-061 — feature Templates). Marca um nó
- * como molde de Lista. No clone (`cloneTree` com `fromTemplate=true`) é
- * remapeado para -352 LIST ANTES do seed/`if LIST` (sem isso a List nasceria
- * sem statuses V3). Catálogo via `GET /projects?idClasse=-401` (Sub-fase 5).
+ * DClasses de template (`ID_CLASSE_TEMPLATE_LIST` -401, `ID_CLASSE_TEMPLATE_SPACE`
+ * -402) e o conjunto `TEMPLATE_CLASSES` são importados da fonte única
+ * `./constants/template-classes.const` (ADR-V2-061). `ID_CLASSE_TEMPLATE_LIST`
+ * é remapeado para -352 LIST no clone (`cloneTree` com `fromTemplate=true`)
+ * ANTES do seed/`if LIST`; `ID_CLASSE_TEMPLATE_SPACE` para -350 SPACE.
  */
-const ID_CLASSE_TEMPLATE_LIST = BigInt(-401);
-
-/**
- * idClasse DProject TEMPLATE_SPACE (ADR-V2-061 — feature Templates). Marca um nó
- * como molde de Espaço. No clone é remapeado para -350 SPACE.
- */
-const ID_CLASSE_TEMPLATE_SPACE = BigInt(-402);
 
 /**
  * Mapa de remap de DClasse template→real aplicado a CADA nó do clone quando
@@ -72,6 +71,18 @@ const TEMPLATE_CLASS_REMAP: ReadonlyMap<bigint, bigint> = new Map([
   [ID_CLASSE_TEMPLATE_LIST, ID_CLASSE_LIST],
   [ID_CLASSE_TEMPLATE_SPACE, ID_CLASSE_SPACE],
 ]);
+
+/**
+ * `true` quando o `idClasse` (string do query) referencia um template
+ * (-401/-402). No catálogo de templates o caminho de visibilidade é dedicado
+ * (bypassa DVincula/público); nas demais listagens os templates são excluídos.
+ */
+function isTemplateClasseFilter(idClasse: string | undefined): boolean {
+  if (idClasse === undefined) return false;
+  if (!/^-?\d+$/.test(idClasse)) return false;
+  const v = BigInt(idClasse);
+  return v === ID_CLASSE_TEMPLATE_LIST || v === ID_CLASSE_TEMPLATE_SPACE;
+}
 
 /**
  * idClasse de DTask FASE/BLOCO (ADR-V2-050). Estrutura organizacional dentro
@@ -185,6 +196,15 @@ export interface FindManyProjectsOptions {
    * Quando ausente, não filtra por pai (retorna raízes e filhos).
    */
   idPai?: string;
+
+  /**
+   * Filtra templates por `dados.categoria` (catálogo — ADR-V2-061).
+   *
+   * Só tem efeito quando `idClasse` é um template (-401/-402); ignorado nas
+   * listagens normais de projeto. Filtra por igualdade exata do JSON-path
+   * `dados->>'categoria'`.
+   */
+  categoria?: string;
 
   /**
    * Filtra pelo campo `DProject.privado`.
@@ -558,7 +578,7 @@ export class ProjectsService implements OnModuleInit {
     userEntidadeId: bigint,
     opts: FindManyProjectsOptions = {},
   ): Promise<ListProjectResponseDto> {
-    const { cursor, teamId, organizationId, idClasse, idPai, privado } = opts;
+    const { cursor, teamId, organizationId, idClasse, idPai, privado, categoria } = opts;
     const take = Math.min(opts.limit ?? 20, 100);
 
     // ADR-V2-042: organizationId vira filtro de tenant via DProject.idEstab.
@@ -571,6 +591,21 @@ export class ProjectsService implements OnModuleInit {
         return { items: [], pagination: { hasMore: false, nextCursor: null } };
       }
       orgIdBig = BigInt(organizationId);
+    }
+
+    // CATÁLOGO de templates (ADR-V2-061, Sub-fase 5): quando o filtro `idClasse`
+    // é um template (-401/-402) a visibilidade é DIFERENTE da normal — um
+    // template é listável se for da org ativa (org-scoped) OU GLOBAL (idEstab
+    // NULL, criado por seed/plataforma e visível a todas as orgs). Templates
+    // globais NÃO têm DVincula, então a união Camada A/B não os enxergaria —
+    // caminho dedicado que bypassa membership/público. Qualquer membro da org
+    // pode VER o catálogo (não exige MANAGER — usar ≠ gerenciar).
+    if (isTemplateClasseFilter(idClasse)) {
+      return this.listTemplates(BigInt(idClasse as string), orgIdBig, {
+        cursor,
+        take,
+        categoria,
+      });
     }
 
     // 1) Se filtrado por team, pré-resolver os projetos do time.
@@ -669,7 +704,12 @@ export class ProjectsService implements OnModuleInit {
             privado: false,
             excluido: false,
             ...(teamProjectIds ? { chave: { in: teamProjectIds } } : {}),
-            ...(idClasse !== undefined ? { idClasse: BigInt(idClasse) } : {}),
+            // ADR-V2-061 (blindagem): templates -401/-402 nunca entram nas
+            // visões normais. Quando `idClasse` é específico, o filtro abaixo já
+            // exclui templates; quando ausente, excluímos explicitamente.
+            ...(idClasse !== undefined
+              ? { idClasse: BigInt(idClasse) }
+              : { idClasse: { notIn: TEMPLATE_CLASSES } }),
             ...(idPai !== undefined ? { idPai: BigInt(idPai) } : {}),
           },
           select: { chave: true },
@@ -727,7 +767,12 @@ export class ProjectsService implements OnModuleInit {
             excluido: false,
             ...(orgIdBig !== undefined ? { idEstab: orgIdBig } : {}),
             // ADR-V2-051: filtro hierárquico por tipo (SPACE/FOLDER/LIST/DOC)
-            ...(idClasse !== undefined ? { idClasse: BigInt(idClasse) } : {}),
+            // ADR-V2-061 (blindagem): quando `idClasse` é específico, o filtro
+            // já exclui templates -401/-402; quando ausente, excluímos
+            // explicitamente (o caminho de catálogo retornou antes deste ponto).
+            ...(idClasse !== undefined
+              ? { idClasse: BigInt(idClasse) }
+              : { idClasse: { notIn: TEMPLATE_CLASSES } }),
             // ADR-V2-051: filtro por pai direto (ex: FOLDERs de um SPACE)
             ...(idPai !== undefined ? { idPai: BigInt(idPai) } : {}),
             // C5: filtro de privacidade — apenas quando explicitamente enviado
@@ -848,6 +893,71 @@ export class ProjectsService implements OnModuleInit {
 
     const nextCursor = hasMore ? projectIds[projectIds.length - 1].toString() : null;
 
+    return { items, pagination: { hasMore, nextCursor } };
+  }
+
+  /**
+   * Lista o catálogo de templates (-401 TEMPLATE_LIST / -402 TEMPLATE_SPACE).
+   *
+   * Visibilidade DEDICADA, diferente da listagem normal (ADR-V2-061, Sub-fase 5):
+   * um template é listável se for da org ativa (`idEstab = orgAtiva`, org-scoped)
+   * **OU** GLOBAL (`idEstab IS NULL`, criado por seed/plataforma e visível a
+   * todas as orgs). Templates globais NÃO têm DVincula, então a união
+   * membership/público de `findMany` não os enxergaria — por isso o caminho é
+   * direto (bypassa Camada A/B). Qualquer membro autenticado com org ativa pode
+   * VER o catálogo (não exige MANAGER — usar um template ≠ gerenciá-lo).
+   *
+   * Resposta FLAT (Pilar 2): cada item já expõe `dados.categoria` em
+   * `ProjectResponseDto.categoria` — o agrupamento por categoria é feito no
+   * cliente. Uma única query (N+1 ZERO) ordenada de forma estável por
+   * `idClasse, chave desc` com cursor.
+   *
+   * @param templateClasse - -401 ou -402 (validado pelo caller via `isTemplateClasseFilter`)
+   * @param orgIdBig - org ativa (BigInt). Ausente = sem org → retorna apenas globais
+   * @param opts - cursor/take/categoria
+   * @returns Lista paginada de templates (flat, com `categoria`)
+   *
+   * @see findMany — encaminha o caminho de catálogo para cá
+   * @see ADR-V2-061 — alcance dois níveis (global idEstab NULL + por-org)
+   */
+  private async listTemplates(
+    templateClasse: bigint,
+    orgIdBig: bigint | undefined,
+    opts: { cursor?: string; take: number; categoria?: string },
+  ): Promise<ListProjectResponseDto> {
+    const { cursor, take, categoria } = opts;
+
+    // Acesso: template da org ativa OU global (idEstab NULL). Sem org ativa,
+    // só globais são visíveis (caller MCP/cross-org — raro para catálogo).
+    const orgScope =
+      orgIdBig !== undefined ? [{ idEstab: orgIdBig }, { idEstab: null }] : [{ idEstab: null }];
+
+    const projects = await this.prisma.dProject.findMany({
+      where: {
+        idClasse: templateClasse,
+        excluido: false,
+        OR: orgScope,
+        // Filtro opcional por categoria via JSON-path dados->>'categoria'.
+        ...(categoria !== undefined ? { dados: { path: ['categoria'], equals: categoria } } : {}),
+        // Cursor: chave estritamente menor (ordenação desc por chave).
+        ...(cursor ? { chave: { lt: BigInt(cursor) } } : {}),
+      },
+      // Ordenação estável: por chave desc (cursor-friendly). O agrupamento por
+      // categoria é responsabilidade do cliente (resposta flat).
+      orderBy: { chave: 'desc' },
+      take: take + 1,
+      select: PROJECT_RESPONSE_SELECT,
+    });
+
+    const hasMore = projects.length > take;
+    const page = hasMore ? projects.slice(0, take) : projects;
+
+    // Templates não têm membros/team/folder/progresso relevantes para o catálogo.
+    // Não emitimos myRole (catálogo é read-only; materialização exige RBAC no
+    // destino, validada em createFromTemplate).
+    const items = page.map((p) => this.buildResponse(p, 0, null, null, undefined, undefined, null));
+
+    const nextCursor = hasMore ? page[page.length - 1].chave.toString() : null;
     return { items, pagination: { hasMore, nextCursor } };
   }
 
@@ -2812,6 +2922,9 @@ export class ProjectsService implements OnModuleInit {
       privado: project.privado ?? false,
       color: (dados?.color as string | null) ?? null,
       icon: (dados?.icon as string | null) ?? null,
+      // ADR-V2-061: categoria do catálogo de templates (dados.categoria).
+      // Presente para qualquer projeto que a tenha; relevante para -401/-402.
+      categoria: (dados?.categoria as string | null | undefined) ?? null,
       tableFields:
         project.idClasse === ID_CLASSE_LIST
           ? mergeBuiltinColumns(project.tableFields)
