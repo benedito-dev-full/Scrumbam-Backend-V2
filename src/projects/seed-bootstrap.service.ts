@@ -17,9 +17,6 @@ const STATUS_V3_DEFAULTS: Array<{ idClasse: bigint; nome: string; codigo: string
   { idClasse: BigInt(-449), nome: 'VALIDATED', codigo: 'VALIDATED' },
 ];
 
-/** idClasse DTabela para Sprint (seed F1). */
-const ID_CLASSE_SPRINT = BigInt(-400);
-
 /**
  * Priorities V3 padrão para seed de projetos.
  * idClasses -421..-424 (seed F1 — DClasses canônicas V2).
@@ -40,7 +37,6 @@ const PRIORITY_DEFAULTS: Array<{ idClasse: bigint; nome: string; codigo: string 
  * Cria os dados padrão de um novo projeto dentro de uma transaction:
  * - 9 statuses V3 (DTabela -441 a -449, dEntidadeId=projectId)
  * - 4 priorities (DTabela -421 a -424, dEntidadeId=projectId)
- * - 1 Sprint default "Sprint 1" (DTabela -400, dEntidadeId=projectId)
  *
  * Chamado dentro de ProjectsService.create() via transaction.
  * Idempotente em duas camadas:
@@ -60,7 +56,7 @@ export class SeedBootstrapService {
   /**
    * Semeia dados padrão do projeto na transaction fornecida.
    *
-   * Cria 9 statuses V3 + 4 priorities + 1 sprint default.
+   * Cria 9 statuses V3 + 4 priorities.
    * Idempotente por INBOX como sentinela; priorities têm idempotência
    * própria (lookup por `idClasse + dEntidadeId`).
    *
@@ -103,21 +99,9 @@ export class SeedBootstrapService {
         });
         created++;
       }
-
-      // Criar Sprint 1 default
-      await tx.dTabela.create({
-        data: {
-          idClasse: ID_CLASSE_SPRINT,
-          nome: 'Sprint 1',
-          codigo: 'SPRINT_1',
-          dEntidadeId: projectId,
-          metaDados: { isDefault: true, order: 1 } as Prisma.InputJsonValue,
-        },
-      });
-      created++;
     } else {
       this.logger.debug(
-        `seedProject: statuses+sprint já existem para projectId=${projectId} — pulando criação base`,
+        `seedProject: statuses já existem para projectId=${projectId} — pulando criação base`,
       );
     }
 
@@ -128,7 +112,7 @@ export class SeedBootstrapService {
     if (created > 0) {
       this.logger.log(
         `seedProject: ${created} registros criados para projectId=${projectId}` +
-          ` (${existingInbox ? 'apenas priorities backfill' : '9 statuses + 1 sprint + ' + prioritiesCreated + ' priorities'})`,
+          ` (${existingInbox ? 'apenas priorities backfill' : '9 statuses + ' + prioritiesCreated + ' priorities'})`,
       );
     }
 

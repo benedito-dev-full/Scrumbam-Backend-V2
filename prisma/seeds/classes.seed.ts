@@ -98,10 +98,11 @@ function esp(
  *   4. DProject — hierarquia Space/Folder/List — 3 (ADR-V2-051).
  *      (+3 SPACE, FOLDER, LIST).
  *   5. DPedido — 4 (EXECUTION + EXEC_LOW/MED/HIGH para Pilar 1 / F6).
- *   6. DTabela principal — 36 (SPRINT, PRIORITY, TASK_TYPE, STATUS V3,
+ *   6. DTabela principal — 35 (PRIORITY, TASK_TYPE, STATUS V3,
  *      CHANNEL, WEBHOOK, API_KEY, MCP_KEY, INSTALL_TOKEN, PAIRING_TOKEN,
  *      ISSUE_COUNTER, DOC).
  *      GAP-04 (+1 DOC).
+ *      ADR-V2-060 (-1 SPRINT — hard delete; range -400..-419 liberado).
  *   7. DEvento — 16 (AUDIT_GENERIC, NOTIFICATION, WEBHOOK_ATTEMPT,
  *      AGENT_HEARTBEAT, TELEGRAM_*, MCP_CALL, EXECUTION_LOG, audit logs,
  *      INVITE_LIFECYCLE, AGENT_SESSION_CREATED, AGENT_SESSION_RESUMED).
@@ -113,10 +114,11 @@ function esp(
  *      INVITE_TOKEN, INVITE_STATUS_*).
  *      ADR-V2-028 (+5 INVITE_TOKEN, INVITE_STATUS_PENDING/ACCEPTED/EXPIRED/REVOKED).
  *
- * Soma: 9 + 15 + 1 + 3 + 4 + 36 + 16 + 21 = 105.
- * Com GAP-COMMENT: +1 = 106.
- * Com Frente B Nexus IA (+1 GEMINI_API_KEY, +1 AI_CHAT_MESSAGE): +2 = 108.
+ * Soma: 9 + 15 + 1 + 3 + 4 + 35 + 16 + 21 = 104.
+ * Com GAP-COMMENT: +1 = 105.
+ * Com Frente B Nexus IA (+1 GEMINI_API_KEY, +1 AI_CHAT_MESSAGE): +2 = 107.
  * (DEntidade subiu de 8 para 9 com ADR-V2-058 PROJECT_REF -158.)
+ * (ADR-V2-060: SPRINT -400 removido — item 6 caiu de 36 para 35.)
  */
 const classesEspecificas: DClasseSeed[] = [
   // === DEntidade — sub-tipos de Pessoa (5) + DProject/DTask (2) + FOLDER (1) + PROJECT_REF (1) ===
@@ -203,7 +205,7 @@ const classesEspecificas: DClasseSeed[] = [
 
   // === DTabela — lookups e folhas runtime principais (32) ===
   // Filhos de TABELAS (-51) ou STATUS (-52) conforme plano-mestre §3.2
-  esp(-400, 'SPRINT', 'Sprint (agrupador)', -51, true),
+  // SPRINT (-400) REMOVIDO (ADR-V2-060 — hard delete de Sprint; range -400..-419 liberado).
   esp(-420, 'PRIORITY', 'Priority (agrupador)', -51, true),
   esp(-421, 'HIGH', 'Priority HIGH', -420),
   esp(-422, 'MEDIUM', 'Priority MEDIUM', -420),

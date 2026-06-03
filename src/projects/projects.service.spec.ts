@@ -148,7 +148,7 @@ describe('ProjectsService', () => {
   });
 
   describe('create()', () => {
-    it('deve criar LIST (idClasse=-352) + DVincula MANAGER + seed statuses + sprint em transaction', async () => {
+    it('deve criar LIST (idClasse=-352) + DVincula MANAGER + seed statuses em transaction', async () => {
       // Arrange — projeto do tipo LIST: mock retorna idClasse=-352 para que a
       // condição `proj.idClasse === ID_CLASSE_LIST` no service seja verdadeira
       // e seedBootstrap.seedProject seja chamado.
@@ -191,7 +191,7 @@ describe('ProjectsService', () => {
     });
 
     it('deve criar SPACE (idClasse=-350) sem chamar seedBootstrap', async () => {
-      // SPACE é contêiner estrutural — NÃO deve receber seed de statuses/sprint.
+      // SPACE é contêiner estrutural — NÃO deve receber seed de statuses.
       // Mock retorna idClasse=-350 → condição ID_CLASSE_LIST falha → seedBootstrap não chamado.
       const spaceProject = { ...mockProject, idClasse: BigInt(-350) };
       prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
@@ -211,7 +211,7 @@ describe('ProjectsService', () => {
     });
 
     it('deve criar FOLDER (idClasse=-351) sem chamar seedBootstrap', async () => {
-      // FOLDER é contêiner estrutural — NÃO deve receber seed de statuses/sprint.
+      // FOLDER é contêiner estrutural — NÃO deve receber seed de statuses.
       // Mock retorna idClasse=-351 → condição ID_CLASSE_LIST falha → seedBootstrap não chamado.
       const folderProject = { ...mockProject, idClasse: BigInt(-351) };
       prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
