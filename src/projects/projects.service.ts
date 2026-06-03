@@ -151,6 +151,54 @@ export interface FindManyProjectsOptions {
 }
 
 /**
+ * Opções do motor de deep-clone `cloneTree` (extraído de `duplicate`).
+ *
+ * Forward-compat para a feature Templates (Sub-fases 3/4 — ver
+ * `workspace/plans/plan-templates-feature.md`). TODAS as opções estão
+ * declaradas aqui, mas nesta Sub-fase 2 (refactor de não-regressão) APENAS
+ * `novoNome`, `novoIcone` e `idPaiDestino` têm efeito — e os defaults de cada
+ * uma reproduzem EXATAMENTE o comportamento atual de `duplicate()`.
+ *
+ * `includeTasks` está declarada (default `false`) mas NÃO é exercida ainda — a
+ * cópia das tasks de trabalho (-154) é responsabilidade da Sub-fase 3. Não há
+ * branch morto: o seam (`copyTasks`) será plugado no ponto-âncora dentro de
+ * `cloneTree` quando a Sub-fase 3 chegar.
+ */
+interface CloneTreeOptions {
+  /**
+   * Copiar as tasks de trabalho (-154) além dos blocos/fases (-200).
+   *
+   * Default `false` = comportamento atual (esqueleto sem tasks). O caminho
+   * `true` é implementado pela Sub-fase 3 (Templates). Declarado aqui apenas
+   * como contrato forward-compat.
+   */
+  includeTasks?: boolean;
+
+  /**
+   * Sobrescreve o nome da raiz. Se ausente, usa `${node.nome} (cópia)` —
+   * comportamento idêntico ao `duplicate()` atual.
+   */
+  novoNome?: string;
+
+  /**
+   * Sobrescreve `dados.icon` da raiz. Se ausente, não toca o ícone herdado —
+   * comportamento idêntico ao `duplicate()` atual.
+   */
+  novoIcone?: string;
+
+  /**
+   * idPai onde a raiz da cópia nasce.
+   *
+   * - `'SAME'` (default) → raiz mantém o `idPai` original (nasce ao lado),
+   *   exatamente como o `duplicate()` atual.
+   * - `bigint | null` → raiz usa esse idPai (plumbing para Sub-fase 4). A
+   *   validação de destino/tenant fica para a Sub-fase 4; aqui só o default
+   *   `'SAME'` é exercitado.
+   */
+  idPaiDestino?: bigint | null | 'SAME';
+}
+
+/**
  * Service de projetos (DProject).
  *
  * Implementa CRUD completo de projetos usando Prisma direto em transactions.
@@ -383,7 +431,15 @@ export class ProjectsService implements OnModuleInit {
     }
 
     // O criador recebe DVincula -171 (MANAGER) na transação acima.
-    return this.buildResponse(project, 1, dto.teamId ?? null, null, undefined, undefined, 'MANAGER');
+    return this.buildResponse(
+      project,
+      1,
+      dto.teamId ?? null,
+      null,
+      undefined,
+      undefined,
+      'MANAGER',
+    );
   }
 
   /**
@@ -1403,11 +1459,59 @@ export class ProjectsService implements OnModuleInit {
    *
    * @see delete — fonte do padrão de CTE recursiva sobre a hierarquia
    * @see create — fonte do padrão espelho + DVincula MANAGER + seed
+   * @see cloneTree — motor genérico de deep-clone (esta rota é um caso particular)
    */
   async duplicate(
     id: string,
     userEntidadeId: bigint,
     organizationId?: string,
+  ): Promise<ProjectResponseDto> {
+    // Casca fina sobre o motor genérico: todos os defaults de `cloneTree`
+    // reproduzem EXATAMENTE o comportamento legado de duplicação (raiz nasce
+    // ao lado com sufixo " (cópia)", sem tasks de trabalho, idEstab cru, gate
+    // tenant-rígido). Zero regressão — ver suíte `duplicate()` em
+    // projects.service.spec.ts.
+    return this.cloneTree(id, userEntidadeId, organizationId, {});
+  }
+
+  /**
+   * Motor genérico de deep-clone de uma subárvore DProject (Space/Folder/List)
+   * + seus blocos/fases (-200). Extraído de `duplicate()` na Sub-fase 2 da
+   * feature Templates como seam para as Sub-fases 3/4 (ver
+   * `workspace/plans/plan-templates-feature.md`).
+   *
+   * Comportamento (com `opts = {}`, idêntico ao `duplicate()` legado):
+   *  - Coleta a subárvore via CTE recursiva (pai antes do filho por `depth`).
+   *  - A raiz nasce ao lado (mesmo `idPai`) com nome `${node.nome} (cópia)`;
+   *    descendentes mantêm nome e apontam para a cópia do seu pai.
+   *  - Cada nova List (-352) recebe seed de statuses V3 + cópia dos blocos -200.
+   *  - O executante vira MANAGER de cada novo DProject (espelho -158 + DVincula
+   *    -171).
+   *  - Emite `project.created` (com `duplicatedFrom`) APÓS persistir.
+   *
+   * Opções (`CloneTreeOptions`) — nesta Sub-fase 2 só `novoNome`, `novoIcone` e
+   * `idPaiDestino` têm efeito, todas com default que reproduz o comportamento
+   * legado. `includeTasks` é forward-compat (Sub-fase 3) e ainda não é exercida.
+   *
+   * Permissão: exige MANAGER (ação estrutural — mesma regra de update/delete).
+   *
+   * @param id - Chave BigInt do projeto raiz a clonar (string)
+   * @param userEntidadeId - Chave BigInt do MANAGER executante
+   * @param organizationId - (Opcional) DEntidade.chave da org ativa (tenant isolation)
+   * @param opts - Opções do clone (ver {@link CloneTreeOptions})
+   * @returns ProjectResponseDto do novo projeto raiz (com myRole=MANAGER)
+   *
+   * @throws {NotFoundException} Se projeto não encontrado ou tenant mismatch
+   * @throws {ForbiddenException} Se não é MANAGER
+   *
+   * @see duplicate — rota pública que delega a este motor com defaults
+   * @see copyPhases — cópia dos blocos -200 (retorna o phaseIdMap p/ Sub-fase 3)
+   */
+  private async cloneTree(
+    id: string,
+    userEntidadeId: bigint,
+    organizationId: string | undefined,
+    opts: CloneTreeOptions,
   ): Promise<ProjectResponseDto> {
     const projectId = BigInt(id);
 
@@ -1465,6 +1569,11 @@ export class ProjectsService implements OnModuleInit {
 
     const rootNode = nodes[0];
 
+    // Default 'SAME' → raiz nasce ao lado (idPai original). Plumbing para a
+    // Sub-fase 4: bigint|null faz a raiz nascer sob um destino (não exercitado
+    // aqui além do default).
+    const idPaiDestino = opts.idPaiDestino ?? 'SAME';
+
     const created = await this.prisma.$transaction(async (tx) => {
       // Mapa old DProject.chave (P) → new DProject.chave (P).
       const idMap = new Map<string, bigint>();
@@ -1472,16 +1581,19 @@ export class ProjectsService implements OnModuleInit {
       for (const node of nodes) {
         const isRoot = node.chave === rootNode.chave;
 
-        // idPai novo: raiz mantém o pai original (nasce ao lado); descendentes
-        // apontam para a cópia do seu pai (já criada por causa do ORDER BY depth).
+        // idPai novo: raiz mantém o pai original (nasce ao lado, default 'SAME')
+        // ou nasce sob `idPaiDestino` quando fornecido; descendentes apontam
+        // para a cópia do seu pai (já criada por causa do ORDER BY depth).
         let newIdPai: bigint | null;
         if (isRoot) {
-          newIdPai = node.idPai;
+          newIdPai = idPaiDestino === 'SAME' ? node.idPai : idPaiDestino;
         } else {
           newIdPai = node.idPai ? (idMap.get(node.idPai.toString()) ?? null) : null;
         }
 
-        const nome = isRoot ? `${node.nome} (cópia)` : node.nome;
+        // Nome da raiz: override explícito (`novoNome`) ou o sufixo legado
+        // " (cópia)". Descendentes mantêm o nome original.
+        const nome = isRoot ? (opts.novoNome ?? `${node.nome} (cópia)`) : node.nome;
 
         // Slug é UNIQUE case-insensitive (lower(dados->>'slug')). Copiar `dados`
         // cru arrastaria o slug do original → colisão (500). Derivamos um slug
@@ -1490,6 +1602,13 @@ export class ProjectsService implements OnModuleInit {
         const dadosOriginais = (node.dados ?? {}) as Record<string, unknown>;
         const slug = await this.deriveUniqueSlug(tx, nome);
         const dadosCopia: Record<string, unknown> = { ...dadosOriginais, slug };
+
+        // Ícone: só a raiz é afetada e somente quando `novoIcone` é fornecido.
+        // Sem ele, o ícone herdado (se houver em `dados`) é preservado intacto —
+        // comportamento legado.
+        if (isRoot && opts.novoIcone !== undefined) {
+          dadosCopia.icon = opts.novoIcone;
+        }
 
         const novo = await tx.dProject.create({
           data: {
@@ -1519,7 +1638,17 @@ export class ProjectsService implements OnModuleInit {
           await this.seedBootstrap.seedProject(tx, refId);
 
           // Copiar as FASES/BLOCOS (-200) da List original para a nova.
-          await this.copyPhases(tx, node.chave, novo.chave);
+          // `copyPhases` retorna o phaseIdMap (old -200 → new -200); o caminho
+          // `duplicate` (includeTasks=false) ignora o retorno — prep de seam.
+          const phaseIdMap = await this.copyPhases(tx, node.chave, novo.chave);
+          void phaseIdMap;
+
+          // ┌─ SEAM Sub-fase 3 (Templates) ────────────────────────────────────
+          // │ Quando `opts.includeTasks === true`, a cópia das tasks de
+          // │ trabalho (-154) será plugada AQUI, consumindo `phaseIdMap` para
+          // │ remapear `dados.idBloco`. Nesta Sub-fase 2 nada é feito (sem
+          // │ branch morto): `includeTasks` ainda não altera o fluxo.
+          // └──────────────────────────────────────────────────────────────────
         }
       }
 
@@ -1556,17 +1685,21 @@ export class ProjectsService implements OnModuleInit {
   /**
    * Copia as FASES/BLOCOS (-200) de uma List para outra, preservando a
    * hierarquia de sub-fases (remapeando `idPai`). Tasks de trabalho (-154) NÃO
-   * são copiadas. Chamado dentro da transaction de `duplicate`.
+   * são copiadas. Chamado dentro da transaction de `cloneTree`.
    *
    * @param tx - Prisma transaction client
    * @param sourceProjectId - Chave BigInt da List de origem (P)
    * @param targetProjectId - Chave BigInt da List de destino (P)
+   * @returns Mapa `old -200 chave (string)` → `new -200 chave (bigint)`
+   *   (`phaseIdMap`). Consumido pelo `copyTasks` na Sub-fase 3 (Templates) para
+   *   remapear `dados.idBloco` das tasks clonadas. O caminho `duplicate`
+   *   (Sub-fase 2) ignora o retorno. Mapa vazio quando a List não tem fases.
    */
   private async copyPhases(
     tx: Prisma.TransactionClient,
     sourceProjectId: bigint,
     targetProjectId: bigint,
-  ): Promise<void> {
+  ): Promise<Map<string, bigint>> {
     // Buscar fases ordenadas por hierarquia: raízes (idPai null) antes das
     // sub-fases. `chave ASC` como desempate estável dentro de cada nível.
     const phases = await tx.dTask.findMany({
@@ -1585,17 +1718,15 @@ export class ProjectsService implements OnModuleInit {
       orderBy: [{ idPai: { sort: 'asc', nulls: 'first' } }, { chave: 'asc' }],
     });
 
-    if (phases.length === 0) return;
-
     const phaseIdMap = new Map<string, bigint>();
+
+    if (phases.length === 0) return phaseIdMap;
 
     for (const phase of phases) {
       // Sub-fase: pai já foi copiado (ordem nulls-first + chave asc garante isso
       // para árvores bem-formadas). Se o pai não estiver no mapa (caso raro de
       // ordenação não-topológica), cria como raiz para não perder o bloco.
-      const newIdPai = phase.idPai
-        ? (phaseIdMap.get(phase.idPai.toString()) ?? null)
-        : null;
+      const newIdPai = phase.idPai ? (phaseIdMap.get(phase.idPai.toString()) ?? null) : null;
 
       const novaFase = await tx.dTask.create({
         data: {
@@ -1611,6 +1742,8 @@ export class ProjectsService implements OnModuleInit {
 
       phaseIdMap.set(phase.chave.toString(), novaFase.chave);
     }
+
+    return phaseIdMap;
   }
 
   /**
