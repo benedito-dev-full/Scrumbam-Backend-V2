@@ -43,6 +43,13 @@ const ID_CLASSE_FOLDER = BigInt(-351);
  */
 const ID_CLASSE_LIST = BigInt(-352);
 
+/**
+ * idClasse de DTask FASE/BLOCO (ADR-V2-050). Estrutura organizacional dentro
+ * de uma List (pode ter sub-fases via idPai). Copiada na duplicação de projeto;
+ * tasks de trabalho (-154) NÃO são copiadas.
+ */
+const ID_CLASSE_PHASE = BigInt(-200);
+
 /** idClasse de DVincula MANAGER de projeto (seed F1). */
 const ID_CLASSE_PROJECT_MANAGER = BigInt(-171);
 const ID_CLASSE_PROJECT_MEMBER = BigInt(-172);
@@ -1367,6 +1374,235 @@ export class ProjectsService implements OnModuleInit {
         notifications: 0,
       },
     };
+  }
+
+  /**
+   * Duplica um projeto (Space/Folder/List) como esqueleto: copia a hierarquia
+   * inteira abaixo do nó + os BLOCOS/FASES (-200), mas NÃO as tasks de
+   * trabalho (-154) (decisão do produto 2026-06-03).
+   *
+   * Comportamento:
+   *  - A cópia nasce no MESMO nível do original (mesmo `idPai`); o nó raiz da
+   *    cópia ganha o sufixo " (cópia)" no nome. Descendentes mantêm os nomes.
+   *  - Cada nova List recebe o seed de statuses V3 (igual ao `create`) — sem
+   *    isso a List copiada não funcionaria.
+   *  - O executante vira MANAGER de cada novo DProject (DVincula -171), via a
+   *    DEntidade-espelho (-158) — mesmo padrão de `create`.
+   *  - Fases (-200) de cada List são copiadas preservando a hierarquia de
+   *    sub-fases (remapeando `idPai`). Vínculos de team (-182) NÃO são copiados.
+   *
+   * Permissão: exige MANAGER (ação estrutural — mesma regra de update/delete).
+   *
+   * @param id - Chave BigInt do projeto raiz a duplicar (string)
+   * @param userEntidadeId - Chave BigInt do MANAGER executante
+   * @param organizationId - (Opcional) DEntidade.chave da org ativa (tenant isolation)
+   * @returns ProjectResponseDto do novo projeto raiz (com myRole=MANAGER)
+   *
+   * @throws {NotFoundException} Se projeto não encontrado ou tenant mismatch
+   * @throws {ForbiddenException} Se não é MANAGER
+   *
+   * @see delete — fonte do padrão de CTE recursiva sobre a hierarquia
+   * @see create — fonte do padrão espelho + DVincula MANAGER + seed
+   */
+  async duplicate(
+    id: string,
+    userEntidadeId: bigint,
+    organizationId?: string,
+  ): Promise<ProjectResponseDto> {
+    const projectId = BigInt(id);
+
+    // ADR-V2-042: tenant check ANTES de qualquer query/RBAC.
+    if (organizationId && /^-?\d+$/.test(organizationId)) {
+      const orgIdBig = BigInt(organizationId);
+      const peek = await this.prisma.dProject.findFirst({
+        where: { chave: projectId, excluido: false },
+        select: { idEstab: true },
+      });
+      if (!peek || peek.idEstab === null || peek.idEstab !== orgIdBig) {
+        throw new NotFoundException(`Projeto ${id} não encontrado`);
+      }
+    }
+
+    await this.requireManagerRole(projectId, userEntidadeId, organizationId);
+
+    // Coletar a subárvore completa (raiz + descendentes) com os campos a copiar.
+    // ORDER BY profundidade garante que o pai é criado antes do filho — assim o
+    // remapeamento de idPai sempre encontra o novo id do pai já materializado.
+    const nodes = await this.prisma.$queryRaw<
+      Array<{
+        chave: bigint;
+        idClasse: bigint;
+        idPai: bigint | null;
+        nome: string;
+        descricao: string | null;
+        idEstab: bigint | null;
+        repoUrl: string | null;
+        privado: boolean;
+        dados: unknown;
+        tableFields: unknown;
+        depth: number;
+      }>
+    >`
+      WITH RECURSIVE tree AS (
+        SELECT p.*, 0 AS depth FROM "DProject" p
+        WHERE p."chave" = ${projectId} AND p."excluido" = false
+
+        UNION ALL
+
+        SELECT c.*, t.depth + 1 FROM "DProject" c
+        INNER JOIN tree t ON c."idPai" = t."chave"
+        WHERE c."excluido" = false
+      )
+      SELECT "chave", "idClasse", "idPai", "nome", "descricao", "idEstab",
+             "repoUrl", "privado", "dados", "tableFields", depth
+      FROM tree
+      ORDER BY depth ASC, "chave" ASC
+    `;
+
+    if (nodes.length === 0) {
+      throw new NotFoundException(`Projeto ${id} não encontrado`);
+    }
+
+    const rootNode = nodes[0];
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      // Mapa old DProject.chave (P) → new DProject.chave (P).
+      const idMap = new Map<string, bigint>();
+
+      for (const node of nodes) {
+        const isRoot = node.chave === rootNode.chave;
+
+        // idPai novo: raiz mantém o pai original (nasce ao lado); descendentes
+        // apontam para a cópia do seu pai (já criada por causa do ORDER BY depth).
+        let newIdPai: bigint | null;
+        if (isRoot) {
+          newIdPai = node.idPai;
+        } else {
+          newIdPai = node.idPai ? (idMap.get(node.idPai.toString()) ?? null) : null;
+        }
+
+        const nome = isRoot ? `${node.nome} (cópia)` : node.nome;
+
+        const novo = await tx.dProject.create({
+          data: {
+            idClasse: node.idClasse,
+            nome,
+            ...(node.descricao ? { descricao: node.descricao } : {}),
+            ...(node.idEstab !== null ? { idEstab: node.idEstab } : {}),
+            ...(node.repoUrl ? { repoUrl: node.repoUrl } : {}),
+            ...(newIdPai !== null ? { idPai: newIdPai } : {}),
+            privado: node.privado,
+            dados: (node.dados ?? {}) as Prisma.InputJsonValue,
+            ...(node.tableFields !== null
+              ? { tableFields: node.tableFields as Prisma.InputJsonValue }
+              : {}),
+          },
+          select: { chave: true, idClasse: true, nome: true, idEstab: true, dados: true },
+        });
+
+        idMap.set(node.chave.toString(), novo.chave);
+
+        // Espelho (-158) + DVincula MANAGER (-171) — executante vira dono.
+        const refId = await this.projectRef.ensureEntidadeRef(tx, novo);
+        await this.projectMembers.createManagerLink(tx, refId, userEntidadeId);
+
+        // Seed de statuses V3 apenas para List (-352) — Space/Folder não têm.
+        if (novo.idClasse === ID_CLASSE_LIST) {
+          await this.seedBootstrap.seedProject(tx, refId);
+
+          // Copiar as FASES/BLOCOS (-200) da List original para a nova.
+          await this.copyPhases(tx, node.chave, novo.chave);
+        }
+      }
+
+      const newRootId = idMap.get(rootNode.chave.toString());
+      if (!newRootId) {
+        // Defesa: a raiz é sempre o 1º item — não deve acontecer.
+        throw new BadRequestException('Falha ao duplicar: raiz não materializada');
+      }
+      return tx.dProject.findFirstOrThrow({
+        where: { chave: newRootId },
+        select: PROJECT_RESPONSE_SELECT,
+      });
+    });
+
+    await this.eventProducer.addInternalEvent(
+      'project.created',
+      {
+        projectId: created.chave.toString(),
+        nome: created.nome,
+        prefix: (created.dados as Record<string, unknown> | null)?.prefix ?? 'DEV',
+        userId: userEntidadeId.toString(),
+        duplicatedFrom: id,
+      },
+      this.correlationIdService.getOrGenerate(),
+      { source: ProjectsService.name },
+    );
+
+    this.logger.log(`Projeto ${projectId} duplicado por user=${userEntidadeId} → ${created.chave}`);
+
+    // Executante é MANAGER da cópia (criou os DVincula -171 acima).
+    return this.buildResponse(created, 1, null, null, undefined, undefined, 'MANAGER');
+  }
+
+  /**
+   * Copia as FASES/BLOCOS (-200) de uma List para outra, preservando a
+   * hierarquia de sub-fases (remapeando `idPai`). Tasks de trabalho (-154) NÃO
+   * são copiadas. Chamado dentro da transaction de `duplicate`.
+   *
+   * @param tx - Prisma transaction client
+   * @param sourceProjectId - Chave BigInt da List de origem (P)
+   * @param targetProjectId - Chave BigInt da List de destino (P)
+   */
+  private async copyPhases(
+    tx: Prisma.TransactionClient,
+    sourceProjectId: bigint,
+    targetProjectId: bigint,
+  ): Promise<void> {
+    // Buscar fases ordenadas por hierarquia: raízes (idPai null) antes das
+    // sub-fases. `chave ASC` como desempate estável dentro de cada nível.
+    const phases = await tx.dTask.findMany({
+      where: {
+        idProject: sourceProjectId,
+        idClasse: ID_CLASSE_PHASE,
+        excluido: false,
+      },
+      select: {
+        chave: true,
+        idPai: true,
+        nome: true,
+        descricao: true,
+        dados: true,
+      },
+      orderBy: [{ idPai: { sort: 'asc', nulls: 'first' } }, { chave: 'asc' }],
+    });
+
+    if (phases.length === 0) return;
+
+    const phaseIdMap = new Map<string, bigint>();
+
+    for (const phase of phases) {
+      // Sub-fase: pai já foi copiado (ordem nulls-first + chave asc garante isso
+      // para árvores bem-formadas). Se o pai não estiver no mapa (caso raro de
+      // ordenação não-topológica), cria como raiz para não perder o bloco.
+      const newIdPai = phase.idPai
+        ? (phaseIdMap.get(phase.idPai.toString()) ?? null)
+        : null;
+
+      const novaFase = await tx.dTask.create({
+        data: {
+          idClasse: ID_CLASSE_PHASE,
+          idProject: targetProjectId,
+          nome: phase.nome,
+          ...(phase.descricao ? { descricao: phase.descricao } : {}),
+          ...(newIdPai !== null ? { idPai: newIdPai } : {}),
+          dados: (phase.dados ?? {}) as Prisma.InputJsonValue,
+        },
+        select: { chave: true },
+      });
+
+      phaseIdMap.set(phase.chave.toString(), novaFase.chave);
+    }
   }
 
   /**

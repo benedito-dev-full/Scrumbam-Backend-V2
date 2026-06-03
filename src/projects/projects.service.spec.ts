@@ -1311,4 +1311,121 @@ describe('ProjectsService', () => {
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
   });
+
+  describe('duplicate()', () => {
+    /** Monta o mock da transaction usada por duplicate(): create + dTask + findFirstOrThrow. */
+    function mockDuplicateTx(createdRoot: Record<string, unknown>, phases: unknown[] = []) {
+      const dProjectCreate = jest.fn().mockImplementation(({ data }: { data: { nome: string } }) =>
+        Promise.resolve({
+          chave: BigInt(900),
+          idClasse: BigInt(-352),
+          nome: data.nome,
+          idEstab: null,
+          dados: {},
+        }),
+      );
+      const dTaskFindMany = jest.fn().mockResolvedValue(phases);
+      const dTaskCreate = jest.fn().mockResolvedValue({ chave: BigInt(800) });
+      const findFirstOrThrow = jest.fn().mockResolvedValue(createdRoot);
+
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
+        fn({
+          dProject: { create: dProjectCreate, findFirstOrThrow },
+          dTask: { findMany: dTaskFindMany, create: dTaskCreate },
+        }),
+      );
+
+      return { dProjectCreate, dTaskFindMany, dTaskCreate, findFirstOrThrow };
+    }
+
+    it('duplica uma List: nó raiz ganha sufixo "(cópia)", re-seed e MANAGER', async () => {
+      prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(1) }); // requireManagerRole MANAGER
+      // CTE de coleta: uma única List (sem filhos).
+      prisma.$queryRaw.mockResolvedValue([
+        {
+          chave: BigInt(1),
+          idClasse: BigInt(-352),
+          idPai: null,
+          nome: 'Social Media',
+          descricao: null,
+          idEstab: null,
+          repoUrl: null,
+          privado: false,
+          dados: { prefix: 'DEV' },
+          tableFields: null,
+          depth: 0,
+        },
+      ]);
+      const createdRoot = { ...mockProject, chave: BigInt(900), idClasse: BigInt(-352), nome: 'Social Media (cópia)' };
+      const { dProjectCreate } = mockDuplicateTx(createdRoot);
+
+      const result = await service.duplicate('1', BigInt(100));
+
+      // Nó raiz criado com sufixo "(cópia)".
+      expect(dProjectCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ nome: 'Social Media (cópia)', idClasse: BigInt(-352) }),
+        }),
+      );
+      // List nova recebe seed de statuses V3 e MANAGER do executante.
+      expect(seedBootstrap.seedProject).toHaveBeenCalledTimes(1);
+      expect(projectMembers.createManagerLink).toHaveBeenCalledTimes(1);
+      // Audit project.created com duplicatedFrom.
+      expect(eventProducer.addInternalEvent).toHaveBeenCalledWith(
+        'project.created',
+        expect.objectContaining({ duplicatedFrom: '1' }),
+        'test-corr-id',
+        expect.objectContaining({ source: 'ProjectsService' }),
+      );
+      // Resposta com myRole/canManage de MANAGER.
+      expect(result.myRole).toBe('MANAGER');
+      expect(result.canManage).toBe(true);
+    });
+
+    it('copia as FASES (-200) da List original para a nova', async () => {
+      prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(1) });
+      prisma.$queryRaw.mockResolvedValue([
+        {
+          chave: BigInt(1),
+          idClasse: BigInt(-352),
+          idPai: null,
+          nome: 'Lista',
+          descricao: null,
+          idEstab: null,
+          repoUrl: null,
+          privado: false,
+          dados: {},
+          tableFields: null,
+          depth: 0,
+        },
+      ]);
+      const createdRoot = { ...mockProject, chave: BigInt(900), idClasse: BigInt(-352), nome: 'Lista (cópia)' };
+      const { dTaskCreate } = mockDuplicateTx(createdRoot, [
+        { chave: BigInt(50), idPai: null, nome: 'Fase 1', descricao: null, dados: { kind: 'phase' } },
+      ]);
+
+      await service.duplicate('1', BigInt(100));
+
+      // A fase foi recriada na List nova (idProject = nova chave).
+      expect(dTaskCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            idClasse: BigInt(-200),
+            idProject: BigInt(900),
+            nome: 'Fase 1',
+          }),
+        }),
+      );
+    });
+
+    it('REJEITA duplicação quando não é MANAGER nem ORG_ADMIN (ForbiddenException)', async () => {
+      prisma.dProject.findFirst.mockResolvedValueOnce({ idEstab: BigInt(50) }); // tenant peek
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce(null) // sem MANAGER -171
+        .mockResolvedValueOnce(null); // sem ORG_ADMIN -161
+
+      await expect(service.duplicate('1', BigInt(999), '50')).rejects.toThrow(ForbiddenException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+  });
 });

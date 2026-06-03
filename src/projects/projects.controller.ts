@@ -237,6 +237,30 @@ export class ProjectsController {
   }
 
   /**
+   * Duplica o projeto como esqueleto (MANAGER).
+   *
+   * Copia a hierarquia inteira abaixo do nó (Space→Folders→Lists ou
+   * Folder→Lists) + os BLOCOS/FASES de cada List, mas NÃO as tasks de
+   * trabalho. A cópia nasce no mesmo nível, com sufixo " (cópia)" no nome do
+   * nó raiz.
+   *
+   * @param id - ID do projeto a duplicar
+   * @returns ProjectResponseDto do novo projeto raiz
+   */
+  @Post(':id/duplicate')
+  @ApiOperation({ summary: 'Duplicar projeto como esqueleto (MANAGER)' })
+  @ApiParam({ name: 'id', description: 'ID do projeto a duplicar' })
+  @ApiResponse({ status: 201, description: 'Projeto duplicado', type: ProjectResponseDto })
+  @ApiResponse({ status: 403, description: 'Requer role MANAGER' })
+  @ApiResponse({ status: 404, description: 'Projeto não encontrado' })
+  async duplicate(
+    @Param('id') id: string,
+    @Request() req: JwtRequest,
+  ): Promise<ProjectResponseDto> {
+    return this.projectsService.duplicate(id, BigInt(req.user.entidadeId), req.user.organizationId);
+  }
+
+  /**
    * Retorna timeline de atividades do projeto (DEvento).
    *
    * Cursor pagination decrescente por chave.
