@@ -26,7 +26,7 @@ import { UserProjectService } from './user-project.service';
  * - ProjectsService: CRUD principal (usa EventProducerService p/ audit)
  * - ProjectActivityService: timeline de eventos
  * - ProjectMembersService: gestão de membros
- * - SeedBootstrapService: seed de statuses V3 + sprint default
+ * - SeedBootstrapService: seed de statuses V3
  *
  * NÃO importa CommonModule nem EventosModule explicitamente — ambos `@Global()`.
  */

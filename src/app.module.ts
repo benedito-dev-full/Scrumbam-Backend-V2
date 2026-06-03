@@ -16,10 +16,9 @@ import { CorrelationIdMiddleware } from './common/middlewares/correlation-id.mid
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
-// F5 — Domínio Estrutural Scrumban (Organizations, Teams, Sprints, Workflow Statuses, Projects, Tasks)
+// F5 — Domínio Estrutural Scrumban (Organizations, Teams, Workflow Statuses, Projects, Tasks)
 import { OrganizationsModule } from './organizations/organizations.module';
 import { TeamsModule } from './teams/teams.module';
-import { SprintsModule } from './sprints/sprints.module';
 import { WorkflowStatusesModule } from './workflow-statuses/workflow-statuses.module';
 import { ProjectsModule } from './projects/projects.module';
 import { TasksModule } from './tasks/tasks.module';
@@ -104,7 +103,6 @@ import { AiModule } from './ai/ai.module';
     // F5 — Domínio Estrutural Scrumban (Blocos A, B, C, D, E implementados)
     OrganizationsModule,
     TeamsModule,
-    SprintsModule,
     WorkflowStatusesModule,
     ProjectsModule,
     TasksModule,

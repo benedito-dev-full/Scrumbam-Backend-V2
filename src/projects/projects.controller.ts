@@ -71,7 +71,7 @@ export class ProjectsController {
   ) {}
 
   /**
-   * Cria novo projeto com seed de statuses V3 e sprint default.
+   * Cria novo projeto com seed de statuses V3.
    *
    * Requer autenticação JWT. O criador torna-se MANAGER automaticamente.
    *
@@ -89,7 +89,7 @@ export class ProjectsController {
   @Post()
   @ApiOperation({
     summary: 'Criar projeto',
-    description: 'Cria projeto com 9 statuses V3 e Sprint 1 default. O criador torna-se MANAGER.',
+    description: 'Cria projeto com 9 statuses V3. O criador torna-se MANAGER.',
   })
   @ApiResponse({ status: 201, description: 'Projeto criado', type: ProjectResponseDto })
   @ApiResponse({ status: 401, description: 'Não autenticado' })

@@ -83,8 +83,8 @@ export class ClasseService {
    *
    * @example
    * ```typescript
-   * const sprints = await service.listarFlat({ nome: 'Sprint' });
-   * // [{ chave: '-400', codigo: 'SPRINT', nome: 'Sprint', ... }]
+   * const tasks = await service.listarFlat({ nome: 'Task' });
+   * // [{ chave: '-154', codigo: 'SCRUMBAN_TASK', nome: 'Task Scrumban', ... }]
    * ```
    */
   async listarFlat(query: ListClassesQueryDto): Promise<ClasseResponseDto[]> {
@@ -199,8 +199,8 @@ export class ClasseService {
    *
    * @example
    * ```typescript
-   * const sprint = await service.buscarPorId('-400');
-   * // { chave: '-400', codigo: 'SPRINT', nome: 'Sprint', ... }
+   * const task = await service.buscarPorId('-154');
+   * // { chave: '-154', codigo: 'SCRUMBAN_TASK', nome: 'Task Scrumban', ... }
    * ```
    */
   async buscarPorId(id: string): Promise<ClasseResponseDto> {

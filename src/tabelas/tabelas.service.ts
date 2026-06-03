@@ -30,7 +30,6 @@ const CLASSE_ALIAS_SUNSET = new Date('2026-06-05T00:00:00.000Z').toISOString();
  * DEntidade real (org/user) e resolver quebraria o filtro.
  */
 const PROJECT_SCOPED_TABELA_CLASSES: ReadonlySet<bigint> = new Set<bigint>([
-  BigInt(-400), // SPRINT
   BigInt(-420), // PRIORITY (agrupador)
   BigInt(-421), // PRIORITY HIGH
   BigInt(-422), // PRIORITY MEDIUM
@@ -53,7 +52,7 @@ const PROJECT_SCOPED_TABELA_CLASSES: ReadonlySet<bigint> = new Set<bigint>([
  * Service canônico para DTabela (Pilar 2 — Endpoints Genéricos).
  *
  * Serve todos os lookups, configs e catálogos:
- * - Sprints (-400), Status V3 (-440), Priorities (-420), Task Types (-430)
+ * - Status V3 (-440), Priorities (-420), Task Types (-430)
  * - Webhooks (-470), API Keys (-471), MCP Keys (-472)
  * - Canais Telegram (-460), etc.
  *
@@ -162,7 +161,7 @@ export class TabelaService {
     const take = Math.min(query.pageSize ?? 20, 100);
     const where = buildTabelaWhereClause(idClasse, query);
 
-    // ADR-V2-058/059: para lookups project-scoped (statuses, sprint, priorities,
+    // ADR-V2-058/059: para lookups project-scoped (statuses, priorities,
     // task types), o `dEntidadeId` recebido é o projectId (P); o seed grava com a
     // DEntidade-espelho (E). Resolver P→E (legacy-safe) para que o filtro encontre
     // os registros. NÃO aplicar a idClasses org/user-scoped (API/MCP keys).
@@ -229,7 +228,7 @@ export class TabelaService {
    *
    * @example
    * ```typescript
-   * const sprint = await service.criar({ idClasse: '-400', nome: 'Sprint 1' });
+   * const status = await service.criar({ idClasse: '-440', nome: 'Em Revisão' });
    * ```
    */
   async criar(dto: CreateTabelaDto): Promise<TabelaResponseDto> {

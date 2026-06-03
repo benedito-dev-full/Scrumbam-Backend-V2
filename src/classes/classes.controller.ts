@@ -57,8 +57,8 @@ export class ClasseController {
    *
    * @example
    * ```bash
-   * curl 'http://localhost:3000/api/v1/classes?nome=Sprint'
-   * # retorna DClasse -400 SPRINT
+   * curl 'http://localhost:3000/api/v1/classes?nome=Task'
+   * # retorna DClasse -154 SCRUMBAN_TASK
    * ```
    */
   @Get()
@@ -67,8 +67,8 @@ export class ClasseController {
     summary: 'Lista DClasses (flat) com filtros',
     description: 'Retorna DClasses ativas. Use ?all=true para incluir inativas/excluídas.',
   })
-  @ApiQuery({ name: 'nome', required: false, description: 'Filtro por nome (parcial)', example: 'Sprint' })
-  @ApiQuery({ name: 'codigo', required: false, description: 'Filtro por código', example: 'SPRINT' })
+  @ApiQuery({ name: 'nome', required: false, description: 'Filtro por nome (parcial)', example: 'Task' })
+  @ApiQuery({ name: 'codigo', required: false, description: 'Filtro por código', example: 'SCRUMBAN_TASK' })
   @ApiQuery({ name: 'idPai', required: false, description: 'Filtro por DClasse pai', example: '-51' })
   @ApiQuery({ name: 'all', required: false, description: 'Incluir inativas/excluídas?', example: false })
   @ApiResponse({ status: 200, description: 'Lista de DClasses', type: [ClasseResponseDto] })

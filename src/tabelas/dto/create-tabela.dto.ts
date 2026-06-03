@@ -5,13 +5,13 @@ import { IsNotEmpty, IsString, IsOptional, IsNumberString } from 'class-validato
  * DTO para criação de tabela lookup/config (POST /tabelas).
  *
  * Cria um novo registro DTabela de qualquer tipo via idClasse.
- * Usado para criar: sprints, statuses customizados, prioridades, webhooks,
+ * Usado para criar: statuses customizados, prioridades, webhooks,
  * API keys, configurações por entidade, etc.
  *
  * @example
  * ```json
- * // Criar sprint
- * { "idClasse": "-400", "nome": "Sprint 1", "codigo": "SPR-001" }
+ * // Criar status customizado
+ * { "idClasse": "-440", "nome": "Em Revisão", "codigo": "REVIEW" }
  *
  * // Criar webhook vinculado a um projeto
  * { "idClasse": "-470", "nome": "Deploy Hook", "dEntidadeId": "100",
@@ -21,10 +21,10 @@ import { IsNotEmpty, IsString, IsOptional, IsNumberString } from 'class-validato
 export class CreateTabelaDto {
   /**
    * ID da DClasse que define o tipo.
-   * Ex: -400 (Sprint), -440 (Status V3), -420 (Priority), -470 (Webhook).
+   * Ex: -440 (Status V3), -420 (Priority), -470 (Webhook).
    */
   @ApiProperty({
-    description: 'ID da DClasse. Ex: -440 (Status V3), -400 (Sprint)',
+    description: 'ID da DClasse. Ex: -440 (Status V3), -420 (Priority)',
     example: '-440',
   })
   @IsNotEmpty()
@@ -36,7 +36,7 @@ export class CreateTabelaDto {
    */
   @ApiProperty({
     description: 'Nome',
-    example: 'Sprint 1',
+    example: 'Em Revisão',
   })
   @IsNotEmpty()
   @IsString()
@@ -47,7 +47,7 @@ export class CreateTabelaDto {
    */
   @ApiPropertyOptional({
     description: 'Código único',
-    example: 'SPR-001',
+    example: 'REVIEW',
   })
   @IsOptional()
   @IsString()
@@ -58,7 +58,7 @@ export class CreateTabelaDto {
    */
   @ApiPropertyOptional({
     description: 'Descrição',
-    example: 'Primeiro sprint do projeto',
+    example: 'Status de revisão de código',
   })
   @IsOptional()
   @IsString()

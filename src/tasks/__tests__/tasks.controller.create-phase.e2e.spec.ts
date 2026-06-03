@@ -115,14 +115,14 @@ describe('TasksController — POST /tasks { idClasse: -200 } (ADR-V2-050)', () =
   // ── E2E 1: cria PHASE root ──────────────────────────────────────────────
   it('1. POST /tasks { idClasse: -200 } → 201 com response.idClasse=-200', async () => {
     const dto: CreateTaskDto = {
-      nome: 'Sprint Q2',
+      nome: 'Bloco Q2',
       projectId: PROJECT_ID,
       idClasse: '-200',
     } as CreateTaskDto;
 
     const phaseResponse = buildTaskResponse({
       id: '100',
-      nome: 'Sprint Q2',
+      nome: 'Bloco Q2',
       idClasse: '-200',
       identifier: '',
       dados: { kind: 'phase', createdBy: USER_ID },

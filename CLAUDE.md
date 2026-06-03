@@ -46,7 +46,7 @@ Exceções a estas regras requerem **ADR-V2-XXX justificando**. Hook `enforce-ca
 | Risk via idClasse (-301/-302/-303), não campo | ADR-V2-006 | F6 DoD |
 | DVFS scripts para portabilidade (chaves 3-7) | ADR-V2-007 | F6 DoD + bug regressivo `s.id` vs `s.chave` |
 | DEvento substitui DNotification/DWebhook | ADR-V2-008 | Reviewer |
-| Sprints/Workflow Statuses como wrappers thin | ADR-V2-009 | README obrigatório |
+| Workflow Statuses como wrapper thin | ADR-V2-009 (Sprint revogado por ADR-V2-060) | README obrigatório |
 | Score gate APPROVED ≥ 7.0 | ADR-V2-015 (a ratificar) | `validate-review-score.sh` |
 | Conventional Commits scope V2 | devari-conventional-commits.md | `validate-documentation.sh` |
 

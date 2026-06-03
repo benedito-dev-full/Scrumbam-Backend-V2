@@ -8,25 +8,25 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
  * @example
  * ```json
  * {
- *   "chave": "-400",
- *   "codigo": "SPRINT",
- *   "nome": "Sprint",
- *   "idPai": "-51",
+ *   "chave": "-154",
+ *   "codigo": "SCRUMBAN_TASK",
+ *   "nome": "Task Scrumban",
+ *   "idPai": "-37",
  *   "agrupamento": false
  * }
  * ```
  */
 export class ClasseResponseDto {
-  @ApiProperty({ description: 'Chave (BigInt como string)', example: '-400' })
+  @ApiProperty({ description: 'Chave (BigInt como string)', example: '-154' })
   chave!: string;
 
-  @ApiPropertyOptional({ description: 'Código textual', example: 'SPRINT' })
+  @ApiPropertyOptional({ description: 'Código textual', example: 'SCRUMBAN_TASK' })
   codigo!: string | null;
 
-  @ApiProperty({ description: 'Nome descritivo', example: 'Sprint' })
+  @ApiProperty({ description: 'Nome descritivo', example: 'Task Scrumban' })
   nome!: string;
 
-  @ApiPropertyOptional({ description: 'ID da DClasse pai (BigInt como string)', example: '-51', nullable: true })
+  @ApiPropertyOptional({ description: 'ID da DClasse pai (BigInt como string)', example: '-37', nullable: true })
   idPai!: string | null;
 
   @ApiProperty({ description: 'É agrupador (nó intermediário)?', example: false })

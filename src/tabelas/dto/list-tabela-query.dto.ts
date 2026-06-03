@@ -23,16 +23,16 @@ import { Type } from 'class-transformer';
  * ```
  * GET /tabelas?idClasse=-440              → todos os Statuses V3
  * GET /tabelas?idClasse=-470&dEntidadeId=100  → webhooks do projeto 100
- * GET /tabelas?classe=SPRINT_STATUS       → alias deprecated
+ * GET /tabelas?classe=STATUS              → alias deprecated
  * ```
  */
 export class ListTabelaQueryDto {
   /**
    * ID da DClasse para filtrar (canônico V2, ADR-V2-015).
-   * Ex: -440 (Status V3), -400 (Sprints), -420 (Priorities), -470 (Webhooks).
+   * Ex: -440 (Status V3), -420 (Priorities), -470 (Webhooks).
    */
   @ApiPropertyOptional({
-    description: 'ID da DClasse (canônico V2). Ex: -440 (Status V3), -400 (Sprint)',
+    description: 'ID da DClasse (canônico V2). Ex: -440 (Status V3), -420 (Priority)',
     example: '-440',
   })
   @IsOptional()

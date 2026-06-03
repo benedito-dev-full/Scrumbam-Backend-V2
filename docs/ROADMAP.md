@@ -8,6 +8,47 @@
 
 ---
 
+## Task: Remoção TOTAL da funcionalidade Sprint do backend (hard delete) ✅ COMPLETA
+
+**Status:** ✅ **COMPLETA** — Sprint removida das 6 camadas (IA/webhooks, métricas, endpoint/tasks, seed, schema/migration, módulo/governança)
+**Módulo V2:** core (transversal: ai, webhooks, dashboards, forecast, analytics, reports, tasks, projects, seeds, sprints)
+**Fase V2:** Pós-F5 (coerência front/back — Sprint já removida 100% do Frontend-V2)
+**Completado em:** 2026-06-03
+**Quality Score:** 8.5/10 (camadas 1-4) · 9.0/10 (camada 5 schema) — reviews macro econômicos
+
+**O Que Foi Feito:**
+
+Remoção em 6 camadas faseadas (1 commit por fase para checkpoint de rollback):
+1. **IA + Webhooks** — `src/ai/` (system-prompt, context-builder, create-task tool) sem sprint; removidos eventos `sprint.started`/`sprint.closed` de `supported-events.ts`.
+2. **Métricas** — velocity → throughput por período (caminho único, promovendo fallback existente); forecast → rolling-window 30d (fonte única, `getSprintThroughput` removido); `historicalSprints` → `historicalPeriods` (analytics/reports + labels PDF).
+3. **Endpoint + Tasks** — removido `PUT /tasks/:id/sprint` + `updateSprint`; `idSprint`/`sprintId` fora de create/filter/select/mapper e DTOs; deletado `update-task-sprint.dto.ts`.
+4. **Seed** — removida DClasse `-400 (SPRINT)`; `seed-bootstrap` deixa de criar "Sprint 1" default (sentinela de idempotência segue INBOX -441).
+5. **Schema** — removida coluna `idSprint BigInt?` + `@@index([idSprint])` de DTask; migration `20260603000000_remove_sprint_hard_delete` (`DROP INDEX` + `DROP COLUMN`, destrutiva).
+6. **Módulo + Governança** — deletada `src/sprints/` (module + README); des-registrado `SprintsModule` de `app.module.ts`; **ADR-V2-060** (revoga dimensão Sprint do ADR-V2-009); CLAUDE.md/CHANGELOG atualizados.
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — remoção em tabela estrutural (DTask).
+- Pilar 2 (Endpoints): Workflow Statuses (wrapper thin) **intacto**; só a dimensão Sprint do ADR-V2-009 foi revogada.
+- Pilar 3 (Seed): DClasse -400 removida; range -400..-419 liberado (V2-específico, não propaga ao template).
+
+**Garantias verificadas:**
+- `grep idSprint src/ --include=*.ts` = VAZIO; `prisma generate` + build verde.
+- `createPhase` e `tenant-isolation.adversarial` preservados.
+- Falhas pré-existentes (arity ADR-V2-058 / progresso projects) confirmadas anteriores à task (git stash) — fora de escopo.
+
+**Pendente deploy (CEO, banco dev offline):**
+- Aplicar migration staging→prod com `pg_dump` antes (DROP COLUMN irreversível para dados).
+- Rodar `prisma/scripts/cleanup-sprint-orphans.ts --apply` (soft-delete das DTabelas -400 órfãs).
+
+**ADRs:**
+- ADR-V2-060 (remoção total Sprint — revoga dimensão Sprint do ADR-V2-009)
+- ADR-V2-009 (Workflow Statuses permanece vigente)
+- ADR-V2-001 (zero tabela nova) — respeitado
+
+**Commits:** `17c24ab` (camadas 1-3) · `e8dc53e` (seed) · `392104e` (schema+migration) · módulo+governança neste commit.
+
+---
+
 ## Task 1: Cascade soft-delete de TASKs normais + limpeza de órfãs ✅ COMPLETA
 
 **Status:** ✅ **COMPLETA** — Soft-delete com cascade default, evento task.deleted, script de saneamento entregue

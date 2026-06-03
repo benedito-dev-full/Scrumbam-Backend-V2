@@ -8,24 +8,24 @@ import { IsOptional, IsString, IsBoolean } from 'class-validator';
  *
  * @example
  * ```json
- * { "nome": "Sprint 1 — Atualizado" }
+ * { "nome": "Em Revisão — Atualizado" }
  * ```
  */
 export class UpdateTabelaDto {
   /** Novo nome. */
-  @ApiPropertyOptional({ description: 'Nome', example: 'Sprint 1 Atualizado' })
+  @ApiPropertyOptional({ description: 'Nome', example: 'Em Revisão' })
   @IsOptional()
   @IsString()
   nome?: string;
 
   /** Novo código único. */
-  @ApiPropertyOptional({ description: 'Código único', example: 'SPR-001-v2' })
+  @ApiPropertyOptional({ description: 'Código único', example: 'REVIEW-v2' })
   @IsOptional()
   @IsString()
   codigo?: string;
 
   /** Nova descrição. */
-  @ApiPropertyOptional({ description: 'Descrição', example: 'Sprint atualizado' })
+  @ApiPropertyOptional({ description: 'Descrição', example: 'Status atualizado' })
   @IsOptional()
   @IsString()
   descricao?: string;

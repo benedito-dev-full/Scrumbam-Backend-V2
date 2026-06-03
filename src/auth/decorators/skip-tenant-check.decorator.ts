@@ -25,7 +25,7 @@ export const SKIP_TENANT_CHECK_KEY = 'skipTenantCheck';
  *    `/agents/:id/execution-result` — autenticados por install-token / HMAC,
  *    nao por JWT, e o guard de agente faz seu proprio isolamento.
  *
- * Demais rotas (`/projects`, `/tasks`, `/agents`, `/sprints`, etc.) NAO
+ * Demais rotas (`/projects`, `/tasks`, `/agents`, `/tabelas`, etc.) NAO
  * devem ter este decorator — devem manter `OrgTenantGuard` ativo e cruzar
  * `idEstab` com `JWT.organizationId` nos services.
  *

@@ -38,7 +38,6 @@ import { ListTabelaResponseDto } from './dto/list-tabela-response.dto';
  *
  * Serve TODOS os lookups, configs e catálogos via `?idClasse=N`:
  * - GET /tabelas?idClasse=-440 → Statuses V3 (INBOX, READY, EXECUTING, ...)
- * - GET /tabelas?idClasse=-400 → Sprints
  * - GET /tabelas?idClasse=-420 → Prioridades
  * - GET /tabelas?idClasse=-430 → Task Types
  * - GET /tabelas?idClasse=-470 → Webhooks
@@ -72,9 +71,9 @@ export class TabelaController {
   @Get()
   @ApiOperation({
     summary: 'Lista tabelas/lookups por classe (Pilar 2 — endpoint genérico)',
-    description: 'Serve Sprints, Statuses, Prioridades, Webhooks, API Keys via ?idClasse=N.',
+    description: 'Serve Statuses, Prioridades, Webhooks, API Keys via ?idClasse=N.',
   })
-  @ApiQuery({ name: 'idClasse', required: false, description: 'ID da DClasse. Ex: -440 (Status V3), -400 (Sprint)', example: '-440' })
+  @ApiQuery({ name: 'idClasse', required: false, description: 'ID da DClasse. Ex: -440 (Status V3), -420 (Priority)', example: '-440' })
   @ApiQuery({ name: 'classe', required: false, description: '[DEPRECATED] Código da DClasse. Use idClasse.', deprecated: true })
   @ApiQuery({ name: 'nome', required: false, description: 'Filtro por nome (parcial)' })
   @ApiQuery({ name: 'dEntidadeId', required: false, description: 'Filtro por entidade dona' })
@@ -117,7 +116,7 @@ export class TabelaController {
    * ```bash
    * curl -X POST http://localhost:3000/api/v1/tabelas \
    *   -H 'Content-Type: application/json' \
-   *   -d '{"idClasse":"-400","nome":"Sprint 1","codigo":"SPR-001"}'
+   *   -d '{"idClasse":"-440","nome":"Em Revisão","codigo":"REVIEW"}'
    * ```
    */
   @Post()

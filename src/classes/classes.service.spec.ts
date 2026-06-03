@@ -7,7 +7,7 @@ import { PrismaService } from '../prisma.service';
 const mockClasses = [
   { chave: BigInt(-1), codigo: 'ROOT', nome: 'Root', idPai: null, agrupamento: true, inativo: false, excluido: false, excluivel: false, editavel: false, tableFields: null },
   { chave: BigInt(-51), codigo: 'TABELAS', nome: 'Tabelas', idPai: BigInt(-1), agrupamento: true, inativo: false, excluido: false, excluivel: false, editavel: false, tableFields: null },
-  { chave: BigInt(-400), codigo: 'SPRINT', nome: 'Sprint', idPai: BigInt(-51), agrupamento: false, inativo: false, excluido: false, excluivel: true, editavel: true, tableFields: null },
+  { chave: BigInt(-430), codigo: 'TASK_TYPE', nome: 'Task Type', idPai: BigInt(-51), agrupamento: true, inativo: false, excluido: false, excluivel: true, editavel: true, tableFields: null },
 ];
 
 describe('ClasseService', () => {
@@ -45,7 +45,7 @@ describe('ClasseService', () => {
       expect(tree.nome).toBe('Root');
       expect(tree.filhos).toHaveLength(1);
       expect(tree.filhos[0].chave).toBe('-51');
-      expect(tree.filhos[0].filhos[0].chave).toBe('-400');
+      expect(tree.filhos[0].filhos[0].chave).toBe('-430');
     });
 
     it('lança NotFoundException se rootChave não existe', async () => {
@@ -56,14 +56,14 @@ describe('ClasseService', () => {
   });
 
   describe('listarFlat', () => {
-    it('retorna DClasse Sprint quando nome=Sprint', async () => {
+    it('retorna DClasse Task Type quando nome=Task', async () => {
       (prisma.dClasse.findMany as jest.Mock).mockResolvedValue([mockClasses[2]]);
 
-      const result = await service.listarFlat({ nome: 'Sprint' });
+      const result = await service.listarFlat({ nome: 'Task' });
 
       expect(result).toHaveLength(1);
-      expect(result[0].codigo).toBe('SPRINT');
-      expect(result[0].chave).toBe('-400');
+      expect(result[0].codigo).toBe('TASK_TYPE');
+      expect(result[0].chave).toBe('-430');
     });
   });
 
@@ -77,9 +77,9 @@ describe('ClasseService', () => {
 
   describe('getFieldsByClasse', () => {
     it('retorna tableFields ou null para DClasse existente', async () => {
-      (prisma.dClasse.findFirst as jest.Mock).mockResolvedValue({ tableFields: null, nome: 'Sprint' });
+      (prisma.dClasse.findFirst as jest.Mock).mockResolvedValue({ tableFields: null, nome: 'Task Type' });
 
-      const result = await service.getFieldsByClasse('-400');
+      const result = await service.getFieldsByClasse('-430');
 
       expect(result).toBeNull();
     });

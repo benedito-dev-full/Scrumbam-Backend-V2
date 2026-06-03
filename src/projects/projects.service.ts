@@ -38,7 +38,7 @@ const ID_CLASSE_FOLDER = BigInt(-351);
 
 /**
  * idClasse DProject para LIST (ADR-V2-051 §3.2).
- * Apenas LISTs recebem seed de statuses V3 e sprint default —
+ * Apenas LISTs recebem seed de statuses V3 —
  * SPACEs (-350) e FOLDERs (-351) são contêineres estruturais.
  */
 const ID_CLASSE_LIST = BigInt(-352);
@@ -152,7 +152,7 @@ export interface FindManyProjectsOptions {
  * Ao criar um projeto, atomicamente:
  * 1. DProject
  * 2. DVincula -171 (PROJECT_ROLE_MANAGER) para o criador
- * 3. SeedBootstrapService.seedProject() → 9 statuses V3 + 1 sprint default
+ * 3. SeedBootstrapService.seedProject() → 9 statuses V3
  * 4. DVincula -182 (PROJECT_TEAM_LINK) se `teamId` informado (ADR-V2-029)
  *
  * Audit DEvento -499 emitido APÓS commit. Eventos
@@ -160,7 +160,7 @@ export interface FindManyProjectsOptions {
  * de team (ADR-V2-029).
  *
  * @see PrismaService — acesso ao banco
- * @see SeedBootstrapService — seed de statuses + sprint
+ * @see SeedBootstrapService — seed de statuses V3
  * @see ProjectMembersService — gestão de membros
  * @see EventProducerService — emissão canônica de eventos (audit pós-commit)
  * @see ADR-V2-029 — Project ↔ Team via DVincula -182
@@ -216,7 +216,7 @@ export class ProjectsService implements OnModuleInit {
    * Transaction atômica (3–4 etapas):
    * 1. DProject (tabela canônica)
    * 2. DVincula -171 (MANAGER) para o criador
-   * 3. seedProject(): 9 statuses V3 + 1 sprint default (apenas para LIST -352)
+   * 3. seedProject(): 9 statuses V3 (apenas para LIST -352)
    *    - SPACE (-350) e FOLDER (-351) são contêineres estruturais, sem seed
    *    - ADR-V2-051 §12: seedBootstrap condicional por idClasse
    * 4. DVincula -182 (PROJECT_TEAM_LINK) se `dto.teamId` informado, após
@@ -235,9 +235,9 @@ export class ProjectsService implements OnModuleInit {
    *
    * @example
    * ```typescript
-   * // Criar um LIST (com seed de statuses + sprint)
+   * // Criar um LIST (com seed de statuses V3)
    * const list = await service.create(
-   *   { nome: 'Sprint 1', idClasse: '-352', idPai: '100' },
+   *   { nome: 'Backlog', idClasse: '-352', idPai: '100' },
    *   BigInt(userId)
    * );
    *
@@ -248,7 +248,7 @@ export class ProjectsService implements OnModuleInit {
    * );
    * ```
    *
-   * @see SeedBootstrapService — responsavel pelo seed de statuses V3 e sprint
+   * @see SeedBootstrapService — responsavel pelo seed de statuses V3
    * @see validateNoCycle — validacao de ciclo em idPai realizada internamente
    */
   async create(dto: CreateProjectDto, userEntidadeId: bigint): Promise<ProjectResponseDto> {
@@ -311,9 +311,9 @@ export class ProjectsService implements OnModuleInit {
       // 3. DVincula -171 (MANAGER): criador é MANAGER — aponta para E, não P.
       await this.projectMembers.createManagerLink(tx, refId, userEntidadeId);
 
-      // 4. Seed: 9 statuses V3 + 1 sprint default — apenas para LIST (ADR-V2-051 §12).
+      // 4. Seed: 9 statuses V3 — apenas para LIST (ADR-V2-051 §12).
       //    SPACE (-350) e FOLDER (-351) são contêineres estruturais e não precisam
-      //    de seed de statuses/sprint. Apenas LIST (-352) contém tasks.
+      //    de seed de statuses. Apenas LIST (-352) contém tasks.
       //    ADR-V2-058/059: DTabela.dEntidadeId é FK para DEntidade.chave — gravar
       //    `refId` (E, a DEntidade-espelho criada na etapa 2), NÃO `proj.chave` (P),
       //    senão a FK DTabela_dEntidadeId_fkey é violada (500 em POST /projects).
@@ -924,7 +924,7 @@ export class ProjectsService implements OnModuleInit {
    * // Atualizar múltiplos campos
    * await service.update(
    *   '1',
-   *   { nome: 'Sprint 2', prefix: 'S2', idPai: '100', teamId: '200' },
+   *   { nome: 'Backlog Q2', prefix: 'BQ2', idPai: '100', teamId: '200' },
    *   BigInt(managerId)
    * );
    * ```

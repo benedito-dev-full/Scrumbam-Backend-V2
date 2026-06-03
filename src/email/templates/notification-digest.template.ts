@@ -23,7 +23,7 @@ export interface DigestNotification {
  *   userName: 'João Silva',
  *   notifications: [
  *     { title: 'Nova tarefa atribuída', body: 'Você recebeu a tarefa "Revisar PR #42"' },
- *     { title: 'Sprint finalizado', body: 'Sprint "Sprint 12" foi concluído com 8/10 tarefas' },
+ *     { title: 'Bloco concluído', body: 'O bloco "Backend V2" foi concluído com 8/10 tarefas' },
  *   ],
  * });
  * ```

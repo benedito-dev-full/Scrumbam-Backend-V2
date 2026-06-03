@@ -17,7 +17,6 @@ import { REPO_URL_REGEX } from '../utils/repo-url';
  * 1. DProject (tabela canônica)
  * 2. DVincula -171 (PROJECT_ROLE_MANAGER) para o criador
  * 3. 9 DTabela statuses V3 padrão (INBOX a VALIDATED)
- * 4. 1 DTabela Sprint default ("Sprint 1")
  *
  * A URL do repositório git é armazenada exclusivamente em `DProject.repoUrl`
  * (ADR-V2-043). O campo `dados.gitRepo` foi removido — use `repoUrl`.
@@ -138,7 +137,7 @@ export class CreateProjectDto {
    * Valores canônicos:
    * - `-350` SPACE  — raiz da hierarquia, não possui pai
    * - `-351` FOLDER — filho de SPACE, agrupador intermediário
-   * - `-352` LIST   — contém tasks; recebe seed de statuses V3 + sprint
+   * - `-352` LIST   — contém tasks; recebe seed de statuses V3
    * - `-353` DOC    — documento (reservado, sem seed)
    *
    * Quando ausente, o projeto é criado como LIST padrão (idClasse=-153,

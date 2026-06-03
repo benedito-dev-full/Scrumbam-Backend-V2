@@ -12,6 +12,22 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Removed
+
+- **Funcionalidade Sprint removida COMPLETAMENTE do backend (hard delete, 2026-06-03)** (ADR-V2-060, revoga dimensão Sprint do ADR-V2-009)
+  - Alinha back ao front: Sprint já fora removida 100% do Scrumbam-Frontend-V2 (era código morto na UI). Mantê-la viva no back gerava incoerência front/back.
+  - **6 camadas removidas:**
+    - IA (`src/ai/`: system-prompt, context-builder, create-task tool) e Webhooks (eventos `sprint.started`/`sprint.closed`)
+    - Métricas: velocity → throughput por período; forecast → rolling-window 30d (fonte única); `historicalSprints` → `historicalPeriods` (analytics/reports/PDF)
+    - Endpoint `PUT /tasks/:id/sprint`, `updateSprint`, `idSprint`/`sprintId` de create/filter/select/mapper + DTOs; deletado `update-task-sprint.dto.ts`
+    - Seed: removida DClasse `-400 (SPRINT)`; `seed-bootstrap` deixa de criar "Sprint 1" default (sentinela de idempotência segue INBOX -441)
+    - Schema: removida coluna `idSprint BigInt?` + `@@index([idSprint])` de DTask; migration `20260603000000_remove_sprint_hard_delete` (`DROP INDEX` + `DROP COLUMN`, destrutiva, irreversível para dados)
+    - Módulo: deletada `src/sprints/` (module + README); des-registrado `SprintsModule` de `app.module.ts`
+  - **V2-específico:** NÃO propaga ao template Devari-Core (Sprint como wrapper thin segue válido como padrão no template). Range DClasse `-400..-419` liberado no V2.
+  - **Workflow Statuses INTACTO:** ADR-V2-009 permanece vigente para Workflow Statuses (wrapper thin).
+  - **Pendente deploy (CEO):** aplicar migration staging→prod com `pg_dump` antes (banco dev offline); rodar `prisma/scripts/cleanup-sprint-orphans.ts --apply` para limpar DTabelas -400 órfãs.
+  - Commits: `17c24ab` (camadas 1-3), `e8dc53e` (seed), `392104e` (schema+migration), módulo+governança neste commit.
+
 ### Added
 
 - **Backfill PROJECT_REF para DTabela legada (V2 pós-F5, 2026-06-02)** (ADR-V2-058/059 passo 5, Score 9.0/10)

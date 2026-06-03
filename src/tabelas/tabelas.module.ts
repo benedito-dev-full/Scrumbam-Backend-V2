@@ -6,7 +6,7 @@ import { AuthModule } from '../auth/auth.module';
 /**
  * Módulo canônico para DTabela (Pilar 2 — Endpoints Genéricos).
  *
- * Serve todos os lookups e configs polimórficos (Sprints, Statuses,
+ * Serve todos os lookups e configs polimórficos (Statuses,
  * Prioridades, Task Types, Webhooks, API Keys, MCP Keys, etc.) via
  * `GET /tabelas?idClasse=N`.
  *
