@@ -6,6 +6,7 @@ import { CorrelationIdService } from '../common/services/correlation-id.service'
 import { TimezoneService } from '../common/services/timezone.service';
 import { TasksIdentifierService } from './tasks-identifier.service';
 import { ProjectRefService } from '../projects/project-ref.service';
+import { TEMPLATE_CLASSES } from '../projects/constants/template-classes.const';
 import { PhaseHierarchyService } from './services/phase-hierarchy.service';
 import { validateTransition, isValidState } from './tasks-state-machine';
 import { TaskStatus, buildInitialTaskDados, ManualTimerSession } from './schemas/task-dados.schema';
@@ -593,11 +594,24 @@ export class TasksService {
 
     // Filtro projectId precisa estar dentro do scope autorizado. Se nao
     // estiver, retorna vazio (mensagem identica → anti enumeration).
+    //
+    // ADR-V2-061 (extensão ao agregado DTask): um TEMPLATE GLOBAL (-401/-402
+    // com idEstab=NULL) é catálogo público read-only — visível a todas as orgs.
+    // Sua prévia (`GET /tasks?projectId={templateGlobal}`) precisa ler os blocos
+    // (-200) e tasks (-154) sem que o tenant guard (ADR-V2-042) zere o resultado.
+    // O bypass é cirúrgico: só libera o caminho `projectId == template global`,
+    // sem alargar o set geral. A query de confirmação (`isGlobalTemplate`) só
+    // roda quando o guard normal JÁ ia negar — custo zero no fluxo normal.
     if (query.projectId && !accessibleProjectIds.includes(query.projectId)) {
-      this.logger.warn(
-        `tenant_mismatch_tasks_findMany projectId=${query.projectId} nao esta em accessibleProjectIds`,
-      );
-      return { items: [], pagination: { hasMore: false, nextCursor: null } };
+      if (!(await this.isGlobalTemplate(BigInt(query.projectId)))) {
+        this.logger.warn(
+          `tenant_mismatch_tasks_findMany projectId=${query.projectId} nao esta em accessibleProjectIds`,
+        );
+        return { items: [], pagination: { hasMore: false, nextCursor: null } };
+      }
+      // templateBypass: segue o fluxo restrito a query.projectId — o cálculo de
+      // `scopedProjectIds` abaixo (linha do `if (query.projectId)`) já produz
+      // `[BigInt(query.projectId)]`, mantendo a leitura confinada ao template.
     }
 
     // Calcular escopo final: se query.projectId esta no scope, restringir a ele.
@@ -793,6 +807,47 @@ export class TasksService {
   }
 
   /**
+   * Confirma que `projectId` é um TEMPLATE GLOBAL — único caso em que a leitura
+   * de tasks bypassa o tenant guard (ADR-V2-042) por design.
+   *
+   * Um template global é um `DProject` com `idClasse ∈ {-401, -402}`
+   * (TEMPLATE_LIST / TEMPLATE_SPACE, fonte única em `template-classes.const`)
+   * E `idEstab = NULL`. Espelha exatamente a regra que `ProjectsService.listTemplates`
+   * já aplica para a LISTAGEM de projetos (ADR-V2-061), estendendo o mesmo
+   * princípio de "catálogo público read-only" ao agregado DTask.
+   *
+   * Segurança: templates ORG-SCOPED (idEstab ≠ NULL) e projetos comuns
+   * (idClasse ∉ {-401,-402}) retornam `false` → continuam negados pelo guard
+   * normal (vazio em `findMany`, 404 em `findOne`). Sem vazamento de tenant.
+   *
+   * Performance: 1 query por chamada, por PK (`chave`), com `select` mínimo.
+   * Chamada SOMENTE quando o guard normal já ia negar (curto-circuito) — custo
+   * zero no fluxo autorizado padrão. ZERO N+1 (nunca em loop).
+   *
+   * @param projectId - Chave BigInt do projeto candidato a template global
+   * @returns `true` se for template global (-401/-402 + idEstab=NULL); senão `false`
+   *
+   * @example
+   * ```typescript
+   * if (await this.isGlobalTemplate(BigInt('-401'))) {
+   *   // libera leitura de tasks do template global
+   * }
+   * ```
+   */
+  private async isGlobalTemplate(projectId: bigint): Promise<boolean> {
+    const p = await this.prisma.dProject.findFirst({
+      where: {
+        chave: projectId,
+        idEstab: null,
+        idClasse: { in: TEMPLATE_CLASSES }, // [-401, -402] da fonte única
+        excluido: false,
+      },
+      select: { chave: true },
+    });
+    return p !== null;
+  }
+
+  /**
    * Busca task por ID, opcionalmente validando que pertence a um projeto
    * no escopo autorizado do caller (ADR-V2-042).
    *
@@ -818,13 +873,22 @@ export class TasksService {
     }
 
     // ADR-V2-042: tenant check via projectId. Mensagem identica → anti enumeration.
+    //
+    // ADR-V2-061 (extensão ao agregado DTask): task de um TEMPLATE GLOBAL
+    // (-401/-402, idEstab=NULL) é legível por qualquer org (catálogo público
+    // read-only). Só nesse caso o gate libera — a query `isGlobalTemplate` só
+    // roda quando o guard normal já ia lançar 404 (custo zero no fluxo normal).
+    // Os endpoints `:id/tree` e `:id/metrics` herdam essa correção (usam
+    // `findOne` como tenant gate).
     if (accessibleProjectIds !== undefined) {
       const projectIdStr = task.idProject?.toString() ?? null;
       if (!projectIdStr || !accessibleProjectIds.includes(projectIdStr)) {
-        this.logger.warn(
-          `tenant_mismatch_task_findOne taskId=${id} projectId=${projectIdStr ?? 'null'} fora do scope`,
-        );
-        throw new NotFoundException(`Task ${id} não encontrada`);
+        if (!task.idProject || !(await this.isGlobalTemplate(task.idProject))) {
+          this.logger.warn(
+            `tenant_mismatch_task_findOne taskId=${id} projectId=${projectIdStr ?? 'null'} fora do scope`,
+          );
+          throw new NotFoundException(`Task ${id} não encontrada`);
+        }
       }
     }
 

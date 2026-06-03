@@ -34,7 +34,7 @@ const ID_CLASSE_PHASE = BigInt(-200);
 const TEMPLATE = {
   nome: 'Implementação Padrão Devari',
   slug: 'implementacao-padrao-devari',
-  categoria: 'dev',
+  categoria: 'desenvolvimento', // deve casar com TEMPLATE_CATEGORIES[].id do front (Frontend-V2)
   prefix: 'DEV',
   description:
     'Processo de implementação padrão da Devari — toda implementação passa por estas etapas.',

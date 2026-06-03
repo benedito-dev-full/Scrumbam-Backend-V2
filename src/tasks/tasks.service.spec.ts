@@ -73,7 +73,10 @@ describe('TasksService', () => {
 
   beforeEach(async () => {
     const prismaMock = {
-      dProject: { findFirst: jest.fn() },
+      // Default null: isGlobalTemplate() (findMany/findOne tenant bypass) NÃO
+      // libera nada por default — casos legados continuam negando vazio/404.
+      // Testes específicos sobrescrevem com o template global.
+      dProject: { findFirst: jest.fn().mockResolvedValue(null) },
       dTask: {
         create: jest.fn(),
         findFirst: jest.fn(),
@@ -1465,6 +1468,103 @@ describe('TasksService', () => {
         'DEV-9',
         'DEV-10',
       ]);
+    });
+  });
+
+  // ─── Template GLOBAL bypass (ADR-V2-061 → DTask) ───────────────────────────
+  //
+  // Prévia de template GLOBAL (DProject -401/-402, idEstab=NULL) deve LER tasks
+  // mesmo quando o projectId não está em accessibleProjectIds (tenant guard
+  // ADR-V2-042). Templates org-scoped e projetos comuns continuam negados.
+  describe('template global — bypass do tenant guard (ADR-V2-061)', () => {
+    describe('findMany()', () => {
+      it('libera leitura quando projectId é template GLOBAL fora do scope', async () => {
+        // projectId 500 NÃO está em accessibleProjectIds (['1']).
+        // dProject.findFirst confirma -401/idEstab=NULL → bypass.
+        prisma.dProject.findFirst.mockResolvedValue({ chave: BigInt(500) });
+        const blocos = [
+          makeTask({ chave: BigInt(10), idProject: BigInt(500) }),
+          makeTask({ chave: BigInt(11), idProject: BigInt(500) }),
+        ];
+        prisma.dTask.findMany.mockResolvedValue(blocos);
+
+        const result = await service.findMany({ projectId: '500', idClasse: '-200' }, ['1']);
+
+        expect(result.items).toHaveLength(2);
+        // 1 query de confirmação do template (ZERO N+1).
+        expect(prisma.dProject.findFirst).toHaveBeenCalledTimes(1);
+        // O where restringe ao próprio projectId do template.
+        const whereArg = prisma.dTask.findMany.mock.calls[0][0].where;
+        expect(whereArg.idProject).toEqual({ in: [BigInt(500)] });
+      });
+
+      it('NÃO consulta dProject quando projectId já está no scope (custo zero)', async () => {
+        prisma.dTask.findMany.mockResolvedValue([makeTask({ idProject: BigInt(1) })]);
+
+        await service.findMany({ projectId: '1' }, ['1']);
+
+        // Guard normal passou → isGlobalTemplate nunca é chamado.
+        expect(prisma.dProject.findFirst).not.toHaveBeenCalled();
+      });
+
+      it('nega (vazio) quando projectId é template ORG-SCOPED de outra org', async () => {
+        // Org-scoped: idEstab≠NULL → findFirst (com filtro idEstab:null) retorna null.
+        prisma.dProject.findFirst.mockResolvedValue(null);
+
+        const result = await service.findMany({ projectId: '777' }, ['1']);
+
+        expect(result.items).toHaveLength(0);
+        expect(prisma.dTask.findMany).not.toHaveBeenCalled();
+      });
+
+      it('nega (vazio) quando projectId é projeto normal fora do scope', async () => {
+        prisma.dProject.findFirst.mockResolvedValue(null);
+
+        const result = await service.findMany({ projectId: '888' }, ['1']);
+
+        expect(result.items).toHaveLength(0);
+        expect(prisma.dTask.findMany).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('findOne()', () => {
+      it('resolve task de template GLOBAL fora do scope', async () => {
+        prisma.dTask.findFirst.mockResolvedValue(
+          makeTask({ chave: BigInt(20), idProject: BigInt(500) }),
+        );
+        prisma.dProject.findFirst.mockResolvedValue({ chave: BigInt(500) });
+
+        const result = await service.findOne('20', ['1']);
+
+        expect(result.id).toBe('20');
+        expect(prisma.dProject.findFirst).toHaveBeenCalledTimes(1);
+      });
+
+      it('lança 404 para task de template ORG-SCOPED de outra org', async () => {
+        prisma.dTask.findFirst.mockResolvedValue(
+          makeTask({ chave: BigInt(21), idProject: BigInt(777) }),
+        );
+        prisma.dProject.findFirst.mockResolvedValue(null);
+
+        await expect(service.findOne('21', ['1'])).rejects.toThrow(NotFoundException);
+      });
+
+      it('lança 404 para task de projeto normal fora do scope', async () => {
+        prisma.dTask.findFirst.mockResolvedValue(
+          makeTask({ chave: BigInt(22), idProject: BigInt(888) }),
+        );
+        prisma.dProject.findFirst.mockResolvedValue(null);
+
+        await expect(service.findOne('22', ['1'])).rejects.toThrow(NotFoundException);
+      });
+
+      it('NÃO consulta dProject quando idProject já está no scope', async () => {
+        prisma.dTask.findFirst.mockResolvedValue(makeTask({ idProject: BigInt(1) }));
+
+        await service.findOne('7', ['1']);
+
+        expect(prisma.dProject.findFirst).not.toHaveBeenCalled();
+      });
     });
   });
 });

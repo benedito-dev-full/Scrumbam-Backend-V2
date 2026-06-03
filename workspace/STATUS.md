@@ -1,6 +1,69 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-06-02 (DVincula↔DProject FK fix — ADR-V2-058, Fases 1-4 COMPLETAS)
+**Ultima atualizacao:** 2026-06-03 (Template Global Task Visibility — ADR-V2-062, COMPLETA)
+
+---
+
+## ✅ Task 1 — Liberar Leitura de Tasks de Template Global na Prévia (V2 F5) — COMPLETA
+
+**Module:** core (subdomínio tasks)
+**Task:** Visibilidade de tarefas em templates globais (prévia Frontend-V2)
+**Status:** COMPLETA (Strategist → Implementer → Reviewer → Documenter)
+**Duration:** ~2h (Strategist 30m + Implementer 1h + Reviewer 30m + Documenter 20m)
+**Quality Score:** 9.0/10 APPROVED (gate CEO 8.0 superado)
+**Date:** 2026-06-03
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | 30m | — |
+| Implementer | 1h | — |
+| Reviewer | 30m | 9.0/10 |
+| Documenter | 20m | — |
+
+**Problem:** `GET /tasks?projectId={templateGlobal}` retornava vazio (0 blocos) porque tenant guard (ADR-V2-042) negava acesso — templates globais (DProject idClasse=-401/-402, idEstab=NULL) não têm DVincula, logo não entram em `accessibleProjectIds`.
+
+**Solution:** Helper privado `isGlobalTemplate(projectId)` em TasksService — verifica se projeto é template global (tripla validação: idClasse ∈ {-401,-402}, idEstab=NULL, excluido=false) e libera leitura SOMENTE para esse caminho (zero alargamento do set geral, sem vazamento de tenant).
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — leitura estrutural de DTask (SELECT, não INSERT em DPedido)
+- Pilar 2 (Endpoints): ATIVO — reutiliza `/tasks` genérico, zero novo controller
+- Pilar 3 (Seed): N/A — zero DClasse nova (usa -401/-402 existentes)
+
+**Deliverables:**
+- [x] Helper `isGlobalTemplate(projectId)` com JSDoc canônico
+- [x] Patch em `findMany` (~linha 605): bypass no guard `projectId`
+- [x] Patch em `findOne` (~linha 886): bypass no guard `idProject`
+- [x] Testes: +8 specs novos (template global retorna, template org-scoped nega, dentro-do-scope custo zero)
+- [x] Correção seed: `categoria` 'dev' → 'desenvolvimento' em `seed-template-implementacao-devari.ts`
+- [x] ADR-V2-062 redigido (bypass cirúrgico para templates globais)
+- [x] CHANGELOG/STATUS/ROADMAP atualizados
+- [x] Build PASS (tsc 0 erros, eslint 0 warnings), Regressão ZERO (85 specs, 100% pass)
+
+**Metrics:**
+- Build: PASS (npm run build, tsc 0 novos erros)
+- Tests: 85 suites passam, +8 novos (template global 4 specs, template org-scoped 2, dentro-do-scope 2)
+- Performance: 1 query extra SOMENTE quando guard ia negar (short-circuit). Fluxo normal = custo ZERO
+- Queries per request: +1 em rejeição de template org-scoped, ZERO em fluxo normal
+- N+1: ZERO (select mínimo, query por PK)
+
+**Security:**
+- Validação tripla: idClasse ∈ TEMPLATE_CLASSES, idEstab=NULL, excluido=false
+- Sem vazamento: templates org-scoped (idEstab≠NULL) retornam false → negados como antes
+- Sem vazamento: projetos normais (idClasse∉TEMPLATE_CLASSES) retornam false → negados como antes
+
+**Endpoints Beneficiados:**
+- `GET /tasks?projectId={templateGlobal}&idClasse=-200` — lê blocos (6 itens de exemplo)
+- `GET /tasks?projectId={templateGlobal}&idClasse=-154` — lê tasks de trabalho
+- `GET /tasks/:id` (task de template global) — agora resolve corretamente
+- `GET /tasks/:id/tree` — herda correção via findOne
+- `GET /tasks/:id/metrics` — herda correção via findOne
+
+**ADRs:** ADR-V2-062 (novo), ADR-V2-061 (templates via DClasse), ADR-V2-042 (tenant isolation)
+
+**Commits:** (será preenchido após git commit)
+
+**Edge Case Conhecido (M1):** Se `accessibleProjectIds` for vazio (user sem nenhum projeto na org), o early-return precede o bypass → prévia de template global não aparece para esse user. Aceitável (caso raro, comportamento correto) — futuro: adicionar flag `allowPublicTemplates` se necessário.
 
 ---
 

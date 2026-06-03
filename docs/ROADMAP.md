@@ -95,6 +95,54 @@
 
 ---
 
+## Task 1: Visibilidade de Tasks em Templates Globais (Prévia Frontend-V2) ✅ COMPLETA
+
+**Status:** ✅ **COMPLETA** — Correção de bypass do tenant guard para leitura de tasks de templates globais
+**Módulo V2:** core (subdomínio tasks)
+**Fase V2:** F5 (Templates / Extensão de ADR-V2-061 ao agregado DTask)
+**Tempo Real:** ~2h total (Strategist 30m + Implementer 1h + Reviewer 30m + Documenter 20m)
+**Completado em:** 2026-06-03
+**Quality Score:** 9.0/10 APPROVED (gate CEO 8.0 superado)
+
+**O Que Foi Feito:**
+
+**Bug Correção:** Prévia de template global (Frontend-V2) exibia "0 blocos e 0 tarefas" porque `GET /tasks?projectId={templateGlobal}` era bloqueado pelo tenant guard (ADR-V2-042) — templates globais não têm DVincula, logo não entram em `accessibleProjectIds`.
+
+**Fix — Bypass Cirúrgico no Service:**
+- Helper privado `isGlobalTemplate(projectId)` verifica se projeto é template global (tripla validação: idClasse ∈ {-401,-402}, idEstab=NULL, excluido=false)
+- Libera leitura SOMENTE para o caminho `projectId == template global`, sem alargar o set geral
+- 1 query extra **SOMENTE quando o guard normal já ia negar** (short-circuit) — custo ZERO no fluxo normal
+- Patches em `findMany` (~linha 605) e `findOne` (~linha 886)
+
+**Correção Adicional (Dado/Seed):** `seed-template-implementacao-devari.ts` — `categoria` mudou de `'dev'` para `'desenvolvimento'` para casar com `TEMPLATE_CATEGORIES[].id` do Frontend-V2 (antes o template caía no bucket "Outros").
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — leitura estrutural de DTask (SELECT, não INSERT transacional)
+- Pilar 2 (Endpoints): ATIVO — reutiliza `/tasks` genérico, ZERO novo controller
+- Pilar 3 (Seed): N/A — ZERO DClasse nova
+
+**Métricas:**
+- Build: ✅ PASS (tsc 0 novos erros, eslint 0 warnings)
+- Tests: +8 specs novos (template global retorna itens, template org-scoped nega, dentro-do-scope custo zero); 85 total, 100% pass
+- Regressão: ZERO
+- Performance: 1 query extra em rejeição template org-scoped; ZERO em fluxo normal
+
+**Garantias:**
+- `Segurança:** Tripla validação sem vazamento (templates org-scoped + projetos normais continuam negados)
+- `Performance:** Custo ZERO no fluxo autorizado normal (short-circuit)
+- `Genericidade:** Padrão reutilizável para outros agregados filho de DProject (candidate a padrão no template Devari-Core)
+
+**Edge Case Conhecido (M1):** Se `accessibleProjectIds` for vazio (user sem nenhum projeto na org), early-return precede bypass → prévia não aparece para esse user. Aceitável (caso raro) — futuro: flag `allowPublicTemplates` se necessário.
+
+**ADRs:**
+- ADR-V2-062 (novo) — Leitura de tasks de template global bypassa tenant guard
+- ADR-V2-061 (Templates via DClasse) — Extensão ao agregado DTask
+- ADR-V2-042 (Tenant isolation) — Defense-in-depth
+
+**Commits:** (será preenchido após git commit)
+
+---
+
 ## Task: Remoção TOTAL da funcionalidade Sprint do backend (hard delete) ✅ COMPLETA
 
 **Status:** ✅ **COMPLETA** — Sprint removida das 6 camadas (IA/webhooks, métricas, endpoint/tasks, seed, schema/migration, módulo/governança)

@@ -45,6 +45,20 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
   - **Pendente deploy (CEO):** aplicar migration staging→prod com `pg_dump` antes (banco dev offline); rodar `prisma/scripts/cleanup-sprint-orphans.ts --apply` para limpar DTabelas -400 órfãs.
   - Commits: `17c24ab` (camadas 1-3), `e8dc53e` (seed), `392104e` (schema+migration), módulo+governança neste commit.
 
+### Fixed
+
+- **Visibilidade de tasks em templates globais (prévia Frontend-V2 agora mostra blocos, V2 F5, 2026-06-03)** (ADR-V2-062, Score 9.0/10)
+  - **Problema:** `GET /tasks?projectId={templateGlobal}` retornava vazio (0 blocos) porque o tenant guard negava acesso — templates globais não têm DVincula, logo não entram em `accessibleProjectIds`
+  - **Solução:** Helper privado `isGlobalTemplate(projectId)` bypass cirúrgico no `TasksService` — verifica se projeto é template global (idClasse∈{-401,-402} + idEstab=NULL) e libera leitura SOMENTE para esse caminho (zero alargamento do set geral)
+  - **Implementação:** `src/tasks/tasks.service.ts`: novo método `isGlobalTemplate()` (1 query por PK, short-circuit) + patches em `findMany` (linha ~605) e `findOne` (linha ~886)
+  - **Endpoints beneficiados:** `GET /tasks?projectId={template}` (prévia), `GET /tasks/:id` (leitura task única de template), `:id/tree` (agregado de blocos), `:id/metrics` (métricas de template)
+  - **Segurança:** Tripla validação (idClasse ∈ TEMPLATE_CLASSES, idEstab=NULL, excluido=false). Sem vazamento — templates org-scoped e projetos normais continuam negados.
+  - **Performance:** 1 query extra SOMENTE quando o guard normal já ia negar (short-circuit). Fluxo normal (usuário autorizado) tem custo ZERO — zero regressão.
+  - **Testes:** +8 specs novos (template global retorna itens, template org-scoped nega, dentro-do-scope não consulta dProject). Build PASS, ESLint PASS, regressão ZERO.
+  - **Correção adicional (dado/seed):** `prisma/scripts/seed-template-implementacao-devari.ts` — `categoria` mudou de `'dev'` para `'desenvolvimento'` para casar com `TEMPLATE_CATEGORIES[].id` do Frontend-V2 (antes o template caía no bucket "Outros")
+  - **Pilares:** Pilar 1 N/A (leitura estrutural de DTask), Pilar 2 ATIVO (reutiliza `/tasks` genérico), Pilar 3 N/A (zero DClasse nova)
+  - **ADRs:** ADR-V2-062 (bypass cirúrgico para templates globais), ADR-V2-061 (templates via DClasse), ADR-V2-042 (tenant isolation)
+
 ### Added
 
 - **Backfill PROJECT_REF para DTabela legada (V2 pós-F5, 2026-06-02)** (ADR-V2-058/059 passo 5, Score 9.0/10)
