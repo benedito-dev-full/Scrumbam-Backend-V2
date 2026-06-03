@@ -161,6 +161,36 @@ export class ProjectResponseDto {
   })
   tableFields!: TableFieldsDto | null;
 
+  /**
+   * Papel do usuário autenticado NESTE projeto (Space/Folder/List).
+   *
+   * Resolvido via RoleResolverService.getProjectRole — já considera a herança
+   * ORG_ADMIN→MANAGER (decisão CEO 2026-06-02) e o acesso herdado de espaço
+   * público (membro da org → MEMBER). `null` apenas em casos-limite (caller
+   * sem usuário). Existe para o front decidir o que habilitar SEM ter que
+   * tentar a ação e tomar 403 (espelha `myCargo` do TeamResponseDto).
+   */
+  @ApiProperty({
+    description: 'Papel do usuário autenticado neste projeto',
+    enum: ['MANAGER', 'MEMBER', 'VIEWER'],
+    nullable: true,
+    example: 'MANAGER',
+  })
+  myRole!: 'MANAGER' | 'MEMBER' | 'VIEWER' | null;
+
+  /**
+   * Atalho de UX: `true` quando o usuário pode executar operações estruturais
+   * do projeto (renomear, mover, mudar privacidade, deletar, gerir membros).
+   *
+   * Equivale a `myRole === 'MANAGER'` — é o que os guards `requireManagerRole`
+   * exigem no backend. O front liga/desliga botões por este campo.
+   */
+  @ApiProperty({
+    description: 'Pode executar operações estruturais (renomear, deletar, gerir membros)',
+    example: true,
+  })
+  canManage!: boolean;
+
   @ApiProperty({ description: 'Data de criação ISO 8601', example: '2026-05-09T00:00:00.000Z' })
   criadoEm!: string;
 

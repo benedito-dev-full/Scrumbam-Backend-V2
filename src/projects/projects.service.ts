@@ -375,7 +375,8 @@ export class ProjectsService implements OnModuleInit {
       );
     }
 
-    return this.buildResponse(project, 1, dto.teamId ?? null);
+    // O criador recebe DVincula -171 (MANAGER) na transação acima.
+    return this.buildResponse(project, 1, dto.teamId ?? null, null, undefined, undefined, 'MANAGER');
   }
 
   /**
@@ -485,12 +486,27 @@ export class ProjectsService implements OnModuleInit {
         excluido: false,
         ...(teamRefIds ? { idLocEscritu: { in: teamRefIds } } : {}),
       },
-      select: { idLocEscritu: true },
+      select: { idLocEscritu: true, idClasse: true },
     });
     const explicitProjectIds = await this.projectRef.refsToProjectIds(
       vinculosExplicitos.map((v) => v.idLocEscritu),
     );
     const explicitSet = new Set(explicitProjectIds);
+
+    // Papel explícito por projectId (P), para preencher `myRole` no response sem
+    // N+1. `refsToProjectIds` preserva a ordem dos refs (E), então pareamos por
+    // índice o idClasse de cada vínculo com o projectId resolvido.
+    const explicitRoleByProjectId = new Map<string, ProjectResponseDto['myRole']>();
+    vinculosExplicitos.forEach((v, i) => {
+      const pid = explicitProjectIds[i];
+      if (pid !== undefined) {
+        explicitRoleByProjectId.set(pid, this.classeToProjectRole(v.idClasse));
+      }
+    });
+
+    // ADR-V2 herança: ADMIN da org dona é MANAGER em qualquer projeto dela.
+    // Resolvido UMA vez para a org do token (evita N+1 no map de items).
+    let isOrgAdmin = false;
 
     // Camada A: espaços públicos da org (apenas quando orgIdBig está presente).
     let publicProjectIds: bigint[] = [];
@@ -503,8 +519,10 @@ export class ProjectsService implements OnModuleInit {
           idClasse: { in: ORG_ROLE_CLASSES },
           excluido: false,
         },
-        select: { chave: true },
+        select: { idClasse: true },
       });
+
+      isOrgAdmin = orgVinculo?.idClasse === ID_CLASSE_ORG_ADMIN;
 
       if (orgVinculo) {
         const publicProjects = await this.prisma.dProject.findMany({
@@ -671,16 +689,24 @@ export class ProjectsService implements OnModuleInit {
       }
     }
 
-    const items: ProjectResponseDto[] = projects.map((p) =>
-      this.buildResponse(
+    const items: ProjectResponseDto[] = projects.map((p) => {
+      const pidStr = p.chave.toString();
+      // Papel do usuário: herança ORG_ADMIN→MANAGER tem precedência; senão o
+      // papel explícito do vínculo; senão MEMBER (chegou aqui só via Camada A,
+      // espaço público — edita tasks mas não faz ops estruturais).
+      const myRole: ProjectResponseDto['myRole'] = isOrgAdmin
+        ? 'MANAGER'
+        : (explicitRoleByProjectId.get(pidStr) ?? 'MEMBER');
+      return this.buildResponse(
         p,
-        countMap.get(p.chave.toString()) ?? 0,
-        teamMap.get(p.chave.toString()) ?? null,
-        folderMap.get(p.chave.toString()) ?? null,
-        doneTaskMap.get(p.chave.toString()) ?? 0,
-        totalTaskMap.get(p.chave.toString()) ?? 0,
-      ),
-    );
+        countMap.get(pidStr) ?? 0,
+        teamMap.get(pidStr) ?? null,
+        folderMap.get(pidStr) ?? null,
+        doneTaskMap.get(pidStr) ?? 0,
+        totalTaskMap.get(pidStr) ?? 0,
+        myRole,
+      );
+    });
 
     const nextCursor = hasMore ? projectIds[projectIds.length - 1].toString() : null;
 
@@ -819,7 +845,7 @@ export class ProjectsService implements OnModuleInit {
           idClasse: { in: PROJECT_ROLE_CLASSES },
           excluido: false,
         },
-        select: { chave: true },
+        select: { chave: true, idClasse: true },
       }),
       this.prisma.dVincula.findFirst({
         where: {
@@ -855,6 +881,10 @@ export class ProjectsService implements OnModuleInit {
         throw new NotFoundException(`Projeto ${id} não encontrado`);
       }
     }
+    // Papel do usuário neste projeto (para o front habilitar/desabilitar ações
+    // estruturais sem precisar tentar e tomar 403). Reusa o vínculo já buscado.
+    let myRole = this.classeToProjectRole(vinculo?.idClasse ?? null);
+
     if (!vinculo) {
       // ADR-V2-051 §8 — Camada A (espaços públicos): membros da org têm
       // acesso a qualquer projeto cujo SPACE raiz seja público (privado=false),
@@ -864,6 +894,17 @@ export class ProjectsService implements OnModuleInit {
       const publicAccess = await this.hasPublicSpaceAccess(project, userEntidadeId, organizationId);
       if (!publicAccess) {
         throw new ForbiddenException('Acesso negado: você não é membro deste projeto');
+      }
+      // Sem DVincula explícita mas com acesso herdado: ORG_ADMIN vira MANAGER
+      // (decisão CEO 2026-06-02); demais membros da org de espaço público são
+      // MEMBER (editam tasks, não ops estruturais).
+      myRole = (await this.isOrgAdminForProject(project, userEntidadeId, organizationId))
+        ? 'MANAGER'
+        : 'MEMBER';
+    } else if (myRole !== 'MANAGER') {
+      // Tem vínculo MEMBER/VIEWER, mas se também é ADMIN da org dona herda MANAGER.
+      if (await this.isOrgAdminForProject(project, userEntidadeId, organizationId)) {
+        myRole = 'MANAGER';
       }
     }
 
@@ -880,6 +921,9 @@ export class ProjectsService implements OnModuleInit {
       memberCount,
       teamLink?.idLocEscritu.toString() ?? null,
       folderLink?.idLocEscritu.toString() ?? null,
+      undefined,
+      undefined,
+      myRole,
     );
   }
 
@@ -1150,6 +1194,10 @@ export class ProjectsService implements OnModuleInit {
       memberCount,
       finalTeamId,
       folderLink?.idLocEscritu.toString() ?? null,
+      undefined,
+      undefined,
+      // Quem chega aqui passou por requireManagerRole → é MANAGER por definição.
+      'MANAGER',
     );
   }
 
@@ -1659,6 +1707,57 @@ export class ProjectsService implements OnModuleInit {
   }
 
   /**
+   * Converte o `idClasse` de um DVincula de projeto no `ProjectRole` do DTO.
+   *
+   * @param idClasse - idClasse do vínculo (-171/-172/-173) ou null
+   * @returns 'MANAGER' | 'MEMBER' | 'VIEWER' ou null se sem vínculo
+   */
+  private classeToProjectRole(idClasse: bigint | null): ProjectResponseDto['myRole'] {
+    if (idClasse === ID_CLASSE_PROJECT_MANAGER) return 'MANAGER';
+    if (idClasse === ID_CLASSE_PROJECT_MEMBER) return 'MEMBER';
+    if (idClasse === ID_CLASSE_PROJECT_VIEWER) return 'VIEWER';
+    return null;
+  }
+
+  /**
+   * Verifica se o usuário é ADMIN da org dona do projeto — herança que o
+   * promove a MANAGER (decisão CEO 2026-06-02, espelha `requireManagerRole`).
+   *
+   * Usa `project.idEstab` como org-alvo para garantir escopo de tenant: admin
+   * da org A nunca herda MANAGER em projeto da org B. Só consulta quando há um
+   * `organizationId` no token coerente com a org dona.
+   *
+   * @param project - Projeto com `idEstab` (org dona)
+   * @param userEntidadeId - Chave BigInt do usuário
+   * @param organizationId - DEntidade.chave da org ativa (JWT)
+   * @returns `true` se o usuário é ADMIN da org dona
+   */
+  private async isOrgAdminForProject(
+    project: { idEstab?: bigint | null },
+    userEntidadeId: bigint,
+    organizationId?: string,
+  ): Promise<boolean> {
+    if (!organizationId || !/^-?\d+$/.test(organizationId)) {
+      return false;
+    }
+    const orgIdBig = BigInt(organizationId);
+    // Coerência de tenant: a org do token tem que ser a org dona do projeto.
+    if (project.idEstab === null || project.idEstab === undefined || project.idEstab !== orgIdBig) {
+      return false;
+    }
+    const orgAdmin = await this.prisma.dVincula.findFirst({
+      where: {
+        idEntidade: userEntidadeId,
+        idLocEscritu: orgIdBig,
+        idClasse: ID_CLASSE_ORG_ADMIN,
+        excluido: false,
+      },
+      select: { chave: true },
+    });
+    return orgAdmin !== null;
+  }
+
+  /**
    * Valida as regras de hierarquia Space/Folder/List (ADR-V2-051).
    *
    * Regras:
@@ -1817,6 +1916,7 @@ export class ProjectsService implements OnModuleInit {
     folderId: string | null = null,
     doneCount?: number,
     totalCount?: number,
+    myRole: ProjectResponseDto['myRole'] = null,
   ): ProjectResponseDto {
     const dados = project.dados as Record<string, unknown> | null;
 
@@ -1843,6 +1943,8 @@ export class ProjectsService implements OnModuleInit {
           : ((project.tableFields as ProjectResponseDto['tableFields'] | undefined) ?? null),
       teamId,
       folderId,
+      myRole,
+      canManage: myRole === 'MANAGER',
       criadoEm: project.criadoEm.toISOString(),
       atualizadoEm: project.atualizadoEm.toISOString(),
     };

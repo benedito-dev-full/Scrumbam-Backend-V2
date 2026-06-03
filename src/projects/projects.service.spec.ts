@@ -188,6 +188,9 @@ describe('ProjectsService', () => {
       );
       expect(result.nome).toBe('Test Project');
       expect(result.memberCount).toBe(1);
+      // Criador recebe DVincula -171 → é MANAGER e pode gerir o projeto.
+      expect(result.myRole).toBe('MANAGER');
+      expect(result.canManage).toBe(true);
     });
 
     it('deve criar SPACE (idClasse=-350) sem chamar seedBootstrap', async () => {
@@ -504,6 +507,53 @@ describe('ProjectsService', () => {
       ]);
 
       await expect(service.findOne('1', BigInt(999), '50')).rejects.toThrow(ForbiddenException);
+    });
+
+    it('expõe myRole=MANAGER e canManage=true quando o vínculo é -171 (MANAGER)', async () => {
+      prisma.dProject.findFirst.mockResolvedValue(mockProject);
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce({ chave: BigInt(1), idClasse: BigInt(-171) }) // membership MANAGER
+        .mockResolvedValueOnce(null) // teamLink
+        .mockResolvedValueOnce(null); // folderLink
+      prisma.dVincula.count.mockResolvedValue(2);
+
+      const result = await service.findOne('1', BigInt(100));
+
+      expect(result.myRole).toBe('MANAGER');
+      expect(result.canManage).toBe(true);
+    });
+
+    it('expõe myRole=MEMBER e canManage=false quando o vínculo é -172 (MEMBER)', async () => {
+      prisma.dProject.findFirst.mockResolvedValue(mockProject);
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce({ chave: BigInt(1), idClasse: BigInt(-172) }) // membership MEMBER
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null)
+        // isOrgAdminForProject não é chamado sem organizationId coerente — mas se
+        // fosse, retornaria não-admin. Garante MEMBER puro.
+        .mockResolvedValueOnce(null);
+      prisma.dVincula.count.mockResolvedValue(2);
+
+      const result = await service.findOne('1', BigInt(100));
+
+      expect(result.myRole).toBe('MEMBER');
+      expect(result.canManage).toBe(false);
+    });
+
+    it('herda MANAGER quando MEMBER do projeto também é ADMIN da org dona (decisão CEO 2026-06-02)', async () => {
+      const orgProject = { ...mockProject, idEstab: BigInt(50) };
+      prisma.dProject.findFirst.mockResolvedValue(orgProject);
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce({ chave: BigInt(1), idClasse: BigInt(-172) }) // MEMBER no projeto
+        .mockResolvedValueOnce(null) // teamLink
+        .mockResolvedValueOnce(null) // folderLink
+        .mockResolvedValueOnce({ chave: BigInt(9) }); // isOrgAdminForProject → ADMIN -161
+      prisma.dVincula.count.mockResolvedValue(2);
+
+      const result = await service.findOne('1', BigInt(100), '50');
+
+      expect(result.myRole).toBe('MANAGER');
+      expect(result.canManage).toBe(true);
     });
   });
 
