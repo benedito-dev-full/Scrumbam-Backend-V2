@@ -1,12 +1,12 @@
 # ADR-V2-061: Templates de Lista/Espaço via DClasse dedicada + remap na materialização (estende o motor `cloneTree`)
 
-**Status:** PROPOSTO
+**Status:** ACEITO
 **Data:** 2026-06-03
 **Decisores:** CEO (dono) + Strategist Agent V2
 **Tags:** #V2 #templates #dclasse #clone #cloneTree #zero-tabela-nova
 **Relacionados:** ADR-V2-001 (zero tabela nova), ADR-V2-051 (hierarquia SPACE/FOLDER/LIST), ADR-V2-057 (timer/telemetria por tarefa), ADR-V2-058/059 (PROJECT_REF espelho + backfill), ADR-V2-060 (remoção Sprint, libera range -400..-419)
 
-> **Nota de ratificação:** As 5 decisões de design abaixo foram **travadas pelo dono em 2026-06-03**. A ratificação formal deste ADR (status `Aceito`) fica para o passo do Documenter ao final da feature Templates. Enquanto isso, o status é `PROPOSTO` e o seed já cita `ADR-V2-061 (proposto)`.
+> **Ratificação:** As 5 decisões de design abaixo foram **travadas pelo dono em 2026-06-03** e **ratificadas pelo Documenter Agent em 2026-06-03** ao final da implementação das Fases 1-6 da feature Templates. Status: **ACEITO**.
 
 ---
 
@@ -159,5 +159,6 @@ usar `dados` para tipo seria redundante e mais frágil.
 
 ---
 
-**Status:** PROPOSTO (decisões de design travadas pelo dono 2026-06-03)
-**Próximo passo:** Sub-fases 2+ (motor cloneTree + rota from-template + catálogo); ratificação formal pelo Documenter ao fim da feature.
+**Status:** ACEITO (ratificado pelo Documenter 2026-06-03)
+**Implementação:** Fases 1-6 completas (seed, refator, copyTasks, from-template, alcance, catálogo+blindagem)
+**Próximos passos:** Frente B — Fase 2 (agente pode criar templates org-scoped) + melhorias em agents.service.listAgentProjects (M4 debt)

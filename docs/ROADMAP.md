@@ -2,9 +2,96 @@
 
 **Versao:** 1.0
 **Mantido por:** Documenter Agent V2
-**Atualizado em:** 2026-05-26
+**Atualizado em:** 2026-06-03
 
 > Este documento rastreia tasks por Fase (F0..F17). Strategist abre, Implementer entrega, Reviewer valida, Documenter fecha. Cada task tem entrada com Status, Modulo, Fase, Tempo Real, Quality Score, Pilares aplicados e ADRs vinculados.
+
+---
+
+## Feature: Templates de Lista/Espaço via DClasse dedicada — Fase 1 COMPLETA ✅
+
+**Status:** ✅ **FASE 1-6 COMPLETAS** — Catálogo, rota from-template, motor cloneTree, alcance global/org, blindagem
+**Módulo V2:** projects (core — seed, services, endpoints genéricos)
+**Fase V2:** F1 Pós-Hierarquia (ADR-V2-051 SPACE/FOLDER/LIST fundação, ADR-V2-060 Sprint libera range -400..-419)
+**Tempo Real:** ~18h total (Strategist 2h + Implementer 12h + Reviewer 2h + Documenter 2h)
+**Completado em:** 2026-06-03
+**Quality Score:** 8.7/10 médio (Fase 1: 8.4, Fase 2: 8.9, Fase 3: 8.7, Fase 4: 8.8, Fase 5: 8.5, Fase 6: 9.1 — todas gate ≥8.0 APPROVED)
+
+**O Que Foi Feito:**
+
+**Fase 1 — Seed DClasses (-401/-402):**
+- Seed `classes.seed.ts`: `-401 TEMPLATE_LIST` (filha de -37 PROJECT), `-402 TEMPLATE_SPACE` (filha de -37)
+- ADR-V2-061 proposto (decisões de design: DClasse dedic., remap classe, alcance global+org, categoria em `dados`, molde limpo)
+
+**Fase 2 — Refator motor clone:**
+- `projects.service.ts`: Extração `cloneTree(opts)` separando `deepCloneTree` de `remapClassesRecursive`
+- Sem regressão em `duplicate()` existente
+
+**Fase 3 — Motor copyTasks (molde limpo):**
+- `TasksService.copyTasks(sourceTaskId, destProjectId, destParentId)` com reset:
+  - Copia `dados.fields` (colunas customizadas)
+  - Zera `idAssignee` (sem responsável herdado)
+  - Zera `dueDate` (sem data de vencimento)
+  - Reset `v3.state → INBOX` (nova task começa no início)
+  - Zera telemetry (nenhuma métrica herdada)
+  - Novo `DEV-N` (sequência própria do projeto destino)
+  - Remap `idPai` task→task e `dados.idBloco` task→bloco no clone
+
+**Fase 4 — Rota from-template:**
+- Endpoint `POST /projects/:id/from-template` (aceita `ListProjectsQueryDto` vazio)
+- Remap de classe: `-401→-352 (LIST)`, `-402→-350 (SPACE)` ANTES do teste `idClasse === ID_CLASSE_LIST`
+- Carimbo `idEstab` = org de destino (não `idEstab` do template)
+- Validação: usuário é MANAGER na org de destino
+
+**Fase 5 — Alcance global:**
+- Templates com `idEstab=NULL` visíveis a **todas as orgs** (criados via seed/plataforma)
+- Templates org-scoped (`idEstab={org}`) visíveis **apenas àquela org** (MANAGER pode criar)
+
+**Fase 6 — Catálogo + Blindagem:**
+- Catálogo: `GET /projects?idClasse=-401&categoria=X` com filtro Por categoria (`dados.categoria` string)
+- Constante `TEMPLATE_CLASSES = [-401, -402]` — fonte única (não hardcode em multiplos pontos)
+- Templates ocultos de:
+  - Listagens normais (findMany, `/projects` sem filtro idClasse=-401/-402)
+  - `folders.listProjects` (projects em pastas não são templates)
+  - `search` (busca não retorna templates)
+  - `analytics.forecast` (forecast não lê templates)
+- Validação em `moveProject` guard (não mover templates para fora da raiz org)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — DProject/DTask são cadastros estruturais (Prisma direto)
+- Pilar 2 (Endpoints): ATIVO — reutiliza `POST /projects` genérico; zero novo controller
+- Pilar 3 (Seed): ATIVO — 2 DClasses dedicadas (-401/-402), range -400..-419 liberado
+
+**Métricas:**
+- Build: ✅ PASS (npm run build, tsc 0 errors, eslint 0 warnings)
+- Tests: 6 sub-fases, todos PASS (gate ≥8.0 superado em todas)
+- Queries: ZERO N+1 (cloneTree é CTE já existente)
+- Regressão: zero (duplicate() intacta)
+
+**Garantias:**
+- `ZERO tabela nova` (ADR-V2-001 respeitado — usa DProject + DClasse)
+- `Molde limpo` — copia estrutura, zera estado (idAssignee, dueDate, telemetry, v3.state)
+- `Remap automático` — template (-401/-402) vira projeto real (-352/-350) na materialização
+- `Alcance configurável` — global (idEstab=NULL) ou por-org (idEstab={org})
+- `Categoria flexível` — categorização em `dados.categoria` (metadado, não taxonomia)
+
+**Débito conhecido:**
+- **M4:** `agents.service.listAgentProjects` não filtra templates (pode listar agent-projects que são templates)
+- **Filtro defensivo:** `folders.listProjects` aplicado, mas não previne 100% acesso indevido (não regressão, mas técnica)
+
+**ADRs:**
+- ADR-V2-061 (Templates via DClasse + remap) — Status: **PROPOSTO → será ratificado para ACEITO**
+- ADR-V2-001 (zero tabela nova) — respeitado
+- ADR-V2-051 (hierarquia SPACE/FOLDER/LIST) — fundação
+- ADR-V2-060 (remoção Sprint) — libera range -401..-419
+
+**Commits:**
+- `4ad656e` feat(seeds): classes `-401 TEMPLATE_LIST` / `-402 TEMPLATE_SPACE` (ADR-V2-061)
+- `57cdc56` refactor(projects): extrai `cloneTree(opts)` de `duplicate()`
+- `d20de55` feat(projects): `copyTasks`/`resetTaskDados` — molde-limpo
+- `5fd8a18` feat(projects): rota `POST /projects/:id/from-template`
+- `4f160c8` feat(projects): alcance global (`idEstab` NULL) + org-scoped
+- `9afe42b` feat(projects): catálogo `GET /projects?idClasse=-401&categoria=X` + blindagem
 
 ---
 

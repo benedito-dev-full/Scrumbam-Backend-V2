@@ -12,6 +12,23 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Added
+
+- **Feature Templates — Fase 1-6 completas: Catálogo de Templates + Rota from-template + Motor cloneTree + Blindagem** (V2 F1 Pós-Hierarquia, 2026-06-03)
+  - **Seed (Fase 1):** DClasses `-401 TEMPLATE_LIST` + `-402 TEMPLATE_SPACE` (idPai -37) com ADR-V2-061 (proposto)
+  - **Refator motor clone (Fase 2):** Extração `cloneTree(opts)` de `duplicate()` sem regressão; `deepCloneTree` + `remapClassesRecursive` separadas
+  - **Motor copyTasks (Fase 3):** `TasksService.copyTasks()` com molde-limpo: copia `dados.fields`, zera `idAssignee`/`dueDate`, reset `v3→INBOX`, zera telemetry, novo `DEV-N`, remap `idPai` task→task e `dados.idBloco` task→bloco
+  - **Rota from-template (Fase 4):** `POST /projects/:id/from-template` (ListProjectsQueryDto) com remap `-401→-352`/`-402→-350` + carimbo `idEstab` destino + validação MANAGER
+  - **Alcance global (Fase 5):** Templates com `idEstab=NULL` (seed/plataforma) visíveis a todas as orgs; templates org-scoped via `idEstab={org}`
+  - **Catálogo + Blindagem (Fase 6):** `GET /projects?idClasse=-401&categoria=X` com `TEMPLATE_CLASSES` const (fonte única); templates ocultos de listagens normais (`findMany`, `folders.listProjects`, `search`, `analytics.forecast`); validação em `moveProject` guard
+  - **Decisões travadas CEO 2026-06-03:** DClasse dedicada (-401/-402); rota from-template; alcance global+org; categoria em `dados.categoria`; molde limpo; ZERO tabela/coluna nova (ADR-V2-001)
+  - **Débito conhecido:** M4 (`agents.service.listAgentProjects` não filtra templates) + filtro defensivo em `folders.listProjects` (não regressão, mas não previne 100%)
+  - **Tests:** 6 sub-fases com scores: seed 8.4/10, refator 8.9/10, copyTasks 8.7/10, from-template 8.8/10, alcance-global 8.5/10, catálogo+blindagem 9.1/10 (gate ≥8.0 APPROVED todas)
+  - **Build:** PASS, TypeScript 0 errors, ESLint 0 warnings
+  - **Pilares:** Pilar 1 N/A (cadastro estrutural), Pilar 2 ATIVO (reutiliza POST /projects genérico), Pilar 3 ATIVO (seed -401/-402, DClasse dedic adas)
+  - **ADRs:** ADR-V2-061 (Templates via DClasse + remap), ADR-V2-001 (zero tabela nova), ADR-V2-051 (hierarquia SPACE/FOLDER/LIST), ADR-V2-060 (remoção Sprint libera range -401..-419)
+  - **Commits:** `4ad656e` (seed), `57cdc56` (refator cloneTree), `d20de55` (copyTasks molde-limpo), `5fd8a18` (rota from-template), `4f160c8` (alcance global), `9afe42b` (catálogo+blindagem)
+
 ### Removed
 
 - **Funcionalidade Sprint removida COMPLETAMENTE do backend (hard delete, 2026-06-03)** (ADR-V2-060, revoga dimensão Sprint do ADR-V2-009)
