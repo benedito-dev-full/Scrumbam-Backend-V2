@@ -1970,15 +1970,141 @@ describe('ProjectsService', () => {
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
-    it('REJEITA template GLOBAL (idEstab NULL) na 4a → NotFoundException', async () => {
-      prisma.dProject.findFirst.mockResolvedValueOnce({
-        chave: BigInt(401),
-        idClasse: BigInt(-401),
-        idEstab: null, // global — só aceito na Sub-fase 4b
+    it('ACEITA TEMPLATE_LIST GLOBAL (idEstab NULL) sob SPACE destino: vira LIST (-352) com idEstab=org destino, tasks copiadas (Sub-fase 4b)', async () => {
+      // findFirst #1 = template GLOBAL (-401, idEstab NULL); #2 = destino SPACE
+      // (-350, org 50). Global é visível a qualquer org e materializa na org ativa.
+      prisma.dProject.findFirst
+        .mockResolvedValueOnce({ chave: BigInt(401), idClasse: BigInt(-401), idEstab: null })
+        .mockResolvedValueOnce({ chave: BigInt(123), idClasse: BigInt(-350), idEstab: BigInt(50) });
+      prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(1) }); // MANAGER destino
+      // CTE devolve o template global (idEstab NULL na origem).
+      prisma.$queryRaw.mockResolvedValue([
+        {
+          chave: BigInt(401),
+          idClasse: BigInt(-401),
+          idPai: null,
+          nome: 'Template Global',
+          descricao: null,
+          idEstab: null,
+          repoUrl: null,
+          privado: false,
+          dados: { prefix: 'DEV' },
+          tableFields: null,
+          depth: 0,
+        },
+      ]);
+      const { dProjectCreate, dTaskCreate } = mockMaterializeTx({
+        createdClasse: BigInt(-352),
+        tasks: [
+          {
+            chave: BigInt(10),
+            idPai: null,
+            nome: 'Task A',
+            descricao: null,
+            idPriority: null,
+            dados: { identifier: 'OLD-1' },
+          },
+        ],
       });
+
+      const result = await service.createFromTemplate('401', BigInt(100), '50', { idPai: '123' });
+
+      // Nó materializado: classe REAL -352 e idEstab da ORG DESTINO (50), não NULL.
+      const createArg = dProjectCreate.mock.calls[0][0] as {
+        data: { idClasse: bigint; idEstab: bigint; idPai?: bigint };
+      };
+      expect(createArg.data.idClasse).toBe(BigInt(-352));
+      expect(createArg.data.idEstab).toBe(BigInt(50)); // carimbado na org ativa (não NULL)
+      expect(createArg.data.idPai).toBe(BigInt(123));
+      // Tasks copiadas + seed V3 disparado.
+      expect(seedBootstrap.seedProject).toHaveBeenCalledTimes(1);
+      const taskCreates = dTaskCreate.mock.calls
+        .map((c) => c[0] as { data: Record<string, unknown> })
+        .filter((c) => c.data.idClasse === BigInt(-154));
+      expect(taskCreates).toHaveLength(1);
+      expect(result.myRole).toBe('MANAGER');
+    });
+
+    it('ACEITA TEMPLATE_SPACE GLOBAL (idEstab NULL) como raiz: vira SPACE (-350) com idEstab=org ativa (Sub-fase 4b)', async () => {
+      // Template SPACE global, sem idPai → nasce raiz; exige membro da org.
+      prisma.dProject.findFirst.mockResolvedValueOnce({
+        chave: BigInt(402),
+        idClasse: BigInt(-402),
+        idEstab: null, // global
+      });
+      prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(1) }); // membro da org
+      prisma.$queryRaw.mockResolvedValue([
+        {
+          chave: BigInt(402),
+          idClasse: BigInt(-402),
+          idPai: null,
+          nome: 'Space Template Global',
+          descricao: null,
+          idEstab: null,
+          repoUrl: null,
+          privado: false,
+          dados: {},
+          tableFields: null,
+          depth: 0,
+        },
+      ]);
+      const { dProjectCreate } = mockMaterializeTx({ createdClasse: BigInt(-350) });
+
+      await service.createFromTemplate('402', BigInt(100), '50', {});
+
+      const createArg = dProjectCreate.mock.calls[0][0] as {
+        data: { idClasse: bigint; idEstab: bigint };
+      };
+      // SPACE-template global → -350, carimbado na org ativa (50).
+      expect(createArg.data.idClasse).toBe(BigInt(-350));
+      expect(createArg.data.idEstab).toBe(BigInt(50));
+    });
+
+    it('M1: REJEITA TEMPLATE_SPACE com idPai → BadRequestException (Space é raiz)', async () => {
+      // Template SPACE org-scoped, mas com idPai informado: Space nasce raiz.
+      prisma.dProject.findFirst
+        .mockResolvedValueOnce({ chave: BigInt(402), idClasse: BigInt(-402), idEstab: BigInt(50) })
+        .mockResolvedValueOnce({ chave: BigInt(123), idClasse: BigInt(-350), idEstab: BigInt(50) });
+      await expect(
+        service.createFromTemplate('402', BigInt(100), '50', { idPai: '123' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('M2: REJEITA destino (idPai) de OUTRA org → NotFoundException', async () => {
+      // Template OK (org 50), mas destino pertence à org 99.
+      prisma.dProject.findFirst
+        .mockResolvedValueOnce({ chave: BigInt(401), idClasse: BigInt(-401), idEstab: BigInt(50) })
+        .mockResolvedValueOnce({ chave: BigInt(123), idClasse: BigInt(-350), idEstab: BigInt(99) });
       await expect(
         service.createFromTemplate('401', BigInt(100), '50', { idPai: '123' }),
       ).rejects.toThrow(NotFoundException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('M3: REJEITA TEMPLATE_LIST com destino incompatível (LIST -352, não SPACE/FOLDER) → BadRequestException', async () => {
+      // Template LIST OK, mas destino é uma LIST (-352), não SPACE/FOLDER.
+      prisma.dProject.findFirst
+        .mockResolvedValueOnce({ chave: BigInt(401), idClasse: BigInt(-401), idEstab: BigInt(50) })
+        .mockResolvedValueOnce({ chave: BigInt(123), idClasse: BigInt(-352), idEstab: BigInt(50) });
+      await expect(
+        service.createFromTemplate('401', BigInt(100), '50', { idPai: '123' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('M4: REJEITA TEMPLATE_SPACE raiz quando usuário SEM membership da org → ForbiddenException', async () => {
+      prisma.dProject.findFirst.mockResolvedValueOnce({
+        chave: BigInt(402),
+        idClasse: BigInt(-402),
+        idEstab: BigInt(50),
+      });
+      // Sem idPai → exige membro da org; dVincula vazio = não-membro.
+      prisma.dVincula.findFirst.mockResolvedValue(null);
+      await expect(service.createFromTemplate('402', BigInt(100), '50', {})).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
     it('REJEITA quando não é MANAGER no destino → ForbiddenException', async () => {

@@ -1804,17 +1804,18 @@ export class ProjectsService implements OnModuleInit {
   }
 
   /**
-   * Materializa um projeto (List/Space) a partir de um TEMPLATE (Sub-fase 4a da
-   * feature Templates — ADR-V2-061, escopo ORG). O `:id` é um DProject-template
-   * (`idClasse` -401 TEMPLATE_LIST ou -402 TEMPLATE_SPACE); o resultado é a
-   * árvore inteira clonada com a DClasse remapeada para a real (-401→-352 LIST,
-   * -402→-350 SPACE), blocos e tasks copiados (molde-limpo) e `idEstab`
-   * carimbado com a org ativa em TODOS os nós.
+   * Materializa um projeto (List/Space) a partir de um TEMPLATE (feature
+   * Templates — ADR-V2-061). O `:id` é um DProject-template (`idClasse` -401
+   * TEMPLATE_LIST ou -402 TEMPLATE_SPACE); o resultado é a árvore inteira
+   * clonada com a DClasse remapeada para a real (-401→-352 LIST, -402→-350
+   * SPACE), blocos e tasks copiados (molde-limpo) e `idEstab` carimbado com a
+   * org ativa em TODOS os nós.
    *
-   * Acesso (Sub-fase 4a — ORG-scoped):
-   *  - O template deve pertencer à org ativa (`idEstab = organizationId`). Caso
-   *    contrário → 404 (não vaza existência cross-tenant). Template GLOBAL
-   *    (`idEstab` NULL) NÃO é aceito ainda — é a Sub-fase 4b (cai em 404 aqui).
+   * Acesso ao template:
+   *  - Usável se for da org ativa (`idEstab = organizationId`) OU GLOBAL
+   *    (`idEstab` NULL — template padrão de plataforma, visível a todas as orgs).
+   *    Template de OUTRA org → 404 (não vaza existência cross-tenant). O clone
+   *    de um template global nasce carimbado na org ativa (nunca herda NULL).
    *  - Permissão no DESTINO: se `dto.idPai` é fornecido, o usuário deve ser
    *    MANAGER do destino (ou ORG_ADMIN); o destino deve ser da mesma org e do
    *    tipo compatível (LIST-template nasce sob SPACE/FOLDER). Se `idPai` é
@@ -1836,7 +1837,8 @@ export class ProjectsService implements OnModuleInit {
    * @throws {ForbiddenException} Se o usuário não é MANAGER do destino (ou
    *   membro da org quando nasce como raiz).
    * @throws {NotFoundException} Se o template/destino não existe ou pertence a
-   *   outra org (template não-global de outra org → 404).
+   *   outra org (template não-global de outra org → 404). Templates GLOBAIS
+   *   (idEstab NULL) são aceitos por qualquer org (Sub-fase 4b).
    *
    * @see cloneTree — motor de deep-clone (acionado com fromTemplate+idEstabDestino)
    * @see ADR-V2-061 — marcação por DClasse -401/-402 + remap obrigatório
@@ -1868,9 +1870,12 @@ export class ProjectsService implements OnModuleInit {
     if (!isTemplateClasse) {
       throw new BadRequestException(`Projeto ${id} não é um template (idClasse -401/-402)`);
     }
-    // Acesso ORG-scoped: template precisa ser da org ativa. Template GLOBAL
-    // (idEstab NULL) ainda NÃO é aceito (Sub-fase 4b). Template de outra org → 404.
-    if (template.idEstab === null || template.idEstab !== orgIdBig) {
+    // Acesso ao template (Sub-fase 4b): um template é usável se for da org ativa
+    // (org-scoped) OU GLOBAL (idEstab NULL — visível a todas as orgs, criado por
+    // seed/plataforma). Template de OUTRA org → 404 (não vaza existência). O clone
+    // resultante é sempre carimbado com a org ativa via `idEstabDestino` (passo 3),
+    // então um template global materializa dentro da org ativa.
+    if (template.idEstab !== null && template.idEstab !== orgIdBig) {
       throw new NotFoundException(`Template ${id} não encontrado`);
     }
 
