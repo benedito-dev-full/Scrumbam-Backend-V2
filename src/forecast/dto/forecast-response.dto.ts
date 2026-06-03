@@ -19,7 +19,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
  *   "unit": "days",
  *   "tasksRemaining": 30,
  *   "iterations": 10000,
- *   "source": "sprints"
+ *   "source": "rolling-window"
  * }
  * ```
  */
@@ -72,15 +72,14 @@ export class ForecastResponseDto {
 
   /**
    * Fonte do throughput histórico utilizado.
-   * - 'sprints': calculado a partir de sprints cadastrados (≥ 2)
    * - 'rolling-window': calculado a partir de janela móvel de 30 dias
    */
   @ApiProperty({
     description: 'Fonte do throughput histórico',
-    enum: ['sprints', 'rolling-window'],
-    example: 'sprints',
+    enum: ['rolling-window'],
+    example: 'rolling-window',
   })
-  source!: 'sprints' | 'rolling-window';
+  source!: 'rolling-window';
 
   /**
    * Throughput médio por período (informativo).

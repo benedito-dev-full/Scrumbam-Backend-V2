@@ -21,7 +21,6 @@ export type UpdateTaskDadosInput = Record<string, unknown | null> & {
  * DTO para atualização parcial de task (PUT /tasks/:id).
  *
  * Não inclui atualização de status (use PUT /tasks/:id/status).
- * Não inclui atualização de sprint (use PUT /tasks/:id/sprint).
  *
  * @example
  * ```typescript

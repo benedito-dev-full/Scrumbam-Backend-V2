@@ -5,26 +5,26 @@ import { Type } from 'class-transformer';
 /**
  * DTO para parâmetros de forecast Monte Carlo.
  *
- * Configura o número de sprints históricos e iterações da simulação.
+ * Configura o número de períodos históricos e iterações da simulação.
  *
  * @example
  * ```typescript
- * // Padrão: 4 sprints, 10.000 iterações
+ * // Padrão: 4 períodos, 10.000 iterações
  * const dto: ForecastQueryDto = {};
  *
  * // Customizado
- * const dto: ForecastQueryDto = { historicalSprints: 8, iterations: 5000 };
+ * const dto: ForecastQueryDto = { historicalPeriods: 8, iterations: 5000 };
  * ```
  */
 export class ForecastQueryDto {
   /**
-   * Número de sprints históricos a considerar no cálculo de throughput.
+   * Número de períodos históricos a considerar no cálculo de throughput.
    *
-   * Fallback para janela móvel de 30 dias se sprints < 2.
+   * O throughput é calculado a partir de uma janela móvel de 30 dias por semana.
    * Min: 1, Max: 12, Default: 4.
    */
   @ApiPropertyOptional({
-    description: 'Número de sprints históricos para throughput (fallback: 30 dias se < 2)',
+    description: 'Número de períodos históricos para throughput',
     example: 4,
     default: 4,
     minimum: 1,
@@ -35,7 +35,7 @@ export class ForecastQueryDto {
   @Min(1)
   @Max(12)
   @Type(() => Number)
-  historicalSprints?: number = 4;
+  historicalPeriods?: number = 4;
 
   /**
    * Número de iterações do Monte Carlo.

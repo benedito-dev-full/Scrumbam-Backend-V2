@@ -13,7 +13,6 @@ import { PhaseMetricsService } from './services/phase-metrics.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { UpdateTaskStatusDto } from './dto/update-task-status.dto';
-import { UpdateTaskSprintDto } from './dto/update-task-sprint.dto';
 import { ListTasksQueryDto } from './dto/list-tasks-query.dto';
 import { TaskResponseDto, ListTasksResponseDto, ActiveExecutionDto } from './dto/task-response.dto';
 import { TaskTimerStateDto } from './dto/task-timer-response.dto';
@@ -272,7 +271,7 @@ export class TasksService {
    *
    * Audit DEvento -497 emitido APÓS commit.
    *
-   * @param dto - Dados da task (nome, projectId, priority, assigneeId, sprintId)
+   * @param dto - Dados da task (nome, projectId, priority, assigneeId)
    * @param creatorId - Chave BigInt da DEntidade do criador
    * @returns TaskResponseDto com identifier e status=INBOX
    *
@@ -293,7 +292,7 @@ export class TasksService {
     // ADR-V2-050: idClasse opcional no DTO, default -154 (TASK). Whitelist no
     // DTO (`@IsIn(['-154','-200'])`) já bloqueia valores fora do range; aqui
     // resolvemos para BigInt e ramificamos comportamento (PHASE pula identifier,
-    // status INBOX e priority; ignora silenciosamente assignee/sprint/taskType).
+    // status INBOX e priority; ignora silenciosamente assignee/taskType).
     const idClasseRequested = dto.idClasse ?? '-154';
     const idClasseBigInt = BigInt(idClasseRequested);
     const isPhase = idClasseBigInt === ID_CLASSE_PHASE;
@@ -377,11 +376,11 @@ export class TasksService {
     // genéricos como Telegram/MCP).
     if (
       isPhase &&
-      (dto.assigneeId || dto.sprintId || dto.priority || dto.taskType || dto.assigneeTeamId)
+      (dto.assigneeId || dto.priority || dto.taskType || dto.assigneeTeamId)
     ) {
       this.logger.warn(
         `create_phase_ignored_fields projectId=${dto.projectId} ` +
-          `assignee=${!!dto.assigneeId} sprint=${!!dto.sprintId} ` +
+          `assignee=${!!dto.assigneeId} ` +
           `priority=${!!dto.priority} taskType=${!!dto.taskType} ` +
           `assigneeTeamId=${!!dto.assigneeTeamId}`,
       );
@@ -404,7 +403,7 @@ export class TasksService {
         // Ramo TASK — comportamento legado preservado.
         // ADR-V2-058/059: o counter -475 também grava DTabela.dEntidadeId
         // (FK → DEntidade.chave). Resolver P→E (legacy-safe) — mesma correção
-        // aplicada a statuses/sprint/priorities no passo 1-2; este write-site
+        // aplicada a statuses/priorities no passo 1-2; este write-site
         // ficou fora do escopo daquele commit e quebrava a FK ao criar o
         // counter de um projeto NOVO (cujo P não existe em DEntidade).
         const counterScope = await this.projectRef.resolveEntidadeRef(projectId);
@@ -472,7 +471,6 @@ export class TasksService {
           idStatus: isPhase ? null : inboxStatusChave,
           idPriority: isPhase ? null : idPriority,
           idAssignee: isPhase ? null : dto.assigneeId ? BigInt(dto.assigneeId) : null,
-          idSprint: isPhase ? null : dto.sprintId ? BigInt(dto.sprintId) : null,
           idCreator: creatorId,
           idPai: idPaiBigInt,
           dados: dadosPayload as Prisma.InputJsonValue,
@@ -570,7 +568,7 @@ export class TasksService {
    *
    * N+1 ZERO — select seletivo com cursor pagination.
    *
-   * @param query - Filtros: projectId, status, assigneeId, sprintId, cursor, limit
+   * @param query - Filtros: projectId, status, assigneeId, cursor, limit
    * @param accessibleProjectIds - Lista de `DProject.chave` (BigInt como string)
    *   onde o usuario tem acesso E que pertencem a org ativa. Resolva via
    *   `ProjectsService.findAccessibleProjectIds(userEntidadeId, organizationId)`.
@@ -624,7 +622,6 @@ export class TasksService {
       excluido: false,
       idProject: { in: scopedProjectIds },
       ...(query.assigneeId ? { idAssignee: BigInt(query.assigneeId) } : {}),
-      ...(query.sprintId ? { idSprint: BigInt(query.sprintId) } : {}),
       ...(query.cursor ? { chave: { lt: BigInt(query.cursor) } } : {}),
     };
 
@@ -768,7 +765,6 @@ export class TasksService {
         idStatus: true,
         idPriority: true,
         idAssignee: true,
-        idSprint: true,
         dueDate: true,
         dados: true,
         excluido: true,
@@ -844,7 +840,7 @@ export class TasksService {
   /**
    * Atualiza campos de task (nome, descrição, priority, assignee).
    *
-   * NÃO altera status (usar updateStatus) nem sprint (usar updateSprint).
+   * NÃO altera status (usar updateStatus).
    *
    * @param id - Chave BigInt da task (string)
    * @param dto - Campos a atualizar
@@ -1323,53 +1319,6 @@ export class TasksService {
       // Continua BFS com filhos de qualquer tipo
       queue.push(...children.map((c) => c.chave));
     }
-  }
-
-  /**
-   * Move task para um sprint diferente.
-   *
-   * @param id - Chave BigInt da task (string)
-   * @param dto - sprintId de destino
-   * @returns TaskResponseDto com novo sprint
-   *
-   * @throws {NotFoundException} Se task não encontrada
-   *
-   * @example
-   * ```typescript
-   * const task = await service.updateSprint('7', { sprintId: '2' });
-   * ```
-   */
-  async updateSprint(
-    id: string,
-    dto: UpdateTaskSprintDto,
-    accessibleProjectIds?: string[],
-  ): Promise<TaskResponseDto> {
-    const taskId = BigInt(id);
-
-    const existing = await this.prisma.dTask.findFirst({
-      where: { chave: taskId, excluido: false },
-      select: { chave: true, idProject: true },
-    });
-
-    if (!existing) {
-      throw new NotFoundException(`Task ${id} não encontrada`);
-    }
-
-    // ADR-V2-042: tenant check via projectId
-    if (accessibleProjectIds !== undefined) {
-      const pid = existing.idProject?.toString() ?? null;
-      if (!pid || !accessibleProjectIds.includes(pid)) {
-        throw new NotFoundException(`Task ${id} não encontrada`);
-      }
-    }
-
-    const updated = await this.prisma.dTask.update({
-      where: { chave: taskId },
-      data: { idSprint: BigInt(dto.sprintId) },
-    });
-
-    const priorityMap = await this.buildPriorityMap([updated.idPriority]);
-    return this.buildResponse(updated, priorityMap);
   }
 
   /**
@@ -1875,7 +1824,6 @@ export class TasksService {
       idStatus?: bigint | null;
       idPriority?: bigint | null;
       idAssignee?: bigint | null;
-      idSprint?: bigint | null;
       dueDate?: Date | null;
       dados?: unknown;
       criadoEm: Date;
@@ -1919,7 +1867,6 @@ export class TasksService {
       taskType,
       assigneeTeamId,
       assigneeId: dados?.assignedToAi ? 'ai' : (task.idAssignee?.toString() ?? null),
-      sprintId: task.idSprint?.toString() ?? null,
       idPai: task.idPai?.toString() ?? null,
       // D1 — dueDate como coluna tipada (não em dados JSON)
       dueDate: task.dueDate ? task.dueDate.toISOString() : null,

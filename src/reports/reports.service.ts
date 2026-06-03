@@ -126,7 +126,7 @@ export class ReportsService {
         this.dashboardsService.getVelocity(orgId, pid, dashQuery),
         this.dashboardsService.getBurndown(orgId, pid, dashQuery),
         this.dashboardsService.getTasksByUser(orgId, pid, dashQuery),
-        this.forecastService.forecast(pid, { historicalSprints: Math.min(8, Math.ceil(periodDays / 14)) }),
+        this.forecastService.forecast(pid, { historicalPeriods: Math.min(8, Math.ceil(periodDays / 14)) }),
         query.includeStakeholderSummary !== false
           ? this.analyticsService.stakeholderReport(orgId, pid, stakeholderQuery)
           : Promise.resolve(null),

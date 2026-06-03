@@ -74,7 +74,7 @@ export class ForecastController {
    *
    * @example
    * ```bash
-   * curl -X GET "http://localhost:3000/forecast/123?historicalSprints=4&iterations=10000" \
+   * curl -X GET "http://localhost:3000/forecast/123?historicalPeriods=4&iterations=10000" \
    *   -H "Authorization: Bearer {token}"
    * ```
    *
@@ -83,7 +83,7 @@ export class ForecastController {
    * {
    *   "p50": 14, "p75": 21, "p85": 28, "p95": 42,
    *   "unit": "days", "tasksRemaining": 30,
-   *   "iterations": 10000, "source": "sprints", "avgThroughput": 5.2
+   *   "iterations": 10000, "source": "rolling-window", "avgThroughput": 5.2
    * }
    * ```
    */
@@ -92,13 +92,13 @@ export class ForecastController {
     summary: 'Forecast Monte Carlo de conclusão do projeto',
     description:
       'Estimativa probabilística de dias até conclusão das tasks restantes via bootstrap resample. ' +
-      'Requer ≥ 2 sprints completos ou ≥ 2 semanas com throughput > 0.',
+      'Requer ≥ 2 semanas com throughput > 0.',
   })
   @ApiParam({ name: 'projectId', description: 'ID do projeto', example: '123' })
   @ApiQuery({
-    name: 'historicalSprints',
+    name: 'historicalPeriods',
     required: false,
-    description: 'Número de sprints históricos (1-12, default: 4)',
+    description: 'Número de períodos históricos (1-12, default: 4)',
     example: 4,
   })
   @ApiQuery({

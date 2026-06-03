@@ -44,7 +44,6 @@ describe('TasksController — timer manual endpoints (ADR-V2-057)', () => {
       taskType: null,
       assigneeTeamId: null,
       assigneeId: null,
-      sprintId: null,
       idPai: null,
       dueDate: null,
       dados: {},

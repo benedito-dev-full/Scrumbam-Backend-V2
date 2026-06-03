@@ -17,7 +17,7 @@ import { TimezoneService } from '../../common/services/timezone.service';
  * - pula identifier DEV-N (sequence intacta)
  * - pula lookup de status INBOX
  * - pula resolvePriorityId
- * - ignora silenciosamente assignee/sprint/priority/taskType (logger.warn)
+ * - ignora silenciosamente assignee/priority/taskType (logger.warn)
  * - persiste `dados = { kind: 'phase', createdBy }`
  * - valida sub-fase (pai deve ser PHASE) — 400 se TASK
  * - emite `phase.created` em adição ao `task.created`
@@ -41,7 +41,6 @@ function makePhaseRow(
     idStatus: bigint | null;
     idPriority: bigint | null;
     idAssignee: bigint | null;
-    idSprint: bigint | null;
     dados: Record<string, unknown> | null;
     excluido: boolean;
     criadoEm: Date;
@@ -58,7 +57,6 @@ function makePhaseRow(
     idStatus: null,
     idPriority: null,
     idAssignee: null,
-    idSprint: null,
     dados: { kind: 'phase', createdBy: '100' },
     excluido: false,
     criadoEm: new Date('2026-05-22T00:00:00Z'),
@@ -197,13 +195,12 @@ describe('TasksService.create() — ramo PHASE (ADR-V2-050)', () => {
     expect(identifierService.getNextIdentifier).not.toHaveBeenCalled();
 
     // Persistência: idClasse=-200, idStatus=null, idPriority=null,
-    // idAssignee=null, idSprint=null, dados.kind='phase'
+    // idAssignee=null, dados.kind='phase'
     expect(captured.data).not.toBeNull();
     expect(captured.data!.idClasse).toEqual(BigInt(-200));
     expect(captured.data!.idStatus).toBeNull();
     expect(captured.data!.idPriority).toBeNull();
     expect(captured.data!.idAssignee).toBeNull();
-    expect(captured.data!.idSprint).toBeNull();
     expect(captured.data!.idPai).toBeNull();
     const dadosPersistido = captured.data!.dados as Record<string, unknown>;
     expect(dadosPersistido.kind).toBe('phase');
@@ -297,7 +294,7 @@ describe('TasksService.create() — ramo PHASE (ADR-V2-050)', () => {
   });
 
   // ── Cenário 5: campos ignorados → logger.warn + persiste null ──────────
-  it('5. PHASE com assigneeId/sprintId/priority/taskType → ignora e loga warn', async () => {
+  it('5. PHASE com assigneeId/priority/taskType → ignora e loga warn', async () => {
     prisma.dProject.findFirst.mockResolvedValue({ dados: { prefix: 'DEV' } });
     const captured = mockTransactionReturning(makePhaseRow());
 
@@ -309,7 +306,6 @@ describe('TasksService.create() — ramo PHASE (ADR-V2-050)', () => {
         projectId: '1',
         idClasse: '-200',
         assigneeId: '999',
-        sprintId: '888',
         priority: 'HIGH',
         taskType: 'BUG',
       },
@@ -318,7 +314,6 @@ describe('TasksService.create() — ramo PHASE (ADR-V2-050)', () => {
 
     // Todos os campos enviados foram IGNORADOS (persistidos como null)
     expect(captured.data!.idAssignee).toBeNull();
-    expect(captured.data!.idSprint).toBeNull();
     expect(captured.data!.idPriority).toBeNull();
     const dados = captured.data!.dados as Record<string, unknown>;
     expect(dados.taskType).toBeUndefined();

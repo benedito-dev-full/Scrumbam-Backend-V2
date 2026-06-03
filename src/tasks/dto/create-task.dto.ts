@@ -62,14 +62,6 @@ export class CreateTaskDto {
   assigneeId?: string;
 
   @ApiPropertyOptional({
-    description: 'ID do sprint (chave DTabela -400)',
-    example: '1',
-  })
-  @IsOptional()
-  @IsString()
-  sprintId?: string;
-
-  @ApiPropertyOptional({
     description: 'Texto bruto da captura (Telegram, etc.)',
     example: 'via telegram',
   })
@@ -109,7 +101,7 @@ export class CreateTaskDto {
     description:
       'idClasse polimórfica da DTask. Default: "-154" (SCRUMBAN_TASK). Use ' +
       '"-200" para criar FASE/BLOCO (ADR-V2-047 / ADR-V2-050). Quando "-200", ' +
-      'os campos `assigneeId`, `sprintId`, `priority` e `taskType` são ' +
+      'os campos `assigneeId`, `priority` e `taskType` são ' +
       'IGNORADOS silenciosamente (fase é agrupador, sem intention própria). ' +
       'Se `idPai` for informado para uma fase, o pai DEVE ser outra fase (-200) ' +
       '— sub-fase.',

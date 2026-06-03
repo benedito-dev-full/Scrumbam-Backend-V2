@@ -17,7 +17,7 @@ import { Transform, Type } from 'class-transformer';
 /**
  * DTO para query de listagem de tasks (GET /tasks).
  *
- * Suporta filtros por projectId, status, assignee, sprint e — desde a Fase 4
+ * Suporta filtros por projectId, status, assignee e — desde a Fase 4
  * de ADR-V2-047 — filtros hierárquicos (`idPai`, `idClasse`, `depth`).
  *
  * Cursor pagination decrescente por chave.
@@ -103,11 +103,6 @@ export class ListTasksQueryDto {
   @IsOptional()
   @IsString()
   assigneeId?: string;
-
-  @ApiPropertyOptional({ description: 'Filtrar por sprint (chave DTabela -400)', example: '1' })
-  @IsOptional()
-  @IsString()
-  sprintId?: string;
 
   @ApiPropertyOptional({
     description: 'Cursor para paginação (chave da última task)',

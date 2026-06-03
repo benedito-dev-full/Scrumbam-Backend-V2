@@ -8,10 +8,6 @@ const CACHE_TTL_MS = 60_000;
 /** Maximo de projetos recentes a listar no bloco. */
 const MAX_RECENT_PROJECTS = 3;
 
-/** Range canonico de idClasse das sprints (DTabela). Seed F1 -400..-419. */
-const SPRINT_CLASSE_MIN = BigInt(-419);
-const SPRINT_CLASSE_MAX = BigInt(-400);
-
 /** DEvento idClasse NOTIFICATION. Seed F1 -490. */
 const NOTIFICATION_CLASSE = BigInt(-490);
 
@@ -40,29 +36,22 @@ interface CacheEntry {
   expiresAt: number;
 }
 
-/** Sprint corrente resolvido — usado apenas internamente. */
-interface SprintCorrente {
-  chave: bigint;
-  nome: string;
-  endDate: Date;
-}
-
 /**
  * Service que monta o bloco de contexto runtime injetado no system prompt
  * do Nexus IA chat (Etapas A + B).
  *
  * Objetivo: permitir que a IA responda com mais precisao SEM gastar tool
  * calls descobrindo contexto basico (nome do user, org, data, projetos
- * recentes, sprint corrente, notificacoes nao lidas). O bloco e
+ * recentes, notificacoes nao lidas). O bloco e
  * concatenado ao `SYSTEM_PROMPT_NEXUS` em cada request, ANTES da chamada
  * ao Gemini, dentro de `AiChatService.sendMessage`.
  *
  * Performance:
  *  - Cache em memoria com TTL de 60s por `${userId}:${orgId ?? '-'}`.
- *  - Cache miss: ATE 4 queries em paralelo via `Promise.allSettled`
- *    (entidades user+org, top 3 projetos, sprint corrente, unread count).
+ *  - Cache miss: ATE 3 queries em paralelo via `Promise.allSettled`
+ *    (entidades user+org, top 3 projetos, unread count).
  *  - Cache hit: zero queries.
- *  - Defensive: falha de sprint/unread NAO derruba o bloco — apenas
+ *  - Defensive: falha de unread NAO derruba o bloco — apenas
  *    omite a secao volatil correspondente.
  *
  * Granularidade da data: `terca-feira, 28 de maio de 2026, tarde` —
@@ -72,7 +61,7 @@ interface SprintCorrente {
  * Estrutura do bloco (B6 — divisao estavel/volatil):
  *  - Secao "Contexto do usuario" (ESTAVEL): user, org, projetos. Muda
  *    raramente. Vem PRIMEIRO para maximizar cache do prompt no Gemini.
- *  - Secao "Estado atual" (VOLATIL): data, sprint, notificacoes. Pode
+ *  - Secao "Estado atual" (VOLATIL): data, notificacoes. Pode
  *    mudar a qualquer momento — fica no fim, fora do beneficio de cache.
  *
  * Invalidacao:
@@ -101,13 +90,12 @@ export class ContextBuilderService {
    * paralelo via `Promise.allSettled` para coletar:
    *  - Nome do user + nome da org (1 query — `IN`)
    *  - Top 3 projetos mais recentes da organizacao (`atualizadoEm DESC`)
-   *  - Sprint corrente da organizacao (se houver)
    *  - Contagem de notificacoes nao lidas do user
    *
    * Entradas de cache STALE (expiradas por TTL) sao removidas
    * automaticamente antes de recomputar (B4 — cleanup oportunista).
    *
-   * Defensive: se as queries B1 (sprint) ou B2 (unread) falharem, o
+   * Defensive: se a query B2 (unread) falhar, o
    * bloco NAO quebra — apenas a secao correspondente e omitida. Logs
    * registram o erro para diagnostico.
    *
@@ -197,12 +185,11 @@ export class ContextBuilderService {
       }
     }
 
-    // 4 queries em paralelo (Promise.allSettled — defensive):
+    // 3 queries em paralelo (Promise.allSettled — defensive):
     //  1. entidades user+org (1 query, IN)
     //  2. top 3 projetos da org filtrando SPACE/FOLDER/LIST (B3)
-    //  3. sprint corrente da org (B1)
-    //  4. unread count do user (B2)
-    const [entidadesRes, projetosRes, sprintRes, unreadRes] = await Promise.allSettled([
+    //  3. unread count do user (B2)
+    const [entidadesRes, projetosRes, unreadRes] = await Promise.allSettled([
       this.prisma.dEntidade.findMany({
         where: { chave: { in: ids }, excluido: false },
         select: { chave: true, nome: true },
@@ -219,7 +206,6 @@ export class ContextBuilderService {
             take: MAX_RECENT_PROJECTS,
           })
         : Promise.resolve([] as Array<{ chave: bigint; nome: string; idClasse: bigint }>),
-      orgIdBig ? this.findSprintCorrente(orgIdBig) : Promise.resolve(null as SprintCorrente | null),
       this.getUnreadCount(userEntidadeId),
     ]);
 
@@ -238,11 +224,6 @@ export class ContextBuilderService {
     const projetos = projetosRes.status === 'fulfilled' ? projetosRes.value : [];
     if (projetosRes.status === 'rejected') {
       this.logger.warn(`context_projetos_failed: ${this.errMsg(projetosRes.reason)}`);
-    }
-
-    const sprintCorrente = sprintRes.status === 'fulfilled' ? sprintRes.value : null;
-    if (sprintRes.status === 'rejected') {
-      this.logger.warn(`context_sprint_failed: ${this.errMsg(sprintRes.reason)}`);
     }
 
     const unreadCount = unreadRes.status === 'fulfilled' ? unreadRes.value : 0;
@@ -268,60 +249,11 @@ export class ContextBuilderService {
     lines.push('', '## Estado atual');
     lines.push(`- **Data:** ${this.formatDataBrasilia(new Date())}`);
 
-    if (sprintCorrente) {
-      const diasRestantes = this.diasAteHoje(sprintCorrente.endDate);
-      lines.push(
-        `- **Sprint corrente:** ${sprintCorrente.nome} (#${sprintCorrente.chave.toString()}) — termina em ${diasRestantes} dia${diasRestantes === 1 ? '' : 's'}`,
-      );
-    }
-
     if (unreadCount > 0) {
       lines.push(`- **Notificacoes nao lidas:** ${unreadCount}`);
     }
 
     return lines.join('\n');
-  }
-
-  /**
-   * Resolve a sprint corrente da organizacao.
-   *
-   * Sprint corrente = DTabela idClasse range -400..-419 ATIVA (nao excluida),
-   * vinculada a um DProject da org via `dEntidadeId`, com
-   * `dados.startDate <= hoje <= dados.endDate`. Se multiplas, escolhe a
-   * que termina MAIS CEDO (mais relevante para o usuario AGORA).
-   *
-   * Implementado via `$queryRaw` para usar JOIN + filtros JSON-path
-   * em uma unica query (ZERO N+1).
-   */
-  private async findSprintCorrente(orgIdBig: bigint): Promise<SprintCorrente | null> {
-    const hoje = new Date();
-    const hojeIso = hoje.toISOString().substring(0, 10); // YYYY-MM-DD
-
-    const rows = await this.prisma.$queryRaw<
-      Array<{ chave: bigint; nome: string; end_date: string }>
-    >`
-      SELECT t."chave", t."nome", t."dados"->>'endDate' AS end_date
-      FROM "DTabela" t
-      INNER JOIN "DProject" p ON p."chave" = t."dEntidadeId"
-      WHERE t."idClasse" BETWEEN ${SPRINT_CLASSE_MIN} AND ${SPRINT_CLASSE_MAX}
-        AND t."excluido" = false
-        AND p."idEstab" = ${orgIdBig}
-        AND p."excluido" = false
-        AND (t."dados"->>'startDate') IS NOT NULL
-        AND (t."dados"->>'endDate') IS NOT NULL
-        AND (t."dados"->>'startDate') <= ${hojeIso}
-        AND (t."dados"->>'endDate') >= ${hojeIso}
-      ORDER BY (t."dados"->>'endDate') ASC
-      LIMIT 1
-    `;
-
-    const row = rows[0];
-    if (!row) return null;
-
-    const endDate = new Date(row.end_date);
-    if (Number.isNaN(endDate.getTime())) return null;
-
-    return { chave: row.chave, nome: row.nome, endDate };
   }
 
   /**
@@ -341,19 +273,6 @@ export class ContextBuilderService {
         AND COALESCE(("metaDados"->>'read')::boolean, false) = false
     `;
     return Number(rows[0]?.count ?? BigInt(0));
-  }
-
-  /**
-   * Calcula quantos dias INTEIROS faltam ate `end` a partir de agora,
-   * no timezone de Brasilia. Sempre retorna >= 0 (sprints expiradas
-   * nao sao consideradas correntes no SQL — defesa adicional).
-   */
-  private diasAteHoje(end: Date): number {
-    const agoraBR = this.timezoneService.toBrazilTime(new Date());
-    const endBR = this.timezoneService.toBrazilTime(end);
-    const msPorDia = 24 * 60 * 60 * 1000;
-    const diff = Math.ceil((endBR.getTime() - agoraBR.getTime()) / msPorDia);
-    return Math.max(0, diff);
   }
 
   /**

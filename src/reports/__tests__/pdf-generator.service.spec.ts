@@ -20,8 +20,8 @@ const FULL_DATA: ProjectReportDataDto = {
     projectId: '123',
     avgVelocity: 10,
     series: [
-      { label: 'Sprint 1', sprintId: '1', completed: 10, planned: 12 },
-      { label: 'Sprint 2', sprintId: '2', completed: 8, planned: 10 },
+      { label: '2026-05-05', completed: 10, planned: 12 },
+      { label: '2026-05-12', completed: 8, planned: 10 },
     ],
   },
   burndown: {
@@ -125,10 +125,9 @@ describe('PdfGeneratorService', () => {
     expect(buffer.length).toBeGreaterThan(0);
   });
 
-  it('deve tratar series grandes sem crashar (velocity com 50 sprints)', async () => {
+  it('deve tratar series grandes sem crashar (velocity com 50 periodos)', async () => {
     const bigSeries = Array.from({ length: 50 }, (_, i) => ({
-      label: `Sprint ${i + 1}`,
-      sprintId: String(i + 1),
+      label: `2026-W${i + 1}`,
       completed: Math.floor(Math.random() * 15),
       planned: 15,
     }));

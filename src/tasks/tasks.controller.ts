@@ -32,7 +32,6 @@ import { PhaseMetricsService } from './services/phase-metrics.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { UpdateTaskStatusDto } from './dto/update-task-status.dto';
-import { UpdateTaskSprintDto } from './dto/update-task-sprint.dto';
 import { ListTasksQueryDto } from './dto/list-tasks-query.dto';
 import { TaskResponseDto, ListTasksResponseDto } from './dto/task-response.dto';
 import { PhaseTreeResponseDto } from './dto/phase-tree-response.dto';
@@ -124,7 +123,7 @@ export class TasksController {
    * Lista tasks com filtros e cursor pagination, restritas aos projetos da
    * org ativa onde o usuario e membro (ADR-V2-042).
    *
-   * Suporta filtros por projectId, status, assigneeId, sprintId.
+   * Suporta filtros por projectId, status, assigneeId.
    *
    * @example
    * ```bash
@@ -136,7 +135,7 @@ export class TasksController {
   @ApiOperation({
     summary: 'Listar tasks com filtros (scopado por org+membership)',
     description:
-      'Suporta filtros canônicos (projectId, status, assigneeId, sprintId) + ' +
+      'Suporta filtros canônicos (projectId, status, assigneeId) + ' +
       'filtros hierárquicos ADR-V2-047 (idPai, idClasse, depth). Quando ' +
       '`idPai` é informado com `depth>=2`, uma CTE recursiva PostgreSQL ' +
       'resolve os descendentes em 1 query antes do findMany principal (zero N+1).',
@@ -299,7 +298,6 @@ export class TasksController {
    * Atualiza campos da task (nome, descrição, priority, assignee).
    *
    * Para atualizar status use PUT /tasks/:id/status.
-   * Para mover sprint use PUT /tasks/:id/sprint.
    *
    * @param id - ID da task
    * @param dto - Campos a atualizar
@@ -360,26 +358,6 @@ export class TasksController {
   ): Promise<TaskResponseDto> {
     const allowed = await this.resolveScopedProjectIds(req);
     return this.tasksService.updateStatus(id, dto, BigInt(req.user.entidadeId), allowed);
-  }
-
-  /**
-   * Move task para sprint.
-   *
-   * @param id - ID da task
-   * @param dto - sprintId de destino
-   */
-  @Put(':id/sprint')
-  @ApiOperation({ summary: 'Mover task para sprint' })
-  @ApiParam({ name: 'id', description: 'ID da task' })
-  @ApiResponse({ status: 200, description: 'Task com novo sprint', type: TaskResponseDto })
-  @ApiResponse({ status: 404, description: 'Task não encontrada ou fora do scope' })
-  async updateSprint(
-    @Param('id') id: string,
-    @Body() dto: UpdateTaskSprintDto,
-    @Request() req: JwtRequest,
-  ): Promise<TaskResponseDto> {
-    const allowed = await this.resolveScopedProjectIds(req);
-    return this.tasksService.updateSprint(id, dto, allowed);
   }
 
   /**

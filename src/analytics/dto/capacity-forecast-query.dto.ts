@@ -6,14 +6,14 @@ import { IsInt, IsOptional, Max, Min } from 'class-validator';
  * DTO para forecast agregado de capacidade por organizacao.
  */
 export class CapacityForecastQueryDto {
-  /** Numero de sprints historicos por projeto. */
+  /** Numero de periodos historicos por projeto. */
   @ApiPropertyOptional({ example: 4, default: 4, minimum: 1, maximum: 12 })
   @IsOptional()
   @IsInt()
   @Min(1)
   @Max(12)
   @Type(() => Number)
-  historicalSprints?: number = 4;
+  historicalPeriods?: number = 4;
 
   /** Iteracoes Monte Carlo por projeto. */
   @ApiPropertyOptional({ example: 10000, default: 10000, minimum: 100, maximum: 50000 })

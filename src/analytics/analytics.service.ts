@@ -131,7 +131,7 @@ export class AnalyticsService {
       Math.min(query.limitProjects ?? DEFAULT_PROJECT_LIMIT, MAX_PROJECT_LIMIT),
     );
     const normalizedQuery = {
-      historicalSprints: query.historicalSprints ?? 4,
+      historicalPeriods: query.historicalPeriods ?? 4,
       iterations: query.iterations ?? 10000,
       limitProjects,
     };
@@ -219,7 +219,7 @@ export class AnalyticsService {
 
   private async forecastProject(
     project: { chave: bigint; nome: string },
-    query: { historicalSprints: number; iterations: number },
+    query: { historicalPeriods: number; iterations: number },
   ): Promise<CapacityForecastProjectDto> {
     try {
       const result = await this.forecastService.forecast(project.chave, query);

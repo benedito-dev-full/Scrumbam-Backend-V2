@@ -12,7 +12,7 @@ import { AiToolContext } from './tool-context';
  * INBOX (V3) — definido internamente pelo service.
  *
  * Campos opcionais: descricao + idPai (sub-task ou sub-fase). Outras
- * propriedades (priority, assignee, sprint) ficam fora da v1 — o usuario
+ * propriedades (priority, assignee) ficam fora da v1 — o usuario
  * pode usar `update_task` futuro (deferido).
  */
 @Injectable()

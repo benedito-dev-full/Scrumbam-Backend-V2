@@ -31,7 +31,6 @@ function makeTask(overrides: Partial<Record<string, unknown>> = {}) {
     idStatus: null,
     idPriority: null,
     idAssignee: null,
-    idSprint: null,
     dueDate: null,
     dados: { identifier: 'DEV-7', v3: { state: 'INBOX' }, fields: {} },
     criadoEm: new Date('2026-05-30T00:00:00.000Z'),

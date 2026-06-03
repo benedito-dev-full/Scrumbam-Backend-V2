@@ -15,8 +15,6 @@ import { DailySummaryResponseDto } from './dto/daily-summary-response.dto';
 
 const CACHE_TTL_SECONDS = 60;
 const CACHE_TTL_MS = CACHE_TTL_SECONDS * 1000;
-const SPRINT_CLASSE_MIN = BigInt(-419);
-const SPRINT_CLASSE_MAX = BigInt(-400);
 const DONE_STATUS_CLASS_IDS = [BigInt(-444), BigInt(-449)];
 const ACTIVE_STATUS_CODES = new Set(['EXECUTING', 'VALIDATING']);
 const BLOCKED_OR_FAILED_STATUS_CODES = new Set(['FAILED']);
@@ -30,7 +28,6 @@ interface CachedEnvelope<T> {
 interface TaskDashboardRow {
   chave: bigint;
   idStatus: bigint | null;
-  idSprint: bigint | null;
   idAssignee: bigint | null;
   criadoEm: Date;
   dados: Prisma.JsonValue | null;
@@ -116,11 +113,11 @@ export class DashboardsService {
   }
 
   /**
-   * Retorna velocity por sprint quando houver sprints, com fallback para throughput.
+   * Retorna velocity como throughput por periodo (semana default).
    *
    * @param orgId - Organizacao do usuario autenticado
    * @param projectId - Chave BigInt do projeto
-   * @param query - Filtros de periodo, granularidade e sprint opcional
+   * @param query - Filtros de periodo e granularidade
    * @returns Serie de velocity e media do periodo
    */
   async getVelocity(
@@ -141,7 +138,7 @@ export class DashboardsService {
    *
    * @param orgId - Organizacao do usuario autenticado
    * @param projectId - Chave BigInt do projeto
-   * @param query - Filtros de periodo e sprint opcional
+   * @param query - Filtros de periodo
    * @returns Serie diaria de burndown
    */
   async getBurndown(
@@ -162,7 +159,7 @@ export class DashboardsService {
    *
    * @param orgId - Organizacao do usuario autenticado
    * @param projectId - Chave BigInt do projeto
-   * @param query - Filtros de periodo e sprint opcional
+   * @param query - Filtros de periodo
    * @returns Lista de usuarios com contagem por status
    */
   async getTasksByUser(
@@ -212,92 +209,16 @@ export class DashboardsService {
     query: DashboardQueryDto,
   ): Promise<Omit<VelocityResponseDto, 'cache'>> {
     const range = this.periodResolver.resolve(query);
-    const sprintId = query.sprintId ? BigInt(query.sprintId) : undefined;
 
-    if (sprintId) {
-      const sprint = await this.prisma.dTabela.findFirst({
-        where: {
-          chave: sprintId,
-          idClasse: { gte: SPRINT_CLASSE_MIN, lte: SPRINT_CLASSE_MAX },
-          dEntidadeId: projectId,
-          excluido: false,
-        },
-        select: { chave: true, nome: true, dados: true, metaDados: true },
-      });
-
-      const tasks = await this.findTasks(projectId, query);
-      const completed = this.countCompleted(tasks);
-      const planned = tasks.length;
-
-      const series = [{
-        label: sprint?.nome ?? `Sprint ${sprintId.toString()}`,
-        sprintId: sprintId.toString(),
-        completed,
-        planned,
-        ...this.extractSprintDates(sprint?.dados, sprint?.metaDados),
-      }];
-
-      return {
-        projectId: projectId.toString(),
-        series,
-        avgVelocity: completed,
-        period: this.toPeriodDto(range),
-      };
-    }
-
-    const sprints = await this.prisma.dTabela.findMany({
-      where: {
-        idClasse: { gte: SPRINT_CLASSE_MIN, lte: SPRINT_CLASSE_MAX },
-        dEntidadeId: projectId,
-        excluido: false,
-      },
-      select: { chave: true, nome: true, dados: true, metaDados: true },
-      orderBy: { chave: 'asc' },
-    });
-
-    if (sprints.length === 0) {
-      const throughput = await this.throughputService.calculate(
-        projectId,
-        query.granularity ?? 'week',
-        query,
-      );
-      const series = throughput.series.map((item) => ({
-        label: item.date,
-        completed: item.count,
-      }));
-
-      return {
-        projectId: projectId.toString(),
-        series,
-        avgVelocity: this.average(series.map((item) => item.completed)),
-        period: this.toPeriodDto(range),
-      };
-    }
-
-    const tasks = await this.findTasks(projectId, query);
-    const doneStatusIds = await this.getDoneStatusIds(projectId);
-    const bySprint = new Map<string, { planned: number; completed: number }>();
-
-    for (const task of tasks) {
-      const key = task.idSprint?.toString() ?? 'backlog';
-      const current = bySprint.get(key) ?? { planned: 0, completed: 0 };
-      current.planned += 1;
-      if (task.idStatus && doneStatusIds.has(task.idStatus.toString())) {
-        current.completed += 1;
-      }
-      bySprint.set(key, current);
-    }
-
-    const series: VelocitySeriesItemDto[] = sprints.map((sprint) => {
-      const values = bySprint.get(sprint.chave.toString()) ?? { planned: 0, completed: 0 };
-      return {
-        label: sprint.nome,
-        sprintId: sprint.chave.toString(),
-        completed: values.completed,
-        planned: values.planned,
-        ...this.extractSprintDates(sprint.dados, sprint.metaDados),
-      };
-    });
+    const throughput = await this.throughputService.calculate(
+      projectId,
+      query.granularity ?? 'week',
+      query,
+    );
+    const series: VelocitySeriesItemDto[] = throughput.series.map((item) => ({
+      label: item.date,
+      completed: item.count,
+    }));
 
     return {
       projectId: projectId.toString(),
@@ -439,7 +360,6 @@ export class DashboardsService {
       where: {
         idProject: projectId,
         excluido: false,
-        ...(query.sprintId ? { idSprint: BigInt(query.sprintId) } : {}),
         ...(options.applyActivityPeriod
           ? {
               OR: [
@@ -452,7 +372,6 @@ export class DashboardsService {
       select: {
         chave: true,
         idStatus: true,
-        idSprint: true,
         idAssignee: true,
         criadoEm: true,
         dados: true,
@@ -465,10 +384,6 @@ export class DashboardsService {
         },
       },
     });
-  }
-
-  private countCompleted(tasks: TaskDashboardRow[]): number {
-    return tasks.filter((task) => Boolean(this.getDoneAt(task.dados))).length;
   }
 
   private async getDoneStatusIds(projectId: bigint): Promise<Set<string>> {
@@ -607,31 +522,4 @@ export class DashboardsService {
     return Math.round(avg * 100) / 100;
   }
 
-  private extractSprintDates(
-    dados: Prisma.JsonValue | null | undefined,
-    metaDados: Prisma.JsonValue | null | undefined,
-  ): { startDate?: string; endDate?: string } {
-    const source = this.asRecord(dados) ?? this.asRecord(metaDados);
-    const startDate = this.firstString(source, ['startDate', 'startedAt', 'inicio']);
-    const endDate = this.firstString(source, ['endDate', 'endedAt', 'fim']);
-    return {
-      ...(startDate ? { startDate } : {}),
-      ...(endDate ? { endDate } : {}),
-    };
-  }
-
-  private firstString(source: Record<string, unknown> | null, keys: string[]): string | undefined {
-    if (!source) {
-      return undefined;
-    }
-
-    for (const key of keys) {
-      const value = source[key];
-      if (typeof value === 'string') {
-        return value;
-      }
-    }
-
-    return undefined;
-  }
 }

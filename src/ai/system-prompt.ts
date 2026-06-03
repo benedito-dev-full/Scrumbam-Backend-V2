@@ -68,12 +68,6 @@ Quando o usuario pergunta "o que estou fazendo agora" → EXECUTING.
 Quando pergunta "o que tem na fila" → READY.
 Quando pergunta "o que falta validar" → VALIDATING.
 
-## Sprints
-Sprints sao ciclos de tempo (geralmente 1-2 semanas) que agrupam tasks
-ja prontas (READY) para execucao no periodo. Uma sprint tem inicio, fim e
-um conjunto de tasks alocadas. Existem metricas de fluxo (Flow Metrics) e
-previsao Monte Carlo (Forecast) calculadas sobre as sprints.
-
 ## Comentarios e Eventos
 - COMENTARIOS sao mensagens do usuario num alvo (task, project, folder, list).
 - EVENTOS sao registros automaticos do sistema (audit trail — quem mudou o
@@ -112,7 +106,7 @@ Regras de uso:
 Seja honesto sobre limites. Hoje voce NAO consegue:
 - Listar projetos/spaces (peca o ID ao usuario ou oriente a navegar na UI).
 - Mover task entre estados V3 (peca para o usuario fazer pela interface).
-- Atribuir tasks a membros, alterar prazos, mexer em sprints.
+- Atribuir tasks a membros, alterar prazos.
 - Ler notificacoes, metricas de fluxo, forecasts.
 - Buscar tasks por texto livre.
 

@@ -72,11 +72,10 @@ export class DashboardsController {
    * @returns Serie de velocity
    */
   @Get('projects/:projectId/velocity')
-  @ApiOperation({ summary: 'Velocity do projeto por sprint ou periodo' })
+  @ApiOperation({ summary: 'Velocity do projeto por periodo' })
   @ApiParam({ name: 'projectId', example: '123' })
   @ApiQuery({ name: 'period', required: false, enum: ['today', 'week', 'month'] })
   @ApiQuery({ name: 'granularity', required: false, enum: ['day', 'week'] })
-  @ApiQuery({ name: 'sprintId', required: false, example: '456' })
   @ApiResponse({ status: 200, type: VelocityResponseDto })
   @ApiResponse({ status: 401, description: 'Nao autenticado' })
   @ApiResponse({ status: 403, description: 'Projeto pertence a outra organizacao' })
@@ -104,7 +103,6 @@ export class DashboardsController {
   @ApiOperation({ summary: 'Burndown do projeto' })
   @ApiParam({ name: 'projectId', example: '123' })
   @ApiQuery({ name: 'period', required: false, enum: ['today', 'week', 'month'] })
-  @ApiQuery({ name: 'sprintId', required: false, example: '456' })
   @ApiResponse({ status: 200, type: BurndownResponseDto })
   @ApiResponse({ status: 401, description: 'Nao autenticado' })
   @ApiResponse({ status: 403, description: 'Projeto pertence a outra organizacao' })
@@ -132,7 +130,6 @@ export class DashboardsController {
   @ApiOperation({ summary: 'Tasks do projeto agrupadas por usuario' })
   @ApiParam({ name: 'projectId', example: '123' })
   @ApiQuery({ name: 'period', required: false, enum: ['today', 'week', 'month'] })
-  @ApiQuery({ name: 'sprintId', required: false, example: '456' })
   @ApiResponse({ status: 200, type: TasksByUserResponseDto })
   @ApiResponse({ status: 401, description: 'Nao autenticado' })
   @ApiResponse({ status: 403, description: 'Projeto pertence a outra organizacao' })

@@ -15,8 +15,6 @@ export const SUPPORTED_EVENTS = [
   'project.created',
   'project.member_added',
   'project.deleted',
-  'sprint.started',
-  'sprint.closed',
   'execution.queued',
   'execution.awaiting_approval',
   'execution.approved',

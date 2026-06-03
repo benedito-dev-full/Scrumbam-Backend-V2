@@ -25,7 +25,7 @@ export class CapacityForecastProjectDto {
   @ApiPropertyOptional({ example: 42, nullable: true })
   p95!: number | null;
 
-  @ApiPropertyOptional({ example: 'sprints', nullable: true })
+  @ApiPropertyOptional({ example: 'rolling-window', nullable: true })
   source!: string | null;
 
   @ApiPropertyOptional({ example: 'INSUFFICIENT_HISTORY', nullable: true })

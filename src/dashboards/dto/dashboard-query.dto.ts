@@ -5,7 +5,6 @@ import { IsIn, IsOptional, IsString, Matches } from 'class-validator';
  * DTO para filtros dos endpoints de dashboards de projeto.
  *
  * Todos os filtros de data sao resolvidos via TimezoneService/PeriodResolver.
- * `sprintId` restringe endpoints que suportam recorte por sprint.
  */
 export class DashboardQueryDto {
   /** Periodo pre-definido no timezone America/Sao_Paulo. */
@@ -33,11 +32,4 @@ export class DashboardQueryDto {
   @IsOptional()
   @IsIn(['day', 'week'])
   granularity?: 'day' | 'week';
-
-  /** Sprint DTabela.chave para recorte opcional. */
-  @ApiPropertyOptional({ example: '456' })
-  @IsOptional()
-  @IsString()
-  @Matches(/^\d+$/, { message: 'sprintId deve ser um BigInt positivo em string' })
-  sprintId?: string;
 }

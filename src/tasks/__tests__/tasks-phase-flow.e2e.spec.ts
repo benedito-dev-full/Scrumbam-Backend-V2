@@ -76,7 +76,6 @@ describe('TasksController — fluxo end-to-end de fase (Fase 10, ADR-V2-047)', (
       priority: null,
       taskType: 'TASK',
       assigneeId: null,
-      sprintId: null,
       dados: { identifier: 'DEV-0', v3: { state: 'INBOX' }, taskType: 'TASK' },
       criadoEm: '2026-05-21T00:00:00.000Z',
       atualizadoEm: '2026-05-21T00:00:00.000Z',

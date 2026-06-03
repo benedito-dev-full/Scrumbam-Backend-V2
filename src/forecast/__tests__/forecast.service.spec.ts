@@ -62,18 +62,17 @@ describe('ForecastService', () => {
     mockPrisma.dProject.findFirst.mockResolvedValue(null);
 
     await expect(
-      service.forecast(BigInt(999), { historicalSprints: 4, iterations: 100 }),
+      service.forecast(BigInt(999), { historicalPeriods: 4, iterations: 100 }),
     ).rejects.toThrow(NotFoundException);
   });
 
-  it('deve usar rolling window como fallback quando sprints insuficientes', async () => {
+  it('deve usar rolling window como fonte unica de throughput', async () => {
     mockPrisma.dProject.findFirst.mockResolvedValue({ chave: BigInt(1) });
-    mockPrisma.dTabela.findMany.mockResolvedValue([]); // sem sprints
     mockPrisma.dTask.count.mockResolvedValue(10);
     mockPrisma.dTask.findMany.mockResolvedValue([]);
     mockThroughput.getHistoricalArray.mockResolvedValue([3, 5, 4, 6, 3, 7]);
 
-    const result = await service.forecast(BigInt(1), { historicalSprints: 4, iterations: 100 });
+    const result = await service.forecast(BigInt(1), { historicalPeriods: 4, iterations: 100 });
 
     expect(result.source).toBe('rolling-window');
     expect(result.tasksRemaining).toBe(10);
@@ -86,7 +85,7 @@ describe('ForecastService', () => {
     mockThroughput.getHistoricalArray.mockResolvedValue([]); // sem dados
 
     await expect(
-      service.forecast(BigInt(1), { historicalSprints: 4, iterations: 100 }),
+      service.forecast(BigInt(1), { historicalPeriods: 4, iterations: 100 }),
     ).rejects.toThrow(BadRequestException);
   });
 
@@ -97,7 +96,7 @@ describe('ForecastService', () => {
     mockPrisma.dTask.findMany.mockResolvedValue([]);
     mockThroughput.getHistoricalArray.mockResolvedValue([3, 5, 4]);
 
-    const result = await service.forecast(BigInt(1), { historicalSprints: 4, iterations: 100 });
+    const result = await service.forecast(BigInt(1), { historicalPeriods: 4, iterations: 100 });
 
     expect(result.tasksRemaining).toBe(0);
     expect(result.p50).toBe(0);
@@ -111,7 +110,7 @@ describe('ForecastService', () => {
     mockPrisma.dTask.findMany.mockResolvedValue([]);
     mockThroughput.getHistoricalArray.mockResolvedValue([3, 5, 4, 6]);
 
-    const result = await service.forecast(BigInt(1), { historicalSprints: 4, iterations: 500 });
+    const result = await service.forecast(BigInt(1), { historicalPeriods: 4, iterations: 500 });
 
     expect(result.unit).toBe('days');
     expect(result.p50).toBeGreaterThan(0);
@@ -124,7 +123,7 @@ describe('ForecastService', () => {
     mockPrisma.dTask.findMany.mockResolvedValue([]);
     mockThroughput.getHistoricalArray.mockResolvedValue([4, 5, 6]);
 
-    const result = await service.forecast(BigInt(1), { historicalSprints: 4, iterations: 200 });
+    const result = await service.forecast(BigInt(1), { historicalPeriods: 4, iterations: 200 });
 
     expect(result.iterations).toBe(200);
   });

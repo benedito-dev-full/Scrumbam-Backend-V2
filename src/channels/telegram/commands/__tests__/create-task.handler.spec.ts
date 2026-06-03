@@ -16,7 +16,6 @@ const makeTaskResponse = () => ({
   taskType: null,
   assigneeTeamId: null, // Fase 1 assigneeTeamId — campo obrigatório no TaskResponseDto
   assigneeId: '100',
-  sprintId: null,
   dueDate: null, // D1 — campo obrigatório no TaskResponseDto
   dados: null,
   idPai: null, // ADR-V2-047 — campo obrigatório no TaskResponseDto

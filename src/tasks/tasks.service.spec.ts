@@ -24,7 +24,6 @@ function makeTask(
     idStatus: bigint | null;
     idPriority: bigint | null;
     idAssignee: bigint | null;
-    idSprint: bigint | null;
     dados: Record<string, unknown> | null;
     excluido: boolean;
     criadoEm: Date;
@@ -39,7 +38,6 @@ function makeTask(
     idStatus: null,
     idPriority: null,
     idAssignee: null,
-    idSprint: null,
     dados: {
       identifier: 'DEV-7',
       v3: { state: 'INBOX', movedAt: '2026-05-09T00:00:00.000Z' },
@@ -1147,7 +1145,6 @@ describe('TasksService', () => {
           idPai: null,
           idPriority: null,
           idAssignee: null,
-          idSprint: null,
           idStatus: null,
           descricao: null,
           dados: existing.dados,
@@ -1178,7 +1175,6 @@ describe('TasksService', () => {
           idPai: null,
           idPriority: null,
           idAssignee: null,
-          idSprint: null,
           idStatus: null,
           descricao: null,
           dados: {},

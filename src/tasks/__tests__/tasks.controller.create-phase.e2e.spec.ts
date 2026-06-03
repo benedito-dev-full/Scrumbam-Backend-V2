@@ -60,7 +60,6 @@ describe('TasksController — POST /tasks { idClasse: -200 } (ADR-V2-050)', () =
       priority: null,
       taskType: null,
       assigneeId: null,
-      sprintId: null,
       dados: { identifier: 'DEV-0', v3: { state: 'INBOX' } },
       criadoEm: '2026-05-22T00:00:00.000Z',
       atualizadoEm: '2026-05-22T00:00:00.000Z',

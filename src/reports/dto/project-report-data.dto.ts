@@ -59,7 +59,7 @@ export class ProjectReportDataDto {
   @ApiPropertyOptional({ description: 'Dashboard de métricas F8' })
   metrics?: Record<string, unknown> | null;
 
-  @ApiPropertyOptional({ description: 'Série de velocity por sprint' })
+  @ApiPropertyOptional({ description: 'Série de velocity por período' })
   velocity?: Record<string, unknown> | null;
 
   @ApiPropertyOptional({ description: 'Série de burndown' })

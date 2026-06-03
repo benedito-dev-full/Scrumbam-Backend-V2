@@ -105,53 +105,26 @@ describe('DashboardsService', () => {
     await expect(service.resolveProjectId('123', '10')).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('velocity agrega sprints e tasks sem N+1', async () => {
-    prisma.dTabela.findMany
-      .mockResolvedValueOnce([
-        { chave: BigInt(1), nome: 'Sprint 1', dados: null, metaDados: null },
-        { chave: BigInt(2), nome: 'Sprint 2', dados: null, metaDados: null },
-      ])
-      .mockResolvedValueOnce([{ chave: BigInt(900) }]);
-    prisma.dTask.findMany.mockResolvedValue([
-      {
-        chave: BigInt(11),
-        idStatus: BigInt(900),
-        idSprint: BigInt(1),
-        idAssignee: null,
-        criadoEm: new Date('2026-05-03T12:00:00.000Z'),
-        dados: { telemetry: { doneAt: '2026-05-04T12:00:00.000Z' } },
-        assignee: null,
-      },
-      {
-        chave: BigInt(12),
-        idStatus: BigInt(901),
-        idSprint: BigInt(1),
-        idAssignee: null,
-        criadoEm: new Date('2026-05-05T12:00:00.000Z'),
-        dados: {},
-        assignee: null,
-      },
-    ]);
+  it('velocity usa throughput por periodo (sem sprint)', async () => {
+    throughput.calculate.mockResolvedValue({
+      series: [
+        { date: '2026-05-05', count: 2 },
+        { date: '2026-05-12', count: 4 },
+      ],
+      total: 6,
+      granularity: 'week',
+    });
 
     const result = await service.getVelocity('10', projectId, { period: 'month' });
 
-    expect(prisma.dTabela.findMany).toHaveBeenCalledTimes(2);
-    expect(prisma.dTabela.findMany).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        where: expect.objectContaining({
-          idClasse: { gte: BigInt(-419), lte: BigInt(-400) },
-        }),
-      }),
-    );
-    expect(prisma.dTask.findMany).toHaveBeenCalledTimes(1);
-    expect(prisma.dTask.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.not.objectContaining({ OR: expect.any(Array) }),
-      }),
-    );
-    expect(result.series[0]).toMatchObject({ sprintId: '1', completed: 1, planned: 2 });
-    expect(result.avgVelocity).toBe(0.5);
+    // Velocity nao consulta mais sprints (DTabela) nem tasks diretamente.
+    expect(prisma.dTabela.findMany).not.toHaveBeenCalled();
+    expect(throughput.calculate).toHaveBeenCalledTimes(1);
+    expect(result.series).toEqual([
+      { label: '2026-05-05', completed: 2 },
+      { label: '2026-05-12', completed: 4 },
+    ]);
+    expect(result.avgVelocity).toBe(3);
   });
 
   it('burndown calcula remaining corretamente', async () => {
@@ -159,7 +132,6 @@ describe('DashboardsService', () => {
       {
         chave: BigInt(11),
         idStatus: BigInt(900),
-        idSprint: null,
         idAssignee: null,
         criadoEm: new Date('2026-05-01T12:00:00.000Z'),
         dados: { telemetry: { doneAt: '2026-05-01T12:00:00.000Z' } },
@@ -168,7 +140,6 @@ describe('DashboardsService', () => {
       {
         chave: BigInt(12),
         idStatus: BigInt(901),
-        idSprint: null,
         idAssignee: null,
         criadoEm: new Date('2026-05-02T12:00:00.000Z'),
         dados: {},
@@ -197,7 +168,6 @@ describe('DashboardsService', () => {
       {
         chave: BigInt(11),
         idStatus: BigInt(700),
-        idSprint: null,
         idAssignee: null,
         criadoEm: new Date('2026-05-03T12:00:00.000Z'),
         dados: {},
@@ -228,7 +198,6 @@ describe('DashboardsService', () => {
       {
         chave: BigInt(11),
         idStatus: BigInt(700),
-        idSprint: null,
         idAssignee: null,
         criadoEm: new Date('2026-05-10T12:00:00.000Z'),
         dados: { telemetry: { doneAt: '2026-05-10T13:00:00.000Z' } },

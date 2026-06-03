@@ -196,18 +196,18 @@ export class PdfGeneratorService {
 
     const avg = this.getNumericField(velocity, 'avgVelocity');
     if (avg !== null) {
-      doc.font('Helvetica').fontSize(10).text(`Velocity média: ${avg} tasks/sprint`);
+      doc.font('Helvetica').fontSize(10).text(`Velocity média: ${avg} tasks/período`);
       doc.moveDown(0.3);
     }
 
     const series = this.getArrayField(velocity, 'series');
     if (series.length > 0) {
-      const rows: [string, string, string][] = [['Sprint/Período', 'Concluídas', 'Planejadas']];
+      const rows: [string, string, string][] = [['Período', 'Concluídas', 'Planejadas']];
       for (const item of series.slice(0, 15)) {
         const record = this.asRecord(item);
         if (!record) continue;
         rows.push([
-          this.truncate(String(record.label ?? record.sprintId ?? '—'), 30),
+          this.truncate(String(record.label ?? '—'), 30),
           String(record.completed ?? '—'),
           String(record.planned ?? '—'),
         ]);
@@ -215,7 +215,7 @@ export class PdfGeneratorService {
       this.renderTable(doc, rows);
       if (series.length > 15) {
         doc.font('Helvetica').fontSize(9).fillColor(this.colors.textSecondary)
-          .text(`(+ ${series.length - 15} sprints omitidos)`);
+          .text(`(+ ${series.length - 15} períodos omitidos)`);
       }
     }
   }
@@ -307,10 +307,10 @@ export class PdfGeneratorService {
 
     const rows: [string, string][] = [
       ['Tasks restantes', this.formatCount(this.getNumericField(forecast, 'tasksRemaining'))],
-      ['P50 (50% confiança)', this.formatSprints(this.getNumericField(forecast, 'p50'))],
-      ['P75 (75% confiança)', this.formatSprints(this.getNumericField(forecast, 'p75'))],
-      ['P85 (85% confiança)', this.formatSprints(this.getNumericField(forecast, 'p85'))],
-      ['P95 (95% confiança)', this.formatSprints(this.getNumericField(forecast, 'p95'))],
+      ['P50 (50% confiança)', this.formatDays(this.getNumericField(forecast, 'p50'))],
+      ['P75 (75% confiança)', this.formatDays(this.getNumericField(forecast, 'p75'))],
+      ['P85 (85% confiança)', this.formatDays(this.getNumericField(forecast, 'p85'))],
+      ['P95 (95% confiança)', this.formatDays(this.getNumericField(forecast, 'p95'))],
     ];
 
     this.renderKeyValueTable(doc, rows);
@@ -485,9 +485,9 @@ export class PdfGeneratorService {
     return String(Math.round(count));
   }
 
-  private formatSprints(sprints: number | null): string {
-    if (sprints === null) return 'N/A';
-    return `${Math.ceil(sprints)} sprints`;
+  private formatDays(days: number | null): string {
+    if (days === null) return 'N/A';
+    return `${Math.ceil(days)} dias`;
   }
 
   private truncate(str: string, maxLen: number): string {

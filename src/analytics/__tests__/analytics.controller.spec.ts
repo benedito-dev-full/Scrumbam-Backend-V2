@@ -48,9 +48,9 @@ describe('AnalyticsController', () => {
   });
 
   it('encaminha capacityForecast com org validada', async () => {
-    await expect(controller.capacityForecast('10', { historicalSprints: 4 }, user)).resolves.toEqual({ orgId: '10' });
+    await expect(controller.capacityForecast('10', { historicalPeriods: 4 }, user)).resolves.toEqual({ orgId: '10' });
 
-    expect(analyticsService.capacityForecast).toHaveBeenCalledWith(BigInt(10), { historicalSprints: 4 });
+    expect(analyticsService.capacityForecast).toHaveBeenCalledWith(BigInt(10), { historicalPeriods: 4 });
   });
 
   it('encaminha stakeholderReport apos validar tenant do projeto', async () => {

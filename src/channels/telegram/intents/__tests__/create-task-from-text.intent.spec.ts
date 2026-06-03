@@ -15,7 +15,6 @@ const makeTaskResponse = () => ({
   descricao: null,
   priority: null,
   assigneeId: '100',
-  sprintId: null,
   dados: null,
   criadoEm: new Date().toISOString(),
   atualizadoEm: new Date().toISOString(),

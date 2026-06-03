@@ -69,7 +69,6 @@ export class ActiveExecutionDto {
  *   "priority": null,
  *   "taskType": "BUG",
  *   "assigneeId": null,
- *   "sprintId": null,
  *   "dados": { "identifier": "DEV-7", "v3": { "state": "INBOX" }, "taskType": "BUG" },
  *   "criadoEm": "2026-05-09T00:00:00.000Z",
  *   "atualizadoEm": "2026-05-09T00:00:00.000Z"
@@ -134,9 +133,6 @@ export class TaskResponseDto {
 
   @ApiPropertyOptional({ description: 'ID do assignee', nullable: true })
   assigneeId!: string | null;
-
-  @ApiPropertyOptional({ description: 'ID do sprint', nullable: true })
-  sprintId!: string | null;
 
   @ApiPropertyOptional({
     description: 'ID da task pai (subtarefa). Null se task raiz.',

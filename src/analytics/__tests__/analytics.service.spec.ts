@@ -122,7 +122,7 @@ describe('AnalyticsService', () => {
         unit: 'days',
         tasksRemaining: 5,
         iterations: 1000,
-        source: 'sprints',
+        source: 'rolling-window',
       })
       .mockResolvedValueOnce({
         p50: 3,
@@ -136,7 +136,7 @@ describe('AnalyticsService', () => {
       });
 
     const result = await service.capacityForecast(BigInt(10), {
-      historicalSprints: 4,
+      historicalPeriods: 4,
       iterations: 1000,
       limitProjects: 25,
     });
