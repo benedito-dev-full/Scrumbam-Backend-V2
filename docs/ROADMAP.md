@@ -139,7 +139,7 @@
 - ADR-V2-061 (Templates via DClasse) — Extensão ao agregado DTask
 - ADR-V2-042 (Tenant isolation) — Defense-in-depth
 
-**Commits:** (será preenchido após git commit)
+**Commits:** `a8af271` (fix(core): libera leitura de tasks de template global — 2026-06-03)
 
 ---
 

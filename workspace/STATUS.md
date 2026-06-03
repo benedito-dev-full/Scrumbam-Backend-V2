@@ -61,7 +61,7 @@
 
 **ADRs:** ADR-V2-062 (novo), ADR-V2-061 (templates via DClasse), ADR-V2-042 (tenant isolation)
 
-**Commits:** (será preenchido após git commit)
+**Commits:** `a8af271` (fix(core): libera leitura de tasks de template global — 2026-06-03)
 
 **Edge Case Conhecido (M1):** Se `accessibleProjectIds` for vazio (user sem nenhum projeto na org), o early-return precede o bypass → prévia de template global não aparece para esse user. Aceitável (caso raro, comportamento correto) — futuro: adicionar flag `allowPublicTemplates` se necessário.
 

@@ -200,6 +200,6 @@ if (accessibleProjectIds !== undefined) {
 
 ---
 
-**Implementado em:** Commit hash (será preenchido após CI)
+**Implementado em:** Commit `a8af271` (2026-06-03)
 **Testado em:** 2026-06-03
 **Status:** Aceito, implementado, testado, documentado
