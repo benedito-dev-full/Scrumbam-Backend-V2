@@ -1327,15 +1327,18 @@ describe('ProjectsService', () => {
       const dTaskFindMany = jest.fn().mockResolvedValue(phases);
       const dTaskCreate = jest.fn().mockResolvedValue({ chave: BigInt(800) });
       const findFirstOrThrow = jest.fn().mockResolvedValue(createdRoot);
+      // deriveUniqueSlug consulta dProject.findFirst (colisão de slug) na tx —
+      // null = slug livre, sem colisão.
+      const dProjectFindFirst = jest.fn().mockResolvedValue(null);
 
       prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
         fn({
-          dProject: { create: dProjectCreate, findFirstOrThrow },
+          dProject: { create: dProjectCreate, findFirst: dProjectFindFirst, findFirstOrThrow },
           dTask: { findMany: dTaskFindMany, create: dTaskCreate },
         }),
       );
 
-      return { dProjectCreate, dTaskFindMany, dTaskCreate, findFirstOrThrow };
+      return { dProjectCreate, dTaskFindMany, dTaskCreate, findFirstOrThrow, dProjectFindFirst };
     }
 
     it('duplica uma List: nó raiz ganha sufixo "(cópia)", re-seed e MANAGER', async () => {
@@ -1367,6 +1370,12 @@ describe('ProjectsService', () => {
           data: expect.objectContaining({ nome: 'Social Media (cópia)', idClasse: BigInt(-352) }),
         }),
       );
+      // Regressão (bug do slug duplicado): a cópia recebe um slug NOVO derivado
+      // do nome da cópia — nunca herda o slug do original (constraint UNIQUE
+      // lower(dados->>'slug') daria 500). deriveUniqueSlug foi consultado na tx.
+      const createArg = dProjectCreate.mock.calls[0][0] as { data: { dados: { slug?: string } } };
+      expect(createArg.data.dados.slug).toBeTruthy();
+      expect(createArg.data.dados.slug).toContain('social-media');
       // List nova recebe seed de statuses V3 e MANAGER do executante.
       expect(seedBootstrap.seedProject).toHaveBeenCalledTimes(1);
       expect(projectMembers.createManagerLink).toHaveBeenCalledTimes(1);

@@ -1483,6 +1483,14 @@ export class ProjectsService implements OnModuleInit {
 
         const nome = isRoot ? `${node.nome} (cópia)` : node.nome;
 
+        // Slug é UNIQUE case-insensitive (lower(dados->>'slug')). Copiar `dados`
+        // cru arrastaria o slug do original → colisão (500). Derivamos um slug
+        // novo a partir do nome da cópia, reusando a tx para enxergar os nós já
+        // inseridos nesta mesma duplicação. Sobrescreve o slug herdado.
+        const dadosOriginais = (node.dados ?? {}) as Record<string, unknown>;
+        const slug = await this.deriveUniqueSlug(tx, nome);
+        const dadosCopia: Record<string, unknown> = { ...dadosOriginais, slug };
+
         const novo = await tx.dProject.create({
           data: {
             idClasse: node.idClasse,
@@ -1492,7 +1500,7 @@ export class ProjectsService implements OnModuleInit {
             ...(node.repoUrl ? { repoUrl: node.repoUrl } : {}),
             ...(newIdPai !== null ? { idPai: newIdPai } : {}),
             privado: node.privado,
-            dados: (node.dados ?? {}) as Prisma.InputJsonValue,
+            dados: dadosCopia as Prisma.InputJsonValue,
             ...(node.tableFields !== null
               ? { tableFields: node.tableFields as Prisma.InputJsonValue }
               : {}),
