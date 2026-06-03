@@ -4,11 +4,11 @@
  * Composicao do seed (ADR-V2-019: monolitico):
  *   - 45 classes fixas universais Devari-Core (range -1..-110), via spread de
  *     `templates/classes-base-template.ts`.
- *   - 108 classes especificas Scrumban-V2 (range -150..-527), declaradas
+ *   - 109 classes especificas Scrumban-V2 (range -150..-527), declaradas
  *     neste arquivo, agrupadas por seccao (DEntidade, DVincula, DPedido,
  *     DTabela, DEvento, DTabela secundario, Fases) com comentarios `// === ... ===`.
  *
- * Total: 153 DClasses (ADR-V2-026: +1 AUDIT_GENERIC; ADR-V2-028: +6 INVITE_*;
+ * Total: 154 DClasses (ADR-V2-026: +1 AUDIT_GENERIC; ADR-V2-028: +6 INVITE_*;
  *   ADR-V2-029: +1 PROJECT_TEAM_LINK; ADR-V2-033: +2 AGENT_SESSION_*;
  *   ADR-V2-FOLDERS-001: +1 FOLDER, +1 FOLDER_PROJECT_LINK;
  *   ADR-V2-047: +1 PHASE;
@@ -16,7 +16,9 @@
  *   GAP-04: +1 DOC;
  *   GAP-COMMENT: +1 TASK_COMMENT;
  *   Frente B Nexus IA: +1 GEMINI_API_KEY (-481), +1 AI_CHAT_MESSAGE (-508);
- *   ADR-V2-058: +1 PROJECT_REF (-158, DEntidade-espelho de DProject em DVincula)).
+ *   ADR-V2-058: +1 PROJECT_REF (-158, DEntidade-espelho de DProject em DVincula);
+ *   ADR-V2-061 (proposto): +2 TEMPLATE_LIST (-401), TEMPLATE_SPACE (-402) —
+ *     feature Templates de Lista/Espaco via deep-clone do motor cloneTree).
  *
  * Validacao automatica:
  *   `validateHierarchy(classes)` e chamado no topo deste modulo. Qualquer
@@ -81,7 +83,7 @@ function esp(
 }
 
 /**
- * Array de classes especificas Scrumban-V2 (108 entradas).
+ * Array de classes especificas Scrumban-V2 (109 entradas).
  *
  * Ordem:
  *   1. DEntidade — 9 (sub-tipos de Pessoa: USER, PLATFORM_SCRUMBAN,
@@ -95,8 +97,9 @@ function esp(
  *      ADR-V2-051 (+2 BOOKMARK, SPACE_PRIVATE_MEMBER).
  *   3. Fases (DTask especializacao) — 1 (PHASE).
  *      ADR-V2-047 (+1 PHASE — agrupador hierarquico de DTask via idPai).
- *   4. DProject — hierarquia Space/Folder/List — 3 (ADR-V2-051).
- *      (+3 SPACE, FOLDER, LIST).
+ *   4. DProject — hierarquia Space/Folder/List + Templates — 5 (ADR-V2-051,
+ *      ADR-V2-061).
+ *      (+3 SPACE, FOLDER, LIST; +2 TEMPLATE_LIST, TEMPLATE_SPACE).
  *   5. DPedido — 4 (EXECUTION + EXEC_LOW/MED/HIGH para Pilar 1 / F6).
  *   6. DTabela principal — 35 (PRIORITY, TASK_TYPE, STATUS V3,
  *      CHANNEL, WEBHOOK, API_KEY, MCP_KEY, INSTALL_TOKEN, PAIRING_TOKEN,
@@ -114,11 +117,14 @@ function esp(
  *      INVITE_TOKEN, INVITE_STATUS_*).
  *      ADR-V2-028 (+5 INVITE_TOKEN, INVITE_STATUS_PENDING/ACCEPTED/EXPIRED/REVOKED).
  *
- * Soma: 9 + 15 + 1 + 3 + 4 + 35 + 16 + 21 = 104.
- * Com GAP-COMMENT: +1 = 105.
- * Com Frente B Nexus IA (+1 GEMINI_API_KEY, +1 AI_CHAT_MESSAGE): +2 = 107.
+ * Soma: 9 + 15 + 1 + 5 + 4 + 35 + 16 + 21 = 106.
+ * Com GAP-COMMENT: +1 = 107.
+ * Com ADR-V2-061 Templates (+2 TEMPLATE_LIST, TEMPLATE_SPACE em item 4): = 109.
+ * (item 4 DProject subiu de 3 para 5 com ADR-V2-061.)
  * (DEntidade subiu de 8 para 9 com ADR-V2-058 PROJECT_REF -158.)
  * (ADR-V2-060: SPRINT -400 removido — item 6 caiu de 36 para 35.)
+ * NOTA: Frente B Nexus IA (GEMINI_API_KEY, AI_CHAT_MESSAGE) ja contabilizada
+ *   nos itens 6/8 desta soma — o total runtime e 109 (validado pelo seed-runner).
  */
 const classesEspecificas: DClasseSeed[] = [
   // === DEntidade — sub-tipos de Pessoa (5) + DProject/DTask (2) + FOLDER (1) + PROJECT_REF (1) ===
@@ -195,6 +201,15 @@ const classesEspecificas: DClasseSeed[] = [
   esp(-350, 'SPACE', 'Espaco de trabalho', -37),
   esp(-351, 'FOLDER', 'Pasta agrupadora', -37),
   esp(-352, 'LIST', 'Lista de tasks (Board/Backlog)', -37),
+
+  // === DProject — Templates de Lista/Espaco (Feature Templates) ===
+  // Filhos de ENTIDADES (-37). Template = DProject marcado por idClasse dedicado
+  // (diferencia template de projeto real). Ao materializar via POST /projects/:id/from-template,
+  // o cloneTree remapeia -401 -> -352 (LIST) e -402 -> -350 (SPACE). Alcance: global =
+  // idEstab NULL (todas as orgs, criado por seed/plataforma); por-org = idEstab=org.
+  // Categoria em dados.categoria. Range -401..-419 liberado por ADR-V2-060. ADR-V2-061 (proposto).
+  esp(-401, 'TEMPLATE_LIST', 'Template de Lista', -37),
+  esp(-402, 'TEMPLATE_SPACE', 'Template de Espaco', -37),
 
   // === DPedido — execucoes Claude Code (4 — Pilar 1 prep para F6) ===
   // Filho de PEDIDOS (-20)
@@ -334,7 +349,7 @@ const classesEspecificas: DClasseSeed[] = [
 ];
 
 /**
- * Array completo do seed (45 fixas + 105 especificas = 150 DClasses).
+ * Array completo do seed (45 fixas + 109 especificas = 154 DClasses).
  * Validado automaticamente em time de import (validateHierarchy abaixo).
  */
 export const classes: DClasseSeed[] = [...classesFixas, ...classesEspecificas];
