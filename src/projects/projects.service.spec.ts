@@ -7,6 +7,7 @@ import { PrismaService } from '../prisma.service';
 import { EventProducerService } from '../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../common/services/correlation-id.service';
 import { ProjectRefService } from './project-ref.service';
+import { TasksIdentifierService } from '../tasks/tasks-identifier.service';
 import { BUILTIN_COLUMN_ORDER } from '../tasks/table-fields/builtin-columns';
 
 describe('ProjectsService', () => {
@@ -98,6 +99,12 @@ describe('ProjectsService', () => {
     };
     const eventProducerMock = { addInternalEvent: jest.fn().mockResolvedValue(undefined) };
     const correlationIdMock = { getOrGenerate: jest.fn().mockReturnValue('test-corr-id') };
+    // Sub-fase 3 (Templates): counter atômico DEV-N para copyTasks. Sequencial
+    // por chamada — permite asserções de identifiers únicos por task clonada.
+    let identifierSeq = 0;
+    const identifierServiceMock = {
+      getNextIdentifier: jest.fn(() => Promise.resolve(`DEV-${++identifierSeq}`)),
+    };
     // ADR-V2-058/059: espelho -158. ensureEntidadeRef devolve um refId (E) fixo;
     // resolveEntidadeRef/resolveProjectId fazem passthrough nos testes.
     const projectRefMock = {
@@ -131,6 +138,7 @@ describe('ProjectsService', () => {
         { provide: EventProducerService, useValue: eventProducerMock },
         { provide: CorrelationIdService, useValue: correlationIdMock },
         { provide: ProjectRefService, useValue: projectRefMock },
+        { provide: TasksIdentifierService, useValue: identifierServiceMock },
       ],
     }).compile();
 
@@ -1359,7 +1367,12 @@ describe('ProjectsService', () => {
           depth: 0,
         },
       ]);
-      const createdRoot = { ...mockProject, chave: BigInt(900), idClasse: BigInt(-352), nome: 'Social Media (cópia)' };
+      const createdRoot = {
+        ...mockProject,
+        chave: BigInt(900),
+        idClasse: BigInt(-352),
+        nome: 'Social Media (cópia)',
+      };
       const { dProjectCreate } = mockDuplicateTx(createdRoot);
 
       const result = await service.duplicate('1', BigInt(100));
@@ -1408,9 +1421,20 @@ describe('ProjectsService', () => {
           depth: 0,
         },
       ]);
-      const createdRoot = { ...mockProject, chave: BigInt(900), idClasse: BigInt(-352), nome: 'Lista (cópia)' };
+      const createdRoot = {
+        ...mockProject,
+        chave: BigInt(900),
+        idClasse: BigInt(-352),
+        nome: 'Lista (cópia)',
+      };
       const { dTaskCreate } = mockDuplicateTx(createdRoot, [
-        { chave: BigInt(50), idPai: null, nome: 'Fase 1', descricao: null, dados: { kind: 'phase' } },
+        {
+          chave: BigInt(50),
+          idPai: null,
+          nome: 'Fase 1',
+          descricao: null,
+          dados: { kind: 'phase' },
+        },
       ]);
 
       await service.duplicate('1', BigInt(100));
@@ -1435,6 +1459,314 @@ describe('ProjectsService', () => {
 
       await expect(service.duplicate('1', BigInt(999), '50')).rejects.toThrow(ForbiddenException);
       expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('resetTaskDados() — molde limpo (Sub-fase 3 Templates)', () => {
+    /** Acessa o helper privado puro para teste isolado. */
+    function callReset(
+      raw: unknown,
+      identifier: string,
+      blocoIdMap: Map<string, bigint>,
+      movedBy = '100',
+    ): Record<string, unknown> {
+      return (
+        service as unknown as {
+          resetTaskDados: (
+            raw: unknown,
+            id: string,
+            map: Map<string, bigint>,
+            movedBy: string,
+          ) => Record<string, unknown>;
+        }
+      ).resetTaskDados(raw, identifier, blocoIdMap, movedBy);
+    }
+
+    it('seta identifier, v3=INBOX, zera telemetry e remove automation/capture', () => {
+      const blocoIdMap = new Map<string, bigint>();
+      const out = callReset(
+        {
+          identifier: 'DEV-7',
+          v3: { state: 'DONE', movedAt: '2026-01-01T00:00:00Z', movedBy: '999' },
+          telemetry: {
+            workSessions: [{ startedAt: '2026-01-01T00:00:00Z', agentId: 'a' }],
+            manualTimers: [{ userId: '5', startedAt: '2026-01-01T00:00:00Z', durationMs: 1000 }],
+            cycleTime: 1234,
+          },
+          automation: { executions: 3, approved: true },
+          capture: { source: 'telegram', rawText: 'oi' },
+        },
+        'DEV-1',
+        blocoIdMap,
+      );
+
+      expect(out.identifier).toBe('DEV-1');
+      expect(out.v3).toEqual(expect.objectContaining({ state: 'INBOX', movedBy: '100' }));
+      // Telemetria zerada por inteiro (workSessions IA + manualTimers humano).
+      expect(out.telemetry).toEqual({});
+      expect(out.automation).toBeUndefined();
+      expect(out.capture).toBeUndefined();
+    });
+
+    it('COPIA dados.fields (parte do molde)', () => {
+      const out = callReset(
+        { identifier: 'DEV-7', fields: { f_abc: 'valor', f_num: 42 } },
+        'DEV-2',
+        new Map(),
+      );
+      expect(out.fields).toEqual({ f_abc: 'valor', f_num: 42 });
+    });
+
+    it('remapeia dados.idBloco via blocoIdMap (hit)', () => {
+      const blocoIdMap = new Map<string, bigint>([['50', BigInt(950)]]);
+      const out = callReset({ identifier: 'DEV-7', idBloco: '50' }, 'DEV-3', blocoIdMap);
+      expect(out.idBloco).toBe('950');
+    });
+
+    it('idBloco órfão (fora do mapa) → null + warn', () => {
+      const warnSpy = jest
+        .spyOn((service as unknown as { logger: { warn: jest.Mock } }).logger, 'warn')
+        .mockImplementation(() => undefined);
+      const out = callReset({ identifier: 'DEV-7', idBloco: '999' }, 'DEV-4', new Map());
+      expect(out.idBloco).toBeNull();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('idBloco órfão'));
+      warnSpy.mockRestore();
+    });
+  });
+
+  describe('cloneTree({ includeTasks: true }) — Sub-fase 3 Templates', () => {
+    /**
+     * Monta a tx para um clone de List COM tasks: dProject.create devolve a
+     * nova List (-352, chave 900); dTask.findMany distingue fases (-200) de
+     * tasks (-154) pela idClasse do `where`; dTabela.findFirst/findMany servem
+     * INBOX e priorities da clone; chaves de task crescem sequencialmente.
+     */
+    function mockCloneWithTasksTx(args: {
+      tasks: Array<Record<string, unknown>>;
+      phases?: Array<Record<string, unknown>>;
+      inboxChave?: bigint;
+      clonePriorities?: Array<{ chave: bigint; idClasse: bigint }>;
+      sourcePriorities?: Array<{ chave: bigint; idClasse: bigint }>;
+    }) {
+      const { tasks, phases = [], inboxChave = BigInt(7777) } = args;
+      const clonePriorities = args.clonePriorities ?? [];
+      const sourcePriorities = args.sourcePriorities ?? [];
+
+      const dProjectCreate = jest.fn().mockResolvedValue({
+        chave: BigInt(900),
+        idClasse: BigInt(-352),
+        nome: 'Template List (cópia)',
+        idEstab: null,
+        dados: { prefix: 'TPL' },
+      });
+      const dProjectFindFirst = jest.fn().mockResolvedValue(null); // slug livre
+      const findFirstOrThrow = jest.fn().mockResolvedValue({
+        ...mockProject,
+        chave: BigInt(900),
+        idClasse: BigInt(-352),
+        nome: 'Template List (cópia)',
+      });
+
+      // dTask.create: chave crescente p/ permitir remap de idPai task→task.
+      let taskChaveSeq = 1000;
+      const dTaskCreate = jest
+        .fn()
+        .mockImplementation(() => Promise.resolve({ chave: BigInt(++taskChaveSeq) }));
+
+      // dTask.findMany é chamado 2x: copyPhases (-200) e copyTasks (-154).
+      const dTaskFindMany = jest
+        .fn()
+        .mockImplementation(({ where }: { where: { idClasse: bigint } }) =>
+          Promise.resolve(where.idClasse === BigInt(-200) ? phases : tasks),
+        );
+
+      // dTabela.findFirst → INBOX da clone; dTabela.findMany → priorities.
+      const dTabelaFindFirst = jest.fn().mockResolvedValue({ chave: inboxChave });
+      const dTabelaFindMany = jest
+        .fn()
+        // 1ª chamada: priorities da clone (idClasse in [-421..-424], dEntidadeId=E)
+        .mockResolvedValueOnce(clonePriorities)
+        // 2ª chamada: priorities de origem (chave in [...])
+        .mockResolvedValueOnce(sourcePriorities);
+
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
+        fn({
+          dProject: { create: dProjectCreate, findFirst: dProjectFindFirst, findFirstOrThrow },
+          dTask: { findMany: dTaskFindMany, create: dTaskCreate },
+          dTabela: { findFirst: dTabelaFindFirst, findMany: dTabelaFindMany },
+        }),
+      );
+
+      return { dProjectCreate, dTaskCreate, dTaskFindMany, dTabelaFindFirst, dTabelaFindMany };
+    }
+
+    /** Invoca o motor privado cloneTree com includeTasks:true. */
+    function cloneTree(opts: Record<string, unknown>) {
+      return (
+        service as unknown as {
+          cloneTree: (
+            id: string,
+            user: bigint,
+            org: string | undefined,
+            opts: Record<string, unknown>,
+          ) => Promise<unknown>;
+        }
+      ).cloneTree('1', BigInt(100), undefined, opts);
+    }
+
+    function singleListNode() {
+      prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(1) }); // MANAGER
+      prisma.$queryRaw.mockResolvedValue([
+        {
+          chave: BigInt(1),
+          idClasse: BigInt(-352),
+          idPai: null,
+          nome: 'Template List',
+          descricao: null,
+          idEstab: null,
+          repoUrl: null,
+          privado: false,
+          dados: { prefix: 'TPL' },
+          tableFields: null,
+          depth: 0,
+        },
+      ]);
+    }
+
+    it('copia tasks -154 com INBOX da clone, assignee/dueDate nulos e DEV-N sequenciais', async () => {
+      singleListNode();
+      const { dTaskCreate } = mockCloneWithTasksTx({
+        tasks: [
+          {
+            chave: BigInt(10),
+            idPai: null,
+            nome: 'Task A',
+            descricao: 'desc',
+            idPriority: null,
+            dados: { identifier: 'OLD-1', v3: { state: 'DONE' } },
+          },
+          {
+            chave: BigInt(11),
+            idPai: null,
+            nome: 'Task B',
+            descricao: null,
+            idPriority: null,
+            dados: { identifier: 'OLD-2' },
+          },
+        ],
+      });
+
+      await cloneTree({ includeTasks: true });
+
+      // 2 tasks criadas no projeto clone (900), INBOX 7777, sem assignee/dueDate.
+      const taskCreates = dTaskCreate.mock.calls
+        .map((c) => c[0] as { data: Record<string, unknown> })
+        .filter((c) => c.data.idClasse === BigInt(-154));
+      expect(taskCreates).toHaveLength(2);
+      for (const tc of taskCreates) {
+        expect(tc.data.idProject).toBe(BigInt(900));
+        expect(tc.data.idStatus).toBe(BigInt(7777));
+        expect(tc.data.idAssignee).toBeNull();
+        expect(tc.data.dueDate).toBeNull();
+        expect(tc.data.idCreator).toBe(BigInt(100));
+      }
+      // DEV-N sequenciais e únicos.
+      const identifiers = taskCreates.map(
+        (tc) => (tc.data.dados as Record<string, unknown>).identifier,
+      );
+      expect(new Set(identifiers).size).toBe(2);
+    });
+
+    it('remapeia idPai (task→task) e dados.idBloco (task→bloco)', async () => {
+      singleListNode();
+      // Fase -200 chave 50 → clone (primeiro dTask.create devolve 1001).
+      const { dTaskCreate } = mockCloneWithTasksTx({
+        phases: [{ chave: BigInt(50), idPai: null, nome: 'Bloco', descricao: null, dados: {} }],
+        tasks: [
+          {
+            chave: BigInt(10),
+            idPai: null,
+            nome: 'Pai',
+            descricao: null,
+            idPriority: null,
+            dados: { identifier: 'OLD-1', idBloco: '50' },
+          },
+          {
+            chave: BigInt(20),
+            idPai: BigInt(10), // subtarefa de 10
+            nome: 'Filha',
+            descricao: null,
+            idPriority: null,
+            dados: { identifier: 'OLD-2' },
+          },
+        ],
+      });
+
+      await cloneTree({ includeTasks: true });
+
+      const calls = dTaskCreate.mock.calls.map((c) => c[0] as { data: Record<string, unknown> });
+      const phaseCreate = calls.find((c) => c.data.idClasse === BigInt(-200));
+      const taskCreates = calls.filter((c) => c.data.idClasse === BigInt(-154));
+      const novaFaseChave = BigInt(1001); // 1ª dTask.create (a fase)
+
+      // idBloco remapeado para a nova fase.
+      const pai = taskCreates.find((c) => c.data.nome === 'Pai');
+      expect((pai!.data.dados as Record<string, unknown>).idBloco).toBe(novaFaseChave.toString());
+      expect(phaseCreate).toBeDefined();
+
+      // A subtarefa aponta para a chave nova da task-pai (criada antes — nulls-first).
+      const filha = taskCreates.find((c) => c.data.nome === 'Filha');
+      const paiNovaChave = BigInt(1002); // 2ª dTask.create (Pai), após a fase
+      expect(filha!.data.idPai).toBe(paiNovaChave);
+    });
+
+    it('remapeia idPriority por código (mesma idClasse) para a priority da clone', async () => {
+      singleListNode();
+      const { dTaskCreate } = mockCloneWithTasksTx({
+        tasks: [
+          {
+            chave: BigInt(10),
+            idPai: null,
+            nome: 'Task HIGH',
+            descricao: null,
+            idPriority: BigInt(500), // priority de ORIGEM (idClasse -421 HIGH)
+            dados: { identifier: 'OLD-1' },
+          },
+        ],
+        clonePriorities: [{ chave: BigInt(600), idClasse: BigInt(-421) }], // HIGH da clone
+        sourcePriorities: [{ chave: BigInt(500), idClasse: BigInt(-421) }],
+      });
+
+      await cloneTree({ includeTasks: true });
+
+      const taskCreate = dTaskCreate.mock.calls
+        .map((c) => c[0] as { data: Record<string, unknown> })
+        .find((c) => c.data.idClasse === BigInt(-154));
+      // Remapeada para a priority HIGH (-421) DA CLONE (chave 600), não a origem (500).
+      expect(taskCreate!.data.idPriority).toBe(BigInt(600));
+    });
+
+    it('includeTasks=false (default duplicate) NÃO copia tasks -154', async () => {
+      singleListNode();
+      const { dTaskCreate } = mockCloneWithTasksTx({
+        tasks: [
+          {
+            chave: BigInt(10),
+            idPai: null,
+            nome: 'Task A',
+            descricao: null,
+            idPriority: null,
+            dados: { identifier: 'OLD-1' },
+          },
+        ],
+      });
+
+      await cloneTree({}); // sem includeTasks → comportamento legado
+
+      const taskCreates = dTaskCreate.mock.calls
+        .map((c) => c[0] as { data: Record<string, unknown> })
+        .filter((c) => c.data.idClasse === BigInt(-154));
+      expect(taskCreates).toHaveLength(0);
     });
   });
 });

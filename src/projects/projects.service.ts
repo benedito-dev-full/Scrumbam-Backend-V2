@@ -13,6 +13,8 @@ import { CorrelationIdService } from '../common/services/correlation-id.service'
 import { SeedBootstrapService } from './seed-bootstrap.service';
 import { ProjectMembersService } from './project-members.service';
 import { ProjectRefService } from './project-ref.service';
+import { TasksIdentifierService } from '../tasks/tasks-identifier.service';
+import { parseTaskDados } from '../tasks/schemas/task-dados.schema';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import {
@@ -49,6 +51,26 @@ const ID_CLASSE_LIST = BigInt(-352);
  * tasks de trabalho (-154) NÃO são copiadas.
  */
 const ID_CLASSE_PHASE = BigInt(-200);
+
+/**
+ * idClasse de DTask TASK de trabalho (card Scrumban). Copiada apenas no clone
+ * de templates (`cloneTree` com `includeTasks=true`); a duplicação simples
+ * (`duplicate()`) NÃO copia tasks -154.
+ */
+const ID_CLASSE_TASK = BigInt(-154);
+
+/**
+ * idClasse de DTabela INBOX (status V3 inicial) escopado por projeto
+ * (`dEntidadeId = E`). Toda task clonada nasce neste status (reset molde-limpo).
+ */
+const ID_CLASSE_STATUS_INBOX = BigInt(-441);
+
+/**
+ * idClasses de DTabela PRIORITY (HIGH/MEDIUM/LOW/URGENT) escopadas por projeto.
+ * Usadas para montar o mapa código→chave da List clone e remapear `idPriority`
+ * das tasks copiadas (a List clone tem suas próprias priorities via seed).
+ */
+const PRIORITY_CLASSES = [BigInt(-421), BigInt(-422), BigInt(-423), BigInt(-424)];
 
 /** idClasse de DVincula MANAGER de projeto (seed F1). */
 const ID_CLASSE_PROJECT_MANAGER = BigInt(-171);
@@ -153,16 +175,14 @@ export interface FindManyProjectsOptions {
 /**
  * Opções do motor de deep-clone `cloneTree` (extraído de `duplicate`).
  *
- * Forward-compat para a feature Templates (Sub-fases 3/4 — ver
- * `workspace/plans/plan-templates-feature.md`). TODAS as opções estão
- * declaradas aqui, mas nesta Sub-fase 2 (refactor de não-regressão) APENAS
- * `novoNome`, `novoIcone` e `idPaiDestino` têm efeito — e os defaults de cada
- * uma reproduzem EXATAMENTE o comportamento atual de `duplicate()`.
+ * Opções do motor de clone para a feature Templates (ver
+ * `workspace/plans/plan-templates-feature.md`). Os defaults de cada opção
+ * reproduzem EXATAMENTE o comportamento de `duplicate()` (esqueleto sem tasks,
+ * raiz nasce ao lado com sufixo " (cópia)").
  *
- * `includeTasks` está declarada (default `false`) mas NÃO é exercida ainda — a
- * cópia das tasks de trabalho (-154) é responsabilidade da Sub-fase 3. Não há
- * branch morto: o seam (`copyTasks`) será plugado no ponto-âncora dentro de
- * `cloneTree` quando a Sub-fase 3 chegar.
+ * `includeTasks=true` (Sub-fase 3) aciona a cópia das tasks de trabalho (-154)
+ * via `copyTasks`. `novoNome`/`novoIcone`/`idPaiDestino` parametrizam a raiz.
+ * A rota `from-template` e o remap de classe template→real são Sub-fase 4.
  */
 interface CloneTreeOptions {
   /**
@@ -234,6 +254,7 @@ export class ProjectsService implements OnModuleInit {
     private readonly eventProducer: EventProducerService,
     private readonly correlationIdService: CorrelationIdService,
     private readonly projectRef: ProjectRefService,
+    private readonly identifierService: TasksIdentifierService,
   ) {}
 
   /**
@@ -1489,9 +1510,9 @@ export class ProjectsService implements OnModuleInit {
    *    -171).
    *  - Emite `project.created` (com `duplicatedFrom`) APÓS persistir.
    *
-   * Opções (`CloneTreeOptions`) — nesta Sub-fase 2 só `novoNome`, `novoIcone` e
-   * `idPaiDestino` têm efeito, todas com default que reproduz o comportamento
-   * legado. `includeTasks` é forward-compat (Sub-fase 3) e ainda não é exercida.
+   * Opções (`CloneTreeOptions`): `novoNome`/`novoIcone`/`idPaiDestino`
+   * parametrizam a raiz (defaults reproduzem o comportamento legado);
+   * `includeTasks=true` copia as tasks de trabalho (-154) via `copyTasks`.
    *
    * Permissão: exige MANAGER (ação estrutural — mesma regra de update/delete).
    *
@@ -1638,17 +1659,32 @@ export class ProjectsService implements OnModuleInit {
           await this.seedBootstrap.seedProject(tx, refId);
 
           // Copiar as FASES/BLOCOS (-200) da List original para a nova.
-          // `copyPhases` retorna o phaseIdMap (old -200 → new -200); o caminho
-          // `duplicate` (includeTasks=false) ignora o retorno — prep de seam.
+          // `copyPhases` retorna o phaseIdMap (old -200 → new -200); consumido
+          // por `copyTasks` (abaixo) para remapear `dados.idBloco`. O caminho
+          // `duplicate` (includeTasks=false) ignora o retorno.
           const phaseIdMap = await this.copyPhases(tx, node.chave, novo.chave);
-          void phaseIdMap;
 
-          // ┌─ SEAM Sub-fase 3 (Templates) ────────────────────────────────────
-          // │ Quando `opts.includeTasks === true`, a cópia das tasks de
-          // │ trabalho (-154) será plugada AQUI, consumindo `phaseIdMap` para
-          // │ remapear `dados.idBloco`. Nesta Sub-fase 2 nada é feito (sem
-          // │ branch morto): `includeTasks` ainda não altera o fluxo.
+          // ┌─ Sub-fase 3 (Templates) — cópia das tasks de trabalho (-154) ─────
+          // │ Só quando `opts.includeTasks === true` (rota from-template). A
+          // │ duplicação simples (`duplicate()`) NÃO entra aqui — comportamento
+          // │ legado intacto. `refId` é o handle canônico (E) da List clone,
+          // │ usado como counterScope (counter -475), escopo de INBOX/priorities
+          // │ e mantém a paridade write/read com `tasks.service`.
           // └──────────────────────────────────────────────────────────────────
+          if (opts.includeTasks === true) {
+            const prefixDaListaClone =
+              ((novo.dados as Record<string, unknown> | null)?.prefix as string | undefined) ??
+              'DEV';
+            await this.copyTasks(
+              tx,
+              node.chave,
+              novo.chave,
+              phaseIdMap,
+              refId,
+              prefixDaListaClone,
+              userEntidadeId,
+            );
+          }
         }
       }
 
@@ -1744,6 +1780,244 @@ export class ProjectsService implements OnModuleInit {
     }
 
     return phaseIdMap;
+  }
+
+  /**
+   * Reseta o `dados` de uma task para o estado "molde limpo" no clone de
+   * template (Sub-fase 3 — Templates). Helper puro (sem I/O), testável
+   * isoladamente.
+   *
+   * Transformações (decisões TRAVADAS — ver
+   * `workspace/plans/plan-templates-feature.md` §"DECISÕES TRAVADAS" #4):
+   *  - `identifier` ← `novoIdentifier` (novo DEV-N do counter da List clone).
+   *  - `v3` ← `{ state: 'INBOX', movedAt, movedBy }` (mesma forma de
+   *    {@link buildInitialTaskDados}; a task nasce no início do fluxo).
+   *  - `telemetry` ← `{}` (zera `workSessions[]` de IA E `manualTimers[]`
+   *    humano — ADR-V2-057; um molde não carrega tempo gasto).
+   *  - remove `automation` e `capture` (dados de instância, não de molde).
+   *  - **remapeia `dados.idBloco`** via `blocoIdMap` (old -200 → new -200): se a
+   *    task aponta a um bloco copiado, troca pelo novo id; se o bloco não está
+   *    no mapa (órfão — bloco excluído), grava `null` + `logger.warn` (não
+   *    quebra o clone).
+   *  - **COPIA `dados.fields`** (valores de colunas customizadas = parte do
+   *    molde — Decisão #4). Mantido intacto.
+   *
+   * @param rawDados - Valor bruto do campo `dados` (Json) da task de origem.
+   * @param novoIdentifier - Identifier DEV-N recém-gerado para a task clonada.
+   * @param blocoIdMap - Mapa `old -200 chave (string)` → `new -200 chave`
+   *   (o `phaseIdMap` de {@link copyPhases}).
+   * @param movedBy - DEntidade.chave (string) do executante — vira `v3.movedBy`.
+   * @returns `dados` resetado pronto para persistir.
+   */
+  private resetTaskDados(
+    rawDados: unknown,
+    novoIdentifier: string,
+    blocoIdMap: Map<string, bigint>,
+    movedBy: string,
+  ): Record<string, unknown> {
+    const original = parseTaskDados(rawDados) as Record<string, unknown>;
+
+    // Partir do original para PRESERVAR campos de molde (ex.: fields, taskType,
+    // assigneeTeamId) e então sobrescrever/limpar o que é de instância.
+    const novo: Record<string, unknown> = { ...original };
+
+    novo.identifier = novoIdentifier;
+    novo.v3 = {
+      state: 'INBOX',
+      movedAt: new Date().toISOString(),
+      movedBy,
+    };
+    // Zera telemetria por inteiro: workSessions (IA) + manualTimers (humano).
+    novo.telemetry = {};
+    // Dados de instância — não fazem parte do molde.
+    delete novo.automation;
+    delete novo.capture;
+
+    // Remap de `idBloco` (task → bloco -200). `fields` é COPIADO (parte do
+    // molde) e portanto NÃO é tocado aqui.
+    const idBlocoOriginal = original.idBloco;
+    if (idBlocoOriginal !== undefined && idBlocoOriginal !== null) {
+      const novoIdBloco = blocoIdMap.get(idBlocoOriginal.toString());
+      if (novoIdBloco !== undefined) {
+        novo.idBloco = novoIdBloco.toString();
+      } else {
+        this.logger.warn(
+          `resetTaskDados: idBloco órfão (${String(idBlocoOriginal)}) não está no ` +
+            `phaseIdMap — task clonada nasce sem bloco (idBloco=null)`,
+        );
+        novo.idBloco = null;
+      }
+    }
+
+    return novo;
+  }
+
+  /**
+   * Copia as TASKS de trabalho (-154) de uma List para outra no clone de
+   * template (Sub-fase 3 — Templates). Chamado dentro da transaction de
+   * {@link cloneTree} APÓS {@link copyPhases}, apenas quando
+   * `opts.includeTasks === true`.
+   *
+   * Leituras em **batch fixo** (ZERO N+1 de leitura):
+   *  1. todas as tasks -154 da List origem (1 query, ordenadas pai-antes-da-
+   *     subtarefa via `idPai nulls-first, chave asc`);
+   *  2. o status INBOX da List clone (1 query — `counterScope = E` da clone);
+   *  3. as priorities da List clone (1 query) → mapa código→chave para remapear
+   *     `idPriority` (o `seedProject` cria priorities -421..-424 por projeto).
+   *
+   * No loop, por task: gera um novo `identifier` DEV-N atômico (counter -475 da
+   * clone — incremento sequencial, requisito funcional, NÃO N+1 de leitura),
+   * reseta o `dados` (molde limpo via {@link resetTaskDados}) e cria a DTask.
+   *
+   * Reset molde-limpo (decisões TRAVADAS): `idStatus = INBOX` da clone;
+   * `idPriority` remapeado por código (ou `null`); `idPai` task→task remapeado
+   * (pai já criado pela ordem nulls-first); `idAssignee = null` e
+   * `dueDate = null` (molde não carrega responsável nem prazo); `idCreator =`
+   * executante (quem clonou cria).
+   *
+   * @param tx - Prisma transaction client.
+   * @param sourceListId - Chave BigInt (P) da List de origem.
+   * @param targetListId - Chave BigInt (P) da List de destino (a clone).
+   * @param blocoIdMap - `phaseIdMap` de {@link copyPhases} (old -200 → new -200).
+   * @param counterScope - Handle canônico (E) da List clone — usado no counter
+   *   -475 e como `dEntidadeId` de INBOX/priorities (ADR-V2-058/059).
+   * @param prefix - Prefixo do identifier da List clone (`dados.prefix ?? 'DEV'`).
+   * @param creatorId - DEntidade.chave do executante (vira `idCreator`/`movedBy`).
+   * @returns Número de tasks copiadas.
+   */
+  private async copyTasks(
+    tx: Prisma.TransactionClient,
+    sourceListId: bigint,
+    targetListId: bigint,
+    blocoIdMap: Map<string, bigint>,
+    counterScope: bigint,
+    prefix: string,
+    creatorId: bigint,
+  ): Promise<number> {
+    // 1) Batch: todas as tasks -154 da List origem. Ordem nulls-first em idPai
+    //    garante que a task-pai é criada ANTES da subtarefa — o remap de idPai
+    //    sempre encontra o novo id do pai já materializado.
+    const tasks = await tx.dTask.findMany({
+      where: {
+        idProject: sourceListId,
+        idClasse: ID_CLASSE_TASK,
+        excluido: false,
+      },
+      select: {
+        chave: true,
+        idPai: true,
+        nome: true,
+        descricao: true,
+        idPriority: true,
+        dados: true,
+      },
+      orderBy: [{ idPai: { sort: 'asc', nulls: 'first' } }, { chave: 'asc' }],
+    });
+
+    if (tasks.length === 0) return 0;
+
+    // 2) Batch: status INBOX da List clone (escopo E). Toda task nasce aqui.
+    const inbox = await tx.dTabela.findFirst({
+      where: {
+        idClasse: ID_CLASSE_STATUS_INBOX,
+        dEntidadeId: counterScope,
+        excluido: false,
+      },
+      select: { chave: true },
+    });
+
+    // 3) Batch: priorities da List clone (escopo E) → mapa idClasse→chave. O
+    //    `seedProject` já criou as 4 priorities (-421..-424) da clone. Mapeamos
+    //    a PRIORITY da task origem para a DA CLONE pela MESMA idClasse (cada
+    //    código de prioridade tem idClasse fixo: HIGH=-421, etc.).
+    const clonePriorities = await tx.dTabela.findMany({
+      where: {
+        idClasse: { in: PRIORITY_CLASSES },
+        dEntidadeId: counterScope,
+        excluido: false,
+      },
+      select: { chave: true, idClasse: true },
+    });
+    const clonePriorityByClasse = new Map<string, bigint>(
+      clonePriorities.map((p) => [p.idClasse.toString(), p.chave]),
+    );
+
+    // Para remapear idPriority por código precisamos da idClasse da priority de
+    // ORIGEM (que carrega o código). 1 query batch resolve todas as priorities
+    // de origem referenciadas pelas tasks (ZERO N+1).
+    const sourcePriorityIds = Array.from(
+      new Set(
+        tasks
+          .map((t) => t.idPriority)
+          .filter((v): v is bigint => v !== null && v !== undefined)
+          .map((v) => v.toString()),
+      ),
+    ).map((s) => BigInt(s));
+    const sourcePriorityClasseById = new Map<string, bigint>();
+    if (sourcePriorityIds.length > 0) {
+      const sourcePriorities = await tx.dTabela.findMany({
+        where: { chave: { in: sourcePriorityIds } },
+        select: { chave: true, idClasse: true },
+      });
+      for (const sp of sourcePriorities) {
+        sourcePriorityClasseById.set(sp.chave.toString(), sp.idClasse);
+      }
+    }
+
+    // Mapa old DTask.chave (string) → new DTask.chave — remap de idPai task→task.
+    const taskIdMap = new Map<string, bigint>();
+    let copied = 0;
+
+    for (const t of tasks) {
+      // Incremento atômico sequencial do counter -475 da clone (requisito
+      // funcional — NÃO é N+1 de leitura).
+      const novoIdentifier = await this.identifierService.getNextIdentifier(
+        tx,
+        counterScope,
+        prefix,
+      );
+
+      const dadosNovo = this.resetTaskDados(
+        t.dados,
+        novoIdentifier,
+        blocoIdMap,
+        creatorId.toString(),
+      );
+
+      // Remap idPriority por CÓDIGO (via idClasse): resolve a idClasse da
+      // priority de origem e busca a priority de mesma idClasse na clone.
+      let idPriorityNovo: bigint | null = null;
+      if (t.idPriority !== null && t.idPriority !== undefined) {
+        const classe = sourcePriorityClasseById.get(t.idPriority.toString());
+        idPriorityNovo = classe ? (clonePriorityByClasse.get(classe.toString()) ?? null) : null;
+      }
+
+      // Remap idPai task→task (pai já criado pela ordem nulls-first).
+      const novoIdPai = t.idPai ? (taskIdMap.get(t.idPai.toString()) ?? null) : null;
+
+      const novaTask = await tx.dTask.create({
+        data: {
+          idClasse: ID_CLASSE_TASK,
+          idProject: targetListId,
+          nome: t.nome,
+          ...(t.descricao ? { descricao: t.descricao } : {}),
+          idStatus: inbox?.chave ?? null,
+          idPriority: idPriorityNovo,
+          // Molde limpo: template não carrega responsável nem prazo.
+          idAssignee: null,
+          dueDate: null,
+          idCreator: creatorId,
+          ...(novoIdPai !== null ? { idPai: novoIdPai } : {}),
+          dados: dadosNovo as Prisma.InputJsonValue,
+        },
+        select: { chave: true },
+      });
+
+      taskIdMap.set(t.chave.toString(), novaTask.chave);
+      copied++;
+    }
+
+    return copied;
   }
 
   /**

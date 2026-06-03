@@ -7,6 +7,7 @@ import { ProjectActivityService } from './project-activity.service';
 import { ProjectMembersService } from './project-members.service';
 import { SeedBootstrapService } from './seed-bootstrap.service';
 import { UserProjectService } from './user-project.service';
+import { TasksIdentifierService } from '../tasks/tasks-identifier.service';
 
 /**
  * ProjectsModule — Domínio de projetos (DProject) V2.
@@ -39,6 +40,12 @@ import { UserProjectService } from './user-project.service';
     ProjectMembersService,
     SeedBootstrapService,
     UserProjectService,
+    // Sub-fase 3 (Templates): cópia das tasks -154 no clone from-template gera
+    // identifiers DEV-N atômicos via TasksIdentifierService. O service só
+    // depende de PrismaService e usa o `tx` passado por parâmetro — registrá-lo
+    // aqui evita importar TasksModule (que já importa ProjectsModule via
+    // forwardRef, criando ciclo) e não compartilha estado entre módulos.
+    TasksIdentifierService,
   ],
   exports: [ProjectsService, ProjectMembersService, UserProjectService],
 })
