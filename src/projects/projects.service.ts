@@ -16,6 +16,7 @@ import { ProjectRefService } from './project-ref.service';
 import { TasksIdentifierService } from '../tasks/tasks-identifier.service';
 import { parseTaskDados } from '../tasks/schemas/task-dados.schema';
 import { CreateProjectDto } from './dto/create-project.dto';
+import { CreateFromTemplateDto } from './dto/create-from-template.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import {
   ProjectResponseDto,
@@ -44,6 +45,33 @@ const ID_CLASSE_FOLDER = BigInt(-351);
  * SPACEs (-350) e FOLDERs (-351) são contêineres estruturais.
  */
 const ID_CLASSE_LIST = BigInt(-352);
+
+/**
+ * idClasse DProject TEMPLATE_LIST (ADR-V2-061 — feature Templates). Marca um nó
+ * como molde de Lista. No clone (`cloneTree` com `fromTemplate=true`) é
+ * remapeado para -352 LIST ANTES do seed/`if LIST` (sem isso a List nasceria
+ * sem statuses V3). Catálogo via `GET /projects?idClasse=-401` (Sub-fase 5).
+ */
+const ID_CLASSE_TEMPLATE_LIST = BigInt(-401);
+
+/**
+ * idClasse DProject TEMPLATE_SPACE (ADR-V2-061 — feature Templates). Marca um nó
+ * como molde de Espaço. No clone é remapeado para -350 SPACE.
+ */
+const ID_CLASSE_TEMPLATE_SPACE = BigInt(-402);
+
+/**
+ * Mapa de remap de DClasse template→real aplicado a CADA nó do clone quando
+ * `opts.fromTemplate === true` (feature Templates): -401→-352, -402→-350.
+ * Aplicado ANTES de `tx.dProject.create` e ANTES do teste `=== ID_CLASSE_LIST`,
+ * para que `seedProject`/`copyPhases` disparem na List materializada e o editor
+ * (liga telas por -352/-350) reconheça o nó. Classes não-template ficam
+ * inalteradas (Folders -351 e Lists -352 dentro de um Space-template).
+ */
+const TEMPLATE_CLASS_REMAP: ReadonlyMap<bigint, bigint> = new Map([
+  [ID_CLASSE_TEMPLATE_LIST, ID_CLASSE_LIST],
+  [ID_CLASSE_TEMPLATE_SPACE, ID_CLASSE_SPACE],
+]);
 
 /**
  * idClasse de DTask FASE/BLOCO (ADR-V2-050). Estrutura organizacional dentro
@@ -216,6 +244,32 @@ interface CloneTreeOptions {
    *   `'SAME'` é exercitado.
    */
   idPaiDestino?: bigint | null | 'SAME';
+
+  /**
+   * Ativa a materialização de template (feature Templates — ADR-V2-061).
+   *
+   * Default `false` = comportamento de `duplicate()` (idEstab cru, sem remap de
+   * classe). Quando `true`:
+   *  - **Remap de DClasse por nó** (-401→-352 LIST, -402→-350 SPACE) ANTES de
+   *    gravar o DProject e ANTES do teste `=== ID_CLASSE_LIST`, para o seed V3
+   *    disparar na List materializada.
+   *  - O `cloneTree` NÃO exige MANAGER na ORIGEM (usar um template ≠ gerenciá-lo;
+   *    o controle de acesso é validado no DESTINO pelo `createFromTemplate`).
+   *
+   * O `cloneTree` não relaxa o gate tenant sozinho — o caller (`createFromTemplate`)
+   * já validou acesso ao template e ao destino antes de invocar o motor.
+   */
+  fromTemplate?: boolean;
+
+  /**
+   * Carimba `idEstab` de TODOS os nós do clone com a org de destino, em vez de
+   * herdar `node.idEstab` cru (feature Templates — ADR-V2-061).
+   *
+   * Default ausente = comportamento de `duplicate()` (copia `node.idEstab`).
+   * Essencial para template global (`idEstab` NULL) não nascer órfão de org, e
+   * correto já no caminho org-scoped (Sub-fase 4a).
+   */
+  idEstabDestino?: bigint;
 }
 
 /**
@@ -1537,18 +1591,28 @@ export class ProjectsService implements OnModuleInit {
     const projectId = BigInt(id);
 
     // ADR-V2-042: tenant check ANTES de qualquer query/RBAC.
-    if (organizationId && /^-?\d+$/.test(organizationId)) {
-      const orgIdBig = BigInt(organizationId);
-      const peek = await this.prisma.dProject.findFirst({
-        where: { chave: projectId, excluido: false },
-        select: { idEstab: true },
-      });
-      if (!peek || peek.idEstab === null || peek.idEstab !== orgIdBig) {
-        throw new NotFoundException(`Projeto ${id} não encontrado`);
+    //
+    // No caminho `fromTemplate` (feature Templates) o gate tenant-rígido e o
+    // RBAC de ORIGEM são PULADOS: o template não tem MANAGER de origem (usar ≠
+    // gerenciar) e o acesso (org-scoped na Sub-fase 4a) já foi validado pelo
+    // `createFromTemplate` ANTES de invocar este motor. A autorização que vale
+    // é a do DESTINO (também validada lá). Sem esse pulo, o gate barraria a
+    // materialização legítima. O caminho `duplicate` (sem fromTemplate) mantém
+    // o gate tenant-rígido + RBAC de origem intactos — zero regressão.
+    if (!opts.fromTemplate) {
+      if (organizationId && /^-?\d+$/.test(organizationId)) {
+        const orgIdBig = BigInt(organizationId);
+        const peek = await this.prisma.dProject.findFirst({
+          where: { chave: projectId, excluido: false },
+          select: { idEstab: true },
+        });
+        if (!peek || peek.idEstab === null || peek.idEstab !== orgIdBig) {
+          throw new NotFoundException(`Projeto ${id} não encontrado`);
+        }
       }
-    }
 
-    await this.requireManagerRole(projectId, userEntidadeId, organizationId);
+      await this.requireManagerRole(projectId, userEntidadeId, organizationId);
+    }
 
     // Coletar a subárvore completa (raiz + descendentes) com os campos a copiar.
     // ORDER BY profundidade garante que o pai é criado antes do filho — assim o
@@ -1602,6 +1666,24 @@ export class ProjectsService implements OnModuleInit {
       for (const node of nodes) {
         const isRoot = node.chave === rootNode.chave;
 
+        // Remap de DClasse template→real (feature Templates — ADR-V2-061).
+        // SOMENTE no caminho `fromTemplate`: -401→-352 LIST, -402→-350 SPACE,
+        // por nó (raiz e descendentes). Classes não-template (Folders -351,
+        // Lists -352 dentro de um Space-template) ficam inalteradas. CRÍTICO:
+        // gravar a classe REAL faz o `if (novo.idClasse === ID_CLASSE_LIST)`
+        // abaixo disparar `seedProject`/`copyPhases` na List materializada — sem
+        // isso a List nasceria sem statuses V3 e o editor não a reconheceria.
+        const idClasseMaterializada = opts.fromTemplate
+          ? (TEMPLATE_CLASS_REMAP.get(node.idClasse) ?? node.idClasse)
+          : node.idClasse;
+
+        // idEstab: carimbo da org de DESTINO em TODOS os nós quando
+        // `idEstabDestino` é fornecido (feature Templates); caso contrário,
+        // herda `node.idEstab` cru (comportamento legado de `duplicate`). O
+        // carimbo evita que um clone de template global (idEstab NULL) nasça
+        // órfão de org.
+        const idEstabMaterializado = opts.idEstabDestino ?? node.idEstab;
+
         // idPai novo: raiz mantém o pai original (nasce ao lado, default 'SAME')
         // ou nasce sob `idPaiDestino` quando fornecido; descendentes apontam
         // para a cópia do seu pai (já criada por causa do ORDER BY depth).
@@ -1633,10 +1715,10 @@ export class ProjectsService implements OnModuleInit {
 
         const novo = await tx.dProject.create({
           data: {
-            idClasse: node.idClasse,
+            idClasse: idClasseMaterializada,
             nome,
             ...(node.descricao ? { descricao: node.descricao } : {}),
-            ...(node.idEstab !== null ? { idEstab: node.idEstab } : {}),
+            ...(idEstabMaterializado !== null ? { idEstab: idEstabMaterializado } : {}),
             ...(node.repoUrl ? { repoUrl: node.repoUrl } : {}),
             ...(newIdPai !== null ? { idPai: newIdPai } : {}),
             privado: node.privado,
@@ -1707,6 +1789,9 @@ export class ProjectsService implements OnModuleInit {
         prefix: (created.dados as Record<string, unknown> | null)?.prefix ?? 'DEV',
         userId: userEntidadeId.toString(),
         duplicatedFrom: id,
+        // Feature Templates: distingue uma materialização from-template de uma
+        // duplicação comum no audit (evento único agregado, não N task.created).
+        ...(opts.fromTemplate ? { fromTemplate: true } : {}),
       },
       this.correlationIdService.getOrGenerate(),
       { source: ProjectsService.name },
@@ -1716,6 +1801,140 @@ export class ProjectsService implements OnModuleInit {
 
     // Executante é MANAGER da cópia (criou os DVincula -171 acima).
     return this.buildResponse(created, 1, null, null, undefined, undefined, 'MANAGER');
+  }
+
+  /**
+   * Materializa um projeto (List/Space) a partir de um TEMPLATE (Sub-fase 4a da
+   * feature Templates — ADR-V2-061, escopo ORG). O `:id` é um DProject-template
+   * (`idClasse` -401 TEMPLATE_LIST ou -402 TEMPLATE_SPACE); o resultado é a
+   * árvore inteira clonada com a DClasse remapeada para a real (-401→-352 LIST,
+   * -402→-350 SPACE), blocos e tasks copiados (molde-limpo) e `idEstab`
+   * carimbado com a org ativa em TODOS os nós.
+   *
+   * Acesso (Sub-fase 4a — ORG-scoped):
+   *  - O template deve pertencer à org ativa (`idEstab = organizationId`). Caso
+   *    contrário → 404 (não vaza existência cross-tenant). Template GLOBAL
+   *    (`idEstab` NULL) NÃO é aceito ainda — é a Sub-fase 4b (cai em 404 aqui).
+   *  - Permissão no DESTINO: se `dto.idPai` é fornecido, o usuário deve ser
+   *    MANAGER do destino (ou ORG_ADMIN); o destino deve ser da mesma org e do
+   *    tipo compatível (LIST-template nasce sob SPACE/FOLDER). Se `idPai` é
+   *    ausente e o template é SPACE (-402), o SPACE nasce como raiz e basta ser
+   *    membro da org.
+   *  - O executante vira MANAGER de cada nó materializado (o `cloneTree` cria os
+   *    DVincula -171). O `cloneTree` PULA o RBAC de origem (usar template ≠
+   *    gerenciá-lo) — a autorização é a do destino, validada aqui.
+   *
+   * @param id - Chave BigInt do template (string).
+   * @param userEntidadeId - Chave BigInt da DEntidade do executante.
+   * @param organizationId - `DEntidade.chave` da org ativa (string).
+   * @param dto - Opções de materialização (ver {@link CreateFromTemplateDto}).
+   * @returns ProjectResponseDto do nó raiz materializado (classe já -350/-352,
+   *   myRole=MANAGER).
+   *
+   * @throws {BadRequestException} Se `:id` não é um template, destino
+   *   incompatível, ou org ausente no token.
+   * @throws {ForbiddenException} Se o usuário não é MANAGER do destino (ou
+   *   membro da org quando nasce como raiz).
+   * @throws {NotFoundException} Se o template/destino não existe ou pertence a
+   *   outra org (template não-global de outra org → 404).
+   *
+   * @see cloneTree — motor de deep-clone (acionado com fromTemplate+idEstabDestino)
+   * @see ADR-V2-061 — marcação por DClasse -401/-402 + remap obrigatório
+   */
+  async createFromTemplate(
+    id: string,
+    userEntidadeId: bigint,
+    organizationId: string | undefined,
+    dto: CreateFromTemplateDto,
+  ): Promise<ProjectResponseDto> {
+    // Org ativa é obrigatória no caminho org-scoped (Sub-fase 4a).
+    if (!organizationId || !/^-?\d+$/.test(organizationId)) {
+      throw new BadRequestException('Org ativa ausente no token (necessária para from-template)');
+    }
+    const orgIdBig = BigInt(organizationId);
+    const templateId = BigInt(id);
+
+    // 1) Carregar o template e validar que É um template DA org ativa.
+    const template = await this.prisma.dProject.findFirst({
+      where: { chave: templateId, excluido: false },
+      select: { chave: true, idClasse: true, idEstab: true },
+    });
+    if (!template) {
+      throw new NotFoundException(`Template ${id} não encontrado`);
+    }
+    const isTemplateClasse =
+      template.idClasse === ID_CLASSE_TEMPLATE_LIST ||
+      template.idClasse === ID_CLASSE_TEMPLATE_SPACE;
+    if (!isTemplateClasse) {
+      throw new BadRequestException(`Projeto ${id} não é um template (idClasse -401/-402)`);
+    }
+    // Acesso ORG-scoped: template precisa ser da org ativa. Template GLOBAL
+    // (idEstab NULL) ainda NÃO é aceito (Sub-fase 4b). Template de outra org → 404.
+    if (template.idEstab === null || template.idEstab !== orgIdBig) {
+      throw new NotFoundException(`Template ${id} não encontrado`);
+    }
+
+    // 2) Destino + permissão.
+    const isTemplateList = template.idClasse === ID_CLASSE_TEMPLATE_LIST;
+    let idPaiDestino: bigint | null | 'SAME';
+
+    if (dto.idPai) {
+      const paiId = BigInt(dto.idPai);
+      // Destino existe e é da mesma org (tenant).
+      const destino = await this.prisma.dProject.findFirst({
+        where: { chave: paiId, excluido: false },
+        select: { chave: true, idClasse: true, idEstab: true },
+      });
+      if (!destino || destino.idEstab === null || destino.idEstab !== orgIdBig) {
+        throw new NotFoundException(`Destino ${dto.idPai} não encontrado`);
+      }
+      // Tipo compatível: LIST-template nasce sob SPACE/FOLDER; SPACE-template
+      // não pode nascer sob outro nó (Space é sempre raiz — ADR-V2-051).
+      if (isTemplateList) {
+        if (destino.idClasse !== ID_CLASSE_SPACE && destino.idClasse !== ID_CLASSE_FOLDER) {
+          throw new BadRequestException(
+            'Template de Lista deve nascer sob um SPACE ou FOLDER (hierarquia inválida)',
+          );
+        }
+      } else {
+        // TEMPLATE_SPACE → materializa SPACE, que é sempre raiz.
+        throw new BadRequestException('Template de Espaço nasce como raiz (não informe idPai)');
+      }
+      // Permissão no DESTINO: MANAGER do destino (ou ORG_ADMIN herdado).
+      await this.requireManagerRole(paiId, userEntidadeId, organizationId);
+      idPaiDestino = paiId;
+    } else {
+      // Sem destino: só TEMPLATE_SPACE pode nascer como raiz; LIST exige destino.
+      if (isTemplateList) {
+        throw new BadRequestException('Template de Lista requer um destino (idPai)');
+      }
+      // SPACE como raiz → exigir que o usuário seja MEMBRO da org (mínimo).
+      const orgMember = await this.prisma.dVincula.findFirst({
+        where: {
+          idEntidade: userEntidadeId,
+          idLocEscritu: orgIdBig,
+          idClasse: { in: ORG_ROLE_CLASSES },
+          excluido: false,
+        },
+        select: { chave: true },
+      });
+      if (!orgMember) {
+        throw new ForbiddenException('Acesso negado: requer ser membro da org');
+      }
+      idPaiDestino = null;
+    }
+
+    // 3) Materializar via motor genérico. `fromTemplate` pula o RBAC de origem e
+    //    aciona o remap de classe; `idEstabDestino` carimba a org ativa em todos
+    //    os nós; `includeTasks` default true (molde completo).
+    return this.cloneTree(id, userEntidadeId, organizationId, {
+      includeTasks: dto.includeTasks ?? true,
+      novoNome: dto.novoNome,
+      novoIcone: dto.novoIcone,
+      idPaiDestino,
+      fromTemplate: true,
+      idEstabDestino: orgIdBig,
+    });
   }
 
   /**

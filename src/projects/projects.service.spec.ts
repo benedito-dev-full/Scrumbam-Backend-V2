@@ -1769,4 +1769,239 @@ describe('ProjectsService', () => {
       expect(taskCreates).toHaveLength(0);
     });
   });
+
+  describe('createFromTemplate() — Sub-fase 4a Templates (org-scoped)', () => {
+    /**
+     * Monta a tx do cloneTree (idêntica à da Sub-fase 3): dProject.create devolve
+     * o nó materializado (chave 900); dTask.findMany distingue fases/-200 de
+     * tasks/-154; dTabela serve INBOX/priorities.
+     */
+    function mockMaterializeTx(args: {
+      createdClasse: bigint;
+      tasks?: Array<Record<string, unknown>>;
+      phases?: Array<Record<string, unknown>>;
+    }) {
+      const { createdClasse, tasks = [], phases = [] } = args;
+      // Echo da classe materializada (data.idClasse) — assim o `if LIST` do
+      // cloneTree dispara corretamente para a List filha de um Space-template.
+      // `createdClasse` é o esperado da raiz (asserção de conveniência).
+      void createdClasse;
+      let projChaveSeq = 900;
+      const dProjectCreate = jest
+        .fn()
+        .mockImplementation(({ data }: { data: { idClasse: bigint; idEstab?: bigint } }) =>
+          Promise.resolve({
+            chave: BigInt(projChaveSeq++),
+            idClasse: data.idClasse,
+            nome: 'Materializado',
+            idEstab: data.idEstab ?? BigInt(50),
+            dados: { prefix: 'DEV' },
+          }),
+        );
+      const dProjectFindFirst = jest.fn().mockResolvedValue(null); // slug livre
+      const findFirstOrThrow = jest.fn().mockResolvedValue({
+        ...mockProject,
+        chave: BigInt(900),
+        idClasse: createdClasse,
+        idEstab: BigInt(50),
+        nome: 'Materializado',
+      });
+      let taskSeq = 1000;
+      const dTaskCreate = jest
+        .fn()
+        .mockImplementation(() => Promise.resolve({ chave: BigInt(++taskSeq) }));
+      const dTaskFindMany = jest
+        .fn()
+        .mockImplementation(({ where }: { where: { idClasse: bigint } }) =>
+          Promise.resolve(where.idClasse === BigInt(-200) ? phases : tasks),
+        );
+      const dTabelaFindFirst = jest.fn().mockResolvedValue({ chave: BigInt(7777) });
+      const dTabelaFindMany = jest.fn().mockResolvedValue([]);
+
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
+        fn({
+          dProject: { create: dProjectCreate, findFirst: dProjectFindFirst, findFirstOrThrow },
+          dTask: { findMany: dTaskFindMany, create: dTaskCreate },
+          dTabela: { findFirst: dTabelaFindFirst, findMany: dTabelaFindMany },
+        }),
+      );
+      return { dProjectCreate, dTaskCreate, findFirstOrThrow };
+    }
+
+    /** Nó-template raiz único (a CTE devolve sempre a árvore do clone). */
+    function templateNode(idClasse: bigint) {
+      prisma.$queryRaw.mockResolvedValue([
+        {
+          chave: BigInt(401),
+          idClasse,
+          idPai: null,
+          nome: 'Template',
+          descricao: null,
+          idEstab: BigInt(50),
+          repoUrl: null,
+          privado: false,
+          dados: { prefix: 'DEV' },
+          tableFields: null,
+          depth: 0,
+        },
+      ]);
+    }
+
+    it('materializa TEMPLATE_LIST (-401) sob SPACE destino: vira LIST (-352), idEstab=org, tasks copiadas, MANAGER', async () => {
+      // findFirst #1 = template (-401, org 50); #2 = destino SPACE (-350, org 50).
+      prisma.dProject.findFirst
+        .mockResolvedValueOnce({ chave: BigInt(401), idClasse: BigInt(-401), idEstab: BigInt(50) })
+        .mockResolvedValueOnce({ chave: BigInt(123), idClasse: BigInt(-350), idEstab: BigInt(50) });
+      // requireManagerRole(destino) → MANAGER direto.
+      prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(1) });
+      templateNode(BigInt(-401));
+      const { dProjectCreate, dTaskCreate } = mockMaterializeTx({
+        createdClasse: BigInt(-352),
+        tasks: [
+          {
+            chave: BigInt(10),
+            idPai: null,
+            nome: 'Task A',
+            descricao: null,
+            idPriority: null,
+            dados: { identifier: 'OLD-1' },
+          },
+        ],
+      });
+
+      const result = await service.createFromTemplate('401', BigInt(100), '50', { idPai: '123' });
+
+      // Nó materializado: classe REAL -352 (remap -401→-352) e idEstab da org (50).
+      const createArg = dProjectCreate.mock.calls[0][0] as {
+        data: { idClasse: bigint; idEstab: bigint; idPai?: bigint };
+      };
+      expect(createArg.data.idClasse).toBe(BigInt(-352));
+      expect(createArg.data.idEstab).toBe(BigInt(50));
+      expect(createArg.data.idPai).toBe(BigInt(123)); // nasce sob o destino
+      // Seed V3 disparou (remap correto → if LIST) e tasks copiadas.
+      expect(seedBootstrap.seedProject).toHaveBeenCalledTimes(1);
+      const taskCreates = dTaskCreate.mock.calls
+        .map((c) => c[0] as { data: Record<string, unknown> })
+        .filter((c) => c.data.idClasse === BigInt(-154));
+      expect(taskCreates).toHaveLength(1);
+      expect(taskCreates[0].data.idCreator).toBe(BigInt(100));
+      // Evento agregado com fromTemplate.
+      expect(eventProducer.addInternalEvent).toHaveBeenCalledWith(
+        'project.created',
+        expect.objectContaining({ fromTemplate: true, duplicatedFrom: '401' }),
+        'test-corr-id',
+        expect.objectContaining({ source: 'ProjectsService' }),
+      );
+      expect(result.myRole).toBe('MANAGER');
+    });
+
+    it('materializa TEMPLATE_SPACE (-402) como raiz: vira SPACE (-350) com filhos', async () => {
+      // findFirst #1 = template (-402). Sem idPai → sem segundo findFirst de destino.
+      prisma.dProject.findFirst.mockResolvedValueOnce({
+        chave: BigInt(402),
+        idClasse: BigInt(-402),
+        idEstab: BigInt(50),
+      });
+      // Sem idPai: exige membro da org → dVincula.findFirst devolve role.
+      prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(1) });
+      // CTE: Space-template (-402) com uma List-template (-401) filha.
+      prisma.$queryRaw.mockResolvedValue([
+        {
+          chave: BigInt(402),
+          idClasse: BigInt(-402),
+          idPai: null,
+          nome: 'Space Template',
+          descricao: null,
+          idEstab: BigInt(50),
+          repoUrl: null,
+          privado: false,
+          dados: {},
+          tableFields: null,
+          depth: 0,
+        },
+        {
+          chave: BigInt(410),
+          idClasse: BigInt(-401),
+          idPai: BigInt(402),
+          nome: 'Lista Filha',
+          descricao: null,
+          idEstab: BigInt(50),
+          repoUrl: null,
+          privado: false,
+          dados: { prefix: 'DEV' },
+          tableFields: null,
+          depth: 1,
+        },
+      ]);
+      const { dProjectCreate } = mockMaterializeTx({ createdClasse: BigInt(-350) });
+
+      await service.createFromTemplate('402', BigInt(100), '50', {});
+
+      const createdClasses = dProjectCreate.mock.calls.map(
+        (c) => (c[0] as { data: { idClasse: bigint } }).data.idClasse,
+      );
+      // Space-template → -350, List-template filha → -352 (ambos remapeados).
+      expect(createdClasses).toEqual([BigInt(-350), BigInt(-352)]);
+      // A List filha materializada recebeu seed V3.
+      expect(seedBootstrap.seedProject).toHaveBeenCalledTimes(1);
+    });
+
+    it('REJEITA quando :id não é template (-352 normal) → BadRequestException', async () => {
+      prisma.dProject.findFirst.mockResolvedValueOnce({
+        chave: BigInt(352),
+        idClasse: BigInt(-352),
+        idEstab: BigInt(50),
+      });
+      await expect(
+        service.createFromTemplate('352', BigInt(100), '50', { idPai: '123' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('REJEITA template de OUTRA org → NotFoundException (não vaza)', async () => {
+      prisma.dProject.findFirst.mockResolvedValueOnce({
+        chave: BigInt(401),
+        idClasse: BigInt(-401),
+        idEstab: BigInt(99), // org diferente da ativa (50)
+      });
+      await expect(
+        service.createFromTemplate('401', BigInt(100), '50', { idPai: '123' }),
+      ).rejects.toThrow(NotFoundException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('REJEITA template GLOBAL (idEstab NULL) na 4a → NotFoundException', async () => {
+      prisma.dProject.findFirst.mockResolvedValueOnce({
+        chave: BigInt(401),
+        idClasse: BigInt(-401),
+        idEstab: null, // global — só aceito na Sub-fase 4b
+      });
+      await expect(
+        service.createFromTemplate('401', BigInt(100), '50', { idPai: '123' }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('REJEITA quando não é MANAGER no destino → ForbiddenException', async () => {
+      prisma.dProject.findFirst
+        .mockResolvedValueOnce({ chave: BigInt(401), idClasse: BigInt(-401), idEstab: BigInt(50) })
+        .mockResolvedValueOnce({ chave: BigInt(123), idClasse: BigInt(-350), idEstab: BigInt(50) });
+      // requireManagerRole: nem MANAGER direto nem ORG_ADMIN.
+      prisma.dVincula.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+      await expect(
+        service.createFromTemplate('401', BigInt(100), '50', { idPai: '123' }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('REJEITA TEMPLATE_LIST sem idPai → BadRequestException (lista exige destino)', async () => {
+      prisma.dProject.findFirst.mockResolvedValueOnce({
+        chave: BigInt(401),
+        idClasse: BigInt(-401),
+        idEstab: BigInt(50),
+      });
+      await expect(service.createFromTemplate('401', BigInt(100), '50', {})).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+  });
 });

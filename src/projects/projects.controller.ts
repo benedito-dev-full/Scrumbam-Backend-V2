@@ -23,6 +23,7 @@ import { AuthCompositeGuard } from '../auth/guards/auth-composite.guard';
 import { ProjectsService } from './projects.service';
 import { ProjectActivityService } from './project-activity.service';
 import { CreateProjectDto } from './dto/create-project.dto';
+import { CreateFromTemplateDto } from './dto/create-from-template.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import {
   ProjectResponseDto,
@@ -140,7 +141,8 @@ export class ProjectsController {
   @ApiQuery({
     name: 'idClasse',
     required: false,
-    description: 'Filtra por idClasse do DProject. Ex: -350=SPACE, -351=FOLDER, -352=LIST, -353=DOC.',
+    description:
+      'Filtra por idClasse do DProject. Ex: -350=SPACE, -351=FOLDER, -352=LIST, -353=DOC.',
     example: '-350',
   })
   @ApiQuery({
@@ -152,7 +154,8 @@ export class ProjectsController {
   @ApiQuery({
     name: 'privado',
     required: false,
-    description: 'Filtra pelo campo privado. true=apenas privados, false=apenas públicos. Ausente=sem filtro.',
+    description:
+      'Filtra pelo campo privado. true=apenas privados, false=apenas públicos. Ausente=sem filtro.',
     example: 'false',
   })
   @ApiResponse({ status: 200, description: 'Lista de projetos', type: ListProjectResponseDto })
@@ -258,6 +261,55 @@ export class ProjectsController {
     @Request() req: JwtRequest,
   ): Promise<ProjectResponseDto> {
     return this.projectsService.duplicate(id, BigInt(req.user.entidadeId), req.user.organizationId);
+  }
+
+  /**
+   * Cria um projeto (List/Space) a partir de um TEMPLATE (Sub-fase 4a — escopo
+   * ORG, feature Templates / ADR-V2-061).
+   *
+   * O `:id` é um DProject-template (idClasse -401 TEMPLATE_LIST ou -402
+   * TEMPLATE_SPACE) DA org ativa. O resultado é a árvore inteira materializada:
+   * DClasse remapeada para a real (-401→-352 LIST, -402→-350 SPACE), blocos e
+   * tasks copiados (molde-limpo: INBOX, sem assignee/prazo, novo identifier
+   * DEV-N), com `idEstab` carimbado na org ativa. O executante vira MANAGER.
+   *
+   * Acesso (4a): template deve ser da org ativa (global idEstab NULL é 4b — cai
+   * em 404 aqui). MANAGER exigido no DESTINO (idPai); para TEMPLATE_SPACE sem
+   * destino, basta ser membro da org.
+   *
+   * @param id - ID do template a materializar.
+   * @param dto - Opções (includeTasks/novoNome/novoIcone/idPai).
+   * @returns ProjectResponseDto do nó raiz materializado (myRole=MANAGER).
+   *
+   * @example
+   * ```bash
+   * curl -X POST "http://localhost:3000/projects/401/from-template" \
+   *   -H "Authorization: Bearer {token}" \
+   *   -H "Content-Type: application/json" \
+   *   -d '{ "novoNome": "Onboarding Cliente X", "idPai": "123" }'
+   * ```
+   */
+  @Post(':id/from-template')
+  @ApiOperation({ summary: 'Criar List/Space a partir de um template (MANAGER no destino)' })
+  @ApiParam({
+    name: 'id',
+    description: 'ID do template (-401 TEMPLATE_LIST / -402 TEMPLATE_SPACE)',
+  })
+  @ApiResponse({ status: 201, description: 'Projeto materializado', type: ProjectResponseDto })
+  @ApiResponse({ status: 400, description: 'Não é template / destino incompatível' })
+  @ApiResponse({ status: 403, description: 'Requer MANAGER no destino (ou membro da org)' })
+  @ApiResponse({ status: 404, description: 'Template/destino não encontrado (ou de outra org)' })
+  async createFromTemplate(
+    @Param('id') id: string,
+    @Body() dto: CreateFromTemplateDto,
+    @Request() req: JwtRequest,
+  ): Promise<ProjectResponseDto> {
+    return this.projectsService.createFromTemplate(
+      id,
+      BigInt(req.user.entidadeId),
+      req.user.organizationId,
+      dto,
+    );
   }
 
   /**
