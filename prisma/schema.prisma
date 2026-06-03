@@ -356,7 +356,6 @@ model DTask {
   idStatus   BigInt? // → DTabela idClasse=-44X
   idPriority BigInt? // → DTabela idClasse=-42X
   idTaskType BigInt? // → DTabela idClasse=-43X
-  idSprint   BigInt? // → DTabela idClasse=-40X
   idAssignee BigInt? // → DEntidade (User)
   idCreator  BigInt? // → DEntidade (User)
   idPai      BigInt? // → DTask (self-FK) — hierarquia de fases (ADR-V2-047)
@@ -382,7 +381,6 @@ model DTask {
   @@index([idProject])
   @@index([idStatus])
   @@index([idAssignee])
-  @@index([idSprint])
   @@index([excluido, idProject])
   @@index([idPai])
   @@index([idPai, excluido])
