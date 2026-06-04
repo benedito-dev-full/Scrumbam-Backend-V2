@@ -537,6 +537,6 @@ export class TasksController {
   ): Promise<void> {
     const allowed = await this.resolveScopedProjectIds(req);
     const cascadeBool = cascade === undefined ? undefined : cascade === 'true';
-    await this.tasksService.delete(id, allowed, { cascade: cascadeBool });
+    await this.tasksService.delete(id, allowed, { cascade: cascadeBool }, BigInt(req.user.entidadeId));
   }
 }

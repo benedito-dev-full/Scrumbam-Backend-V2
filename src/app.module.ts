@@ -51,6 +51,7 @@ import { InvitesModule } from './invites/invites.module';
 import { BookmarksModule } from './bookmarks/bookmarks.module';
 // Frente B (Nexus IA Chat — v1): chat IA com Gemini + 4 tools (createTask/Comment/listComments/getProjectSummary)
 import { AiModule } from './ai/ai.module';
+import { RealtimeModule } from './realtime/realtime.module';
 
 /**
  * AppModule raiz do Scrumban-Backend-V2.
@@ -134,6 +135,8 @@ import { AiModule } from './ai/ai.module';
     BookmarksModule,
     // Frente B (Nexus IA Chat — v1) — POST /ai/chat + GET /ai/chat/history
     AiModule,
+    // Task 6 — Realtime board (WebSocket /realtime sobre o barramento de eventos)
+    RealtimeModule,
   ],
   providers: [
     // LoggingInterceptor global — loga method, path, statusCode, durationMs, correlationId

@@ -14,6 +14,22 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Realtime WebSocket (Socket.io) no Board da Lista — Fase 0/1/2 completas: Tempo real com consumer dinâmico** (V2 Transversal F7/F10, 2026-06-04, ADR-V2-063)
+  - **Fase 0 (Eventos — 8.5/10):** Completar emissão de eventos em `tasks.service.ts` (novo `task.updated` para task normal com `projectId`+`actorId`, add `projectId` em `task.status.changed`, add `actorId` em deletes). `event-types.ts` com novo tipo, `audit-log.consumer.ts` com mapeamento `-489 AUDIT_GENERIC`
+  - **Fase 1 (Gateway + Guard — 8.8/10):** WebSocket namespace `/realtime` com Socket.io 4.8.3. `RealtimeGateway` (@WebSocketGateway) com handlers `join:list`/`leave:list` + método `broadcast()`. `WsJwtGuard` valida JWT (2 vias: auth.token ou header), popula `client.data.user`. CORS configurável `REALTIME_CORS_ORIGIN`
+  - **Fase 2 (Consumer + Module — 9.2/10):** `RealtimeConsumer` (IEventConsumer dinâmico, registrado via `EventRouter.registerConsumer()` em RealtimeModule.onModuleInit). Mapeia `task.*`→`task.*`, `phase.*`→`block.*`. Envelope imutável `{ event, listId, entityId, actorId }` → sala `list:{listId}` via `gateway.broadcast()`. RBAC no join reusa `ProjectsService.findAccessibleProjectIds()` (zero duplicação)
+  - **Conformidade:** Zero tabela/DClasse nova (ADR-V2-001, ADR-V2-008). Pilar 1 N/A (consumer lê DEvento). Pilar 2 OK (RBAC reuso). Pilar 3 OK (zero seed novo, -489 AUDIT_GENERIC)
+  - **Precedente:** ADR-V2-049 (Telegram listener — consumer dinâmico, padrão validado)
+  - **Performance:** 1 réplica in-memory <1ms; 2+ réplicas TODO Redis adapter + sticky sessions
+  - **Tests:** 27 specs realtime PASS (consumer derivação, guard JWT, gateway RBAC)
+  - **Build:** PASS, TypeScript 0 errors, ESLint 0 warnings
+  - **Pilares:** Pilar 1 N/A (estrutural), Pilar 2 OK (reuso RBAC), Pilar 3 OK (zero novo)
+  - **ADRs:** ADR-V2-063 (novo — realtime via WebSocket consumer dinâmico), ADR-V2-049 (precedente), ADR-V2-001 (zero tabela), ADR-V2-008 (DEvento base), ADR-V2-042 (tenant isolation)
+  - **Dependências:** `@nestjs/websockets@10.4.22`, `@nestjs/platform-socket.io@10.4.22`, `socket.io@4.8.3` adicionadas ao `package.json`
+  - **Documentação:** `src/realtime/README.md` (protocolo, RBAC, mapa eventos), `ADR-V2-063` (decisão arquitetural), `src/eventos/README.md` atualizado (RealtimeConsumer dinâmico)
+  - **Estratégia:** "avisar para invalidar" — envelope mínimo, frontend executa `invalidateQueries()`. Zero patch de entidade (reduz acoplamento, sem vazamento cross-tenant)
+  - **Candidato upstream:** Padrão genérico "sala dinâmica derivada de idClasse" reutilizável em Devari-Core
+
 - **Feature Templates — Fase 1-6 completas: Catálogo de Templates + Rota from-template + Motor cloneTree + Blindagem** (V2 F1 Pós-Hierarquia, 2026-06-03)
   - **Seed (Fase 1):** DClasses `-401 TEMPLATE_LIST` + `-402 TEMPLATE_SPACE` (idPai -37) com ADR-V2-061 (proposto)
   - **Refator motor clone (Fase 2):** Extração `cloneTree(opts)` de `duplicate()` sem regressão; `deepCloneTree` + `remapClassesRecursive` separadas

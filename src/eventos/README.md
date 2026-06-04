@@ -50,6 +50,7 @@ Service caller (apos persistencia)
 | `consumers/notification-triggers.const.ts` | Set de triggers de notificacao. |
 | `consumers/webhook.consumer.ts` | Resolve org, busca `DTabela -470`, delega ao dispatcher. |
 | `consumers/webhook-triggers.const.ts` | Whitelist/blacklist e matching de eventos. |
+| `consumers/realtime.consumer.ts` | Transmite eventos WS para sala `list:{listId}` (consumer dinâmico, ADR-V2-063). |
 | `dispatchers/webhook-dispatcher.stub.ts` | Stub sem entrega externa real; mascara endpoint em log. |
 | `monitoring/telemetry.service.ts` | Contadores em memoria. |
 | `monitoring/event-health.controller.ts` | `GET /events/health`. |
@@ -143,6 +144,32 @@ Soft delete:
 - filtros de list/count/read/read-all/delete usam `excluido=false`
 - a excecao e limitada a esta coluna e foi formalizada em ADR-V2-032
 
+## RealtimeConsumer
+
+`RealtimeConsumer` e registrado **dinamicamente** (ADR-V2-049 pattern, ADR-V2-063) via `EventRouter.registerConsumer()` no `OnModuleInit` de `RealtimeModule`. Transmite eventos de domínio em tempo real para clientes WebSocket conectados.
+
+Match function: `(type) => type.startsWith('task.') || type.startsWith('phase.')`
+
+Derivação:
+- `task.*` → `task.*` no envelope WS
+- `phase.*` → `block.*` no envelope WS (derivado, não emitido como phase.* direto)
+
+Envelope:
+```json
+{
+  "event": "task.created|task.updated|task.status.changed|task.deleted|block.created|block.updated|block.deleted",
+  "listId": "<DProject.chave>",
+  "entityId": "<DTask.chave>",
+  "actorId": "<DEntidade.chave do mutator ou ''>"
+}
+```
+
+Broadcast para sala: `server.to('list:' + listId).emit('list:event', envelope)`
+
+**Por que dinâmico?** Evita ciclo Eventos↔RealtimeModule→ProjectsModule. Padrão validado em produção (Telegram, ADR-V2-049).
+
+Mais detalhes: `src/realtime/README.md`
+
 ## WebhookConsumer
 
 `WebhookConsumer` e acionado para `task.*`, `project.*`, `org.*` e
@@ -203,9 +230,12 @@ Consumers esperados:
 {
   "audit-log": "up",
   "notification": "up",
-  "webhook": "stub"
+  "webhook": "stub",
+  "realtime": "up"
 }
 ```
+
+Nota: `realtime` é registrado dinamicamente se `RealtimeModule` estiver importado em `app.module.ts`.
 
 ## Nao Objetivos Desta Etapa
 

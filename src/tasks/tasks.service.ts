@@ -1064,6 +1064,21 @@ export class TasksService {
         this.correlationIdService.getOrGenerate(),
         { source: TasksService.name },
       );
+    } else {
+      // task.updated (Realtime Fase 0): task normal carrega projectId (= sala
+      // list:{listId}) e actorId (quem causou) para o barramento. Audit em
+      // -489 AUDIT_GENERIC (audit-log.consumer). Pós-commit (Pilar 7).
+      await this.eventProducer.addInternalEvent(
+        'task.updated',
+        {
+          taskId: updated.chave.toString(),
+          projectId: updated.idProject?.toString() ?? null,
+          idClasse: updated.idClasse.toString(),
+          actorId: actorId?.toString() ?? null,
+        },
+        this.correlationIdService.getOrGenerate(),
+        { source: TasksService.name },
+      );
     }
 
     // Feed de atividades do time — emitido quando assigneeTeamId é definido no update.
@@ -1276,6 +1291,7 @@ export class TasksService {
       'task.status.changed',
       {
         taskId: taskId.toString(),
+        projectId: task.idProject?.toString() ?? null,
         from: fromStatus,
         to: toStatus,
         ...(actorId && { userId: actorId.toString() }),
@@ -1424,6 +1440,7 @@ export class TasksService {
     id: string,
     accessibleProjectIds?: string[],
     options?: { cascade?: boolean },
+    actorId?: bigint,
   ): Promise<{ affected: number }> {
     const taskId = BigInt(id);
 
@@ -1468,6 +1485,7 @@ export class TasksService {
           {
             phaseId: taskId.toString(),
             projectId,
+            actorId: actorId?.toString() ?? null,
             cascade: true,
             affected: result.affected,
           },
@@ -1480,6 +1498,7 @@ export class TasksService {
           {
             taskId: taskId.toString(),
             projectId,
+            actorId: actorId?.toString() ?? null,
             cascade: true,
             affected: result.affected,
           },
@@ -1506,6 +1525,7 @@ export class TasksService {
         {
           phaseId: taskId.toString(),
           projectId,
+          actorId: actorId?.toString() ?? null,
           cascade: false,
           affected: 1,
         },
@@ -1518,6 +1538,7 @@ export class TasksService {
         {
           taskId: taskId.toString(),
           projectId,
+          actorId: actorId?.toString() ?? null,
           cascade: false,
           affected: 1,
         },

@@ -35,6 +35,9 @@ function makeTask(
     nome: 'Test Task',
     descricao: null,
     idProject: BigInt(1),
+    // idClasse sempre presente em produção (coluna NOT NULL). Default = SCRUMBAN_TASK
+    // (-154). Testes que precisam de PHASE sobrescrevem para -200.
+    idClasse: BigInt(-154),
     idStatus: null,
     idPriority: null,
     idAssignee: null,
@@ -1014,9 +1017,24 @@ describe('TasksService', () => {
         expect(call?.[1]).toMatchObject({
           phaseId: '42',
           projectId: '1',
+          actorId: null,
           cascade: true,
           affected: 3,
         });
+      });
+
+      it('TASK normal: propaga actorId ao payload task.deleted', async () => {
+        prisma.dTask.findFirst.mockResolvedValue({
+          chave: BigInt(7),
+          idProject: BigInt(1),
+          idClasse: BigInt(-154),
+        });
+        phaseHierarchy.softDeleteCascade.mockResolvedValue({ affected: 1 });
+
+        await service.delete('7', undefined, undefined, BigInt(100));
+
+        const call = eventProducer.addInternalEvent.mock.calls.find((c) => c[0] === 'task.deleted');
+        expect(call?.[1]).toMatchObject({ taskId: '7', actorId: '100' });
       });
 
       it('TASK normal (-154): default agora cascateia e emite task.deleted (cascade=true), NÃO phase.deleted', async () => {
@@ -1164,7 +1182,7 @@ describe('TasksService', () => {
         expect(emitted).toContain('phase.updated');
       });
 
-      it('NÃO deve emitir phase.updated quando idClasse != -200', async () => {
+      it('deve emitir task.updated (NÃO phase.updated) quando idClasse != -200, com projectId/idClasse/actorId', async () => {
         const existing = {
           chave: BigInt(7),
           dados: {},
@@ -1188,10 +1206,49 @@ describe('TasksService', () => {
         prisma.dTask.findFirst.mockResolvedValue(existing);
         prisma.dTask.update.mockResolvedValue(updated);
 
-        await service.update('7', { nome: 'Task X' });
+        await service.update('7', { nome: 'Task X' }, undefined, BigInt(100));
 
         const emitted = eventProducer.addInternalEvent.mock.calls.map((c) => c[0]);
         expect(emitted).not.toContain('phase.updated');
+        expect(emitted).toContain('task.updated');
+
+        const call = eventProducer.addInternalEvent.mock.calls.find(
+          (c) => c[0] === 'task.updated',
+        );
+        expect(call?.[1]).toMatchObject({
+          taskId: '7',
+          projectId: '1',
+          idClasse: '-154',
+          actorId: '100',
+        });
+      });
+
+      it('task.updated leva actorId=null quando o ator não é informado', async () => {
+        const existing = { chave: BigInt(7), dados: {}, idProject: BigInt(1) };
+        const updated = {
+          chave: BigInt(7),
+          nome: 'Task X',
+          idProject: BigInt(1),
+          idClasse: BigInt(-154),
+          idPai: null,
+          idPriority: null,
+          idAssignee: null,
+          idStatus: null,
+          descricao: null,
+          dados: {},
+          excluido: false,
+          criadoEm: new Date(),
+          atualizadoEm: new Date(),
+        };
+        prisma.dTask.findFirst.mockResolvedValue(existing);
+        prisma.dTask.update.mockResolvedValue(updated);
+
+        await service.update('7', { nome: 'Task X' });
+
+        const call = eventProducer.addInternalEvent.mock.calls.find(
+          (c) => c[0] === 'task.updated',
+        );
+        expect(call?.[1]).toMatchObject({ taskId: '7', actorId: null });
       });
     });
   });

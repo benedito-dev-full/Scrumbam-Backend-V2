@@ -1,6 +1,88 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-06-03 (Template Global Task Visibility — ADR-V2-062, COMPLETA)
+**Ultima atualizacao:** 2026-06-04 (Task 6 Realtime WebSocket — ADR-V2-063, COMPLETA)
+
+---
+
+## ✅ Task 6 — Tempo Real (WebSocket/Socket.io) no Board da Lista (V2 Transversal F7/F10) — COMPLETA
+
+**Module:** realtime (novo módulo) + eventos (consumer dinâmico) + tasks (emissão)
+**Task:** Realtime WebSocket com 3 fases de implementação (emissão eventos, gateway+guard, consumer+module)
+**Status:** COMPLETA (Strategist → Implementer → Reviewer → Documenter)
+**Duration:** ~15h total (Strategist planning 2h + Implementer Fases 0-2 ~10h + Reviewer 2h + Documenter 1h)
+**Quality Score:** Fase 0: 8.5/10, Fase 1: 8.8/10, Fase 2: 9.2/10 (médio 8.83/10) — TODAS APPROVED
+**Date:** 2026-06-04
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | 2h planning | — |
+| Implementer | 10h (3 fases) | — |
+| Reviewer | 2h (fases 0-2) | Fase 0: 8.5/10, Fase 1: 8.8/10, Fase 2: 9.2/10 |
+| Documenter | 1h | — |
+
+**Problem:** Backend não notificava clientes em tempo real quando tasks/blocos eram atualizados — estratégia acordada é "avisar para invalidar" (envelope mínimo, frontend recarrega via `invalidateQueries()`).
+
+**Solution:** Realtime WebSocket sobre barramento de eventos canônico. Consumer dinâmico (ADR-V2-049 pattern) escuta `task.*`/`phase.*`, deriva evento WS, e transmite para sala `list:{listId}`.
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — consumer lê DEvento, zero INSERT em transacional
+- Pilar 2 (Endpoints): OK — RBAC reusa `ProjectsService.findAccessibleProjectIds()`, zero novo controller
+- Pilar 3 (Seed): OK — zero DClasse nova, `task.updated`→`-489 AUDIT_GENERIC`
+
+**Deliverables:**
+- [x] **Fase 0:** `task.updated` emitido em `update()` (task normal), `projectId` adicionado a `task.status.changed`, `actorId` adicionado a deletes
+- [x] **Fase 0:** `event-types.ts` com `TASK_UPDATED`, `audit-log.consumer.ts` com mapeamento `-489`
+- [x] **Fase 1:** WebSocket namespace `/realtime` com Socket.io 4.8.3
+- [x] **Fase 1:** `RealtimeGateway` (@WebSocketGateway) com handlers `join:list`/`leave:list`, método `broadcast()`
+- [x] **Fase 1:** `WsJwtGuard` valida JWT (2 vias: auth.token ou header), popula `client.data.user`
+- [x] **Fase 1:** CORS configurável via env `REALTIME_CORS_ORIGIN`
+- [x] **Fase 2:** `RealtimeConsumer` (IEventConsumer dinâmico) com derivação task.*/phase.*
+- [x] **Fase 2:** `RealtimeModule` com `OnModuleInit` registra consumer via `eventRouter.registerConsumer()`
+- [x] **Fase 2:** Integração em `app.module.ts`
+- [x] **Docs:** ADR-V2-063 redigido (decisão arquitetural, conformidade, extensões futuras)
+- [x] **Docs:** `src/realtime/README.md` (protocolo, componentes, mapa eventos, CORS, testes)
+- [x] **Docs:** `src/eventos/README.md` atualizado (RealtimeConsumer seção)
+- [x] **Docs:** ROADMAP, CHANGELOG e STATUS atualizados
+
+**Metrics:**
+- Build: PASS (npm run build, TypeScript 0 errors, ESLint 0 warnings)
+- Tests: 27 specs realtime PASS (consumer derivação task.*→block.*, JWT guard, gateway RBAC, join acesso)
+- Performance: 1 réplica in-memory <1ms latência, broadcast via `server.to(room).emit()`
+- Regressão: ZERO (104 specs tasks baseline PASS)
+- N+1: ZERO (batch RBAC, reuso de findAccessibleProjectIds)
+- Queries/request: +0 (consumer não faz queries, derivação em memória)
+
+**Security:**
+- RBAC validado handshake (WsJwtGuard) + join revalidação (ProjectsService)
+- Tenant isolation via `findAccessibleProjectIds` (sem tabela nova)
+- Envelope mínimo `{ event, listId, entityId, actorId }` — sem vazamento de campos privados
+- Sem acesso: WsException('FORBIDDEN_LIST')
+
+**Conformance:**
+- **ADR-V2-001:** Respeitado (zero tabela nova, WebSocket é infraestrutura)
+- **ADR-V2-008:** Respeitado (DEvento base, realtime derivado)
+- **ADR-V2-042:** Respeitado (tenant isolation via `findAccessibleProjectIds`)
+- **ADR-V2-049:** Padrão dinâmico validado (Telegram consumer precedente)
+- **ADR-V2-063:** Novo — Realtime via WebSocket (Socket.io) sobre barramento canônico
+
+**Dependências Adicionadas:**
+- `@nestjs/websockets@10.4.22`
+- `@nestjs/platform-socket.io@10.4.22`
+- `socket.io@4.8.3`
+
+**Architecture Decisions:**
+- Consumer dinâmico (registerConsumer) — evita ciclo Eventos↔RealtimeModule
+- Namespace `/realtime` (mesma porta HTTP) — Traefik repassa upgrade
+- Envelope mínimo — frontend invalida queries
+- Eco-filter frontend (não servidor) — responsabilidade do cliente
+- 1 réplica MVP (Redis adapter TODO para 2+ réplicas com sticky sessions)
+
+**ADRs:** ADR-V2-063 (novo), ADR-V2-049, ADR-V2-008, ADR-V2-042, ADR-V2-001
+
+**Commits:** [hash será preenchido em git commit Fase 3]
+
+**Candidato Upstream:** Padrão "sala dinâmica = recurso:id" reutilizável no Devari-Core (salas futuras: `user:{userId}`, `org:{orgId}`, `comment:{taskId}`)
 
 ---
 

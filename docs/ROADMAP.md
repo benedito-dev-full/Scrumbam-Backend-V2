@@ -699,6 +699,107 @@ Remoção em 6 camadas faseadas (1 commit por fase para checkpoint de rollback):
 
 ---
 
+## Task 6 — Tempo Real (WebSocket/Socket.io) no Board da Lista — Fase 0/1/2 ✅ COMPLETA
+
+**Status:** ✅ **COMPLETA** — Realtime WebSocket entregue com 3 fases de implementação aprovadas
+**Módulo V2:** realtime (novo módulo) + eventos (consumer dinâmico) + tasks (emissão de eventos)
+**Fase V2:** Transversal F7/F10 — acopla infra de eventos e espírito de Channels
+**Tempo Real:** ~15h total (Strategist planning 2h + Implementer Fases 0-2 ~10h + Reviewer 2h + Documenter 1h)
+**Completado em:** 2026-06-04
+**Quality Score:** Fase 0 8.5/10, Fase 1 8.8/10, Fase 2 9.2/10 (médio 8.83/10) — TODAS APPROVED
+
+**O Que Foi Feito (3 Fases):**
+
+**Fase 0 (Emissão de eventos — 8.5/10):**
+- `event-types.ts`: novo tipo `TASK_UPDATED: 'task.updated'`
+- `audit-log.consumer.ts`: mapeamento `'task.updated': BigInt(-489)` (AUDIT_GENERIC)
+- `tasks.service.ts`:
+  * `update()`: emitir `task.updated { taskId, projectId, idClasse, actorId }` para task normal (idClasse ≠ -200)
+  * `updateStatus()`: adicionar `projectId` + `actorId` ao payload `task.status.changed`
+  * `delete()`: adicionar `actorId` ao payload (já tem `projectId`)
+- `tasks.controller.ts`: garantir `actorId` passado ao service (via `@CurrentUser()`)
+
+**Fase 1 (Gateway + Guard — 8.8/10):**
+- `RealtimeGateway` (@WebSocketGateway namespace `/realtime`)
+  * CORS: configurável via env `REALTIME_CORS_ORIGIN`
+  * Handlers: `join:list { listId }` com RBAC, `leave:list`
+  * Método público `broadcast(room, event, payload)` → `server.to(room).emit('list:event')`
+- `WsJwtGuard` (CanActivate para contexto WS)
+  * Extrai JWT de `handshake.auth.token` ou header `Authorization`
+  * Valida com `JwtService.verifyAsync()`
+  * Popula `client.data.user` com JwtPayload
+- Dependências: `@nestjs/websockets@10.4.22`, `@nestjs/platform-socket.io@10.4.22`, `socket.io@4.8.3`
+
+**Fase 2 (Consumer + Module — 9.2/10):**
+- `RealtimeConsumer` (IEventConsumer dinâmico)
+  * Match: `(type) => type.startsWith('task.') || type.startsWith('phase.')`
+  * Derivação: `task.*` → `task.*`, `phase.*` → `block.*`
+  * Envelope: `{ event, listId, entityId, actorId }`
+  * Broadcast: `gateway.broadcast('list:' + listId, wsEvent, envelope)`
+- `RealtimeModule`
+  * Imports: `forwardRef(() => AuthModule)`, `ProjectsModule`
+  * `OnModuleInit`: registra consumer dinamicamente via `eventRouter.registerConsumer(match, consumer)`
+- Integração em `app.module.ts`: import `RealtimeModule`
+
+**Conformidade com Pilares e ADRs:**
+- **Pilar 1 (Engine):** N/A — consumer lê DEvento, zero INSERT em transacional
+- **Pilar 2 (Endpoints):** OK — RBAC reusa `ProjectsService.findAccessibleProjectIds()`, zero duplicação
+- **Pilar 3 (Seed):** OK — zero DClasse nova, `task.updated`→`-489 AUDIT_GENERIC`
+- **ADR-V2-001:** Respeitado (zero tabela nova)
+- **ADR-V2-008:** Respeitado (DEvento base, realtime derivado)
+- **ADR-V2-042:** Respeitado (tenant isolation via `findAccessibleProjectIds`)
+- **ADR-V2-049:** Padrão dinâmico validado (Telegram precedente)
+- **ADR-V2-063:** Novo — Realtime via WebSocket (Socket.io) sobre barramento de eventos canônico
+
+**Estratégia de Transporte:**
+- "Avisar para invalidar" — envelope mínimo, frontend executa `invalidateQueries()`
+- Zero patch de entidade (reduz acoplamento, sem vazamento cross-tenant)
+- Eco-filter no frontend (não emite para quem fez a mudança, por `actorId`)
+
+**RBAC no Join:**
+- Validação dupla: WsJwtGuard (handshake) + handler `join:list` (revalidação)
+- `ProjectsService.findAccessibleProjectIds()` garante tenant isolation
+- Sem acesso: throw WsException('FORBIDDEN_LIST')
+
+**Performance:**
+- 1 réplica: in-memory broadcast via `server.to(room).emit()` — <1ms latência
+- 2+ réplicas (futuro): `@socket.io/redis-adapter` + sticky sessions Traefik (TODO documentado)
+
+**Métricas e Testes:**
+- Build: ✅ PASS (npm run build, TypeScript 0 errors, ESLint 0 warnings)
+- Tests: 27 specs realtime PASS (consumer derivação, guard JWT, gateway RBAC, events emissão)
+- Regressão: ZERO (104 specs tasks baseline PASS)
+- N+1 Queries: ZERO (batch RBAC, reuso existente)
+
+**Documentação:**
+- `docs/decisions/ADR-V2-063-realtime-websocket-board.md` (decisão arquitetural, conformidade, extensões futuras)
+- `src/realtime/README.md` (protocolo cliente-servidor, componentes, mapa eventos, CORS)
+- `src/eventos/README.md` (seção RealtimeConsumer, consumer dinâmico pattern)
+- `workspace/plans/plan-realtime-websocket-board-task6.md` (plano detalhado 3 fases)
+
+**Decisões Travadas (CEO):**
+1. WebSocket na MESMA porta HTTP (Traefik repassa upgrade)
+2. Envelope `{ event, listId, entityId, actorId }` — mínimo
+3. CORS configurável `REALTIME_CORS_ORIGIN`
+4. 1 réplica MVP (Redis TODO para 2+)
+5. Eco-filter no frontend (responsabilidade do cliente)
+
+**Candidato Upstream:** Padrão genérico "sala dinâmica derivada de idClasse" reutilizável no template Devari-Core (salas futuras: `user:{userId}` notifications, `org:{orgId}` activity)
+
+**Pilares:**
+- Pilar 1: N/A (estrutural)
+- Pilar 2: OK (RBAC reuso)
+- Pilar 3: OK (zero novo)
+
+**ADRs Vinculados:**
+- ADR-V2-063 (novo — realtime WebSocket)
+- ADR-V2-049 (precedente consumer dinâmico)
+- ADR-V2-008 (DEvento base)
+- ADR-V2-042 (tenant isolation)
+- ADR-V2-001 (zero tabela nova)
+
+---
+
 ## Frente B — Nexus IA Chat v1 (Gemini + 4 tools + DEvento -508) ✅ COMPLETA
 
 **Status:** ✅ **COMPLETA** — Módulo AI entregue, integração frontend (Scrumbam-Frontend-V2) entregue, índice DEvento B.0 em produção

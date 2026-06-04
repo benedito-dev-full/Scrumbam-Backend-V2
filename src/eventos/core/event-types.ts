@@ -20,6 +20,7 @@ export const EVENT_TYPES = {
   TASK_STATUS_CHANGED: 'task.status.changed',
   TASK_ASSIGNED: 'task.assigned',
   TASK_DELETED: 'task.deleted',
+  TASK_UPDATED: 'task.updated',
   TASK_COMMENT_CREATED: 'task.comment.created',
   TASK_COMMENT_DELETED: 'task.comment.deleted',
   // ============== TIMER MANUAL (ADR-V2-057) ==============
