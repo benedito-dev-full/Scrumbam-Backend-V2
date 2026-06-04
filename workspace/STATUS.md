@@ -1,6 +1,94 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-06-04 (Task 6 Realtime WebSocket — ADR-V2-063, COMPLETA)
+**Ultima atualizacao:** 2026-06-04 (Feature Multi-Provider IA — ADR-V2-064, FASE 7 DOCUMENTACAO CONCLUIDA)
+
+---
+
+## ✅ Feature: Multi-Provider IA no Nexus (Gemini + Claude + OpenAI) (V2 F7) — FASE 7 COMPLETA (DOCUMENTACAO)
+
+**Module:** ai (transversal — provider registry, CRUD de chaves, roteamento dinâmico)
+**Task:** Multi-Provider IA Nexus com 7 fases (seed, resolver, providers, registry, keys, error translation, documentation)
+**Status:** COMPLETA — Fases 1-6 implementadas (2026-06-04 commits 37b6c91, ae9df86, e253683), Fase 7 documentação (2026-06-04)
+**Duration:** ~8h total (Strategist planning 2h + Implementer Fases 1-6 ~4h + Reviewer 45m + Documenter 1h15m)
+**Quality Score:** Fases 1-6 médio 8.0/10 (todas APPROVED ≥8.0 gate), Fase 7 (docs) — CONCLUÍDA
+**Date:** 2026-06-04
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | 2h planning | — |
+| Implementer | 4h (Fases 1-6) | — |
+| Reviewer | 45m | 8.0/10 médio (todas fases ≥8.0) |
+| Documenter | 1h15m (Fase 7) | — |
+
+**Problem:** Nexus IA Chat era monolítico (acoplado só ao Gemini). Produto requer multi-provider (Gemini, Claude, OpenAI) com chaves multi-tenant.
+
+**Solution:** Provider Registry (DI singleton) + AiKeyResolverService (cascata user→org→global→env) + AiKeysController (CRUD ADMIN-only, masking obrigatório). Zero tabela nova (chaves em DTabela -481/-482/-483, pref em -484).
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — chaves estruturais (DTabela, Prisma direto)
+- Pilar 2 (Endpoints): Controller específico `/ai/keys` justificado (masking+gate+vendor validation ≠ genérico /tabela)
+- Pilar 3 (Seed): 4 DClasses novas (-481/-482/-483/-484), zero tabela nova
+
+**Deliverables — Fases 1-7:**
+- [x] **Fase 1 (Seed):** DClasses -481 GEMINI_API_KEY, -482 CLAUDE_API_KEY, -483 OPENAI_API_KEY, -484 AI_PREFERENCES
+- [x] **Fase 2 (Key Resolver + Pref):** AiKeyResolverService cascata, AiProviderPrefService upsert, cache TTL 60s
+- [x] **Fase 3 (Claude + OpenAI):** ClaudeProvider (@anthropic-ai/sdk, claude-sonnet-4-5), OpenAiProvider (openai, gpt-4o), error translation
+- [x] **Fase 4 (Registry):** AiProviderRegistry DI, desacopla AiChatService, roteamento dinâmico, retrocompatibilidade (sem provider → Gemini)
+- [x] **Fase 5 (CRUD Chaves):** AiKeysController POST/GET/DELETE (ADMIN-only, OrgAdminGuard), masking obrigatório, endpoints GET /ai/providers e PUT /ai/preference
+- [x] **Fase 6 (Erro por Vendor):** provider-error.util.ts tradução (Gemini/Claude/OpenAI), mensagens amigáveis
+- [x] **Fase 7 (ADR + Docs):** ADR-V2-064 redigido (5 alternativas, conformidade), README.md atualizado (multi-provider), Swagger 100%, JSDoc completo, STATUS/ROADMAP/CHANGELOG atualizados
+
+**Metrics:**
+- Build: PASS (npm run build, tsc 0 errors, eslint 0 warnings)
+- Tests: 94 specs ai.* — 100% PASS (registry 20, resolver 18, controller 8, error translation 15, chat roteamento 5, end-to-end retrocompat 2, regression 26)
+- Performance: 1 query cache por (provider, orgId, userId), TTL 60s. Sem N+1.
+- Regressão: ZERO (baseline 94 specs ai.*)
+- Build time: +0 (fases 1-6 já compiladas)
+
+**Security:**
+- RBAC: OrgAdminGuard (DVincula -161) em POST/GET/DELETE /ai/keys — membro normal → 403
+- Masking: DTO resposta tem plaintext NUNCA. Teste explícito valida (falha se plaintext expõe)
+- Tenant isolation: dEntidadeId=orgId em DTabela (cascata resolve correta por org)
+- Rate limit: TODO (debt baixo, monitorar primeiros dias)
+
+**Conformance:**
+- **ADR-V2-001:** Respeitado (zero tabela nova — chaves em DTabela -481/-482/-483)
+- **ADR-V2-003:** RBAC via DVincula (-161 ADMIN)
+- **ADR-V2-004:** Chaves em DTabela, padrão
+- **ADR-V2-008:** DEvento chat (-508) intacto
+
+**Decisions Travadas (CEO 2026-06-04):**
+1. Cascata: user (desligado por flag) → org → global → env
+2. Plaintext nesta leva. **PRÓXIMA TAREFA: criptografia at-rest AES-256-GCM** (isolado no resolver, zero mudança schema)
+3. Seleção PROVEDOR agora. Seleção MODEL é próxima
+4. Dono=Organization. Usuário nunca vê chave (masking obrigatório)
+5. Retrocompatibilidade crítica (sem provider → Gemini v1 behavior)
+
+**ADRs:**
+- **ADR-V2-064 (novo):** Provider Registry + cascata de resolução de chave (decisão arquitetural completa, 5 alternativas analisadas, conformidade Pilares/ADRs, implementação, debt plaintext)
+- Relacionados: ADR-V2-001, ADR-V2-003, ADR-V2-004, ADR-V2-008
+
+**Documentation:**
+- `docs/decisions/ADR-V2-064-provider-registry-cascata-resolucao-chave.md` (640 linhas — decisão, alternativas, conformidade, implementação, extensões futuras)
+- `src/ai/README.md` (atualizado — multi-provider, cascata, tabela de provedores/modelos, env vars, endpoints, pendências)
+- `src/ai/ai-keys.controller.ts` (JSDoc completo com exemplos curl, autorização ADMIN)
+- `src/ai/ai-chat.controller.ts` (JSDoc atualizado para roteamento dinâmico)
+- `src/ai/ai-provider.registry.ts` (JSDoc meticuloso em metodos e tipos)
+- `src/ai/ai-key-resolver.service.ts` (JSDoc extenso em todos metodos)
+
+**Débitos Registrados:**
+- **DEBT-AI-01 (ALTA PRIORIDADE):** Criptografia at-rest das chaves (AES-256-GCM, key master em KMS/Vault). Ponto isolado em `AiKeyResolverService` — basta injetar encrypt/decrypt, zero mudança schema.
+- **DEBT-AI-02:** Seleção de modelo específico por provedor (field `model?` em `AiPreferences` schema pronto, falta UI)
+- **DEBT-AI-03:** Frontend: seleção de provider na aba de configuração da org (endpoints prontos)
+
+**Commits:**
+- `37b6c91` feat(ai): seed providers + key resolver + cascata + Claude/OpenAI + registry (Fases 1-4)
+- `ae9df86` feat(ai): gestão de chaves ADMIN-only, masked, endpoints /ai/keys + /ai/preference + /ai/providers (Fase 5)
+- `e253683` feat(ai): tradução de erro padronizada por vendor (Fase 6)
+- (Fase 7 commit será gerado neste workflow de documentação)
+
+**Candidato Upstream:** Padrão genérico "chaves de provedores com cascata" reutilizável no template Devari-Core (integrações externas multiplas, criptografia, RBAC centralizado)
 
 ---
 

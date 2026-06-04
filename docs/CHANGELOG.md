@@ -14,6 +14,23 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Multi-Provider IA no Nexus (Gemini + Claude + OpenAI) — Fases 1-7 completas: Provider Registry + Cascata de resolução de chave** (V2 F7, 2026-06-04, ADR-V2-064)
+  - **Fase 1 (Seed — 8.0/10):** 4 DClasses novas (-481 GEMINI_API_KEY, -482 CLAUDE_API_KEY, -483 OPENAI_API_KEY, -484 AI_PREFERENCES) em DTabela
+  - **Fase 2 (Key Resolver + Pref — 8.0/10):** AiKeyResolverService cascata user→org→global→env (nível user desligado por flag). AiProviderPrefService upsert em DTabela -484. Cache TTL 60s.
+  - **Fase 3 (Providers — 8.0/10):** ClaudeProvider (@anthropic-ai/sdk, claude-sonnet-4-5), OpenAiProvider (openai, gpt-4o). Ambos com timeout 30s + retry 1x + error translation
+  - **Fase 4 (Registry — 8.0/10):** AiProviderRegistry (DI singleton) desacopla AiChatService do Gemini fixo. Roteamento: `dto.provider ?? pref.org ?? default(gemini)`. Retrocompatibilidade 100% (sem provider → Gemini)
+  - **Fase 5 (CRUD Chaves — 8.0/10):** AiKeysController POST/GET/DELETE `/ai/keys` (ADMIN-only, OrgAdminGuard). Masking obrigatório em DTO resposta (plaintext NUNCA retorna). Endpoints adicionais: `GET /ai/providers` (membro — só bool configured), `PUT /ai/preference` (ADMIN — define provider default)
+  - **Fase 6 (Erro por Vendor — 8.0/10):** provider-error.util.ts centraliza tradução (401→BadRequest, 429→ServiceUnavailable, timeout→GatewayTimeout) por vendor. Mensagens amigáveis sem vazar detalhe do SDK
+  - **Fase 7 (ADR + Docs — CONCLUÍDA):** ADR-V2-064 (decisão arquitetural, 5 alternativas analisadas, conformidade Pilares 1-3 + ADRs 001/003/004/008). `src/ai/README.md` atualizado (multi-provider, cascata, env vars, endpoints, pendências). Swagger 100% em endpoints `/ai/keys`, `/ai/preference`, `/ai/providers`.
+  - **Conformidade:** Zero tabela nova (ADR-V2-001), chaves em DTabela (ADR-V2-004), RBAC via DVincula -161 ADMIN (ADR-V2-003), DEvento chat intacto (ADR-V2-008)
+  - **Decisões Travadas CEO:** Cascata user→org→global→env. Plaintext nesta leva (PRÓXIMA TAREFA: criptografia at-rest AES-256-GCM). Seleção PROVEDOR nesta leva (seleção MODEL é próxima). Dono=Organization, usuário nunca vê chave.
+  - **Testes:** 94 specs ai.* (unit+integration) — 100% PASS. Registry 20, Resolver 18, Controller 8, Error translation 15, Chat roteamento 5, End-to-end retrocompat 2, Regression 26 — zero regressão.
+  - **Build:** PASS, tsc 0 errors, eslint 0 warnings. Performance: 1 query cache por (provider, orgId, userId), TTL 60s. Sem N+1.
+  - **Pilares:** Pilar 1 N/A (estrutural). Pilar 2 controller especifico justificado (masking+gate+vendor validation ≠ genérico /tabela). Pilar 3 4 DClasses novas (-481/-482/-483/-484)
+  - **ADRs:** ADR-V2-064 (novo — Provider Registry), ADR-V2-001/003/004/008 (relacionados)
+  - **Pendências de Alta Prioridade:** DEBT-AI-01 criptografia at-rest (isolado no AiKeyResolverService, zero mudança schema). DEBT-AI-02 seleção modelo por provider (schema pronto, falta UI). DEBT-AI-03 frontend seleção provider.
+  - **Commits (Fases 1-6):** `37b6c91` (seed, resolver, Claude/OpenAI, registry), `ae9df86` (CRUD chaves masked, endpoints, endpoints), `e253683` (error translation)
+
 - **Realtime WebSocket (Socket.io) no Board da Lista — Fase 0/1/2 completas: Tempo real com consumer dinâmico** (V2 Transversal F7/F10, 2026-06-04, ADR-V2-063)
   - **Fase 0 (Eventos — 8.5/10):** Completar emissão de eventos em `tasks.service.ts` (novo `task.updated` para task normal com `projectId`+`actorId`, add `projectId` em `task.status.changed`, add `actorId` em deletes). `event-types.ts` com novo tipo, `audit-log.consumer.ts` com mapeamento `-489 AUDIT_GENERIC`
   - **Fase 1 (Gateway + Guard — 8.8/10):** WebSocket namespace `/realtime` com Socket.io 4.8.3. `RealtimeGateway` (@WebSocketGateway) com handlers `join:list`/`leave:list` + método `broadcast()`. `WsJwtGuard` valida JWT (2 vias: auth.token ou header), popula `client.data.user`. CORS configurável `REALTIME_CORS_ORIGIN`

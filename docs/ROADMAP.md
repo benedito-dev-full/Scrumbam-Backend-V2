@@ -800,6 +800,131 @@ Remoção em 6 camadas faseadas (1 commit por fase para checkpoint de rollback):
 
 ---
 
+## Feature: Multi-Provider IA no Nexus (Gemini + Claude + OpenAI) — Fases 1-7 ✅ COMPLETA
+
+**Status:** ✅ **FASES 1-7 COMPLETAS** — Provider Registry + Cascata de resolução de chave + Masking obrigatório
+**Módulo V2:** ai (transversal — novo registro de providers, CRUD de chaves, roteamento dinâmico)
+**Fase V2:** F7 (Documentação e fechamento — ADR-V2-064)
+**Tempo Real:** ~8h total (Strategist 2h + Implementer 4h nas Fases 1-6 + Reviewer ~45m + Documenter 1h15m)
+**Completado em:** 2026-06-04
+**Quality Score:** Fases 1-6 médio 8.0/10 (todas APPROVED ≥8.0 gate), Fase 7 (docs) — CONCLUÍDA
+
+**O Que Foi Feito (Fases 1-7):**
+
+**Fase 1 — Seed de DClasses (8.0/10):**
+- Seed `classes.seed.ts`: 4 DClasses novas:
+  - `-481 GEMINI_API_KEY` (filha de -52 STATUS — lookups)
+  - `-482 CLAUDE_API_KEY` (filha de -52)
+  - `-483 OPENAI_API_KEY` (filha de -52)
+  - `-484 AI_PREFERENCES` (filha de -52 — preferência de provider da org)
+- Zero coluna nova em DTabela (dEntidadeId já existe para escopo)
+
+**Fase 2 — AiKeyResolverService + Preferência (8.0/10):**
+- `AiKeyResolverService`: cascata user→org→global→env (nível user desligado por flag ENABLE_USER_LEVEL_KEYS=false)
+- Cache TTL 60s por (provider, orgId, userId)
+- `AiProviderPrefService`: upsert atômico em DTabela -484 (dEntidadeId=orgId)
+- Métodos: `resolveKey()`, `resolveOrgKey()`, `resolveGlobalKey()`, `getOrgPreference()`
+
+**Fase 3 — Providers Claude + OpenAI (8.0/10):**
+- `ClaudeProvider`: SDK `@anthropic-ai/sdk`, modelo default `claude-sonnet-4-5`
+- `OpenAiProvider`: SDK `openai`, modelo default `gpt-4o`
+- Ambos implementam interface `AiProvider` (contrato unificado com GeminiProvider)
+- Timeout 30s + retry 1x em 429/5xx + tradução de erro por vendor
+
+**Fase 4 — AiProviderRegistry + Desacoplar (8.0/10):**
+- `AiProviderRegistry` (DI, singleton): `register(name, provider)`, `getProvider(name)`, `listAvailable()`
+- Injeção DI de 3 providers (Gemini, Claude, OpenAI)
+- `AiChatService`: resolução dinâmica `dto.provider ?? pref.org ?? default(gemini)`
+- **Retrocompatibilidade:** chamadas sem `provider` no body → default Gemini ✅
+
+**Fase 5 — CRUD de Chaves + Masking (8.0/10):**
+- `AiKeysController`: POST/GET/DELETE `/ai/keys` (ADMIN-only, OrgAdminGuard)
+- `AiKeysService`: upsert em DTabela (-481/-482/-483), dEntidadeId=orgId
+- `AiKeyResponseDto`: plaintext NUNCA retorna. Campos: provider, prefix, masked, configured, createdAt, lastRotatedAt
+- **Masking obrigatório:** teste explícito valida que plaintext não expõe
+- Endpoints adicionais:
+  - `GET /ai/providers` (acessível a membro — só boolean configured, não chave)
+  - `PUT /ai/preference` (ADMIN-only — define provider/modelo default da org)
+
+**Fase 6 — Tradução de Erro por Provider (8.0/10):**
+- `provider-error.util.ts`: centraliza mapeamento de exceções por vendor
+- Gemini: 401→BadRequest, 429→ServiceUnavailable, timeout→GatewayTimeout
+- Claude: authentication_error→BadRequest, rate_limit_error→ServiceUnavailable
+- OpenAI: 401→BadRequest, insufficient_quota→ServiceUnavailable
+- Mensagens amigáveis (sem vazar detalhe do vendor)
+
+**Fase 7 — ADR-V2-064 + README + Swagger (CONCLUÍDA):**
+- **ADR-V2-064 redigido:** Provider Registry + cascata + RBAC + plaintext debt + alternativas consideradas
+- **src/ai/README.md atualizado:** multi-provider (não mais "Provider único v1: Gemini")
+- Tabela de provedores com modelos default e DClasse
+- Documentação de cascata, env vars, endpoints
+- Pendências refatoradas: criptografia at-rest marcada como **PRÓXIMA PRIORIDADE**
+- **Swagger 100%:** todos endpoints (POST/GET/DELETE /ai/keys, PUT /ai/preference, GET /ai/providers) com @ApiOperation/@ApiResponse/@ApiParam/@ApiBearerAuth
+
+**Conformidade com Pilares e ADRs:**
+- **Pilar 1 (Engine):** N/A — chaves são estruturais (DTabela, Prisma direto)
+- **Pilar 2 (Endpoints):** Controller específico `/ai/keys` justificado por masking obrigatório + gate ADMIN + validação vendor (não genérico `/tabela`)
+- **Pilar 3 (Seed):** 4 DClasses novas (-481/-482/-483/-484), zero tabela nova (ADR-V2-001)
+- **ADR-V2-001:** Respeitado (zero tabela nova — chaves em DTabela canônica)
+- **ADR-V2-003:** RBAC via DVincula (-161 ADMIN) — membro normal → 403
+- **ADR-V2-004:** Chaves em DTabela, padrão aplicado
+- **ADR-V2-008:** DEvento base (chat messages) — não impactado
+
+**Decisões Travadas (CEO 2026-06-04):**
+1. Cascata completa: user (desligado) → org → global → env
+2. Plaintext nesta leva. **Próxima: criptografia at-rest** (ponto isolado, zero mudança schema)
+3. Seleção de PROVEDOR agora. Seleção de MODELO (ex: gpt-4-turbo vs gpt-4o) é próxima
+4. Dono = Organization (DEntidade -152). Usuário nunca vê chave (masking obrigatório)
+5. Compatibilidade retroativa crítica (sem `provider` → Gemini)
+
+**Testes (Fases 1-6):**
+- 94 specs ai.* (unit + integration) — 100% PASS
+- Provider Registry: 20 specs (register, getProvider, default, list)
+- AiKeyResolverService: 18 specs (cascata, cache, invalidação)
+- AiKeysController: 8 specs (auth 403/200, masking 100%, CRUD)
+- Provider error translation: 15 specs (Gemini/Claude/OpenAI/unknown)
+- AiChatService roteamento: 5 specs (retrocompat sem provider)
+- End-to-end: 2 specs (default Gemini = v1 compat)
+- Regression (baseline tasks): 26 specs — zero regressão
+
+**Build & Performance:**
+- Build: ✅ PASS (npm run build, tsc 0 errors, eslint 0 warnings)
+- Regressão: ZERO (baseline 94 specs de ai.*)
+- Performance: 1 query cache por (provider, orgId, userId), TTL 60s. Sem N+1.
+- Queries/request: +0 (cascata em memória, resolver cacheado)
+
+**Pilares:**
+- Pilar 1: N/A (estrutural)
+- Pilar 2: Controller específico justificado (masking+gate+vendor validation)
+- Pilar 3: 4 DClasses novas (-481/-482/-483/-484)
+
+**ADRs Redigidos:**
+- **ADR-V2-064 (novo):** Provider Registry + cascata de resolução de chave (decisão arquitetural completa, 5 alternativas analisadas)
+- Relacionados: ADR-V2-001, ADR-V2-003, ADR-V2-004, ADR-V2-008
+
+**Pendências Registradas:**
+- **DEBT-AI-01 (ALTA PRIORIDADE):** Criptografia at-rest das chaves (AES-256-GCM, key master em KMS/Vault). Ponto de encrypt/decrypt já isolado em AiKeyResolverService — basta injetar logica sem mudança de schema.
+- **DEBT-AI-02:** Seleção de modelo específico por provedor (field `model?` em AiPreferences pronto, falta UI)
+- **DEBT-AI-03:** Frontend: UI de seleção de provider na aba de configuração da org
+
+**Commits Fases 1-6:**
+- `37b6c91` feat(ai): seed providers + key resolver + cascata + Claude/OpenAI providers + registry (Fases 1-4)
+- `ae9df86` feat(ai): gestão de chaves ADMIN-only, masked, /ai/keys + /ai/preference + /ai/providers (Fase 5)
+- `e253683` feat(ai): tradução de erro padronizada por vendor (Fase 6)
+
+**Commits Fase 7:**
+- (commit será gerado após submissão desta documentação)
+
+**Documentação:**
+- `docs/decisions/ADR-V2-064-provider-registry-cascata-resolucao-chave.md` (decisão, alternativas, conformidade, implementação)
+- `src/ai/README.md` (atualizado — multi-provider, cascata, endpoints, env vars, criptografia debt)
+- `src/ai/ai-keys.controller.ts` (JSDoc completo, exemplos curl, autorização ADMIN)
+- `src/ai/ai-chat.controller.ts` (JSDoc atualizado para roteamento dinâmico)
+
+**Candidato Upstream:** Padrão genérico "chaves de provedores com cascata" reutilizável no template Devari-Core (outros provedores, outras integrações externas)
+
+---
+
 ## Frente B — Nexus IA Chat v1 (Gemini + 4 tools + DEvento -508) ✅ COMPLETA
 
 **Status:** ✅ **COMPLETA** — Módulo AI entregue, integração frontend (Scrumbam-Frontend-V2) entregue, índice DEvento B.0 em produção
