@@ -87,8 +87,11 @@ export class AiProviderPrefService {
   /**
    * Grava (upsert logico) a preferencia de provider/modelo padrao de uma org.
    *
-   * NAO exposto por controller nesta fase (endpoint e Fase 5). Atualiza a
-   * linha existente da org se houver; caso contrario cria. Invalida o cache
+   * Exposto via `PUT /ai/preference` (ADMIN-only) desde a Fase 5. O find+update
+   * roda dentro de um `$transaction` para garantir ATOMICIDADE (resolve o
+   * debito M1 da Fase 2): sob concorrencia, duas chamadas simultaneas para a
+   * mesma org nao geram dois registros — a transacao serializa o read-then-write.
+   * Atualiza a linha existente se houver; caso contrario cria. Invalida o cache
    * da org ao final.
    *
    * @param orgId - Org dona da preferencia.
@@ -102,31 +105,34 @@ export class AiProviderPrefService {
     }
     const dados = dadosObj as Prisma.InputJsonValue;
 
-    const existing = await this.prisma.dTabela.findFirst({
-      where: {
-        idClasse: ID_CLASSE_AI_PROVIDER_PREF,
-        dEntidadeId: orgId,
-        excluido: false,
-      },
-      select: { chave: true },
-      orderBy: { chave: 'desc' },
-    });
-
-    if (existing) {
-      await this.prisma.dTabela.update({
-        where: { chave: existing.chave },
-        data: { dados, inativo: false },
-      });
-    } else {
-      await this.prisma.dTabela.create({
-        data: {
+    // Read-then-write atomico: $transaction evita race (M1) entre concorrentes.
+    await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.dTabela.findFirst({
+        where: {
           idClasse: ID_CLASSE_AI_PROVIDER_PREF,
           dEntidadeId: orgId,
-          nome: `AI provider pref org=${orgId.toString()}`,
-          dados,
+          excluido: false,
         },
+        select: { chave: true },
+        orderBy: { chave: 'desc' },
       });
-    }
+
+      if (existing) {
+        await tx.dTabela.update({
+          where: { chave: existing.chave },
+          data: { dados, inativo: false },
+        });
+      } else {
+        await tx.dTabela.create({
+          data: {
+            idClasse: ID_CLASSE_AI_PROVIDER_PREF,
+            dEntidadeId: orgId,
+            nome: `AI provider pref org=${orgId.toString()}`,
+            dados,
+          },
+        });
+      }
+    });
 
     this.cache.delete(orgId.toString());
     this.logger.log(`ai_provider_pref_set org=${orgId.toString()} provider=${pref.provider}`);

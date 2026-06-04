@@ -2,13 +2,23 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AiProviderPrefService } from './ai-provider-pref.service';
 import { PrismaService } from '../prisma.service';
 
-const makePrismaMock = () => ({
-  dTabela: {
-    findFirst: jest.fn(),
-    create: jest.fn(),
-    update: jest.fn(),
-  },
-});
+const makePrismaMock = () => {
+  const mock: {
+    dTabela: { findFirst: jest.Mock; create: jest.Mock; update: jest.Mock };
+    $transaction: jest.Mock;
+  } = {
+    dTabela: {
+      findFirst: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+    },
+    // setDefaultForOrg agora roda dentro de $transaction (atomicidade M1).
+    // O mock executa o callback com o proprio mock como `tx`, preservando
+    // as assertions sobre dTabela.create/update.
+    $transaction: jest.fn((cb: (tx: typeof mock) => unknown) => cb(mock)),
+  };
+  return mock;
+};
 
 describe('AiProviderPrefService', () => {
   let service: AiProviderPrefService;

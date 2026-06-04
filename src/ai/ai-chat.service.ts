@@ -22,8 +22,8 @@ const MAX_TOOL_ITERATIONS = 5;
  * Orquestrador principal do chat IA Nexus.
  *
  * Fluxo (`POST /ai/chat`):
- *   1. Persistir `role=user` em `DEvento -508` ANTES da chamada Gemini.
- *      (Se Gemini falhar, refresh hidrata a mensagem do user — R-7 do plano.)
+ *   1. Persistir `role=user` em `DEvento -508` ANTES da chamada ao provider.
+ *      (Se o provider falhar, refresh hidrata a mensagem do user — R-7 do plano.)
  *   2. Carregar historico (ultimas 30 msgs, ASC cronologico).
  *   3. Anexar nova mensagem do user ao final do array.
  *   4. Construir tools via `ToolRegistry` com `ctx` extraido do JWT.

@@ -4,11 +4,14 @@ import { CommentsModule } from '../comments/comments.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { AiChatController } from './ai-chat.controller';
+import { AiKeysController } from './ai-keys.controller';
 import { AiChatService } from './ai-chat.service';
+import { AiKeysService } from './ai-keys.service';
 import { ChatMessagesService } from './chat-messages.service';
 import { ContextBuilderService } from './context-builder.service';
 import { AiKeyResolverService } from './ai-key-resolver.service';
 import { AiProviderPrefService } from './ai-provider-pref.service';
+import { OrgAdminGuard } from './guards/org-admin.guard';
 import { AiProviderRegistry } from './providers/ai-provider.registry';
 import { ClaudeProvider } from './providers/claude.provider';
 import { GeminiProvider } from './providers/gemini.provider';
@@ -56,13 +59,15 @@ import { ToolRegistry } from './tools/tool-registry';
     forwardRef(() => TasksModule),
     forwardRef(() => ProjectsModule),
   ],
-  controllers: [AiChatController],
+  controllers: [AiChatController, AiKeysController],
   providers: [
     AiChatService,
+    AiKeysService,
     ChatMessagesService,
     ContextBuilderService,
     AiKeyResolverService,
     AiProviderPrefService,
+    OrgAdminGuard,
     GeminiProvider,
     ClaudeProvider,
     OpenAiProvider,
