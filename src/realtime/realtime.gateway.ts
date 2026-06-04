@@ -1,5 +1,6 @@
 import { Logger, UseGuards } from '@nestjs/common';
 import {
+  ConnectedSocket,
   MessageBody,
   SubscribeMessage,
   WebSocketGateway,
@@ -74,7 +75,10 @@ export class RealtimeGateway {
    * @param payload - `{ listId }` (chave do DProject).
    */
   @SubscribeMessage('join:list')
-  async handleJoinList(client: Socket, @MessageBody() payload: JoinListDto): Promise<void> {
+  async handleJoinList(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: JoinListDto,
+  ): Promise<void> {
     const listId = payload?.listId;
     if (typeof listId !== 'string' || listId.length === 0) {
       client.emit('error', { code: 'INVALID_PAYLOAD', message: 'listId obrigatório' });
@@ -110,7 +114,10 @@ export class RealtimeGateway {
    * @param payload - `{ listId }` (chave do DProject).
    */
   @SubscribeMessage('leave:list')
-  async handleLeaveList(client: Socket, @MessageBody() payload: JoinListDto): Promise<void> {
+  async handleLeaveList(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: JoinListDto,
+  ): Promise<void> {
     const listId = payload?.listId;
     if (typeof listId !== 'string' || listId.length === 0) {
       return;
