@@ -192,7 +192,7 @@ export class AiKeyResolverService {
         `nem process.env.${config.envVar} configurados`,
     );
     throw new InternalServerErrorException(
-      'Configuracao da IA com problema. Contate o suporte.',
+      `Nenhuma chave de IA configurada para o provedor ${provider}. Contate o administrador.`,
     );
   }
 

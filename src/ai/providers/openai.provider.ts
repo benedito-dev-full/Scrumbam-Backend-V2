@@ -1,11 +1,5 @@
 import { createHash } from 'crypto';
-import {
-  BadGatewayException,
-  GatewayTimeoutException,
-  Injectable,
-  Logger,
-  ServiceUnavailableException,
-} from '@nestjs/common';
+import { BadGatewayException, GatewayTimeoutException, Injectable, Logger } from '@nestjs/common';
 import OpenAI from 'openai';
 import { AiKeyResolverService } from '../ai-key-resolver.service';
 import {
@@ -15,6 +9,7 @@ import {
   AiProviderResult,
   AiToolDefinition,
 } from './ai-provider.interface';
+import { timeoutExceptionFor, translateProviderError } from './provider-error.util';
 
 /** Modelo OpenAI default — gpt-4o equilibra qualidade e custo.
  *  Pode ser sobrescrito por `opts.model` (override opcional). */
@@ -255,13 +250,7 @@ export class OpenAiProvider implements AiProvider {
     const attempt = async (): Promise<OpenAiChatResponse> => {
       let timerId: NodeJS.Timeout | undefined;
       const timeout = new Promise<never>((_, reject) => {
-        timerId = setTimeout(
-          () =>
-            reject(
-              new GatewayTimeoutException('A IA demorou demais para responder. Tente novamente.'),
-            ),
-          OPENAI_TIMEOUT_MS,
-        );
+        timerId = setTimeout(() => reject(timeoutExceptionFor(this.name)), OPENAI_TIMEOUT_MS);
       });
       try {
         return await Promise.race([fn(), timeout]);
@@ -290,22 +279,22 @@ export class OpenAiProvider implements AiProvider {
     }
   }
 
+  /**
+   * Traduz um erro do vendor para a `HttpException` amigavel canonica.
+   *
+   * A EXTRACAO de status/code/type e especifica do SDK OpenAI; a TRADUCAO e
+   * delegada ao util compartilhado. O 429 com `code='insufficient_quota'` e
+   * classificado como `quota` (mensagem distinta — problema de cota/billing),
+   * separado do rate limit temporario. O detalhe tecnico vai apenas para o
+   * log — nunca a chave nem o corpo cru do vendor.
+   */
   private translateError(err: unknown): Error {
     if (err instanceof GatewayTimeoutException) return err;
     const status = this.extractHttpStatus(err);
+    const { code, type } = this.extractErrorCodeType(err);
     const message = err instanceof Error ? err.message : String(err);
     this.logger.error(`openai_error status=${status ?? '?'} message=${message}`);
-    if (status === 401) {
-      return new BadGatewayException('Configuracao da IA com problema. Contate o suporte.');
-    }
-    if (status === 429) {
-      // 'insufficient_quota' e 'rate_limit_exceeded' ambos vem como 429;
-      // ambos sao tratados como indisponibilidade temporaria para o usuario.
-      return new ServiceUnavailableException(
-        'Limite de uso da IA atingido. Tente em alguns segundos.',
-      );
-    }
-    return new BadGatewayException('A IA falhou ao responder. Tente novamente em instantes.');
+    return translateProviderError({ status, code, type }, this.name);
   }
 
   private extractHttpStatus(err: unknown): number | null {
@@ -318,6 +307,33 @@ export class OpenAiProvider implements AiProvider {
       if (match) return parseInt(match[1], 10);
     }
     return null;
+  }
+
+  /**
+   * Extrai code/type textual do erro OpenAI. O SDK expoe `error.code`
+   * (ex: 'insufficient_quota', 'rate_limit_exceeded') e `error.type`; cobrimos
+   * tambem os mesmos campos aninhados em `error.error` por robustez.
+   */
+  private extractErrorCodeType(err: unknown): { code: string | null; type: string | null } {
+    if (!err || typeof err !== 'object') return { code: null, type: null };
+    const anyErr = err as {
+      code?: unknown;
+      type?: unknown;
+      error?: { code?: unknown; type?: unknown };
+    };
+    const code =
+      typeof anyErr.code === 'string'
+        ? anyErr.code
+        : typeof anyErr.error?.code === 'string'
+          ? anyErr.error.code
+          : null;
+    const type =
+      typeof anyErr.type === 'string'
+        ? anyErr.type
+        : typeof anyErr.error?.type === 'string'
+          ? anyErr.error.type
+          : null;
+    return { code, type };
   }
 
   /** Converte uma tool do contrato para o formato OpenAI (function calling). */

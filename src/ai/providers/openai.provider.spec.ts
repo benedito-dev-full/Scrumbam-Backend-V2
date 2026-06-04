@@ -39,8 +39,9 @@ const toolCallResponse = (id: string, name: string, args: Record<string, unknown
   usage: { prompt_tokens: 9, completion_tokens: 3 },
 });
 
-/** Erro estilo SDK (status numerico). */
-const sdkError = (status: number) => Object.assign(new Error(`openai ${status}`), { status });
+/** Erro estilo SDK (status numerico + code/type opcionais). */
+const sdkError = (status: number, extra?: { code?: string; type?: string }) =>
+  Object.assign(new Error(`openai ${status}`), { status, ...extra });
 
 describe('OpenAiProvider', () => {
   let provider: OpenAiProvider;
@@ -213,6 +214,44 @@ describe('OpenAiProvider', () => {
 
     // 429 dispara 1 retry → 2 chamadas no total.
     expect(completionsCreateMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('traduz 429 rate_limit e 429 insufficient_quota para mensagens DISTINTAS (503)', async () => {
+    // Rate limit temporario.
+    completionsCreateMock.mockRejectedValue(sdkError(429, { code: 'rate_limit_exceeded' }));
+    let rateMsg = '';
+    try {
+      await provider.chat({
+        systemPrompt: 's',
+        messages: [{ role: 'user', content: 'oi' }],
+        tools: [],
+      });
+    } catch (e) {
+      expect(e).toBeInstanceOf(ServiceUnavailableException);
+      rateMsg = (e as ServiceUnavailableException).message;
+    }
+
+    jest.clearAllMocks();
+    keyResolver.resolveKey.mockResolvedValue('sk-openai-test-key');
+
+    // Cota esgotada (billing) — mesmo status 429, mensagem distinta.
+    completionsCreateMock.mockRejectedValue(sdkError(429, { code: 'insufficient_quota' }));
+    let quotaMsg = '';
+    try {
+      await provider.chat({
+        systemPrompt: 's',
+        messages: [{ role: 'user', content: 'oi' }],
+        tools: [],
+      });
+    } catch (e) {
+      expect(e).toBeInstanceOf(ServiceUnavailableException);
+      quotaMsg = (e as ServiceUnavailableException).message;
+    }
+
+    expect(rateMsg).not.toBe('');
+    expect(quotaMsg).not.toBe('');
+    expect(quotaMsg).not.toBe(rateMsg);
+    expect(quotaMsg.toLowerCase()).toContain('cota');
   });
 
   it('traduz 5xx para BadGatewayException sem vazar a chave', async () => {

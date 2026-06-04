@@ -1,11 +1,5 @@
 import { createHash } from 'crypto';
-import {
-  BadGatewayException,
-  GatewayTimeoutException,
-  Injectable,
-  Logger,
-  ServiceUnavailableException,
-} from '@nestjs/common';
+import { BadGatewayException, GatewayTimeoutException, Injectable, Logger } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
 import { AiKeyResolverService } from '../ai-key-resolver.service';
 import {
@@ -15,6 +9,7 @@ import {
   AiProviderResult,
   AiToolDefinition,
 } from './ai-provider.interface';
+import { timeoutExceptionFor, translateProviderError } from './provider-error.util';
 
 /** Modelo Claude default — Sonnet 4.5 equilibra qualidade e custo.
  *  Pode ser sobrescrito por `opts.model` (override opcional). */
@@ -273,13 +268,7 @@ export class ClaudeProvider implements AiProvider {
     const attempt = async (): Promise<AnthropicMessageResponse> => {
       let timerId: NodeJS.Timeout | undefined;
       const timeout = new Promise<never>((_, reject) => {
-        timerId = setTimeout(
-          () =>
-            reject(
-              new GatewayTimeoutException('A IA demorou demais para responder. Tente novamente.'),
-            ),
-          CLAUDE_TIMEOUT_MS,
-        );
+        timerId = setTimeout(() => reject(timeoutExceptionFor(this.name)), CLAUDE_TIMEOUT_MS);
       });
       try {
         return await Promise.race([fn(), timeout]);
@@ -308,26 +297,21 @@ export class ClaudeProvider implements AiProvider {
     }
   }
 
+  /**
+   * Traduz um erro do vendor para a `HttpException` amigavel canonica.
+   *
+   * A EXTRACAO de status/code/type e especifica do SDK Anthropic; a TRADUCAO
+   * (status HTTP + mensagem) e delegada ao util compartilhado. O 529
+   * (overloaded) e classificado pelo util como `overloaded` → 503. O detalhe
+   * tecnico vai apenas para o log — nunca a chave nem o corpo cru do vendor.
+   */
   private translateError(err: unknown): Error {
     if (err instanceof GatewayTimeoutException) return err;
     const status = this.extractHttpStatus(err);
+    const { code, type } = this.extractErrorCodeType(err);
     const message = err instanceof Error ? err.message : String(err);
     this.logger.error(`claude_error status=${status ?? '?'} message=${message}`);
-    if (status === 401) {
-      return new BadGatewayException('Configuracao da IA com problema. Contate o suporte.');
-    }
-    if (status === 429) {
-      return new ServiceUnavailableException(
-        'Limite de uso da IA atingido. Tente em alguns segundos.',
-      );
-    }
-    // 'overloaded' (529) do Anthropic tambem cai como indisponibilidade.
-    if (status === 529) {
-      return new ServiceUnavailableException(
-        'A IA esta sobrecarregada no momento. Tente em alguns segundos.',
-      );
-    }
-    return new BadGatewayException('A IA falhou ao responder. Tente novamente em instantes.');
+    return translateProviderError({ status, code, type }, this.name);
   }
 
   private extractHttpStatus(err: unknown): number | null {
@@ -341,6 +325,33 @@ export class ClaudeProvider implements AiProvider {
       if (match) return parseInt(match[1], 10);
     }
     return null;
+  }
+
+  /**
+   * Extrai code/type textual do erro Anthropic. O SDK expoe o tipo do erro em
+   * `error.error.type` (ex: 'overloaded_error', 'rate_limit_error'); cobrimos
+   * tambem `error.type`/`error.code` no topo por robustez.
+   */
+  private extractErrorCodeType(err: unknown): { code: string | null; type: string | null } {
+    if (!err || typeof err !== 'object') return { code: null, type: null };
+    const anyErr = err as {
+      code?: unknown;
+      type?: unknown;
+      error?: { type?: unknown; code?: unknown };
+    };
+    const code =
+      typeof anyErr.code === 'string'
+        ? anyErr.code
+        : typeof anyErr.error?.code === 'string'
+          ? anyErr.error.code
+          : null;
+    const type =
+      typeof anyErr.type === 'string'
+        ? anyErr.type
+        : typeof anyErr.error?.type === 'string'
+          ? anyErr.error.type
+          : null;
+    return { code, type };
   }
 
   /** Converte uma tool do contrato para o formato Anthropic. */

@@ -1,11 +1,5 @@
 import { createHash } from 'crypto';
-import {
-  BadGatewayException,
-  GatewayTimeoutException,
-  Injectable,
-  Logger,
-  ServiceUnavailableException,
-} from '@nestjs/common';
+import { BadGatewayException, GatewayTimeoutException, Injectable, Logger } from '@nestjs/common';
 import {
   FunctionCall,
   FunctionDeclaration,
@@ -23,6 +17,7 @@ import {
   AiProviderResult,
   AiToolDefinition,
 } from './ai-provider.interface';
+import { timeoutExceptionFor, translateProviderError } from './provider-error.util';
 
 /** Modelo Gemini default — flash equilibra custo e latencia para chat MVP.
  *  NOTA: gemini-1.5-* foi descontinuado pelo Google em 2025; 2.5-flash e o atual.
@@ -224,13 +219,7 @@ export class GeminiProvider implements AiProvider {
     const attempt = async (): Promise<GenerateContentResult> => {
       let timerId: NodeJS.Timeout | undefined;
       const timeout = new Promise<never>((_, reject) => {
-        timerId = setTimeout(
-          () =>
-            reject(
-              new GatewayTimeoutException('A IA demorou demais para responder. Tente novamente.'),
-            ),
-          GEMINI_TIMEOUT_MS,
-        );
+        timerId = setTimeout(() => reject(timeoutExceptionFor(this.name)), GEMINI_TIMEOUT_MS);
       });
       try {
         return await Promise.race([fn(), timeout]);
@@ -259,20 +248,22 @@ export class GeminiProvider implements AiProvider {
     }
   }
 
+  /**
+   * Traduz um erro do vendor para a `HttpException` amigavel canonica.
+   *
+   * A EXTRACAO do status/code e especifica do SDK Gemini; a TRADUCAO
+   * (status HTTP + mensagem amigavel) e delegada ao util compartilhado
+   * (`translateProviderError`), garantindo consistencia entre os 3 providers.
+   * O detalhe tecnico vai apenas para o log — a `HttpException` devolvida ao
+   * client tem mensagem generica (sem chave, sem corpo cru do vendor).
+   */
   private translateError(err: unknown): Error {
     if (err instanceof GatewayTimeoutException) return err;
     const status = this.extractHttpStatus(err);
+    const code = this.extractErrorCode(err);
     const message = err instanceof Error ? err.message : String(err);
     this.logger.error(`gemini_error status=${status ?? '?'} message=${message}`);
-    if (status === 401) {
-      return new BadGatewayException('Configuracao da IA com problema. Contate o suporte.');
-    }
-    if (status === 429) {
-      return new ServiceUnavailableException(
-        'Limite de uso da IA atingido. Tente em alguns segundos.',
-      );
-    }
-    return new BadGatewayException('A IA falhou ao responder. Tente novamente em instantes.');
+    return translateProviderError({ status, code }, this.name);
   }
 
   private extractHttpStatus(err: unknown): number | null {
@@ -285,6 +276,15 @@ export class GeminiProvider implements AiProvider {
       const match = anyErr.message.match(/\b(4\d\d|5\d\d)\b/);
       if (match) return parseInt(match[1], 10);
     }
+    return null;
+  }
+
+  /** Extrai o code/status textual do erro do vendor (para distinguir cota). */
+  private extractErrorCode(err: unknown): string | null {
+    if (!err || typeof err !== 'object') return null;
+    const anyErr = err as { code?: unknown; status?: unknown };
+    if (typeof anyErr.code === 'string') return anyErr.code;
+    if (typeof anyErr.status === 'string') return anyErr.status;
     return null;
   }
 
