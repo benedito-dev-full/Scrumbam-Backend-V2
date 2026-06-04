@@ -4,11 +4,11 @@
  * Composicao do seed (ADR-V2-019: monolitico):
  *   - 45 classes fixas universais Devari-Core (range -1..-110), via spread de
  *     `templates/classes-base-template.ts`.
- *   - 109 classes especificas Scrumban-V2 (range -150..-527), declaradas
+ *   - 112 classes especificas Scrumban-V2 (range -150..-527), declaradas
  *     neste arquivo, agrupadas por seccao (DEntidade, DVincula, DPedido,
  *     DTabela, DEvento, DTabela secundario, Fases) com comentarios `// === ... ===`.
  *
- * Total: 154 DClasses (ADR-V2-026: +1 AUDIT_GENERIC; ADR-V2-028: +6 INVITE_*;
+ * Total: 157 DClasses (ADR-V2-026: +1 AUDIT_GENERIC; ADR-V2-028: +6 INVITE_*;
  *   ADR-V2-029: +1 PROJECT_TEAM_LINK; ADR-V2-033: +2 AGENT_SESSION_*;
  *   ADR-V2-FOLDERS-001: +1 FOLDER, +1 FOLDER_PROJECT_LINK;
  *   ADR-V2-047: +1 PHASE;
@@ -16,6 +16,8 @@
  *   GAP-04: +1 DOC;
  *   GAP-COMMENT: +1 TASK_COMMENT;
  *   Frente B Nexus IA: +1 GEMINI_API_KEY (-481), +1 AI_CHAT_MESSAGE (-508);
+ *   Frente B Nexus IA multi-provider: +3 CLAUDE_API_KEY (-482),
+ *     OPENAI_API_KEY (-483), AI_PROVIDER_PREF (-484);
  *   ADR-V2-058: +1 PROJECT_REF (-158, DEntidade-espelho de DProject em DVincula);
  *   ADR-V2-061 (proposto): +2 TEMPLATE_LIST (-401), TEMPLATE_SPACE (-402) —
  *     feature Templates de Lista/Espaco via deep-clone do motor cloneTree).
@@ -83,7 +85,7 @@ function esp(
 }
 
 /**
- * Array de classes especificas Scrumban-V2 (109 entradas).
+ * Array de classes especificas Scrumban-V2 (112 entradas).
  *
  * Ordem:
  *   1. DEntidade — 9 (sub-tipos de Pessoa: USER, PLATFORM_SCRUMBAN,
@@ -261,6 +263,12 @@ const classesEspecificas: DClasseSeed[] = [
   // dados.plaintext + dados.hash + dados.prefix; v2 multi-tenant trocara
   // para dEntidadeId=orgId. Ver src/ai/README.md (R-2 plaintext aceito v1).
   esp(-481, 'GEMINI_API_KEY', 'Chave Gemini (provider IA Nexus)', -52),
+  // Frente B (Nexus IA Chat — multi-provider): chaves de API por provider e
+  // preferencia de modelo padrao da org. Mesmo padrao de -481 GEMINI_API_KEY
+  // (DTabela canonica, ADR-V2-004). dados.plaintext + dados.hash + dados.prefix.
+  esp(-482, 'CLAUDE_API_KEY', 'Chave Anthropic Claude (provider IA Nexus)', -52),
+  esp(-483, 'OPENAI_API_KEY', 'Chave OpenAI (provider IA Nexus)', -52),
+  esp(-484, 'AI_PROVIDER_PREF', 'Preferencia de provider/modelo padrao da org (Nexus)', -52),
   // GAP-04: documento rico associado a qualquer entidade (DProject, DTask, Space, etc.).
   // Conteudo rico (Markdown/JSON) armazenado em dados.content (campo Json de DTabela).
   // Uso: DTabela (idClasse=-353, dEntidadeId=entidadeAlvo).
@@ -349,7 +357,7 @@ const classesEspecificas: DClasseSeed[] = [
 ];
 
 /**
- * Array completo do seed (45 fixas + 109 especificas = 154 DClasses).
+ * Array completo do seed (45 fixas + 112 especificas = 157 DClasses).
  * Validado automaticamente em time de import (validateHierarchy abaixo).
  */
 export const classes: DClasseSeed[] = [...classesFixas, ...classesEspecificas];

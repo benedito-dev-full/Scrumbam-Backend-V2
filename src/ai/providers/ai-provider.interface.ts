@@ -73,6 +73,22 @@ export interface AiProviderChatOptions {
   tools: AiToolDefinition[];
   /** Limite duro de idas/voltas do loop de tool calling. Default: 5. */
   maxToolIterations?: number;
+  /**
+   * Override opcional do modelo do provider (ex: 'gemini-2.5-pro'). Quando
+   * ausente, o provider usa seu modelo default. Campo opcional — nao quebra
+   * implementacoes existentes.
+   */
+  model?: string;
+  /**
+   * Org ativa do request (DEntidade -152), propagada ao key resolver para a
+   * cascata de resolucao de chave (org→global→env). Opcional.
+   */
+  orgId?: bigint;
+  /**
+   * User logado do request (DEntidade.chave), propagado ao key resolver para
+   * o nivel user da cascata (desligado por flag nesta fase). Opcional.
+   */
+  userEntidadeId?: bigint;
 }
 
 /**

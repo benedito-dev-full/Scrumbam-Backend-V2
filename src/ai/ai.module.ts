@@ -7,8 +7,12 @@ import { AiChatController } from './ai-chat.controller';
 import { AiChatService } from './ai-chat.service';
 import { ChatMessagesService } from './chat-messages.service';
 import { ContextBuilderService } from './context-builder.service';
-import { GeminiApiKeyService } from './gemini-api-key.service';
+import { AiKeyResolverService } from './ai-key-resolver.service';
+import { AiProviderPrefService } from './ai-provider-pref.service';
+import { AiProviderRegistry } from './providers/ai-provider.registry';
+import { ClaudeProvider } from './providers/claude.provider';
 import { GeminiProvider } from './providers/gemini.provider';
+import { OpenAiProvider } from './providers/openai.provider';
 import { CreateCommentTool } from './tools/create-comment.tool';
 import { CreateTaskTool } from './tools/create-task.tool';
 import { GetProjectSummaryTool } from './tools/get-project-summary.tool';
@@ -18,12 +22,15 @@ import { ToolRegistry } from './tools/tool-registry';
 /**
  * AiModule — Nexus IA chat (Frente B — v1).
  *
- * Provider unico v1: Gemini (`gemini-2.5-flash`). Arquitetura preparada
- * para Claude/OpenAI futuro (interface `AiProvider`).
+ * Multi-provider: Gemini (`gemini-2.5-flash`, default/compat retroativa),
+ * Claude (`claude-sonnet-4-5`) e OpenAI (`gpt-4o`). O `AiProviderRegistry`
+ * indexa os 3 por `.name`; o `AiChatService` resolve o provider efetivo na
+ * cascata `dto.provider → preferencia da org (DTabela -484) → default (gemini)`.
  *
  * Storage: `DEvento idClasse=-508 AI_CHAT_MESSAGE` (Pilar 1 N/A — audit).
- * API key: `DTabela idClasse=-481 GEMINI_API_KEY` (ADR-V2-004) + fallback
- *   `process.env.GOOGLE_API_KEY` para dev local.
+ * API key: resolvida pelo `AiKeyResolverService` em cascata user→org→global→env
+ *   (`DTabela -481/-482/-483` por provider + fallback env). O `AiProviderPrefService`
+ *   le a preferencia default da org em `DTabela -484`. ADR-V2-004 / ADR-V2-064.
  *
  * Tools v1 (4):
  *  - createComment / listComments — proxies do `CommentsService`.
@@ -54,8 +61,12 @@ import { ToolRegistry } from './tools/tool-registry';
     AiChatService,
     ChatMessagesService,
     ContextBuilderService,
-    GeminiApiKeyService,
+    AiKeyResolverService,
+    AiProviderPrefService,
     GeminiProvider,
+    ClaudeProvider,
+    OpenAiProvider,
+    AiProviderRegistry,
     ToolRegistry,
     CreateCommentTool,
     ListCommentsTool,

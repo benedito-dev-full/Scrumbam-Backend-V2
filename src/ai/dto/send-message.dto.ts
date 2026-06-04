@@ -1,5 +1,11 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsString, MaxLength, MinLength } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+
+/** Providers de IA suportados pelo Nexus (roteamento — Fase 4). */
+export const AI_PROVIDER_NAMES = ['gemini', 'claude', 'openai'] as const;
+
+/** Tipo do provider escolhido (subset fechado validado por `@IsIn`). */
+export type AiProviderName = (typeof AI_PROVIDER_NAMES)[number];
 
 /**
  * DTO para envio de mensagem ao Nexus (`POST /ai/chat`).
@@ -29,4 +35,36 @@ export class SendMessageDto {
   @MinLength(1)
   @MaxLength(50000)
   content!: string;
+
+  /**
+   * Provider de IA a usar nesta mensagem (override do default).
+   *
+   * Opcional. Quando ausente, o backend resolve o provider na cascata
+   * `preferencia da org → default global (gemini)`. Quando presente, ganha
+   * de qualquer preferencia. Valores aceitos: `gemini`, `claude`, `openai`.
+   */
+  @ApiPropertyOptional({
+    description: 'Provider de IA a usar nesta mensagem (override do default da org)',
+    enum: AI_PROVIDER_NAMES,
+    example: 'claude',
+  })
+  @IsOptional()
+  @IsIn(AI_PROVIDER_NAMES)
+  provider?: AiProviderName;
+
+  /**
+   * Modelo especifico dentro do provider (override do default interno).
+   *
+   * Opcional. Quando ausente, o provider escolhido usa seu modelo default
+   * (ex: `gemini-2.5-flash`, `claude-sonnet-4-5`, `gpt-4o`).
+   */
+  @ApiPropertyOptional({
+    description: 'Modelo especifico do provider (ex: gemini-2.5-pro). Default: modelo interno do provider',
+    example: 'gemini-2.5-pro',
+    maxLength: 100,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  model?: string;
 }

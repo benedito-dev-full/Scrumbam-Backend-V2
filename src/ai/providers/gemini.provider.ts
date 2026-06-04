@@ -15,7 +15,7 @@ import {
   GoogleGenerativeAI,
   Part,
 } from '@google/generative-ai';
-import { GeminiApiKeyService } from '../gemini-api-key.service';
+import { AiKeyResolverService } from '../ai-key-resolver.service';
 import {
   AiProvider,
   AiProviderChatOptions,
@@ -24,8 +24,9 @@ import {
   AiToolDefinition,
 } from './ai-provider.interface';
 
-/** Modelo Gemini v1 — flash equilibra custo e latencia para chat MVP.
- *  NOTA: gemini-1.5-* foi descontinuado pelo Google em 2025; 2.5-flash e o atual. */
+/** Modelo Gemini default — flash equilibra custo e latencia para chat MVP.
+ *  NOTA: gemini-1.5-* foi descontinuado pelo Google em 2025; 2.5-flash e o atual.
+ *  Pode ser sobrescrito por `opts.model` (override opcional). */
 const GEMINI_MODEL = 'gemini-2.5-flash';
 
 /** Hard limit do loop de tool calling (defesa em profundidade — R-5). */
@@ -59,7 +60,7 @@ export class GeminiProvider implements AiProvider {
   readonly name = 'gemini';
   private readonly logger = new Logger(GeminiProvider.name);
 
-  constructor(private readonly keyService: GeminiApiKeyService) {}
+  constructor(private readonly keyResolver: AiKeyResolverService) {}
 
   /**
    * Executa uma rodada completa de chat com tool calling.
@@ -80,8 +81,13 @@ export class GeminiProvider implements AiProvider {
    * @throws {BadGatewayException} Outros erros do vendor (401/5xx persistentes).
    */
   async chat(opts: AiProviderChatOptions): Promise<AiProviderResult> {
-    const apiKey = await this.keyService.getActiveKey();
+    const apiKey = await this.keyResolver.resolveKey({
+      provider: 'gemini',
+      ...(opts.orgId !== undefined ? { orgId: opts.orgId } : {}),
+      ...(opts.userEntidadeId !== undefined ? { userEntidadeId: opts.userEntidadeId } : {}),
+    });
     const maxIterations = opts.maxToolIterations ?? DEFAULT_MAX_TOOL_ITERATIONS;
+    const modelName = opts.model ?? GEMINI_MODEL;
 
     const genAI = new GoogleGenerativeAI(apiKey);
 
@@ -91,7 +97,7 @@ export class GeminiProvider implements AiProvider {
         : undefined;
 
     const model = genAI.getGenerativeModel({
-      model: GEMINI_MODEL,
+      model: modelName,
       systemInstruction: opts.systemPrompt,
       ...(tools ? { tools } : {}),
     });
@@ -195,7 +201,7 @@ export class GeminiProvider implements AiProvider {
 
     return {
       finalMessage: finalText,
-      model: GEMINI_MODEL,
+      model: modelName,
       toolCallsExecuted: executed,
       ...(tokensUsed ? { tokensUsed } : {}),
       ...(finishReason ? { finishReason } : {}),

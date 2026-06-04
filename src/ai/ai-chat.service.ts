@@ -6,7 +6,8 @@ import { ChatMessagesService, PersistedChatMessage } from './chat-messages.servi
 import { ContextBuilderService } from './context-builder.service';
 import { SendMessageDto } from './dto/send-message.dto';
 import { ChatMessageResponseDto, ChatToolCallDto } from './dto/chat-message-response.dto';
-import { GeminiProvider } from './providers/gemini.provider';
+import { AiProviderRegistry } from './providers/ai-provider.registry';
+import { AiProviderPrefService } from './ai-provider-pref.service';
 import { AiProviderMessage } from './providers/ai-provider.interface';
 import { SYSTEM_PROMPT_NEXUS } from './system-prompt';
 import { ToolRegistry } from './tools/tool-registry';
@@ -26,14 +27,16 @@ const MAX_TOOL_ITERATIONS = 5;
  *   2. Carregar historico (ultimas 30 msgs, ASC cronologico).
  *   3. Anexar nova mensagem do user ao final do array.
  *   4. Construir tools via `ToolRegistry` com `ctx` extraido do JWT.
- *   5. Chamar `GeminiProvider.chat(...)` — loop de tool calling embutido.
+ *   4.5 Resolver o provider efetivo (`dto.provider ?? pref.org ?? default`)
+ *      via `AiProviderRegistry` e chamar `provider.chat(...)` — loop de tool
+ *      calling embutido no provider. Default `gemini` (compat retroativa).
  *   6. Persistir `role=assistant` com metadata (model, tokens, toolCalls)
  *      em `DEvento -508` APOS sucesso.
  *   7. Emitir eventos canonicos (`ai.chat.message.created` + 1 por tool call).
  *   8. Retornar `ChatMessageResponseDto`.
  *
  * Erros do provider (429/timeout/5xx) sao traduzidos para HTTP appropriado
- * dentro do `GeminiProvider` (NestJS HttpException). O `AiChatController`
+ * dentro de cada provider (NestJS HttpException). O `AiChatController`
  * NAO precisa try/catch — propagacao natural.
  *
  * Tenant isolation: tools recebem `userEntidadeId` + `organizationId` do
@@ -41,7 +44,7 @@ const MAX_TOOL_ITERATIONS = 5;
  * o gate. IA NUNCA escolhe quem eh o user.
  *
  * @see ChatMessagesService — persistencia em DEvento -508.
- * @see GeminiProvider — chamada ao SDK + tool calling.
+ * @see AiProviderRegistry — resolucao do provider efetivo por nome.
  * @see ToolRegistry — montagem das tools com ctx do request.
  */
 @Injectable()
@@ -51,7 +54,8 @@ export class AiChatService {
   constructor(
     private readonly chatMessages: ChatMessagesService,
     private readonly toolRegistry: ToolRegistry,
-    private readonly gemini: GeminiProvider,
+    private readonly providerRegistry: AiProviderRegistry,
+    private readonly providerPref: AiProviderPrefService,
     private readonly eventProducer: EventProducerService,
     private readonly correlationId: CorrelationIdService,
     private readonly contextBuilder: ContextBuilderService,
@@ -105,12 +109,38 @@ export class AiChatService {
     const contextBlock = await this.contextBuilder.build(userEntidadeId, organizationId);
     const finalSystemPrompt = `${SYSTEM_PROMPT_NEXUS}\n\n${contextBlock}`;
 
-    // 4. Chamar Gemini — erros sao traduzidos pelo provider (Http exceptions).
-    const result = await this.gemini.chat({
+    // 4. Resolver o provider efetivo na cascata de roteamento (ADR-V2-064):
+    //      providerName = dto.provider ?? prefDaOrg?.provider ?? registry.defaultName
+    //    - dto.provider: escolha explicita do user nesta mensagem (ganha de tudo).
+    //    - prefDaOrg: preferencia default da org (DTabela -484), so consultada se
+    //      ha org no request. 1 query cacheada (60s) — sem N+1.
+    //    - registry.defaultName: fallback final 'gemini' (compat retroativa).
+    //    Sem dto.provider e sem pref de org → 'gemini', sem model → o provider
+    //    usa seu default interno (gemini-2.5-flash). Comportamento IDENTICO a v1.
+    const orgPref = organizationId
+      ? await this.providerPref.getDefaultForOrg(BigInt(organizationId))
+      : null;
+
+    const providerName = dto.provider ?? orgPref?.provider ?? this.providerRegistry.defaultName;
+    const effectiveModel = dto.model ?? orgPref?.model;
+
+    const provider = this.providerRegistry.resolve(providerName);
+
+    this.logger.log(
+      `ai_chat_route provider=${providerName} model=${effectiveModel ?? 'default'} org=${organizationId ?? '-'}`,
+    );
+
+    // 4.1. Chamar o provider resolvido — erros sao traduzidos pelo provider
+    //    (Http exceptions). orgId/userEntidadeId sao propagados para a cascata
+    //    de resolucao de chave (org→global→env) no AiKeyResolverService.
+    const result = await provider.chat({
       systemPrompt: finalSystemPrompt,
       messages: providerMessages,
       tools,
       maxToolIterations: MAX_TOOL_ITERATIONS,
+      userEntidadeId,
+      ...(organizationId ? { orgId: BigInt(organizationId) } : {}),
+      ...(effectiveModel ? { model: effectiveModel } : {}),
     });
 
     // 5. Persistir assistant message APOS sucesso, com metadata para audit.
