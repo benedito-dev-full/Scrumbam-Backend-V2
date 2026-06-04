@@ -1,5 +1,6 @@
 import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
+import { encrypt, isEncrypted, tryDecrypt } from './crypto/ai-key-crypto';
 
 /**
  * Providers de IA suportados pelo Nexus.
@@ -87,9 +88,11 @@ const CACHE_TTL_MS = 60_000;
  * org/provider nao serve chave de outro escopo. `invalidateCache()` limpa
  * tudo; `invalidateScope()` limpa um escopo (para futuro upsert/delete).
  *
- * **R-2 (plano):** plaintext armazenado SEM criptografia. Decisao CEO aceita;
- * o resolver isola o ponto de leitura — basta envolver `decrypt()` aqui no
- * futuro, sem mudanca de schema.
+ * **R-2 (ADR-V2-064):** a chave fica CIFRADA at-rest (AES-256-GCM, formato
+ * `enc:v1:...`) em `dados.plaintext`. O resolver isola o ponto de leitura:
+ * decifra via `tryDecrypt` e, ao encontrar um registro legado ainda em
+ * plaintext, dispara uma auto-migracao best-effort (fire-and-forget) que o
+ * regrava cifrado — sem bloquear a resposta e sem mudanca de schema.
  *
  * @see GeminiProvider — consumer principal (provider gemini).
  * @see ApiKeyService (-471) — padrao espelhado de storage de chave.
@@ -231,9 +234,15 @@ export class AiKeyResolverService {
 
   /**
    * Le a primeira DTabela ativa (nao excluida, nao inativa) do `idClasse` e
-   * `dEntidadeId` informados, retornando `dados.plaintext` ou null.
+   * `dEntidadeId` informados, retornando a chave DECIFRADA ou null.
    *
    * `dEntidadeId=null` → chave global. `bigint` → chave de org/user.
+   *
+   * O valor lido pode estar cifrado (`enc:v1:...`) ou em plaintext legado.
+   * `tryDecrypt` resolve ambos. Quando o registro ainda esta em plaintext,
+   * dispara uma auto-migracao best-effort (fire-and-forget) que o regrava
+   * cifrado, mantendo os demais campos de `dados` intactos — sem bloquear a
+   * leitura e sem nunca logar a chave.
    */
   private async tryReadFromDTabela(
     idClasse: bigint,
@@ -246,18 +255,72 @@ export class AiKeyResolverService {
         excluido: false,
         inativo: false,
       },
-      select: { dados: true },
+      // `chave` (PK) e necessaria para a auto-migracao do registro legado.
+      select: { chave: true, dados: true },
       orderBy: { chave: 'desc' }, // rotacao: pega a mais nova
     });
 
     if (!row) return null;
 
     const dados = row.dados as Record<string, unknown> | null;
-    const plaintext = dados?.plaintext;
-    if (typeof plaintext === 'string' && plaintext.length > 0) {
-      return plaintext;
+    const raw = dados?.plaintext;
+    if (typeof raw !== 'string' || raw.length === 0) {
+      return null;
     }
-    return null;
+
+    // Auto-migracao best-effort: registro legado em plaintext → regrava cifrado.
+    if (!isEncrypted(raw) && row.chave !== undefined && row.chave !== null) {
+      this.migrateToEncrypted(row.chave, dados ?? {}, raw);
+    }
+
+    // Decifra (cifrado) ou passa-through (legado). Adulteracao propaga erro.
+    return tryDecrypt(raw);
+  }
+
+  /**
+   * Auto-migracao best-effort de um registro legado para o formato cifrado.
+   *
+   * Fire-and-forget: o UPDATE roda fora do caminho de resposta; falhas sao
+   * apenas logadas (sem a chave) e NUNCA quebram a leitura. Preserva todos os
+   * campos de `dados`, trocando apenas `plaintext` pelo valor cifrado.
+   *
+   * @param chave - PK do registro DTabela a regravar.
+   * @param dados - `dados` atual (preservado, exceto `plaintext`).
+   * @param rawPlaintext - Valor plaintext legado a cifrar.
+   */
+  private migrateToEncrypted(
+    chave: bigint,
+    dados: Record<string, unknown>,
+    rawPlaintext: string,
+  ): void {
+    let encryptedDados: Record<string, unknown>;
+    try {
+      encryptedDados = { ...dados, plaintext: encrypt(rawPlaintext) };
+    } catch (err) {
+      // Cifra falhou (ex: chave-mestra ausente) — leitura segue normal.
+      this.logger.warn(
+        `ai_key_automigrate_encrypt_failed chave=${chave.toString()} ` +
+          `err=${(err as Error)?.message ?? 'unknown'}`,
+      );
+      return;
+    }
+
+    void this.prisma.dTabela
+      .update({
+        where: { chave },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        data: { dados: encryptedDados as any },
+      })
+      .then(() => {
+        this.logger.debug(`ai_key_automigrated chave=${chave.toString()}`);
+      })
+      .catch((err: unknown) => {
+        // Best-effort: proximo read tenta de novo. Chave NUNCA e logada.
+        this.logger.warn(
+          `ai_key_automigrate_update_failed chave=${chave.toString()} ` +
+            `err=${(err as Error)?.message ?? 'unknown'}`,
+        );
+      });
   }
 
   /** Monta a chave de cache de um escopo. */

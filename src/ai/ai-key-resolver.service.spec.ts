@@ -2,10 +2,12 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { InternalServerErrorException } from '@nestjs/common';
 import { AiKeyResolverService } from './ai-key-resolver.service';
 import { PrismaService } from '../prisma.service';
+import { encrypt } from './crypto/ai-key-crypto';
 
 const makePrismaMock = () => ({
   dTabela: {
     findFirst: jest.fn(),
+    update: jest.fn().mockResolvedValue({ chave: BigInt(1) }),
   },
 });
 
@@ -23,6 +25,8 @@ describe('AiKeyResolverService', () => {
     delete process.env.GOOGLE_API_KEY;
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.OPENAI_API_KEY;
+    // Chave-mestra (hex 64) p/ decifrar/auto-migrar (R-2 / ADR-V2-064).
+    process.env.AI_KEYS_ENCRYPTION_KEY = 'c'.repeat(64);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [AiKeyResolverService, { provide: PrismaService, useValue: prisma }],
@@ -169,6 +173,59 @@ describe('AiKeyResolverService', () => {
       const key = await service.resolveKey({ provider: 'gemini', orgId: BigInt(1) });
 
       expect(key).toBe('env-fallback');
+    });
+  });
+
+  describe('criptografia at-rest (R-2 / ADR-V2-064)', () => {
+    it('DECIFRA a chave cifrada lida da DTabela', async () => {
+      const secret = 'claude-org-cifrada';
+      prisma.dTabela.findFirst.mockResolvedValueOnce({
+        chave: BigInt(5),
+        dados: { plaintext: encrypt(secret) },
+      });
+
+      const key = await service.resolveKey({ provider: 'claude', orgId: BigInt(152) });
+
+      expect(key).toBe(secret);
+      // Ja cifrado → NAO auto-migra.
+      expect(prisma.dTabela.update).not.toHaveBeenCalled();
+    });
+
+    it('AUTO-MIGRA registro legado (plaintext) regravando cifrado, sem quebrar a leitura', async () => {
+      const legacy = 'gemini-legacy-plain';
+      prisma.dTabela.findFirst.mockResolvedValueOnce({
+        chave: BigInt(9),
+        dados: { plaintext: legacy, prefix: 'AIzaSyL' },
+      });
+
+      const key = await service.resolveKey({ provider: 'gemini' });
+
+      // Leitura devolve o plaintext (passa-through do legado).
+      expect(key).toBe(legacy);
+      // Auto-migracao fire-and-forget regrava o registro.
+      // Aguarda o microtask do `.then/.catch` resolver.
+      await Promise.resolve();
+      expect(prisma.dTabela.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { chave: BigInt(9) } }),
+      );
+      const updateArg = prisma.dTabela.update.mock.calls[0][0] as {
+        data: { dados: { plaintext: string; prefix: string } };
+      };
+      // Agora cifrado, demais campos preservados.
+      expect(updateArg.data.dados.plaintext.startsWith('enc:v1:')).toBe(true);
+      expect(updateArg.data.dados.plaintext).not.toContain(legacy);
+      expect(updateArg.data.dados.prefix).toBe('AIzaSyL');
+    });
+
+    it('NAO auto-migra quando o registro nao tem chave (PK ausente)', async () => {
+      prisma.dTabela.findFirst.mockResolvedValueOnce({
+        dados: { plaintext: 'gemini-sem-chave' },
+      });
+
+      const key = await service.resolveKey({ provider: 'gemini' });
+
+      expect(key).toBe('gemini-sem-chave');
+      expect(prisma.dTabela.update).not.toHaveBeenCalled();
     });
   });
 });

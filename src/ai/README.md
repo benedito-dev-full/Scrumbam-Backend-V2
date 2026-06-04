@@ -85,9 +85,29 @@ GOOGLE_API_KEY=AIzaSy...
 ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-...
 ENABLE_USER_LEVEL_KEYS=false  # Desligado (futuro)
+
+# Chave-mestra da criptografia at-rest das chaves de IA (R-2 / ADR-V2-064).
+# Hex de 64 chars (32 bytes / 256 bits). Gere com: openssl rand -hex 32
+AI_KEYS_ENCRYPTION_KEY=
 ```
 
 `AiKeyResolverService` cascata: user (se flag) → org → global → env.
+
+### Criptografia at-rest das chaves (R-2 / ADR-V2-064)
+
+As chaves cadastradas em `DTabela` (`dados.plaintext`) ficam **cifradas**
+com AES-256-GCM (formato `enc:v1:<iv>:<authTag>:<ciphertext>`). A chave-mestra
+vem de `AI_KEYS_ENCRYPTION_KEY`.
+
+- **Geração:** `openssl rand -hex 32` (64 chars hex = 32 bytes).
+- **Obrigatória:** sem ela, gravar/ler chave cifrada **falha com erro claro**
+  (`Criptografia de IA não configurada. Contate o administrador.`).
+- **Dev:** um valor fora do formato hex-64 é tolerado via fallback `sha256` da
+  string crua, com `warn` (não usar em produção).
+- **Auto-migração:** registros legados em plaintext são re-gravados cifrados de
+  forma transparente na primeira leitura (best-effort, não bloqueia a resposta).
+- O plaintext **nunca** aparece em log nem em resposta HTTP — só a máscara
+  (`prefix…últimos4`).
 
 ### Criação de Chaves (Produção)
 
@@ -145,7 +165,7 @@ Mapeados em `src/eventos/consumers/audit-log.consumer.ts` (TYPE_TO_CLASSE).
 
 | Item | Status | Razão | Quando |
 |------|--------|-------|--------|
-| **Criptografia at-rest das chaves** | ⚠️ DEBT | Plaintext em DB (R-2 elevado em multi-tenant). Ponto de encrypt/decrypt isolado em `AiKeyResolverService`. Zero mudança de schema. | **PRÓXIMA TAREFA** |
+| **Criptografia at-rest das chaves** | ✅ DONE | AES-256-GCM (`crypto/ai-key-crypto.ts`). Chaves cifradas em `dados.plaintext` (formato `enc:v1:…`). Auto-migração de legado na leitura. Master key em `AI_KEYS_ENCRYPTION_KEY`. Zero mudança de schema. | Concluído (R-2) |
 | **Seleção de modelo específico** | ⏳ FUTURO | Agora: default por provider (gemini-2.5-flash, claude-sonnet-4-5, gpt-4o). Field `model?` em `AiPreferences` pronto, falta UI. | Depois cripto |
 | Multi-conversa por user | ⏳ FUTURO | `identificadorExterno` vira `uuid`. Schema DEvento já suporta. | Later |
 | Título automático da conversa | ⏳ FUTURO | Call extra após 1ª resposta. | Later |

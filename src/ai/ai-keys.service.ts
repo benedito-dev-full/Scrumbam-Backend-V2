@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma.service';
 import { AiKeyResolverService } from './ai-key-resolver.service';
 import { AiProviderName } from './dto/send-message.dto';
 import { AiKeyResponseDto } from './dto/ai-key-response.dto';
+import { encrypt, tryDecrypt } from './crypto/ai-key-crypto';
 
 /**
  * Mapa estatico provider → idClasse da DTabela da chave.
@@ -46,7 +47,10 @@ const PREFIX_LEN = 8;
 
 /** Forma interna de `dados` de uma chave de IA em DTabela. */
 interface AiKeyDados {
-  /** Chave plaintext (R-2: sem criptografia nesta leva). */
+  /**
+   * Chave cifrada at-rest (AES-256-GCM, formato `enc:v1:...`) — R-2/ADR-V2-064.
+   * Registros legados podem conter plaintext cru; a leitura usa `tryDecrypt`.
+   */
   plaintext: string;
   /** Prefixo publico (identificacao). */
   prefix: string;
@@ -155,8 +159,9 @@ export class AiKeysService {
         typeof prev.createdAt === 'string' && prev.createdAt.length > 0
           ? prev.createdAt
           : nowIso;
+      // `prefix`/`hash` derivam do `key` CRU (mascara/duplicata); persiste cifrado.
       const dados: AiKeyDados = {
-        plaintext: key,
+        plaintext: encrypt(key),
         prefix,
         hash,
         createdBy: createdByEntidadeId.toString(),
@@ -176,8 +181,9 @@ export class AiKeysService {
       return this.toResponse(provider, { ...dados });
     }
 
+    // `prefix`/`hash` derivam do `key` CRU (mascara/duplicata); persiste cifrado.
     const dados: AiKeyDados = {
-      plaintext: key,
+      plaintext: encrypt(key),
       prefix,
       hash,
       createdBy: createdByEntidadeId.toString(),
@@ -334,7 +340,11 @@ export class AiKeysService {
     provider: AiProviderName,
     dados: Record<string, unknown>,
   ): AiKeyResponseDto {
-    const plaintext = typeof dados.plaintext === 'string' ? dados.plaintext : '';
+    // `plaintext` em `dados` esta cifrado (novos) ou cru (legados). `tryDecrypt`
+    // resolve ambos: cifrado → decifra; legado → passa-through. So a mascara
+    // usa o resultado; o plaintext real NUNCA entra na resposta.
+    const stored = typeof dados.plaintext === 'string' ? dados.plaintext : '';
+    const plaintext = stored.length > 0 ? tryDecrypt(stored) : '';
     const prefix =
       typeof dados.prefix === 'string' && dados.prefix.length > 0
         ? dados.prefix

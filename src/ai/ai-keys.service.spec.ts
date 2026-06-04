@@ -3,6 +3,7 @@ import { NotFoundException } from '@nestjs/common';
 import { AiKeysService } from './ai-keys.service';
 import { PrismaService } from '../prisma.service';
 import { AiKeyResolverService } from './ai-key-resolver.service';
+import { encrypt } from './crypto/ai-key-crypto';
 
 describe('AiKeysService', () => {
   let service: AiKeysService;
@@ -19,6 +20,19 @@ describe('AiKeysService', () => {
 
   const ORG = BigInt(152);
   const ADMIN = BigInt(900);
+
+  // Chave-mestra (hex 64 chars) p/ a criptografia at-rest (R-2 / ADR-V2-064).
+  const MASTER_KEY_ENV = 'AI_KEYS_ENCRYPTION_KEY';
+  const ORIGINAL_MASTER = process.env[MASTER_KEY_ENV];
+
+  beforeAll(() => {
+    process.env[MASTER_KEY_ENV] = 'b'.repeat(64);
+  });
+
+  afterAll(() => {
+    if (ORIGINAL_MASTER === undefined) delete process.env[MASTER_KEY_ENV];
+    else process.env[MASTER_KEY_ENV] = ORIGINAL_MASTER;
+  });
 
   beforeEach(async () => {
     prisma = {
@@ -59,6 +73,17 @@ describe('AiKeysService', () => {
       expect(res.configured).toBe(true);
       expect((res as unknown as Record<string, unknown>).plaintext).toBeUndefined();
       expect(JSON.stringify(res)).not.toContain('sk-ant-abcdef1234');
+
+      // O `dados.plaintext` PERSISTIDO esta cifrado (nunca o segredo cru).
+      const createArg = prisma.dTabela.create.mock.calls[0][0] as {
+        data: { dados: { plaintext: string; prefix: string } };
+      };
+      expect(createArg.data.dados.plaintext.startsWith('enc:v1:')).toBe(true);
+      expect(createArg.data.dados.plaintext).not.toContain('sk-ant-abcdef1234');
+      // prefix/hash derivam do CRU → mascara/duplicata continuam corretas.
+      expect(createArg.data.dados.prefix).toBe('sk-ant-a');
+      // A mascara da resposta usa o sufixo do plaintext CRU (…1234).
+      expect(res.masked).toContain('1234');
     });
 
     it('ROTACIONA (update) quando ja existe registro, preservando createdAt', async () => {
@@ -74,6 +99,13 @@ describe('AiKeysService', () => {
       );
       expect(prisma.dTabela.create).not.toHaveBeenCalled();
       expect(resolver.invalidateScope).toHaveBeenCalledWith('openai', 'org', ORG);
+
+      // Rotacao tambem grava CIFRADO (nunca o segredo cru).
+      const updateArg = prisma.dTabela.update.mock.calls[0][0] as {
+        data: { dados: { plaintext: string } };
+      };
+      expect(updateArg.data.dados.plaintext.startsWith('enc:v1:')).toBe(true);
+      expect(updateArg.data.dados.plaintext).not.toContain('sk-openai-key-xyz');
     });
 
     it('mapeia gemini→-481 e openai→-483', async () => {
@@ -114,6 +146,30 @@ describe('AiKeysService', () => {
       // O segredo NUNCA aparece.
       expect(JSON.stringify(list)).not.toContain('supersecret9999');
       expect((list[0] as unknown as Record<string, unknown>).plaintext).toBeUndefined();
+    });
+
+    it('mascara CORRETAMENTE chave CIFRADA (via tryDecrypt), sem vazar o segredo', async () => {
+      const secret = 'sk-ant-cifrada-final7777';
+      prisma.dTabela.findMany.mockResolvedValue([
+        {
+          idClasse: BigInt(-482),
+          chave: BigInt(11),
+          dados: {
+            plaintext: encrypt(secret), // armazenado CIFRADO (enc:v1:...)
+            prefix: 'sk-ant-c',
+            createdAt: '2026-06-04T00:00:00.000Z',
+          },
+        },
+      ]);
+
+      const list = await service.listKeys(ORG);
+
+      expect(list).toHaveLength(1);
+      // Mascara usa o sufixo do plaintext decifrado (…7777).
+      expect(list[0].masked).toContain('7777');
+      // O segredo (cru OU cifrado) NUNCA aparece na resposta.
+      expect(JSON.stringify(list)).not.toContain('cifrada-final7777');
+      expect(JSON.stringify(list)).not.toContain('enc:v1:');
     });
 
     it('deduplica por provider (1 registro por provider)', async () => {
