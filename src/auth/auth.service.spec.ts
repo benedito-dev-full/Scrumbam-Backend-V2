@@ -268,7 +268,7 @@ describe('AuthService', () => {
 
   describe('refresh', () => {
     it('deve rotacionar refresh token (happy path)', async () => {
-      refreshTokenService.validate.mockResolvedValue(true);
+      refreshTokenService.validate.mockResolvedValue('valid');
 
       const mockUserGroup = {
         chave: BigInt(1),
@@ -287,8 +287,8 @@ describe('AuthService', () => {
       expect(result.refreshToken).toBe('new-refresh-token');
     });
 
-    it('deve detectar reuse attack e revogar tokens', async () => {
-      refreshTokenService.validate.mockResolvedValue(false);
+    it("deve detectar reuse attack ('invalid') e revogar tokens", async () => {
+      refreshTokenService.validate.mockResolvedValue('invalid');
 
       await expect(service.refresh('stolen-token', BigInt(1))).rejects.toThrow(
         UnauthorizedException,
@@ -297,8 +297,20 @@ describe('AuthService', () => {
       expect(refreshTokenService.revoke).toHaveBeenCalledWith(BigInt(1));
     });
 
+    it("deve lançar 401 benigno para token 'expired' SEM revogar como ataque", async () => {
+      refreshTokenService.validate.mockResolvedValue('expired');
+
+      await expect(service.refresh('old-token', BigInt(1))).rejects.toThrow(
+        UnauthorizedException,
+      );
+
+      // Expiração benigna: NÃO trata como reuse → não revoga, não rotaciona.
+      expect(refreshTokenService.revoke).not.toHaveBeenCalled();
+      expect(refreshTokenService.rotate).not.toHaveBeenCalled();
+    });
+
     it('deve emitir JWT órfão quando user perdeu todos os vínculos (ADR-V2-038)', async () => {
-      refreshTokenService.validate.mockResolvedValue(true);
+      refreshTokenService.validate.mockResolvedValue('valid');
 
       const mockUserGroup = {
         chave: BigInt(1),

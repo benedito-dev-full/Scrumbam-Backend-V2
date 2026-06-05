@@ -297,15 +297,25 @@ export class AuthService {
    * @throws {UnauthorizedException} Se token inválido ou reuse detectado
    */
   async refresh(refreshTokenPlaintext: string, userGroupId: bigint): Promise<AuthResponseDto> {
-    const isValid = await this.refreshTokenService.validate(refreshTokenPlaintext, userGroupId);
+    const validation = await this.refreshTokenService.validate(
+      refreshTokenPlaintext,
+      userGroupId,
+    );
 
-    if (!isValid) {
-      // Reuse detectado! Revogar tudo imediatamente
+    if (validation === 'invalid') {
+      // Hash não bate → reuse detectado! Revogar tudo imediatamente.
       this.logger.warn(`REUSE ATTACK detectado para userGroupId=${userGroupId}`);
       await this.refreshTokenService.revoke(userGroupId);
       throw new UnauthorizedException(
         'Refresh token inválido ou já utilizado. Faça login novamente.',
       );
+    }
+
+    if (validation === 'expired') {
+      // Expiração benigna por idade (ou registro legado sem carimbo).
+      // NÃO é ataque: não loga como REUSE, apenas pede re-login.
+      this.logger.log(`Refresh token expirado (re-login) userGroupId=${userGroupId}`);
+      throw new UnauthorizedException('Sessão expirada. Faça login novamente.');
     }
 
     const userGroup = await this.prisma.dUserGroup.findUnique({
