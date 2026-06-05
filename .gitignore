@@ -42,3 +42,7 @@ workspace/
 
 # Claude Code local
 .claude/settings.local.json
+
+# Codex local
+.codex
+AGENTS.md
