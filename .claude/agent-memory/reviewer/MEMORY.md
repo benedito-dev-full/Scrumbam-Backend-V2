@@ -198,6 +198,7 @@ npm test -- --testPathPattern=automation/risk-gate.adversarial.spec.ts
 
 | Task | Módulo | Fase | Score | Decisão | Issue principal |
 |------|--------|------|-------|---------|-----------------|
+| Task1 Fase5 | ai-multi-provider (keys CRUD) | Frente B Nexus | **8.5** | **APPROVED** | gate CEO 8.0; DVincula -161 direção correta (orgId=idLocEscritu, userId=idEntidade); orgId exclusivo JWT; plaintext nunca vaza resposta/log; 70/70 specs; M1: upsertKey sem $transaction (race teórico, baixo risco); M2: índice DVincula tripla não garantido (infra) |
 | (2026-06-01) | rename-archive-builtin-columns | Frontend+Backend | **8.5** | **APPROVED** | Gate CEO 8.0 atingido; MINOR-1: spec de rename testa só __nome, não cobre status/responsavel/etc. explicitamente; MINOR-2: edge case "arquivar todas as colunas" produz board vazio (sem guard de mínimo); MINOR-3: `applySetColumnHidden` silencioso quando key não existe no schema |
 | (2026-05-26) | prompt-builder | Pós-F13 | **7.2** | **NEEDS_CHANGES** | C1: CommandValidator.DANGEROUS_CHARS rejeita `()` no prompt placeholder (feature disfuncional em produção); masked por mock no integration test |
 | (2026-05-26) re-review | prompt-builder | Pós-F13 | **8.8** | **APPROVED** | C1 fix Opção B (placeholder simbólico); C2/M1 teste REAL detectou variante `<` `>`; R1 dupla camada anti-enum; R2 @Matches `^\d+$`; gate CEO 8.5 atingido |
