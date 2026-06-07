@@ -196,6 +196,82 @@
 
 ---
 
+## ✅ Task 4a: Exposição de `tableFields` no retorno de `get_project` (MCP leitura) — V2 F11 — COMPLETA
+
+**Module:** mcp (MCP Server — 15 tools)
+**Task:** Expor campo `tableFields` (schema de colunas customizáveis) no retorno de `get_project`, documentar e testar regressão
+**Status:** COMPLETA — Implementação finalizada (campo já saía no spread de ProjectResponseDto), Reviewer APPROVED 9.0/10, Documenter entregou docs+commit
+**Duration:** ~1h10m total (Implementer 20m + Reviewer 15m + Documenter 35m) — tarefa PEQUENA (leitura + docs + testes regressão)
+**Quality Score:** 9.0/10 APPROVED (gate CEO 8.0 superado)
+**Date:** 2026-06-07
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | N/A (task micro — não requisitou plano) |
+| Implementer | 20m code | — |
+| Reviewer | 15m | 9.0/10 |
+| Documenter | 35m docs+commit | — |
+
+**Problem:** O retorno de `get_project` JÁ continha `tableFields` (via spread de ProjectResponseDto + JSON.stringify sem filtro), MAS o campo não era explicitamente documentado em:
+- Description da tool (deixava implícito)
+- JSDoc do método (faltava menção e @example)
+- Testes de regressão (não validava o campo)
+
+Isso criava incerteza: será que o campo sempre saía? E se o usuário/LLM queria validar estrutura?
+
+**Solution:** Documentação explícita do campo:
+- **Tool Description:** "Retorna o projeto base (incluindo tableFields — schema das colunas customizáveis da Lista, null para não-Lista)"
+- **JSDoc:** Parágrafo dedicado explicando que `tableFields` sempre retorna (zero query extra), estrutura esperada, semântica (null para não-Listas)
+- **Testes:** Validar que `tableFields` está sempre no payload, com casos m/n (existente vs null vs sem colunas)
+- **Schema:** Description do tool atualizado para deixar explícito
+
+**Implementação:**
+- `src/mcp/tools/get-project.tool.ts` — description + JSDoc detalhado (parágrafo tableFields, @example com field incluído)
+- `src/mcp/schemas/tools.schema.json` — description da tool 1:1 com get-project.tool.ts
+- `src/mcp/__tests__/mcp-tools.get-project.spec.ts` — testes m/n: projeto com tableFields (esperado payload com field), sem tableFields (esperado null)
+- Sem mudança de CÓDIGO (campo já saía) — puramente documentação + validação
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — leitura em DProject (estrutural, SELECT)
+- Pilar 2 (Endpoints): MCP reutiliza ProjectsService.findOne (genérico REST)
+- Pilar 3 (Seed): N/A — ZERO DClasse nova
+
+**Deliverables:**
+- [x] Tool description atualizado (menção explícita de tableFields)
+- [x] JSDoc em get-project.tool.ts — parágrafo sobre tableFields, estrutura esperada, null para não-Listas
+- [x] Schema tools.schema.json — description 1:1 com tool
+- [x] Testes: casos m/n (tableFields presente, null, estrutura JSON validada), 100% PASS
+- [x] CHANGELOG/STATUS atualizados
+- [x] Build PASS (tsc 0 errors, eslint 0 warnings)
+
+**Metrics:**
+- Build: PASS (npm run build, tsc 0 errors, eslint 0 warnings)
+- Tests: regressão 100% (all 99 MCP specs PASS; novos casos tableFields em get-project spec)
+- N+1: ZERO (zero mudança de query — campo já vinha no ProjectResponseDto)
+- Performance: ZERO impacto (campo retorna sem query extra)
+- Tenant isolation: ADR-V2-042 preservada (gate identico, cortocircuito identico)
+
+**Security:**
+- RBAC/Tenant isolation ADR-V2-042 intacta — gate e cortocircuito sem alteração
+- Anti-enumeration: NotFoundException idêntica
+
+**ADRs:**
+- ADR-V2-061 (tableFields como schema versionado de colunas customizáveis — já proposto em Task Colunas Customizáveis Fases 1-5)
+- ADR-V2-042 (tenant isolation — reafirmado)
+
+**Documentation:**
+- JSDoc completo em `get-project.tool.ts` (parágrafo tableFields, estrutura, exemplos)
+- Schema description atualizado
+- CHANGELOG entry: campo explicitamente exposto (leitura, não write)
+- STATUS entry: this section
+
+**Decision (CEO 2026-06-07 — handoff Task 4a/4b):**
+- **Task 4a (CONCLUÍDA):** Leitura + documentação explícita de tableFields. Escrita adiada.
+- **Task 4b (FUTURA):** Escrita de tableFields (PUT /projects/:id com novo campo) + atualização de valores em DTask.dados.fields
+
+**Commit Message:** docs(mcp): expoe tableFields no get_project (leitura) + teste de regressao (V2 F11 Task 4a)
+
 ---
 
 ## ✅ Feature: Multi-Provider IA no Nexus (Gemini + Claude + OpenAI) (V2 F7) — FASE 7 COMPLETA (DOCUMENTACAO)

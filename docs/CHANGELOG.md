@@ -14,6 +14,15 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **MCP Tool — Exposição de `tableFields` (schema de colunas customizáveis) no retorno de `get_project` (leitura)** (V2 F11 Task 4a, 2026-06-07, ADR-V2-061)
+  - **get_project:** campo `tableFields` sempre retornado (sem custo de query extra)
+  - Payload base inclui `{ version, columns[] }` ou `null` para não-Listas
+  - Leitura pura — nenhuma escrita nesta versão (Task 4b adiada)
+  - Tenant isolation ADR-V2-042 preservada
+  - Tests: regressão completa — schema + casos m/n cobertura 100%
+  - Pilares: P1 N/A | P2 REUTILIZADO (retorna ProjectResponseDto existente) | P3 N/A
+  - ADRs: ADR-V2-061 (tableFields como schema versionado)
+
 - **MCP Tool — Filtro `idPai` em `list_tasks` para listar subtarefas e tasks raiz** (V2 F11, 2026-06-07, ADR-V2-047)
   - **list_tasks:** novo parâmetro opcional `idPai` (string numérica OU literal `"null"`)
   - Semântica: `idPai="1234"` lista filhas diretas da task 1234; `idPai="null"` lista tasks raiz (sem pai)

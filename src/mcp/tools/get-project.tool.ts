@@ -28,6 +28,17 @@ type GetProjectInclude = (typeof ALLOWED_INCLUDES)[number];
  * Tool MCP `get_project` — busca dados completos de um projeto, com campos
  * opcionais via `include[]` (`members`, `stats`).
  *
+ * Payload base inclui `tableFields` (ADR-V2-061): o schema versionado das
+ * colunas customizáveis da Lista (`{ version, columns[] }`), ou `null` para
+ * projetos que não são Lista (ou Listas sem schema). Esse campo vem SEMPRE no
+ * payload base — de graça, populado pelo `ProjectsService.findOne` (a mesma
+ * query do REST `GET /projects/:id`), SEM custo de query adicional. Por isso
+ * NÃO é um `include[]` opt-in: os includes (`members`, `stats`) existem apenas
+ * para campos que disparam queries extras; `tableFields` não dispara nenhuma.
+ * O agente/LLM recebe o schema de colunas para, no futuro (Task 4b — escrita),
+ * preencher/editar valores com conhecimento das colunas. Esta tool é LEITURA
+ * PURA — nenhuma escrita, nenhuma mutação.
+ *
  * Tenant isolation (ADR-V2-042 — defense in depth):
  * 1. Resolve `accessibleProjectIds` via `ProjectsService.findAccessibleProjectIds`.
  * 2. Se `projectId` NAO esta no scope autorizado, lanca `NotFoundException`
@@ -80,7 +91,7 @@ export class GetProjectTool implements McpTool {
 
   readonly name = 'get_project';
   readonly description =
-    'Busca dados de um projeto por ID. Suporta include opcional (members, stats) para reduzir round-trips do LLM.';
+    'Busca dados de um projeto por ID. Retorna o projeto base (incluindo tableFields — schema das colunas customizáveis da Lista, null para não-Lista). Suporta include opcional (members, stats) para reduzir round-trips do LLM.';
   readonly inputSchema = {
     type: 'object',
     required: ['projectId'],
