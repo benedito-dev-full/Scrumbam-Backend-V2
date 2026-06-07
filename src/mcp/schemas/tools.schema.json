@@ -206,7 +206,7 @@
     },
     {
       "name": "get_project",
-      "description": "Busca dados de um projeto por ID. Suporta include opcional (members, stats) para reduzir round-trips do LLM.",
+      "description": "Busca dados de um projeto por ID. Retorna o projeto base (incluindo tableFields — schema das colunas customizáveis da Lista, null para não-Lista). Suporta include opcional (members, stats) para reduzir round-trips do LLM.",
       "inputSchema": {
         "type": "object",
         "required": ["projectId"],

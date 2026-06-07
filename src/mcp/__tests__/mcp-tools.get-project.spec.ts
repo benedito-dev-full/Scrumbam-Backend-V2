@@ -18,6 +18,11 @@ import { GetProjectTool } from '../tools/get-project.tool';
  * (j) projeto fora do scope (tenant isolation) → NotFoundException, NENHUM include chamado
  * (k) ctx.dEntidadeId propagado corretamente para findAccessibleProjectIds e findOne
  * (l) expoe get_project em tools/list
+ * (m) tableFields objeto sai no payload base (Task 4a — leitura, ADR-V2-061)
+ * (n) tableFields:null sai como null (chave presente, NAO omitida)
+ *
+ * Nota: Task 4a e LEITURA PURA — escrita de valores/schema de colunas e
+ * escopo da Task 4b (futura).
  */
 describe('MCP get_project tool', () => {
   const projectId = '9007199254740995';
@@ -326,9 +331,59 @@ describe('MCP get_project tool', () => {
         expect.objectContaining({
           name: 'get_project',
           description:
-            'Busca dados de um projeto por ID. Suporta include opcional (members, stats) para reduzir round-trips do LLM.',
+            'Busca dados de um projeto por ID. Retorna o projeto base (incluindo tableFields — schema das colunas customizáveis da Lista, null para não-Lista). Suporta include opcional (members, stats) para reduzir round-trips do LLM.',
         }),
       ]),
     });
+  });
+
+  it('(m) tableFields objeto sai no payload base (sem include) — Task 4a leitura', async () => {
+    const tableFields = {
+      version: 1,
+      columns: [
+        { key: 'f_prioridade', type: 'dropdown', label: 'Prioridade', order: 0 },
+        { key: 'f_estimativa', type: 'number', label: 'Estimativa', order: 1 },
+      ],
+    };
+    const projectWithFields = { ...projectBase, tableFields };
+    projectsService.findOne.mockResolvedValueOnce(projectWithFields);
+
+    const response = await router.dispatch(
+      'tools/call',
+      { name: 'get_project', arguments: { projectId } },
+      userCtx,
+    );
+
+    // tableFields vem do findOne (payload base) — NAO e um include opt-in.
+    expect(projectMembersService.getMembers).not.toHaveBeenCalled();
+    expect(projectsService.getStats).not.toHaveBeenCalled();
+
+    const text = (response.result as { content: { type: string; text: string }[] }).content[0].text;
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    expect(parsed.tableFields).toEqual(tableFields);
+    expect(response.result).toEqual({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(projectWithFields),
+        },
+      ],
+    });
+  });
+
+  it('(n) tableFields:null sai como null (chave presente, NAO omitida) — Task 4a leitura', async () => {
+    const projectNonList = { ...projectBase, tableFields: null };
+    projectsService.findOne.mockResolvedValueOnce(projectNonList);
+
+    const response = await router.dispatch(
+      'tools/call',
+      { name: 'get_project', arguments: { projectId } },
+      userCtx,
+    );
+
+    const text = (response.result as { content: { type: string; text: string }[] }).content[0].text;
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    expect('tableFields' in parsed).toBe(true);
+    expect(parsed.tableFields).toBeNull();
   });
 });
