@@ -7,6 +7,7 @@ import { McpUserContext } from '../interfaces/mcp.types';
 import { McpTool, McpToolError, McpToolResult } from './tool.interface';
 import {
   V3_STATUS_CODES,
+  assertIso8601,
   assertRecord,
   invalidParams,
   parseBigIntParam,
@@ -30,7 +31,10 @@ type PriorityValue = (typeof PRIORITY_VALUES)[number];
  * `tools/list` com tools-quase-iguais. Internamente roteia para:
  *
  * - `tasksService.update` — para `name` / `description` / `priority` /
- *   `assigneeId` (campos basicos).
+ *   `assigneeId` / `dueDate` / `idPai` / `idBloco` (campos basicos).
+ *   `dueDate`/`idPai`/`idBloco` seguem semantica ternaria
+ *   (ausente=nao toca, null=remove, string=define); `idBloco` e
+ *   empacotado em `dados: { idBloco }` (ADR-V2-065).
  * - `tasksService.updateStatus` — para `status` V3 (state machine + telemetria).
  *
  * Ordem de execucao quando multiplos campos sao enviados:
@@ -78,7 +82,7 @@ export class UpdateTaskTool implements McpTool {
 
   readonly name = 'update_task';
   readonly description =
-    'Atualiza qualquer combinacao de campos de uma task (name, description, priority, assigneeId, status). Use update_status se for atualizar APENAS o status.';
+    'Atualiza qualquer combinacao de campos de uma task (name, description, priority, assigneeId, status, dueDate, idPai, idBloco). Para dueDate/idPai/idBloco: ausente=nao toca, null=remove, string=define. Use update_status se for atualizar APENAS o status.';
   readonly inputSchema = {
     type: 'object',
     required: ['taskId'],
@@ -101,6 +105,19 @@ export class UpdateTaskTool implements McpTool {
         description:
           'Codigo V3: INBOX|READY|EXECUTING|DONE|FAILED|CANCELLED|DISCARDED|VALIDATING|VALIDATED',
       },
+      dueDate: {
+        type: ['string', 'null'],
+        description: 'Data limite ISO 8601; null remove; ausente nao toca',
+      },
+      idPai: {
+        type: ['string', 'null'],
+        description: 'string=novo pai (subtarefa, ADR-V2-047); null=move para raiz; ausente=nao toca',
+      },
+      idBloco: {
+        type: ['string', 'null'],
+        description:
+          'string=vincula ao Bloco (DTask -200); null=desvincula; ausente=nao toca (via dados.idBloco)',
+      },
     },
     anyOf: [
       { required: ['name'] },
@@ -108,6 +125,9 @@ export class UpdateTaskTool implements McpTool {
       { required: ['priority'] },
       { required: ['assigneeId'] },
       { required: ['status'] },
+      { required: ['dueDate'] },
+      { required: ['idPai'] },
+      { required: ['idBloco'] },
     ],
   };
 
@@ -152,11 +172,22 @@ export class UpdateTaskTool implements McpTool {
     const assigneeId = this.extractOptionalStringOrNull(input, 'assigneeId');
     const status = this.extractOptionalEnum(input, 'status', V3_STATUS_CODES);
 
+    // Novos campos com semantica ternaria (ausente/null/string).
+    // dueDate: valida ISO 8601 quando string; idPai/idBloco: valida
+    // BigInt-parseabilidade quando string. null e repassado ao service,
+    // que o interpreta como "remover" (raiz/desvincular/sem prazo).
+    const dueDate = this.extractOptionalStringOrNull(input, 'dueDate', { iso8601: true });
+    const idPai = this.extractOptionalStringOrNull(input, 'idPai', { bigint: true });
+    const idBloco = this.extractOptionalStringOrNull(input, 'idBloco', { bigint: true });
+
     const hasBasicUpdate =
       name !== undefined ||
       description !== undefined ||
       priority !== undefined ||
-      assigneeId !== undefined;
+      assigneeId !== undefined ||
+      dueDate !== undefined ||
+      idPai !== undefined ||
+      idBloco !== undefined;
     const hasStatusUpdate = status !== undefined;
 
     if (!hasBasicUpdate && !hasStatusUpdate) {
@@ -175,11 +206,18 @@ export class UpdateTaskTool implements McpTool {
       // assigneeId === null e codificado como '' (string vazia), que o
       // TasksService.update interpreta como "limpar" (idAssignee = null).
       // Diferente de `undefined`, que significa "nao tocar".
+      // dueDate/idPai: passar valor (string|null) direto — o service
+      // distingue undefined/null/string (semantica ternaria).
+      // idBloco: empacotar em `dados: { idBloco }` — o service faz merge
+      // superficial e null remove a chave (desvincula).
       const basicDto: Record<string, unknown> = {
         ...(name !== undefined ? { nome: name } : {}),
         ...(description !== undefined ? { descricao: description } : {}),
         ...(priority !== undefined ? { priority } : {}),
         ...(assigneeId !== undefined ? { assigneeId: assigneeId ?? '' } : {}),
+        ...(dueDate !== undefined ? { dueDate } : {}),
+        ...(idPai !== undefined ? { idPai } : {}),
+        ...(idBloco !== undefined ? { dados: { idBloco } } : {}),
       };
       await this.tasksService.update(taskId, basicDto as never, accessibleProjectIds);
     }
@@ -221,13 +259,25 @@ export class UpdateTaskTool implements McpTool {
   }
 
   /**
-   * Helper privado: extrai `assigneeId` que aceita explicitamente `null`
-   * (semantica: "remover assignee"). Retorna `undefined` se ausente,
-   * `null` se explicitamente nulo, string se valida.
+   * Helper privado: extrai um campo que aceita explicitamente `null`
+   * (semantica ternaria: ausente=nao toca, null=remove, string=define).
+   * Retorna `undefined` se ausente, `null` se explicitamente nulo, string
+   * se valida.
+   *
+   * Validacao adicional opcional quando o valor e string:
+   *   - `iso8601`: exige formato ISO 8601 (ex: dueDate)
+   *   - `bigint`: exige string parseavel como BigInt (ex: idPai/idBloco)
+   *
+   * @param input - Objeto de argumentos da chamada
+   * @param field - Nome do campo a extrair
+   * @param opts - Validacoes adicionais para o caso string
+   * @returns `undefined` (ausente) | `null` (remover) | string (definir)
+   * @throws {McpToolError} INVALID_PARAMS quando o valor existe mas e invalido
    */
   private extractOptionalStringOrNull(
     input: Record<string, unknown>,
     field: string,
+    opts?: { iso8601?: boolean; bigint?: boolean },
   ): string | null | undefined {
     if (!(field in input)) {
       return undefined;
@@ -238,6 +288,12 @@ export class UpdateTaskTool implements McpTool {
     }
     if (typeof value !== 'string' || value.trim() === '') {
       throw invalidParams(field, 'string or null expected');
+    }
+    if (opts?.iso8601) {
+      assertIso8601(value, field);
+    }
+    if (opts?.bigint) {
+      parseBigIntParam(value, field);
     }
     return value;
   }

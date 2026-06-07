@@ -74,6 +74,60 @@ export function optionalLimit(params: Record<string, unknown>): number {
   return value;
 }
 
+/**
+ * Valida que um campo opcional, quando presente e nao-null, e uma string em
+ * formato ISO 8601 (data ou datetime). Espelha o validador `@IsISO8601` do
+ * `CreateTaskDto`/`UpdateTaskDto` — falha cedo com INVALID_PARAMS limpo,
+ * evitando que uma data malformada vire 500 no service (`new Date(...)`).
+ *
+ * Semantica:
+ *   - ausente/null/undefined → retorna `undefined` (campo nao informado)
+ *   - string ISO 8601 valida → retorna a string
+ *   - qualquer outro valor → lanca INVALID_PARAMS
+ *
+ * @param params - Objeto de argumentos da chamada MCP
+ * @param field - Nome do campo a extrair
+ * @returns A string ISO 8601 quando valida, ou `undefined` se ausente/null
+ * @throws {McpToolError} INVALID_PARAMS quando o valor existe mas nao e ISO 8601
+ *
+ * @example
+ * ```typescript
+ * const dueDate = optionalIso8601({ dueDate: '2026-06-30' }, 'dueDate'); // '2026-06-30'
+ * const none = optionalIso8601({}, 'dueDate');                            // undefined
+ * optionalIso8601({ dueDate: 'amanha' }, 'dueDate');                      // throws
+ * ```
+ */
+export function optionalIso8601(
+  params: Record<string, unknown>,
+  field: string,
+): string | undefined {
+  const value = params[field];
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  return assertIso8601(value, field);
+}
+
+/**
+ * Garante que `value` e uma string em formato ISO 8601. Reutilizavel por
+ * extratores que aceitam `string | null` (ex: update_task), onde a checagem
+ * de null acontece fora deste helper.
+ *
+ * @param value - Valor a validar (tipado como `unknown`)
+ * @param field - Nome do campo (para a mensagem de erro)
+ * @returns A string validada (narrowing para `string`)
+ * @throws {McpToolError} INVALID_PARAMS quando nao e string ISO 8601 valida
+ */
+export function assertIso8601(value: unknown, field: string): string {
+  if (typeof value !== 'string') {
+    throw invalidParams(field, 'ISO 8601 date string expected');
+  }
+  if (value.trim() === '' || Number.isNaN(Date.parse(value))) {
+    throw invalidParams(field, 'ISO 8601 date string expected');
+  }
+  return value;
+}
+
 export function parseBigIntParam(value: string, field: string): bigint {
   try {
     return BigInt(value);

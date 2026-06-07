@@ -80,6 +80,70 @@
 
 ---
 
+## ✅ Task 2: Paridade de campos em create_task / update_task (MCP) — V2 F11 — COMPLETA
+
+**Module:** mcp (MCP Server — 15 tools)
+**Task:** Adicionar campos faltantes em create_task e update_task para paridade com frontend
+**Status:** COMPLETA — Implementação finalizada, Reviewer APPROVED 8.7/10, Documenter entregou docs+commit
+**Duration:** ~3h50m total (Strategist planning 40m + Implementer 1h40m + Reviewer 50m + Documenter 40m)
+**Quality Score:** 8.7/10 APPROVED (gate CEO 8.0 superado)
+**Date:** 2026-06-07
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | 40m planning | — |
+| Implementer | 1h40m code | — |
+| Reviewer | 50m | 8.7/10 |
+| Documenter | 40m docs+commit | — |
+
+**Problem:** MCP tools create_task e update_task não exponham campos que o frontend já suporta (priority, dueDate, idPai, assigneeTeamId, idBloco), criando assimetria — LLM não conseguia criar task com prioridade ou vincular a bloco.
+
+**Solution:** Adicionar 5 campos opcionais em ambas tools com validação prévia de tipo:
+- `priority`: enum LOW/MEDIUM/HIGH/URGENT (DTabela -421..-424)
+- `dueDate`: string ISO 8601
+- `idPai`: string BigInt para subtarefa (ADR-V2-047)
+- `assigneeTeamId`: string BigInt para time (DEntidade -155)
+- `idBloco`: string BigInt para bloco (DTask -200, via dados.idBloco per ADR-V2-065)
+
+**Validações:**
+- Helper `optionalIso8601()` em tool-params.ts — valida ISO 8601, retorna undefined/string
+- Helper `assertIso8601()` — garantidor ISO 8601 para reutilização em semântica ternária
+- Helper `extractOptionalStringOrNull()` em update-task.tool.ts — aceita opts { iso8601?, bigint? } para validar string antes de repassar
+- Ordem: ausente (undefined) → null (remove) → string (define)
+- ZERO mudança em TasksService — reutiliza create()/update() existentes (Pilar 2)
+- idBloco empacotado em `dados: { idBloco }` no DTO antes de passar ao service
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DTask é estrutural (SELECT/UPDATE, não INSERT transacional)
+- Pilar 2 (Endpoints): PLENAMENTE ATIVO — reutiliza TasksService.create/update/updateStatus genéricos, ZERO duplicação
+- Pilar 3 (Seed): N/A — ZERO DClasse nova
+
+**Deliverables:**
+- [x] create-task.tool.ts — adiciona 5 campos opcionais, valida enum/ISO/BigInt antes de service
+- [x] update-task.tool.ts — mesmos 5 campos com semântica ternária
+- [x] tool-params.ts — helpers optionalIso8601/assertIso8601, extractOptionalStringOrNull melhorado com opts
+- [x] Testes: 6 specs create_task + 12 specs update_task = 18 novos, 100% PASS
+- [x] JSDoc completo em todos arquivos (template devari-jsdoc)
+- [x] CHANGELOG/ROADMAP/STATUS atualizados
+- [x] Build PASS (tsc 0 errors, eslint 0 warnings)
+
+**Metrics:**
+- Build: PASS (npm run build, tsc 0 errors, eslint 0 warnings)
+- Tests: 18 specs novos (create-task 6 + update-task 12), 100% PASS, regressão ZERO
+- N+1: ZERO (reutiliza queries existentes)
+- Performance: <1ms validation (validações antes de service)
+- Tenant isolation: preservada (projectsService.findOne antes de create, accessibleProjectIds propagado)
+
+**ADRs:**
+- ADR-V2-065 (vínculo dados.idBloco, idPai exclusivamente subtarefa)
+- ADR-V2-047 (subtarefa via idPai)
+- ADR-V2-042 (tenant isolation)
+
+**Commit Message:** feat(mcp): adiciona paridade de campos create_task/update_task — priority/dueDate/idPai/assigneeTeamId/idBloco
+
+---
+
 ---
 
 ## ✅ Feature: Multi-Provider IA no Nexus (Gemini + Claude + OpenAI) (V2 F7) — FASE 7 COMPLETA (DOCUMENTACAO)

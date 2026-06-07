@@ -37,7 +37,7 @@
     },
     {
       "name": "create_task",
-      "description": "Cria uma task no projeto informado.",
+      "description": "Cria uma task no projeto informado. Campos opcionais: priority (LOW/MEDIUM/HIGH/URGENT), dueDate (ISO 8601), idPai (subtarefa), assigneeTeamId (time) e idBloco (vincula a um Bloco via dados.idBloco).",
       "inputSchema": {
         "type": "object",
         "required": ["projectId", "titulo"],
@@ -55,6 +55,27 @@
           },
           "assigneeId": {
             "type": "string"
+          },
+          "priority": {
+            "type": "string",
+            "enum": ["LOW", "MEDIUM", "HIGH", "URGENT"],
+            "description": "Prioridade (LOW/MEDIUM/HIGH/URGENT)"
+          },
+          "dueDate": {
+            "type": "string",
+            "description": "Data limite no formato ISO 8601 (ex: 2026-06-30)"
+          },
+          "idPai": {
+            "type": "string",
+            "description": "ID da task pai (subtarefa, ADR-V2-047)"
+          },
+          "assigneeTeamId": {
+            "type": "string",
+            "description": "ID do time responsavel (DEntidade -155)"
+          },
+          "idBloco": {
+            "type": "string",
+            "description": "ID do Bloco (DTask -200) a vincular via dados.idBloco"
           }
         }
       }
@@ -109,7 +130,7 @@
     },
     {
       "name": "update_task",
-      "description": "Atualiza qualquer combinacao de campos de uma task (name, description, priority, assigneeId, status). Use update_status se for atualizar APENAS o status.",
+      "description": "Atualiza qualquer combinacao de campos de uma task (name, description, priority, assigneeId, status, dueDate, idPai, idBloco). Para dueDate/idPai/idBloco: ausente=nao toca, null=remove, string=define. Use update_status se for atualizar APENAS o status.",
       "inputSchema": {
         "type": "object",
         "required": ["taskId"],
@@ -140,6 +161,18 @@
               "VALIDATED"
             ],
             "description": "Codigo V3: INBOX|READY|EXECUTING|DONE|FAILED|CANCELLED|DISCARDED|VALIDATING|VALIDATED"
+          },
+          "dueDate": {
+            "type": ["string", "null"],
+            "description": "Data limite ISO 8601; null remove; ausente nao toca"
+          },
+          "idPai": {
+            "type": ["string", "null"],
+            "description": "string=novo pai (subtarefa, ADR-V2-047); null=move para raiz; ausente=nao toca"
+          },
+          "idBloco": {
+            "type": ["string", "null"],
+            "description": "string=vincula ao Bloco (DTask -200); null=desvincula; ausente=nao toca (via dados.idBloco)"
           }
         },
         "anyOf": [
@@ -147,7 +180,10 @@
           { "required": ["description"] },
           { "required": ["priority"] },
           { "required": ["assigneeId"] },
-          { "required": ["status"] }
+          { "required": ["status"] },
+          { "required": ["dueDate"] },
+          { "required": ["idPai"] },
+          { "required": ["idBloco"] }
         ]
       }
     },

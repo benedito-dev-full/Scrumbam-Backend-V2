@@ -345,6 +345,147 @@ describe('MCP update_task tool', () => {
     ).rejects.toThrow(BadRequestException);
   });
 
+  // ── Novos campos: dueDate / idPai / idBloco (Task #2 paridade) ────────
+
+  it('(r) dueDate string → update recebe { dueDate }', async () => {
+    await router.dispatch(
+      'tools/call',
+      { name: 'update_task', arguments: { taskId, dueDate: '2026-06-30' } },
+      userCtx,
+    );
+
+    expect(tasksService.update).toHaveBeenCalledWith(
+      taskId,
+      { dueDate: '2026-06-30' },
+      [projectId],
+    );
+  });
+
+  it('(s) dueDate null → update recebe { dueDate: null } (remove)', async () => {
+    await router.dispatch(
+      'tools/call',
+      { name: 'update_task', arguments: { taskId, dueDate: null } },
+      userCtx,
+    );
+
+    expect(tasksService.update).toHaveBeenCalledWith(taskId, { dueDate: null }, [projectId]);
+  });
+
+  it('(t) idPai string → update recebe { idPai }', async () => {
+    await router.dispatch(
+      'tools/call',
+      { name: 'update_task', arguments: { taskId, idPai: '5' } },
+      userCtx,
+    );
+
+    expect(tasksService.update).toHaveBeenCalledWith(taskId, { idPai: '5' }, [projectId]);
+  });
+
+  it('(u) idPai null → update recebe { idPai: null } (move para raiz)', async () => {
+    await router.dispatch(
+      'tools/call',
+      { name: 'update_task', arguments: { taskId, idPai: null } },
+      userCtx,
+    );
+
+    expect(tasksService.update).toHaveBeenCalledWith(taskId, { idPai: null }, [projectId]);
+  });
+
+  it('(v) idBloco string → update recebe { dados: { idBloco } }', async () => {
+    await router.dispatch(
+      'tools/call',
+      { name: 'update_task', arguments: { taskId, idBloco: '77' } },
+      userCtx,
+    );
+
+    expect(tasksService.update).toHaveBeenCalledWith(
+      taskId,
+      { dados: { idBloco: '77' } },
+      [projectId],
+    );
+  });
+
+  it('(w) idBloco null → update recebe { dados: { idBloco: null } } (desvincula)', async () => {
+    await router.dispatch(
+      'tools/call',
+      { name: 'update_task', arguments: { taskId, idBloco: null } },
+      userCtx,
+    );
+
+    expect(tasksService.update).toHaveBeenCalledWith(
+      taskId,
+      { dados: { idBloco: null } },
+      [projectId],
+    );
+  });
+
+  it('(x) combinacao idPai + idBloco + dueDate → 1 chamada a update, sem updateStatus', async () => {
+    await router.dispatch(
+      'tools/call',
+      {
+        name: 'update_task',
+        arguments: { taskId, idPai: '5', idBloco: '77', dueDate: '2026-06-30' },
+      },
+      userCtx,
+    );
+
+    expect(tasksService.update).toHaveBeenCalledTimes(1);
+    expect(tasksService.update).toHaveBeenCalledWith(
+      taskId,
+      { dueDate: '2026-06-30', idPai: '5', dados: { idBloco: '77' } },
+      [projectId],
+    );
+    expect(tasksService.updateStatus).not.toHaveBeenCalled();
+  });
+
+  it('(y) dueDate mal-formado → INVALID_PARAMS sem chamar service', async () => {
+    const response = await router.dispatch(
+      'tools/call',
+      { name: 'update_task', arguments: { taskId, dueDate: 'amanha' } },
+      userCtx,
+    );
+
+    expect(response.error).toEqual(
+      expect.objectContaining({
+        code: -32602,
+        data: { field: 'dueDate', issue: 'ISO 8601 date string expected' },
+      }),
+    );
+    expect(tasksService.update).not.toHaveBeenCalled();
+  });
+
+  it('(z) idPai nao-BigInt → INVALID_PARAMS sem chamar service', async () => {
+    const response = await router.dispatch(
+      'tools/call',
+      { name: 'update_task', arguments: { taskId, idPai: 'abc' } },
+      userCtx,
+    );
+
+    expect(response.error).toEqual(
+      expect.objectContaining({
+        code: -32602,
+        data: { field: 'idPai', issue: 'valid bigint string expected' },
+      }),
+    );
+    expect(tasksService.update).not.toHaveBeenCalled();
+  });
+
+  it('(aa) tenant: idBloco nao burla scope — NotFound do service propaga', async () => {
+    tasksService.update.mockRejectedValueOnce(
+      new NotFoundException(`Task ${taskId} não encontrada`),
+    );
+
+    await expect(
+      router.dispatch(
+        'tools/call',
+        { name: 'update_task', arguments: { taskId, idBloco: '77' } },
+        userCtx,
+      ),
+    ).rejects.toThrow(NotFoundException);
+
+    expect(tasksService.findOne).not.toHaveBeenCalled();
+  });
+
   it('(q) expoe update_task em tools/list', async () => {
     const result = await router.dispatch('tools/list', undefined, userCtx);
 

@@ -143,6 +143,65 @@
 
 ---
 
+## Task 2: Paridade de campos em create_task / update_task (MCP) ✅ COMPLETA
+
+**Status:** ✅ **COMPLETA** — Paridade de campos frontend ↔ MCP tools
+**Módulo V2:** mcp (MCP Server — 15 tools)
+**Fase V2:** F11 (MCP — integração com Claude Code)
+**Tempo Real:** ~3h50m total (Strategist planning 40m + Implementer 1h40m + Reviewer 50m + Documenter 40m)
+**Completado em:** 2026-06-07
+**Quality Score:** 8.7/10 APPROVED (gate CEO 8.0 superado)
+
+**O Que Foi Feito:**
+
+**MCP Tools — Novos campos expostos:**
+- `create_task` — adiciona 5 campos opcionais novos (além dos existentes projectId, titulo, descricao, assigneeId):
+  * `priority`: enum LOW/MEDIUM/HIGH/URGENT (DTabela -421..-424)
+  * `dueDate`: string ISO 8601 (ex: 2026-06-30)
+  * `idPai`: string BigInt para subtarefa (ADR-V2-047)
+  * `assigneeTeamId`: string BigInt para DEntidade -155 (time)
+  * `idBloco`: string BigInt para DTask -200 (vincula via dados.idBloco — ADR-V2-065)
+
+- `update_task` — mesmos 5 campos com semântica ternária:
+  * ausente = não toca o campo
+  * null = remove (dueDate→undefined, idPai→raiz, idBloco→desvincula)
+  * string = define o valor
+
+**Validações em tool-params.ts:**
+- `optionalIso8601()` — valida formato ISO 8601 para dueDate, retorna undefined/string
+- `assertIso8601()` — garante string é ISO 8601, reutilizável em helpers ternários
+- `extractOptionalStringOrNull()` em update-task.tool.ts — aceita `{ iso8601?: boolean; bigint?: boolean }` para validar string antes de repassar ao service
+- Todas validações falham com INVALID_PARAMS antes de chegar no service (sem 500s)
+
+**Reutilização Pilar 2:**
+- create_task → TasksService.create() (ZERO duplicação)
+- update_task → TasksService.update() + TasksService.updateStatus() (orquestração condicional)
+- idBloco empacotado em `dados: { idBloco }` (o service faz merge superficial)
+
+**Tenant Isolation (ADR-V2-042):**
+- create_task valida acesso ao projeto antes de criar (`projectsService.findOne()`)
+- update_task resolve accessibleProjectIds uma vez e propaga para update/updateStatus
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — DTask é estrutural (SELECT/UPDATE, não INSERT transacional)
+- Pilar 2 (Endpoints): PLENAMENTE ATIVO — reutiliza TasksService.create/update genéricos
+- Pilar 3 (Seed): N/A — ZERO DClasse nova
+
+**Métricas:**
+- Build: ✅ PASS (tsc 0 errors, eslint 0 warnings)
+- Tests: 6 specs create_task.ts + 12 specs update_task.ts = 18 novos, 100% PASS
+- N+1: ZERO (reutiliza queries existentes)
+- Performance: <1ms validation
+
+**ADRs:**
+- ADR-V2-065 (vínculo bloco↔task via dados.idBloco, idPai exclusivamente subtarefa)
+- ADR-V2-047 (subtarefa via idPai)
+- ADR-V2-042 (tenant isolation)
+
+**Commits:** feat(mcp): adiciona paridade de campos create_task/update_task — priority/dueDate/idPai/assigneeTeamId/idBloco (V2 F11)
+
+---
+
 ## Task: Remoção TOTAL da funcionalidade Sprint do backend (hard delete) ✅ COMPLETA
 
 **Status:** ✅ **COMPLETA** — Sprint removida das 6 camadas (IA/webhooks, métricas, endpoint/tasks, seed, schema/migration, módulo/governança)

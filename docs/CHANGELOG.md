@@ -12,6 +12,19 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Added
+
+- **MCP Tools — Paridade de campos em create_task / update_task (priority, dueDate, idPai, assigneeTeamId, idBloco)** (V2 F11, 2026-06-07)
+  - **create_task:** novos campos opcionais `priority` (LOW/MEDIUM/HIGH/URGENT), `dueDate` (ISO 8601), `idPai` (subtarefa), `assigneeTeamId` (DEntidade -155), `idBloco` (DTask -200 via dados.idBloco)
+  - **update_task:** mesmos novos campos com semântica ternária (ausente=não toca, null=remove, string=define)
+  - Validações: enum priority, ISO 8601 dueDate, BigInt-parseabilidade IDs
+  - Helpers em `tool-params.ts`: `optionalIso8601`, `assertIso8601`, `extractOptionalStringOrNull` com suporte a validações condicionais
+  - Reutiliza `TasksService.create`/`TasksService.update` (Pilar 2 ATIVADO)
+  - Tenant isolation ADR-V2-042 preservada (validação projeto antes de operação)
+  - Pilares: P1 N/A | P2 REUTILIZADO | P3 N/A (zero DClasse nova)
+  - Tests: 6 specs novos em `mcp-tools.create-task.spec.ts`, 12 specs novos em `mcp-tools.update-task.spec.ts`, todos PASS
+  - ADRs: ADR-V2-065 (vínculo dados.idBloco), ADR-V2-047 (subtarefa idPai), ADR-V2-042 (tenant isolation)
+
 ### Changed
 
 - **MCP Tools — Realinhamento Bloco↔Task (rename `get_block_tree` → `list_block_tasks`)** (V2 F11, 2026-06-07, ADR-V2-065)
