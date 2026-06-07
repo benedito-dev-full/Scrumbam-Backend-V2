@@ -143,6 +143,69 @@
 
 ---
 
+## Task 1: Filtro `idPai` em `list_tasks` para listar subtarefas (MCP) ✅ COMPLETA
+
+**Status:** ✅ **COMPLETA** — Filtro de subtarefas em list_tasks MCP tool
+**Módulo V2:** mcp (MCP Server — 15 tools)
+**Fase V2:** F11 (MCP — integração com Claude Code)
+**Tempo Real:** ~1h40m total (Strategist planning 30m + Implementer 45m + Reviewer 15m + Documenter 10m)
+**Completado em:** 2026-06-07
+**Quality Score:** 9.0/10 APPROVED (gate CEO 8.0 superado)
+
+**O Que Foi Feito:**
+
+**MCP Tool — Novo filtro `idPai` em `list_tasks`:**
+- Novo parâmetro opcional `idPai` (string numérica negativa/positiva OU literal `"null"`)
+- Semântica: 
+  * `idPai="1234"` → lista filhas diretas da task 1234 (depth=1 default)
+  * `idPai="null"` → lista tasks raiz (sem pai)
+  * Ausente → retorna todas as tasks (comportamento padrão preservado)
+
+**Validações em list-tasks.tool.ts:**
+- Regex `^-?\d+$` para valores numéricos (mesmo padrão de idClasse)
+- Aceita literal `"null"` explicitamente (para tasks raiz)
+- Propagação com `!== undefined` (preserva `"null"` e `"0"` como valores válidos)
+- Early-return com mensagem genérica se não autorizado (ADR-V2-042 anti-enumeration)
+
+**Reutilização Pilar 2:**
+- Filtra via `TasksService.findMany()` genérico (ZERO duplicação)
+- Parâmetro `idPai` propagado ao service que já suporta a funcionalidade
+
+**Tenant Isolation (ADR-V2-042):**
+- Resolve `scopedProjectIds` com `ProjectsService.findAccessibleProjectIds()`
+- Apenas tasks de projetos acessíveis retornam — varredura negada em tempo nulo
+- Mensagem idêntica para "fora de scope" e "lista vazia" (anti-enumeration)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — DTask é estrutural (SELECT, não INSERT transacional)
+- Pilar 2 (Endpoints): PLENAMENTE ATIVO — reutiliza TasksService.findMany genérico
+- Pilar 3 (Seed): N/A — ZERO DClasse nova
+
+**Métricas:**
+- Build: ✅ PASS (tsc 0 errors, eslint 0 warnings)
+- Tests: 4 specs novos em `mcp-tools.list-tasks-idpai-filter.spec.ts`, 100% PASS
+- N+1: ZERO (reutiliza TasksService.findMany existente)
+- Performance: <1ms propagação parâmetro
+
+**Exemplos JSDoc:**
+```typescript
+// Listar subtarefas (filhas diretas) de uma task pai
+{"idPai": "1234", "limit": 20}
+// Response: { items: [{chave, nome, idPai: "1234", ...}], pagination: {...} }
+
+// Listar tasks raiz (sem pai)
+{"idPai": "null"}
+// Response: { items: [{chave, nome, idPai: null, ...}], pagination: {...} }
+```
+
+**ADRs:**
+- ADR-V2-047 (subtarefa via idPai — hieararquia de tasks)
+- ADR-V2-042 (tenant isolation — defense-in-depth)
+
+**Commits:** feat(mcp): adiciona filtro idPai a list_tasks para listar subtarefas (V2 F11)
+
+---
+
 ## Task 2: Paridade de campos em create_task / update_task (MCP) ✅ COMPLETA
 
 **Status:** ✅ **COMPLETA** — Paridade de campos frontend ↔ MCP tools

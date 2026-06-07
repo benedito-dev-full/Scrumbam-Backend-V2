@@ -80,6 +80,58 @@
 
 ---
 
+## ✅ Task 1: Filtro `idPai` em `list_tasks` para listar subtarefas (MCP) — V2 F11 — COMPLETA
+
+**Module:** mcp (MCP Server — 15 tools)
+**Task:** Adicionar filtro `idPai` a tool `list_tasks` para LLM listar subtarefas ou tasks raiz
+**Status:** COMPLETA — Implementação finalizada, Reviewer APPROVED 9.0/10, Documenter entregou docs+commit
+**Duration:** ~1h40m total (Strategist planning 30m + Implementer 45m + Reviewer 15m + Documenter 10m)
+**Quality Score:** 9.0/10 APPROVED (gate CEO 8.0 superado)
+**Date:** 2026-06-07
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | 30m planning | — |
+| Implementer | 45m code | — |
+| Reviewer | 15m | 9.0/10 |
+| Documenter | 10m docs+commit | — |
+
+**Problem:** MCP tool `list_tasks` não tinha filtro `idPai` — LLM não conseguia listar subtarefas (filhas diretas de uma task) ou tasks raiz (sem pai). Funcionalidade já existia no backend (`TasksService.findMany` suportava), faltava apenas expor na tool MCP.
+
+**Solution:** Adicionar parâmetro opcional `idPai` a `list_tasks` com semântica dupla:
+- String numérica (ex: `"1234"`) → filhas diretas da task 1234
+- Literal `"null"` → tasks raiz (sem pai)
+- Ausente → preserva comportamento padrão (todas as tasks)
+
+**Implementação:**
+- Novo parâmetro em `list-tasks.tool.ts` com JSDoc completo (5 exemplos — classe, múltiplo, idPai numérico, idPai="null", idPai com paginação)
+- Validação regex `^-?\d+$` OU literal `"null"` (mesmo padrão idClasse)
+- Propagação com `!== undefined` (preserva `"null"` e `"0"` como válidos)
+- ZERO mudança em TasksService — reutiliza `findMany()` existente (Pilar 2 ATIVADO)
+- Tenant isolation ADR-V2-042 preservada (scopedProjectIds + anti-enumeration nula)
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DTask estrutural (SELECT, não transacional)
+- Pilar 2 (Endpoints): PLENAMENTE ATIVO — reutiliza TasksService.findMany genérico
+- Pilar 3 (Seed): N/A — ZERO DClasse nova
+
+**Métricas:**
+- Build: ✅ PASS (tsc 0 errors, eslint 0 warnings)
+- Tests: 4 specs novos `mcp-tools.list-tasks-idpai-filter.spec.ts` (numérico + "null" + validação + scope), 100% PASS
+- N+1: ZERO (reutiliza findMany existente)
+- Performance: <1ms propagação parâmetro
+
+**Security:**
+- RBAC/Tenant isolation ADR-V2-042 intacta
+- Anti-enumeration: mensagem/retorno idênticos para "fora scope" e "lista vazia"
+
+**ADRs:**
+- ADR-V2-047 (subtarefa via idPai — hierarquia de tasks)
+- ADR-V2-042 (tenant isolation — defense-in-depth)
+
+---
+
 ## ✅ Task 2: Paridade de campos em create_task / update_task (MCP) — V2 F11 — COMPLETA
 
 **Module:** mcp (MCP Server — 15 tools)

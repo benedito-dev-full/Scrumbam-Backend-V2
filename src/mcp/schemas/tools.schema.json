@@ -2,7 +2,7 @@
   "tools": [
     {
       "name": "list_tasks",
-      "description": "Lista tasks do usuario com filtros opcionais de projeto, status, assignee e idClasse (ex: -200=Bloco, -154=SCRUMBAN_TASK).",
+      "description": "Lista tasks do usuario com filtros opcionais de projeto, status, assignee, idClasse (ex: -200=Bloco, -154=SCRUMBAN_TASK) e idPai (subtarefas / ADR-V2-047).",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -21,6 +21,10 @@
           "idClasse": {
             "type": "string",
             "description": "Filtra por idClasse polimorfica da DTask (string numerica negativa). Ex: -200=Bloco, -154=SCRUMBAN_TASK."
+          },
+          "idPai": {
+            "type": "string",
+            "description": "Lista subtarefas: chave numerica da task pai (filhas diretas). Use o literal \"null\" para listar tasks raiz (sem pai). Opcional."
           },
           "limit": {
             "type": "integer",

@@ -14,6 +14,17 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **MCP Tool — Filtro `idPai` em `list_tasks` para listar subtarefas e tasks raiz** (V2 F11, 2026-06-07, ADR-V2-047)
+  - **list_tasks:** novo parâmetro opcional `idPai` (string numérica OU literal `"null"`)
+  - Semântica: `idPai="1234"` lista filhas diretas da task 1234; `idPai="null"` lista tasks raiz (sem pai)
+  - Validação: regex `^-?\d+$` OU literal `"null"` — match com ListTasksQueryDto
+  - Propagação: `!== undefined` (preserva `"null"` e `"0"` como valores válidos)
+  - Reutiliza `TasksService.findMany` com depth=1 default (Pilar 2 ATIVADO)
+  - Tenant isolation ADR-V2-042 preservada (scopedProjectIds + anti-enumeration)
+  - Pilares: P1 N/A | P2 REUTILIZADO (findMany genérico) | P3 N/A (zero DClasse)
+  - Tests: 4 specs novos em `mcp-tools.list-tasks-idpai-filter.spec.ts` (numérico + "null" + validação + scope), todos PASS
+  - ADRs: ADR-V2-047 (subtarefa/hieararquia), ADR-V2-042 (tenant isolation)
+
 - **MCP Tools — Paridade de campos em create_task / update_task (priority, dueDate, idPai, assigneeTeamId, idBloco)** (V2 F11, 2026-06-07)
   - **create_task:** novos campos opcionais `priority` (LOW/MEDIUM/HIGH/URGENT), `dueDate` (ISO 8601), `idPai` (subtarefa), `assigneeTeamId` (DEntidade -155), `idBloco` (DTask -200 via dados.idBloco)
   - **update_task:** mesmos novos campos com semântica ternária (ausente=não toca, null=remove, string=define)

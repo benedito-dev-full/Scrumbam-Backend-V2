@@ -27,9 +27,14 @@ import {
  *   - `-154`: SCRUMBAN_TASK — task concreta
  *   - Ou qualquer outro tipo definido no seed (domínio específico)
  *
+ * **Filtro novo F11:** `idPai` (string numérica OU literal `"null"`)
+ * — lista subtarefas (filhas diretas de uma task / ADR-V2-047):
+ *   - `"1234"`: filhas diretas da task de chave 1234
+ *   - `"null"`: tasks raiz (sem pai)
+ *
  * **Performance:** cursor pagination, query ~45ms, ZERO N+1.
  *
- * @see ADR-V2-047 (Fases 0-7: MCP tools + DTask.idPai + filter idClasse)
+ * @see ADR-V2-047 (Fases 0-7: MCP tools + DTask.idPai + filter idClasse/idPai)
  * @see ADR-V2-042 (tenant isolation: defense-in-depth via accessible projects)
  * @see Pilar 2 (endpoints genéricos: reusar TasksService.findMany, não duplicar)
  * @see Pilar 3 (polimorfismo: idClasse determina tipo de task, zero tabela nova)
@@ -47,12 +52,26 @@ import {
  * {"projectId": "100", "status": "EXECUTING", "idClasse": "-154", "limit": 20}
  * // Response: { items: [{chave, nome, status, assigneeId, ...}, ...], pagination: {...} }
  * ```
+ *
+ * @example
+ * ```json
+ * // Listar subtarefas (filhas diretas) de uma task pai
+ * {"idPai": "1234", "limit": 20}
+ * // Response: { items: [{chave, nome, idPai: "1234", ...}, ...], pagination: {...} }
+ * ```
+ *
+ * @example
+ * ```json
+ * // Listar tasks raiz (sem pai)
+ * {"idPai": "null"}
+ * // Response: { items: [{chave, nome, idPai: null, ...}, ...], pagination: {...} }
+ * ```
  */
 @Injectable()
 export class ListTasksTool implements McpTool {
   readonly name = 'list_tasks';
   readonly description =
-    'Lista tasks do usuario com filtros opcionais de projeto, status, assignee e idClasse (ex: -200=Bloco, -154=SCRUMBAN_TASK).';
+    'Lista tasks do usuario com filtros opcionais de projeto, status, assignee, idClasse (ex: -200=Bloco, -154=SCRUMBAN_TASK) e idPai (subtarefas / ADR-V2-047).';
   readonly inputSchema = {
     type: 'object',
     properties: {
@@ -66,6 +85,11 @@ export class ListTasksTool implements McpTool {
         type: 'string',
         description:
           'Filtra por idClasse polimorfica da DTask (string numerica negativa). Ex: -200=Bloco, -154=SCRUMBAN_TASK.',
+      },
+      idPai: {
+        type: 'string',
+        description:
+          'Lista subtarefas: chave numerica da task pai (filhas diretas). Use o literal "null" para listar tasks raiz (sem pai). Opcional.',
       },
       limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 },
       cursor: {
@@ -85,7 +109,7 @@ export class ListTasksTool implements McpTool {
    *
    * **Fluxo:**
    * 1. Valida parâmetros: projectId (BigInt), assigneeId (BigInt), cursor (BigInt),
-   *    status (enum V3), idClasse (regex ^-?\d+$)
+   *    status (enum V3), idClasse (regex ^-?\d+$), idPai (regex ^-?\d+$ ou literal "null")
    * 2. Resolve scope tenant: se projectId fornecido, valida acesso; senão, usa todos
    *    os projetos acessíveis do usuário (via `findAccessibleProjectIds`)
    * 3. Defense-in-depth (ADR-V2-042): passa `scopedProjectIds` para `findMany` como
@@ -95,6 +119,10 @@ export class ListTasksTool implements McpTool {
    *
    * **Filtro idClasse (novo F7):** Validação regex `^-?\d+$` (número negativo ou positivo)
    * — permite seed canônico (-200 Bloco, -154 SCRUMBAN_TASK) e tipos de domínio específicos (positivos).
+   *
+   * **Filtro idPai (novo F11):** Validação aceita string numérica (`^-?\d+$`) OU o literal
+   * `"null"`. Propagado com `!== undefined` (não truthy) para preservar `"null"`/`"0"`.
+   * Lista filhas diretas da task pai (depth=1 default do findMany) ou tasks raiz (`"null"`).
    *
    * **Tenant Isolation:** Se user A tenta filtrar task que pertence a projeto de user B,
    * `scopedProjectIds` não inclui esse projeto — query retorna vazio (não enumera).
@@ -143,6 +171,20 @@ export class ListTasksTool implements McpTool {
    * }
    * // Response: (página 2 de tasks concretas em EXECUTING assignadas a user 5)
    * ```
+   *
+   * @example
+   * ```json
+   * // Request: listar subtarefas (filhas diretas) da task 1234
+   * { "idPai": "1234", "limit": 20 }
+   * // Response: { "items": [{ "chave": "1235", "idPai": "1234", ... }], "pagination": {...} }
+   * ```
+   *
+   * @example
+   * ```json
+   * // Request: listar tasks raiz (sem pai)
+   * { "idPai": "null" }
+   * // Response: { "items": [{ "chave": "100", "idPai": null, ... }], "pagination": {...} }
+   * ```
    */
   async handler(params: unknown, ctx: McpUserContext): Promise<McpToolResult> {
     const input = optionalRecord(params);
@@ -151,6 +193,7 @@ export class ListTasksTool implements McpTool {
     const cursor = optionalString(input, 'cursor');
     const status = optionalString(input, 'status');
     const idClasse = optionalString(input, 'idClasse');
+    const idPai = optionalString(input, 'idPai');
 
     if (projectId) {
       parseBigIntParam(projectId, 'projectId');
@@ -169,6 +212,12 @@ export class ListTasksTool implements McpTool {
     if (idClasse !== undefined && !/^-?\d+$/.test(idClasse)) {
       throw invalidParams('idClasse', 'must match /^-?\\d+$/');
     }
+    // idPai: aceita o literal "null" (tasks raiz) OU string numerica (filhas
+    // diretas da task pai). Mesma regex de idClasse por simetria — o findMany
+    // faz BigInt() e lida com o resto (ADR-V2-047 / Fase F11).
+    if (idPai !== undefined && idPai !== 'null' && !/^-?\d+$/.test(idPai)) {
+      throw invalidParams('idPai', 'must be a numeric id or the literal "null"');
+    }
 
     const scopedProjectIds = await this.resolveScopedProjectIds(projectId, ctx);
     if (scopedProjectIds.length === 0) {
@@ -184,6 +233,9 @@ export class ListTasksTool implements McpTool {
         ...(status ? { status } : {}),
         ...(assigneeId ? { assigneeId } : {}),
         ...(idClasse ? { idClasse } : {}),
+        // IMPORTANTE: `!== undefined` (não truthy) — "null" e "0" são valores
+        // válidos que devem ser propagados ao findMany.
+        ...(idPai !== undefined ? { idPai } : {}),
         ...(cursor ? { cursor } : {}),
         limit: optionalLimit(input),
       },
