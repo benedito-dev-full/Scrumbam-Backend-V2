@@ -10,10 +10,10 @@ import {
 import toolsSchema from '../schemas/tools.schema.json';
 import { McpJsonRpcError, McpToolDefinition, McpUserContext } from '../interfaces/mcp.types';
 import { CreateTaskTool } from '../tools/create-task.tool';
-import { GetBlockTreeTool } from '../tools/get-block-tree.tool';
 import { GetProjectTool } from '../tools/get-project.tool';
 import { GetTaskTool } from '../tools/get-task.tool';
 import { GetUnreadCountTool } from '../tools/get-unread-count.tool';
+import { ListBlockTasksTool } from '../tools/list-block-tasks.tool';
 import { ListBlocksTool } from '../tools/list-blocks.tool';
 import { ListMembersTool } from '../tools/list-members.tool';
 import { ListNotificationsTool } from '../tools/list-notifications.tool';
@@ -74,7 +74,7 @@ export class McpRouterService {
     getUnreadCountTool?: GetUnreadCountTool,
     searchTasksTool?: SearchTasksTool,
     listBlocksTool?: ListBlocksTool,
-    getBlockTreeTool?: GetBlockTreeTool,
+    listBlockTasksTool?: ListBlockTasksTool,
     configService?: ConfigService,
   ) {
     const tools: Array<McpTool | undefined> = [
@@ -92,7 +92,7 @@ export class McpRouterService {
       getUnreadCountTool,
       searchTasksTool,
       listBlocksTool,
-      getBlockTreeTool,
+      listBlockTasksTool,
     ];
     this.tools = tools.filter((tool): tool is McpTool => tool !== undefined);
     this.cachedToolDefinitions = (toolsSchema.tools as McpToolDefinition[]).map((tool) => ({

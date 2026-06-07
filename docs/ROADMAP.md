@@ -4657,6 +4657,75 @@ Remoção cirúrgica do write-path dual entre `DProject.repoUrl` (coluna canôni
 
 ---
 
+## Task 1: Polir MCP block tools — Realinhamento `list_block_tasks` (rename get_block_tree) ✅ COMPLETA
+
+**Status:** ✅ **COMPLETA** — MCP tools realinhadas ao modelo de Bloco C (vínculo via `dados.idBloco`, não via `idPai`)
+**Módulo V2:** mcp (MCP Server — 15 tools)
+**Fase V2:** F11 (MCP Server maintenance/realignment pós-Bloco C)
+**Tempo Real:** ~5h30m total (Strategist planning 1h + Implementer 2h50m + Reviewer 30m + Documenter 1h10m)
+**Completado em:** 2026-06-07
+**Quality Score:** 8.8/10 APPROVED (gate CEO 8.0 superado)
+
+**O Que Foi Feito:**
+
+**Análise do Problema:**
+- Duas MCP tools (`get_block_tree`, `list_blocks`) escritas na era "fases/sprints" (pré-Bloco C)
+- Pressuposto morto: vínculo task↔bloco via `idPai` (CTE recursiva descia SOMENTE por `idPai`)
+- Realidade V2: vínculo task↔bloco mudou para `dados.idBloco` (JSON field), `idPai` é EXCLUSIVAMENTE subtarefa
+- Consequência: `get_block_tree` retornava vazio (não enxergava tasks — bug provado)
+
+**Tool Nova `list_block_tasks` (substitui get_block_tree):**
+- Input: `blockId` (required), `includeMetrics?` (boolean), `limit?` (1..50 def 20), `cursor?`
+- Output: lista plana (não árvore) com `items[]` (TaskResponseDto), `pagination`, `metrics?` (opcional)
+- Métricas em memória (ZERO query extra): done/failed/inProgress/total/percent (semântica front)
+- Reusa `TasksService.findMany` (Pilar 2 ATIVADO) com filtro `idBloco`
+- Tenant isolation ADR-V2-042 preservado (scope RBAC + anti-enumeration)
+
+**Ajustes correlatos:**
+- `list_blocks` limpo: removido `includeMetrics` (era no-op)
+- Vocabulário "PHASE" → "Bloco" em `list_tasks` (descrição, schema, JSDoc)
+- `get-block-tree.tool.ts` deletado (arquivo + testes)
+- `PhaseTreeService` **intacto** — continua servindo `GET /tasks/:id/tree` (hierarquia por `idPai`)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — DTask é estrutural (SELECT via Prisma)
+- Pilar 2 (Endpoints): PLENAMENTE ATIVO — reutiliza `TasksService.findMany` genérico
+- Pilar 3 (Seed): N/A — ZERO DClasse nova (reutiliza -200 bloco, -441..-449 status V3)
+
+**Métricas:**
+- Build: ✅ PASS (npm run build, tsc 0 errors, eslint 0 warnings)
+- Tests: ✅ 155/155 specs MCP PASS (novo test suite `mcp-tools.list-block-tasks.spec.ts`, deletados `mcp-tools.get-block-tree.spec.ts`)
+- Queries: ZERO query extra (métricas em memória sobre items já carregados)
+- N+1: ZERO (reuso findMany existente)
+- Performance: <1ms memória sobre página; se bloco >limit, métricas são parciais (documentado)
+
+**Garantias:**
+- `ZERO tabela/DClasse nova` (ADR-V2-001 respeitado)
+- `Tenant isolation ADR-V2-042` preservada (scope + anti-enumeration idêntico)
+- `PhaseTreeService + /tasks/:id/tree intactos` — hierarquia de subtarefa por `idPai` continua funcionando
+- `Schema-consistency test verde` — tools/schema pareamento validado mecanicamente
+
+**Breaking Change:**
+- Tool `get_block_tree` removida → clientes MCP receberão `METHOD_NOT_FOUND`
+- Mitigação: Frontend usa `GET /tasks?idBloco=`, não a tool (risco BAIXO)
+- CHANGELOG com nota de breaking change
+
+**ADRs:**
+- **ADR-V2-065 (novo):** Vínculo bloco↔task via `dados.idBloco`; `idPai` é EXCLUSIVAMENTE subtarefa (eixos independentes)
+- ADR-V2-047 (clarificado, não revogado — hierarquia por `idPai` continua válida para subtarefas)
+- ADR-V2-042 (tenant isolation — reafirmado em ambas as tools MCP)
+
+**Documentação:**
+- `docs/decisions/ADR-V2-065-bloco-task-via-dados-idbloco.md` (redigido — contexto, alternativas, decisão, implementação)
+- JSDoc completo em `list-block-tasks.tool.ts` (template devari-jsdoc)
+- Schema `tools.schema.json` atualizado com nova tool, remover ref obsoleta
+- ROADMAP, CHANGELOG, STATUS atualizados
+
+**Commits:**
+- Commit único consolidado: feat(mcp) + fix(mcp-vocabulario) + docs(adr) + test(mcp) (Conventional Commits scope V2)
+
+---
+
 ## Proximas fases (preview)
 
 | Fase | Nome | Pilar dominante |

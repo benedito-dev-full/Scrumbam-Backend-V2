@@ -9,10 +9,11 @@ import { ListBlocksTool } from '../tools/list-blocks.tool';
  * (b) projectId ausente → INVALID_PARAMS
  * (c) projectId fora do scope → retorna lista vazia (anti enumeration)
  * (d) cursor invalido → INVALID_PARAMS
- * (e) includeMetrics=true — ignorado nesta versao, NAO chama PhaseMetricsService
  * (f) limit fora de range → INVALID_PARAMS
- * (g) BigInt id serializado como string no payload retornado
  * (h) scope vazio retorna items vazios sem chamar findMany
+ *
+ * Nota: o param `includeMetrics` foi REMOVIDO desta tool (Task 1 — polir block
+ * tools). Para tasks + métricas de um bloco use `list_block_tasks`.
  */
 describe('MCP list_blocks tool', () => {
   const projectId = '9007199254740995';
@@ -130,10 +131,10 @@ describe('MCP list_blocks tool', () => {
     );
   });
 
-  it('(e) includeMetrics=true — NAO computa metricas (chama findMany normal)', async () => {
+  it('includeMetrics removido — findMany nunca recebe o campo', async () => {
     await router.dispatch(
       'tools/call',
-      { name: 'list_blocks', arguments: { projectId, includeMetrics: true } },
+      { name: 'list_blocks', arguments: { projectId } },
       userCtx,
     );
 
@@ -151,21 +152,6 @@ describe('MCP list_blocks tool', () => {
 
     expect(response.error).toEqual(
       expect.objectContaining({ code: -32602, data: expect.objectContaining({ field: 'limit' }) }),
-    );
-  });
-
-  it('(g) includeMetrics tipo errado (string) → INVALID_PARAMS', async () => {
-    const response = await router.dispatch(
-      'tools/call',
-      { name: 'list_blocks', arguments: { projectId, includeMetrics: 'true' } },
-      userCtx,
-    );
-
-    expect(response.error).toEqual(
-      expect.objectContaining({
-        code: -32602,
-        data: expect.objectContaining({ field: 'includeMetrics' }),
-      }),
     );
   });
 

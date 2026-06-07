@@ -5,7 +5,6 @@ import { TasksService } from '../../tasks/tasks.service';
 import { McpUserContext } from '../interfaces/mcp.types';
 import { McpTool, McpToolResult } from './tool.interface';
 import {
-  invalidParams,
   optionalLimit,
   optionalRecord,
   optionalString,
@@ -23,17 +22,15 @@ import {
  * ADR-V2-042). Quando o `projectId` informado não está no escopo do usuário MCP,
  * retorna lista vazia com anti-enumeration (mensagem idêntica a "sem blocos").
  *
- * **Nota sobre `includeMetrics`:** aceito por compatibilidade futura, mas NÃO
- * computado nesta v1 — calcular métricas em listagem pode ser N+1 (50 blocos x
- * CTE recursiva = custo alto). Para métricas use `get_block_tree(blockId,
- * includeMetrics=true)` que as computa em 1 CTE.
+ * **Para as tasks e métricas de um bloco**, use `list_block_tasks(blockId,
+ * includeMetrics=true)` — esta tool lista apenas os blocos (agrupadores), não
+ * suas tasks.
  *
  * **Performance:** cursor pagination, query ~45ms, ZERO N+1.
  *
- * @see ADR-V2-047 (Fases 0-7: MCP tools + DTask.idPai + tree + bloco seletor)
- * @see PhaseTreeService — para árvore recursiva com métricas consolidadas
  * @see ADR-V2-042 (tenant isolation: defense-in-depth via accessible projects)
  * @see Pilar 2 (endpoints genéricos: reusar TasksService.findMany, não duplicar)
+ * @see ListBlockTasksTool — para as tasks de um bloco + métricas de progresso
  *
  * @example
  * ```json
@@ -48,7 +45,7 @@ export class ListBlocksTool implements McpTool {
 
   readonly name = 'list_blocks';
   readonly description =
-    'Lista blocos (DTask idClasse=-200) de um projeto acessivel ao usuario. Para metricas detalhadas use get_block_tree.';
+    'Lista blocos (DTask idClasse=-200) de um projeto acessivel ao usuario. Para as tasks e metricas de um bloco use list_block_tasks.';
   readonly inputSchema = {
     type: 'object',
     required: ['projectId'],
@@ -56,11 +53,6 @@ export class ListBlocksTool implements McpTool {
       projectId: { type: 'string', description: 'ID do projeto (obrigatorio)' },
       limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 },
       cursor: { type: 'string', description: 'Cursor de paginacao' },
-      includeMetrics: {
-        type: 'boolean',
-        description:
-          'Aceito por compatibilidade futura — NAO computa metricas nesta versao (evita N+1). Use get_block_tree(blockId, includeMetrics=true) para metricas por bloco.',
-      },
     },
   };
 
@@ -76,9 +68,8 @@ export class ListBlocksTool implements McpTool {
    * 1. Valida `projectId` (BigInt) e `cursor` (BigInt opcional, via `parseBigIntParam`)
    * 2. Resolve `accessibleProjectIds` do usuário MCP (defense-in-depth ADR-V2-042)
    * 3. Se `projectId` não está no scope, retorna lista vazia (anti-enumeration)
-   * 4. Se `includeMetrics=true`, loga aviso (flag ignorado) e prossegue
-   * 5. Delega para `TasksService.findMany({ projectId, idClasse: '-200', cursor, limit }, accessibleProjectIds)`
-   * 6. Retorna response tipado com items + pagination (hasMore, nextCursor)
+   * 4. Delega para `TasksService.findMany({ projectId, idClasse: '-200', cursor, limit }, accessibleProjectIds)`
+   * 5. Retorna response tipado com items + pagination (hasMore, nextCursor)
    *
    * **Tenant Isolation:** `accessibleProjectIds` passado para TasksService como
    * 2º argumento — defense-in-depth. Se blockId não acessível, erro genérico (404).
@@ -117,11 +108,6 @@ export class ListBlocksTool implements McpTool {
       parseBigIntParam(cursor, 'cursor');
     }
 
-    const includeMetrics = input.includeMetrics;
-    if (includeMetrics !== undefined && typeof includeMetrics !== 'boolean') {
-      throw invalidParams('includeMetrics', 'boolean expected');
-    }
-
     const limit = optionalLimit(input);
 
     const accessibleProjectIds = await this.projectsService.findAccessibleProjectIds(
@@ -134,12 +120,6 @@ export class ListBlocksTool implements McpTool {
         `list_blocks: projeto ${projectId} fora do scope para entidade ${ctx.dEntidadeId.toString()}`,
       );
       return textResult({ items: [], pagination: { hasMore: false, nextCursor: null } });
-    }
-
-    if (includeMetrics) {
-      this.logger.debug(
-        `list_blocks includeMetrics=true ignorado (use get_block_tree). projectId=${projectId}`,
-      );
     }
 
     const result = await this.tasksService.findMany(

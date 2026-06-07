@@ -2,7 +2,7 @@
   "tools": [
     {
       "name": "list_tasks",
-      "description": "Lista tasks do usuario com filtros opcionais de projeto, status, assignee e idClasse (ex: -200=PHASE, -154=SCRUMBAN_TASK).",
+      "description": "Lista tasks do usuario com filtros opcionais de projeto, status, assignee e idClasse (ex: -200=Bloco, -154=SCRUMBAN_TASK).",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -20,7 +20,7 @@
           },
           "idClasse": {
             "type": "string",
-            "description": "Filtra por idClasse polimorfica da DTask (string numerica negativa). Ex: -200=PHASE, -154=SCRUMBAN_TASK."
+            "description": "Filtra por idClasse polimorfica da DTask (string numerica negativa). Ex: -200=Bloco, -154=SCRUMBAN_TASK."
           },
           "limit": {
             "type": "integer",
@@ -245,40 +245,32 @@
     },
     {
       "name": "list_blocks",
-      "description": "Lista blocos (DTask idClasse=-200) de um projeto acessivel ao usuario. Para metricas detalhadas use get_block_tree.",
+      "description": "Lista blocos (DTask idClasse=-200) de um projeto acessivel ao usuario. Para as tasks e metricas de um bloco use list_block_tasks.",
       "inputSchema": {
         "type": "object",
         "required": ["projectId"],
         "properties": {
           "projectId": { "type": "string", "description": "ID do projeto (obrigatorio)" },
           "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 20 },
-          "cursor": { "type": "string", "description": "Cursor de paginacao" },
-          "includeMetrics": {
-            "type": "boolean",
-            "description": "Aceito por compatibilidade futura — NAO computa metricas nesta versao (evita N+1). Use get_block_tree(blockId, includeMetrics=true) para metricas por bloco."
-          }
+          "cursor": { "type": "string", "description": "Cursor de paginacao" }
         }
       }
     },
     {
-      "name": "get_block_tree",
-      "description": "Retorna arvore recursiva de um bloco ou task. Aceita maxDepth (1..20) e includeMetrics opcionais. Escopo automatico por tenant.",
+      "name": "list_block_tasks",
+      "description": "Lista as tasks de um Bloco (via dados.idBloco) como lista plana, com paginacao e metricas opcionais (total/done/failed/inProgress/percent da pagina). Escopo automatico por tenant.",
       "inputSchema": {
         "type": "object",
         "required": ["blockId"],
         "properties": {
-          "blockId": { "type": "string", "description": "ID do bloco ou task raiz (chave DTask)" },
-          "maxDepth": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 20,
-            "description": "Profundidade maxima de descida (default 20)"
-          },
+          "blockId": { "type": "string", "description": "ID do Bloco (chave DTask idClasse=-200)" },
           "includeMetrics": {
             "type": "boolean",
             "default": false,
-            "description": "Quando true, anexa metricas (total/done/failed/inProgress/percent) em cada no de bloco. ZERO N+1 (CTE agregadora)."
-          }
+            "description": "Quando true, anexa metricas de progresso (total/done/failed/inProgress/percent) calculadas sobre a pagina retornada. ZERO query extra."
+          },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 20 },
+          "cursor": { "type": "string", "description": "Cursor de paginacao" }
         }
       }
     }

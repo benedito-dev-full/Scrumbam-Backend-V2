@@ -1,9 +1,9 @@
 import toolsSchema from '../schemas/tools.schema.json';
 import { CreateTaskTool } from '../tools/create-task.tool';
-import { GetBlockTreeTool } from '../tools/get-block-tree.tool';
 import { GetProjectTool } from '../tools/get-project.tool';
 import { GetTaskTool } from '../tools/get-task.tool';
 import { GetUnreadCountTool } from '../tools/get-unread-count.tool';
+import { ListBlockTasksTool } from '../tools/list-block-tasks.tool';
 import { ListBlocksTool } from '../tools/list-blocks.tool';
 import { ListMembersTool } from '../tools/list-members.tool';
 import { ListNotificationsTool } from '../tools/list-notifications.tool';
@@ -61,7 +61,7 @@ function buildRegisteredTools(): McpTool[] {
     new GetUnreadCountTool(noop),
     new SearchTasksTool(noop, noop),
     new ListBlocksTool(noop, noop),
-    new GetBlockTreeTool(noop, noop, noop),
+    new ListBlockTasksTool(noop, noop),
   ];
 }
 

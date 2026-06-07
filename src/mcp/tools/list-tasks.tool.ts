@@ -23,7 +23,7 @@ import {
  *
  * **Filtro novo F7:** `idClasse` (string numérica negativa ou positiva)
  * — filtra por tipo de task (Pilar 3 — polimorfismo DTask):
- *   - `-200`: PHASE — agrupador de tasks (chamado "Bloco" no frontend)
+ *   - `-200`: Bloco — agrupador de tasks (DTask idClasse=-200)
  *   - `-154`: SCRUMBAN_TASK — task concreta
  *   - Ou qualquer outro tipo definido no seed (domínio específico)
  *
@@ -36,7 +36,7 @@ import {
  *
  * @example
  * ```json
- * // Listar apenas phases de um projeto
+ * // Listar apenas blocos de um projeto
  * {"projectId": "100", "idClasse": "-200", "limit": 10}
  * // Response: { items: [{chave, nome, idClasse: -200, ...}, ...], pagination: {...} }
  * ```
@@ -52,7 +52,7 @@ import {
 export class ListTasksTool implements McpTool {
   readonly name = 'list_tasks';
   readonly description =
-    'Lista tasks do usuario com filtros opcionais de projeto, status, assignee e idClasse (ex: -200=PHASE, -154=SCRUMBAN_TASK).';
+    'Lista tasks do usuario com filtros opcionais de projeto, status, assignee e idClasse (ex: -200=Bloco, -154=SCRUMBAN_TASK).';
   readonly inputSchema = {
     type: 'object',
     properties: {
@@ -65,7 +65,7 @@ export class ListTasksTool implements McpTool {
       idClasse: {
         type: 'string',
         description:
-          'Filtra por idClasse polimorfica da DTask (string numerica negativa). Ex: -200=PHASE, -154=SCRUMBAN_TASK.',
+          'Filtra por idClasse polimorfica da DTask (string numerica negativa). Ex: -200=Bloco, -154=SCRUMBAN_TASK.',
       },
       limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 },
       cursor: {
@@ -94,7 +94,7 @@ export class ListTasksTool implements McpTool {
    * 5. Retorna response tipado: { items: TaskResponseDto[], pagination: { hasMore, nextCursor } }
    *
    * **Filtro idClasse (novo F7):** Validação regex `^-?\d+$` (número negativo ou positivo)
-   * — permite seed canônico (-200, -154) e tipos de domínio específicos (positivos).
+   * — permite seed canônico (-200 Bloco, -154 SCRUMBAN_TASK) e tipos de domínio específicos (positivos).
    *
    * **Tenant Isolation:** Se user A tenta filtrar task que pertence a projeto de user B,
    * `scopedProjectIds` não inclui esse projeto — query retorna vazio (não enumera).
@@ -105,7 +105,7 @@ export class ListTasksTool implements McpTool {
    *
    * @example
    * ```json
-   * // Request: listar fases de um projeto (idClasse=-200)
+   * // Request: listar blocos de um projeto (idClasse=-200)
    * {
    *   "projectId": "100",
    *   "idClasse": "-200",
@@ -117,7 +117,7 @@ export class ListTasksTool implements McpTool {
    *   "items": [
    *     {
    *       "chave": "200",
-   *       "nome": "Fase 1",
+   *       "nome": "Bloco 1",
    *       "descricao": null,
    *       "idClasse": "-200",
    *       "idProject": "100",

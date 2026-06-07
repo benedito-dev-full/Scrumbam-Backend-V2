@@ -1,6 +1,84 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-06-04 (Feature Multi-Provider IA — ADR-V2-064, FASE 7 DOCUMENTACAO CONCLUIDA)
+**Ultima atualizacao:** 2026-06-07 (Task 1: Polir MCP block tools — realinhamento Bloco C)
+
+---
+
+## ✅ Task 1: Polir MCP block tools (list_block_tasks) — Realinhamento ao modelo Bloco C (V2 F11) — COMPLETA
+
+**Module:** mcp (MCP Server — 15 tools)
+**Task:** Substituir `get_block_tree` por `list_block_tasks` (nome+semântica nova); limpar vocabulário "PHASE"→"Bloco"
+**Status:** COMPLETA — Implementação finalizada, Reviewer APPROVED 8.8/10, Documenter entregou ADR-V2-065 + docs
+**Duration:** ~5h30m total (Strategist planning 1h + Implementer 2h50m + Reviewer 30m + Documenter 1h10m)
+**Quality Score:** 8.8/10 APPROVED (gate CEO 8.0 superado)
+**Date:** 2026-06-07
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | 1h planning | — |
+| Implementer | 2h50m code | — |
+| Reviewer | 30m | 8.8/10 |
+| Documenter | 1h10m docs+commit | — |
+
+**Problem:** Duas MCP tools (`get_block_tree`, `list_blocks`) foram escritas na era pré-Bloco C e mantiveram pressuposto morto: vínculo task↔bloco via `idPai` (hierarquia recursiva). Realidade V2: vínculo task↔bloco mudou para `dados.idBloco` (JSON), e `idPai` é EXCLUSIVAMENTE subtarefa. Consequência: `get_block_tree` retornava vazio (não enxergava tasks — bug provado).
+
+**Solution:** Nova tool MCP `list_block_tasks` (substitui `get_block_tree`) com semântica plana: filtra tasks por `dados.idBloco`, retorna lista com métricas opcionais (done/failed/inProgress/total/percent). Reutiliza `TasksService.findMany` (Pilar 2 ATIVADO). Métricas em memória = ZERO query extra.
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DTask é estrutural (SELECT via Prisma)
+- Pilar 2 (Endpoints): PLENAMENTE ATIVO — reutiliza `TasksService.findMany` genérico
+- Pilar 3 (Seed): N/A — ZERO DClasse nova (reutiliza -200 bloco, -441..-449 status V3)
+
+**Deliverables:**
+- [x] Tool nova `list_block_tasks.tool.ts` (filtra idBloco, métricas em memória, tenant gate ADR-V2-042)
+- [x] `get-block-tree.tool.ts` deletado (arquivo + testes)
+- [x] `list_blocks.tool.ts` limpo: `includeMetrics` removido
+- [x] `list_tasks.tool.ts` renomeado: "PHASE" → "Bloco"
+- [x] Schema `tools.schema.json` atualizado: remover `get_block_tree`, adicionar `list_block_tasks`
+- [x] Tests: 155/155 specs MCP PASS (novo suite list-block-tasks, antigos deletados)
+- [x] `PhaseTreeService` **intacto** — `/tasks/:id/tree` continua funcionando (hierarquia por idPai)
+- [x] ADR-V2-065 redigido (vínculo bloco↔task via dados.idBloco; idPai exclusivamente subtarefa)
+- [x] ROADMAP/CHANGELOG/STATUS atualizados
+- [x] Build PASS (tsc 0 errors, eslint 0 warnings)
+
+**Metrics:**
+- Build: PASS (npm run build, tsc 0 errors, eslint 0 warnings)
+- Tests: 155/155 specs MCP PASS (novo test suite `mcp-tools.list-block-tasks.spec.ts`, deletados `mcp-tools.get-block-tree.spec.ts`)
+- Queries: ZERO query extra (métricas em memória sobre items já carregados)
+- N+1: ZERO (reuso findMany existente)
+- Performance: <1ms memória; se bloco >limit, métricas parciais (documentado)
+- Schema consistency: verde (pareamento tools/schema validado mecanicamente)
+
+**Security:**
+- RBAC/Tenant isolation ADR-V2-042 preservada: `findAccessibleProjectIds` + anti-enumeration (mensagem/retorno idênticos para "fora scope" e "vazio")
+- Bloqueio de `get_block_tree`: 404 anti-enumeration idêntico (compatível com cliente LLM)
+
+**Garantias:**
+- `ZERO tabela/DClasse nova` (ADR-V2-001 respeitado)
+- `Tenant isolation ADR-V2-042` intacta
+- `PhaseTreeService + /tasks/:id/tree intactos` — hierarquia subtarefa por idPai continua 100%
+- `Semântica de métricas` alinhada ao front (done={DONE,VALIDATED,CANCELLED}, failed={FAILED,DISCARDED}, inProgress={EXECUTING,VALIDATING})
+
+**Breaking Change (Registrado em CHANGELOG):**
+- Tool `get_block_tree` removida → clientes MCP receberão `METHOD_NOT_FOUND`
+- Mitigação: Frontend usa `GET /tasks?idBloco=`, não a tool (risco BAIXO)
+
+**ADRs:**
+- **ADR-V2-065 (novo):** Vínculo bloco↔task via `dados.idBloco`; `idPai` EXCLUSIVAMENTE subtarefa (eixos independentes)
+- ADR-V2-047 (clarificado, não revogado — hierarquia por `idPai` continua válida)
+- ADR-V2-042 (tenant isolation — reafirmado)
+
+**Documentation:**
+- `docs/decisions/ADR-V2-065-bloco-task-via-dados-idbloco.md` (640 linhas — contexto, alternativas 3, decisão, implementação, consequências)
+- JSDoc completo em `list-block-tasks.tool.ts` (template devari-jsdoc)
+- CHANGELOG entry: breaking change + contexto + métricas + ADRs
+- ROADMAP entry: Task completada com pilares, métricas, ADRs
+- STATUS entry: this section
+
+**Commits:** 1 commit único consolidado (Conventional Commits, scope V2 = `mcp`)
+
+---
 
 ---
 

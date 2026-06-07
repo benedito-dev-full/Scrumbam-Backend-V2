@@ -12,6 +12,21 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Changed
+
+- **MCP Tools — Realinhamento Bloco↔Task (rename `get_block_tree` → `list_block_tasks`)** (V2 F11, 2026-06-07, ADR-V2-065)
+  - **BREAKING CHANGE:** Tool `get_block_tree` removida, substituída por `list_block_tasks`
+  - Contexto: vínculo bloco↔task mudou para `dados.idBloco` (JSON field); `idPai` é exclusivamente subtarefa
+  - Tool nova `list_block_tasks` retorna **lista plana** de tasks (não árvore) com métricas opcionais (done/failed/inProgress/total/percent) baseadas em semântica do front
+  - Reutiliza `TasksService.findMany` (Pilar 2) — zero query extra
+  - Métricas em memória sobre página (se >limit, métricas são parciais — documentado)
+  - Tenant isolation ADR-V2-042 preservado (scope RBAC + anti-enumeration)
+  - Tool `list_blocks` limpa: `includeMetrics` removido (era no-op)
+  - Vocabulário "PHASE" → "Bloco" em descrições MCP e schema
+  - **Impacto:** Clientes MCP que chamem `get_block_tree` receberão `METHOD_NOT_FOUND` — migrar para `list_block_tasks`
+  - Testes: 155/155 specs MCP PASS (novo test suite list-block-tasks, antigos deletados)
+  - ADRs: ADR-V2-065 (novo — eixos independentes agrupamento/hierarquia), ADR-V2-047 (clarificado, não revogado), ADR-V2-042 (relação RBAC)
+
 ### Added
 
 - **Multi-Provider IA no Nexus (Gemini + Claude + OpenAI) — Fases 1-7 completas: Provider Registry + Cascata de resolução de chave** (V2 F7, 2026-06-04, ADR-V2-064)
