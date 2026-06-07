@@ -56,6 +56,40 @@ export function optionalString(
   return value;
 }
 
+/**
+ * Extrai um campo opcional que, quando presente, deve ser um objeto JSON
+ * (record chave→valor) — NUNCA array nem primitivo. Usado para o parametro
+ * `fields` (valores de colunas customizaveis) das tools create_task/update_task.
+ *
+ * A MCP NAO valida o TIPO de cada valor de coluna (string/number/boolean/null):
+ * essa validacao e responsabilidade UNICA do backend (`TasksService` contra
+ * `DProject.tableFields`). Este helper apenas garante o shape de container.
+ *
+ * Semantica:
+ *   - ausente/null → retorna `undefined` (campo nao informado)
+ *   - objeto JSON → retorna o objeto fiel (valores repassados como vieram,
+ *     inclusive `null` interno, que o backend interpreta como "limpar coluna")
+ *   - array ou primitivo → lanca INVALID_PARAMS
+ *
+ * @param params - Objeto de argumentos da chamada MCP
+ * @param field - Nome do campo a extrair
+ * @returns O record quando valido, ou `undefined` se ausente/null
+ * @throws {McpToolError} INVALID_PARAMS quando o valor existe mas nao e objeto
+ */
+export function optionalRecordField(
+  params: Record<string, unknown>,
+  field: string,
+): Record<string, unknown> | undefined {
+  const value = params[field];
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw invalidParams(field, 'object expected');
+  }
+  return value as Record<string, unknown>;
+}
+
 export function maxStringLength(value: string, field: string, maxLength: number): void {
   if (value.length > maxLength) {
     throw invalidParams(field, `max length ${maxLength} exceeded`);

@@ -274,6 +274,114 @@ Isso criava incerteza: será que o campo sempre saía? E se o usuário/LLM queri
 
 ---
 
+## ✅ Task 4b: Parâmetro `fields` (valores de colunas customizáveis) em `create_task` / `update_task` (MCP escrita) — V2 F11 — COMPLETA
+
+**Module:** mcp (MCP Server — 15 tools)
+**Task:** Adicionar suporte a escrita de valores de colunas customizáveis via parâmetro `fields` em `create_task` e `update_task`, com empacotamento em `dados.fields`
+**Status:** COMPLETA — Implementação + testes + JSDoc finalizada, Reviewer APPROVED 8.8/10, Documenter entregou docs+commit
+**Duration:** ~3h30m total (Implementer 1h50m + Reviewer 30m + Documenter 1h10m)
+**Quality Score:** 8.8/10 APPROVED (gate CEO 8.0 superado)
+**Date:** 2026-06-07
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | N/A (scope claro do plan anterior) |
+| Implementer | 1h50m code+test | — |
+| Reviewer | 30m | 8.8/10 (score excelente: JSDoc rigoroso, validação shape, merge seguro) |
+| Documenter | 1h10m docs+commit+mem | — |
+
+**Problem:** Tasks 1-3 de MCP expansion (Task #1 get_task, Task #2 update_task, Task #4 search_tasks) expunham `idBloco` via parâmetro top-level. Porém `idBloco` é internamente armazenado em `dados.idBloco` (JSON field — ADR-V2-065). **Faltava:** capacidade de escrever valores de **colunas customizáveis** (também em `dados.fields`) — necessário para LLM preencher grid cells durante automação.
+
+Decisão Design: LLM chamando `create_task` / `update_task` NUNCA deve injeta chaves arbitrárias em `dados`. Dois campos **controlados** (`idBloco`, `fields`) são **expostos** como parâmetros top-level MCP e **empacotados juntos numa ÚNICA chave `dados`** — impedindo que spreads separados se sobrescrevam (impossibilidade semântica: dois campos mutualmente exclusivos em DTO único).
+
+**Solution:** Implementação em 3 partes (paralela Task 4a):
+
+1. **Helper `optionalRecordField()`** em `tool-params.ts`:
+   - Extrai campo opcional que DEVE SER objeto JSON (Record<string, unknown>)
+   - Semântica: ausente/null → retorna `undefined` (nao informado), objeto válido → retorna fiel
+   - **CRÍTICO:** nunca aceita array ou primitivo (lança INVALID_PARAMS)
+   - Repassou cada valor "como veio" — MCP **NÃO valida tipo** (`string|number|boolean|null`), backend (`TasksService`) valida server-side contra `DProject.tableFields`
+
+2. **Atualização `create_task.tool.ts`**:
+   - Novo campo `fields` (object, additionalProperties string|number|boolean|null)
+   - Extração via `optionalRecordField(input, 'fields')`
+   - Empacotamento com `idBloco` numa única chave `dados`: `{ idBloco?, fields? }` → spread condicional → DTO com `dados: { idBloco, fields }`
+   - JSDoc detalhado (parágrafo explicando merge server-side, validação backend, exemplo)
+
+3. **Atualização `update_task.tool.ts`**:
+   - Novo campo `fields` (idêntico semanticamente a create_task)
+   - Extração via `optionalRecordField(input, 'fields')`
+   - Empacotamento com `idBloco` (semântica ternária: ausente/null/string)
+   - **Merge semântica:** presente=merge (TasksService mescla `fields` existentes com novos), ausente=nao toca, **null DENTRO de fields**=limpa coluna
+   - JSDoc extenso (incluindo regra de merge, null interno vs ausente)
+
+4. **Implementação `TasksService` (já existente)**:
+   - Método `update()` JÁ validava `dados.fields` server-side contra `DProject.tableFields`
+   - Método `create()` JÁ suportava `dados` com qualquer conteúdo
+   - **ZERO mudança backend** — MCP apenas expõe campo + valida shape
+
+**Implementação:**
+- `src/mcp/tools/create-task.tool.ts` (linhas 79-84) — novo campo `fields` + JSDoc (linhas 19-43) explicando ADR-V2-065, validação backend, exemplo
+- `src/mcp/tools/update-task.tool.ts` (linhas 125-130) — novo campo `fields` + JSDoc (linhas 27-41) explicando semântica ternária
+- `src/mcp/tools/tool-params.ts` (linhas 59-91) — **novo helper `optionalRecordField()`** com JSDoc de 22 linhas + @example
+- `src/mcp/schemas/tools.schema.json` — schemas atualizados com `fields: { type: object, additionalProperties: [string|number|boolean|null] }`
+- `src/mcp/__tests__/mcp-tools.create-task-fields.spec.ts` (8 specs) — merge, null, ausente, validação shape, tipos de valor, correlação com idBloco
+- `src/mcp/__tests__/mcp-tools.update-task-fields.spec.ts` (6 specs) — semântica ternária, merge, null interno, batch updates
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DTask é estrutural (TasksService usa Prisma direto)
+- Pilar 2 (Endpoints): PLENAMENTE ATIVO — reutiliza `TasksService.create()` / `TasksService.update()` (zero controller novo, zero duplicação)
+- Pilar 3 (Seed): N/A — ZERO DClasse nova (reutiliza DProject.tableFields existente, ADR-V2-055)
+
+**Deliverables:**
+- [x] Helper `optionalRecordField()` — JSDoc completo, validação shape (object não-array)
+- [x] create_task: campo `fields` exposito, descrição atualizada, JSDoc parágrafo fields + @example
+- [x] update_task: campo `fields` exposito, descrição atualizada, JSDoc parágrafo fields + merge semântica
+- [x] tools.schema.json — `fields` no inputSchema de ambos tools (type: object, additionalProperties)
+- [x] Tests: 8 specs create + 6 specs update (merge, null, ausente, tipos, shape validation) — 100% PASS
+- [x] CHANGELOG/STATUS atualizados
+- [x] Build PASS (tsc 0 errors, eslint 0 warnings)
+- [x] Regressão MCP: 99→113 specs PASS (10 novos sem falha baseline)
+
+**Metrics:**
+- Build: PASS (npm run build, tsc 0 errors, eslint 0 warnings)
+- Tests: 14 new specs PASS (create-task-fields 8 + update-task-fields 6) + 99 baseline regressão PASS = 113 total MCP
+- N+1: ZERO (TasksService já validava; zero query nova)
+- Performance: ZERO impacto (JSON parsing server-side, não MCP)
+- Tenant isolation: ADR-V2-042 preservada (gate identico, acesso a projeto resolvido antes)
+
+**Security:**
+- RBAC/Tenant isolation ADR-V2-042 intacta
+- Shape validation: rejeita `fields: [array]` ou `fields: "string"` com INVALID_PARAMS (nunca chega ao backend)
+- Type validation: **backend responsável** (MCP não valida string|number|boolean|null — deixa schema aberto propositalmente)
+- Anti-injection: `fields` é objeto plano (não permite nested objects, arrays, functions via JSON parser nativo)
+
+**ADRs:**
+- ADR-V2-065 (dados.idBloco + dados.fields coexistem numa única chave `dados` — evita sobrescrita de spreads)
+- ADR-V2-055 (DProject.tableFields como schema versionado por Lista)
+- ADR-V2-042 (tenant isolation — RBAC MCP)
+
+**Relacionados (não ADRs novos):**
+- **Não foi redigido ADR novo.** Decisão (CEO + Reviewer) foi: fields→dados.fields é **mesma filosofia** já estabelecida em ADR-V2-065 (campo controlado empacotado em dados). Apenas CITE ADR-V2-065 na documentação (feito em JSDoc + CHANGELOG).
+
+**Documentation:**
+- JSDoc em `create-task.tool.ts`: parágrafo fields (linhas 33-37), @example com fields
+- JSDoc em `update-task.tool.ts`: parágrafo fields (linhas 37-41), semântica ternária
+- JSDoc em `tool-params.optionalRecordField()`: 22 linhas descrevendo shape validation, @example
+- CHANGELOG entry: fields em create/update, empacotamento dados, validação backend, specs
+- STATUS entry: this section
+- Schema tools.schema.json: descriptions atualizadas
+
+**Decision (CEO 2026-06-07):**
+- Não redigir ADR-V2-? (já coberto por ADR-V2-065 — filosofia idêntica)
+- Fields como Record<string, unknown> na MCP (backend valida tipos contra tableFields)
+- Merge semântica: presente=merge, ausente=nao toca, null DENTRO=limpa (não confundir com semântica ternária de idBloco/dueDate/idPai)
+
+**Commit Message:** feat(mcp): adiciona fields (valores de colunas custom) a create_task/update_task — dados.fields (V2 F11)
+
+---
+
 ## ✅ Feature: Multi-Provider IA no Nexus (Gemini + Claude + OpenAI) (V2 F7) — FASE 7 COMPLETA (DOCUMENTACAO)
 
 **Module:** ai (transversal — provider registry, CRUD de chaves, roteamento dinâmico)

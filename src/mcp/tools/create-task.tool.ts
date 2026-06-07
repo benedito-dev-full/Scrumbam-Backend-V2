@@ -9,6 +9,7 @@ import {
   invalidParams,
   maxStringLength,
   optionalIso8601,
+  optionalRecordField,
   optionalString,
   parseBigIntParam,
   requiredString,
@@ -28,7 +29,12 @@ const PRIORITY_VALUES = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] as const;
  * duplicar logica de negocio (Pilar 2): priority/dueDate/idPai/
  * assigneeTeamId sao repassados diretos; `idBloco` e exposto como campo
  * top-level e traduzido internamente para `dados.idBloco` (ADR-V2-065),
- * evitando que o LLM injete chaves arbitrarias em `dados`.
+ * evitando que o LLM injete chaves arbitrarias em `dados`. Pela mesma
+ * filosofia, `fields` (valores de colunas customizaveis da Lista) e exposto
+ * como objeto top-level e empacotado em `dados.fields` — mesclado com
+ * `idBloco` numa unica chave `dados`. A MCP NAO valida o tipo de cada valor
+ * de coluna: o backend (`TasksService`) valida server-side contra o schema
+ * da Lista (`DProject.tableFields`).
  *
  * Validacoes (enum, ISO 8601, BigInt-parseabilidade) falham com
  * INVALID_PARAMS limpo ANTES de chegar no service (sem 500).
@@ -40,7 +46,7 @@ const PRIORITY_VALUES = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] as const;
 export class CreateTaskTool implements McpTool {
   readonly name = 'create_task';
   readonly description =
-    'Cria uma task no projeto informado. Campos opcionais: priority (LOW/MEDIUM/HIGH/URGENT), dueDate (ISO 8601), idPai (subtarefa), assigneeTeamId (time) e idBloco (vincula a um Bloco via dados.idBloco).';
+    'Cria uma task no projeto informado. Campos opcionais: priority (LOW/MEDIUM/HIGH/URGENT), dueDate (ISO 8601), idPai (subtarefa), assigneeTeamId (time), idBloco (vincula a um Bloco via dados.idBloco) e fields (valores das colunas customizaveis da Lista, empacotados em dados.fields).';
   readonly inputSchema = {
     type: 'object',
     required: ['projectId', 'titulo'],
@@ -70,6 +76,12 @@ export class CreateTaskTool implements McpTool {
         type: 'string',
         description: 'ID do Bloco (DTask -200) a vincular via dados.idBloco',
       },
+      fields: {
+        type: 'object',
+        additionalProperties: { type: ['string', 'number', 'boolean', 'null'] },
+        description:
+          'Valores das colunas customizaveis da Lista, chaveados por ColumnDef.key (ex: f_a1b2). Valores: string|number|boolean|null (null limpa o valor). Validados server-side contra o schema da Lista (DProject.tableFields).',
+      },
     },
   };
 
@@ -87,8 +99,11 @@ export class CreateTaskTool implements McpTool {
    *    BigInt-parseabilidade de assigneeId/idPai/assigneeTeamId/idBloco).
    * 3. Verifica acesso ao projeto (ADR-V2-042).
    * 4. Monta o DTO espalhando condicionalmente os campos presentes;
-   *    `idBloco` vira `dados: { idBloco }`. Mantem `source: 'mcp'`.
-   * 5. Delega para `tasksService.create`.
+   *    `idBloco` e `fields` viram chaves de um UNICO `dados`
+   *    (`dados: { idBloco, fields }`), incluido apenas quando ao menos um
+   *    estiver presente. Mantem `source: 'mcp'`.
+   * 5. Delega para `tasksService.create` (que valida `fields` server-side
+   *    contra `DProject.tableFields`).
    *
    * @param params - Argumentos da chamada (ver `inputSchema`)
    * @param ctx - Contexto MCP autenticado (contem `dEntidadeId`)
@@ -119,6 +134,7 @@ export class CreateTaskTool implements McpTool {
     const idPai = optionalString(input, 'idPai');
     const assigneeTeamId = optionalString(input, 'assigneeTeamId');
     const idBloco = optionalString(input, 'idBloco');
+    const fields = optionalRecordField(input, 'fields');
 
     if (idPai) {
       parseBigIntParam(idPai, 'idPai');
@@ -132,6 +148,15 @@ export class CreateTaskTool implements McpTool {
 
     await this.projectsService.findOne(projectId, ctx.dEntidadeId);
 
+    // `idBloco` e `fields` sao empacotados numa UNICA chave `dados` para que
+    // ambos possam coexistir na mesma chamada (dois spreads separados de
+    // `{ dados: ... }` se sobrescreveriam). `dados` so e incluido no DTO se
+    // ao menos um deles estiver presente.
+    const dados: Record<string, unknown> = {
+      ...(idBloco ? { idBloco } : {}),
+      ...(fields ? { fields } : {}),
+    };
+
     const result = await this.tasksService.create(
       {
         projectId,
@@ -142,7 +167,7 @@ export class CreateTaskTool implements McpTool {
         ...(dueDate ? { dueDate } : {}),
         ...(idPai ? { idPai } : {}),
         ...(assigneeTeamId ? { assigneeTeamId } : {}),
-        ...(idBloco ? { dados: { idBloco } } : {}),
+        ...(Object.keys(dados).length > 0 ? { dados } : {}),
         source: 'mcp',
       },
       ctx.dEntidadeId,

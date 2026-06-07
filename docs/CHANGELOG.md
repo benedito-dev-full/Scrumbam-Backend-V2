@@ -14,6 +14,16 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **MCP Tools — Parâmetro `fields` (valores de colunas customizáveis) em `create_task` e `update_task` (escrita)** (V2 F11 Task 4b-valores, 2026-06-07)
+  - **create_task:** novo campo opcional `fields` (Record<string, string|number|boolean|null>)
+  - **update_task:** novo campo opcional `fields` com semântica merge (presente=merge, ausente=nao toca, null DENTRO de fields limpa coluna)
+  - Empacotamento em `dados.fields` para coexistir com `idBloco` (ADR-V2-065 — single dados key)
+  - Validação server-side contra `DProject.tableFields` (MCP NAO valida tipos — backend responsável)
+  - Helper `optionalRecordField` em `tool-params.ts` (valida shape = object, nao array/primitivo)
+  - Tests: 8 specs novos em `mcp-tools.create-task-fields.spec.ts` + 6 specs em `mcp-tools.update-task-fields.spec.ts` (merge, null, ausente, validacao shape)
+  - Pilares: P1 N/A | P2 REUTILIZADO (TasksService.create/update) | P3 N/A (zero DClasse)
+  - ADRs: ADR-V2-065 (dados.fields + idBloco coexistem), ADR-V2-042 (tenant isolation)
+
 - **MCP Tool — Exposição de `tableFields` (schema de colunas customizáveis) no retorno de `get_project` (leitura)** (V2 F11 Task 4a, 2026-06-07, ADR-V2-061)
   - **get_project:** campo `tableFields` sempre retornado (sem custo de query extra)
   - Payload base inclui `{ version, columns[] }` ou `null` para não-Listas

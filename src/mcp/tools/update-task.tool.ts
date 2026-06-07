@@ -10,6 +10,7 @@ import {
   assertIso8601,
   assertRecord,
   invalidParams,
+  optionalRecordField,
   parseBigIntParam,
   requiredString,
   textResult,
@@ -31,10 +32,13 @@ type PriorityValue = (typeof PRIORITY_VALUES)[number];
  * `tools/list` com tools-quase-iguais. Internamente roteia para:
  *
  * - `tasksService.update` — para `name` / `description` / `priority` /
- *   `assigneeId` / `dueDate` / `idPai` / `idBloco` (campos basicos).
+ *   `assigneeId` / `dueDate` / `idPai` / `idBloco` / `fields` (campos basicos).
  *   `dueDate`/`idPai`/`idBloco` seguem semantica ternaria
- *   (ausente=nao toca, null=remove, string=define); `idBloco` e
- *   empacotado em `dados: { idBloco }` (ADR-V2-065).
+ *   (ausente=nao toca, null=remove, string=define); `idBloco` e `fields` sao
+ *   empacotados numa UNICA chave `dados` (ADR-V2-065). `fields` (valores das
+ *   colunas customizaveis da Lista): presente=merge (o service mescla por
+ *   chave), ausente=nao toca; `null` DENTRO de `fields` limpa aquela coluna.
+ *   A MCP nao valida o tipo dos valores — o backend valida server-side.
  * - `tasksService.updateStatus` — para `status` V3 (state machine + telemetria).
  *
  * Ordem de execucao quando multiplos campos sao enviados:
@@ -82,7 +86,7 @@ export class UpdateTaskTool implements McpTool {
 
   readonly name = 'update_task';
   readonly description =
-    'Atualiza qualquer combinacao de campos de uma task (name, description, priority, assigneeId, status, dueDate, idPai, idBloco). Para dueDate/idPai/idBloco: ausente=nao toca, null=remove, string=define. Use update_status se for atualizar APENAS o status.';
+    'Atualiza qualquer combinacao de campos de uma task (name, description, priority, assigneeId, status, dueDate, idPai, idBloco, fields). Para dueDate/idPai/idBloco: ausente=nao toca, null=remove, string=define. fields (valores das colunas customizaveis da Lista): presente=merge, ausente=nao toca, null DENTRO de fields limpa a coluna. Use update_status se for atualizar APENAS o status.';
   readonly inputSchema = {
     type: 'object',
     required: ['taskId'],
@@ -118,6 +122,12 @@ export class UpdateTaskTool implements McpTool {
         description:
           'string=vincula ao Bloco (DTask -200); null=desvincula; ausente=nao toca (via dados.idBloco)',
       },
+      fields: {
+        type: 'object',
+        additionalProperties: { type: ['string', 'number', 'boolean', 'null'] },
+        description:
+          'Valores das colunas customizaveis da Lista, chaveados por ColumnDef.key (ex: f_a1b2). Valores: string|number|boolean|null (null limpa o valor). Validados server-side contra o schema da Lista (DProject.tableFields).',
+      },
     },
     anyOf: [
       { required: ['name'] },
@@ -128,6 +138,7 @@ export class UpdateTaskTool implements McpTool {
       { required: ['dueDate'] },
       { required: ['idPai'] },
       { required: ['idBloco'] },
+      { required: ['fields'] },
     ],
   };
 
@@ -180,6 +191,11 @@ export class UpdateTaskTool implements McpTool {
     const idPai = this.extractOptionalStringOrNull(input, 'idPai', { bigint: true });
     const idBloco = this.extractOptionalStringOrNull(input, 'idBloco', { bigint: true });
 
+    // `fields`: presente=merge (repassado ao service, que mescla por chave),
+    // ausente=nao toca. `null` DENTRO de fields (remocao de valor de coluna)
+    // e repassado fiel — o backend o interpreta como "limpar".
+    const fields = optionalRecordField(input, 'fields');
+
     const hasBasicUpdate =
       name !== undefined ||
       description !== undefined ||
@@ -187,7 +203,8 @@ export class UpdateTaskTool implements McpTool {
       assigneeId !== undefined ||
       dueDate !== undefined ||
       idPai !== undefined ||
-      idBloco !== undefined;
+      idBloco !== undefined ||
+      fields !== undefined;
     const hasStatusUpdate = status !== undefined;
 
     if (!hasBasicUpdate && !hasStatusUpdate) {
@@ -208,8 +225,14 @@ export class UpdateTaskTool implements McpTool {
       // Diferente de `undefined`, que significa "nao tocar".
       // dueDate/idPai: passar valor (string|null) direto — o service
       // distingue undefined/null/string (semantica ternaria).
-      // idBloco: empacotar em `dados: { idBloco }` — o service faz merge
-      // superficial e null remove a chave (desvincula).
+      // idBloco/fields: empacotados numa UNICA chave `dados` — o service faz
+      // merge superficial (null em idBloco desvincula; null DENTRO de fields
+      // limpa a coluna). Dois spreads separados de `{ dados: ... }` se
+      // sobrescreveriam, impossibilitando enviar idBloco E fields juntos.
+      const dados: Record<string, unknown> = {
+        ...(idBloco !== undefined ? { idBloco } : {}),
+        ...(fields !== undefined ? { fields } : {}),
+      };
       const basicDto: Record<string, unknown> = {
         ...(name !== undefined ? { nome: name } : {}),
         ...(description !== undefined ? { descricao: description } : {}),
@@ -217,7 +240,7 @@ export class UpdateTaskTool implements McpTool {
         ...(assigneeId !== undefined ? { assigneeId: assigneeId ?? '' } : {}),
         ...(dueDate !== undefined ? { dueDate } : {}),
         ...(idPai !== undefined ? { idPai } : {}),
-        ...(idBloco !== undefined ? { dados: { idBloco } } : {}),
+        ...(Object.keys(dados).length > 0 ? { dados } : {}),
       };
       await this.tasksService.update(taskId, basicDto as never, accessibleProjectIds);
     }

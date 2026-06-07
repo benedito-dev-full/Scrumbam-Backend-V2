@@ -41,7 +41,7 @@
     },
     {
       "name": "create_task",
-      "description": "Cria uma task no projeto informado. Campos opcionais: priority (LOW/MEDIUM/HIGH/URGENT), dueDate (ISO 8601), idPai (subtarefa), assigneeTeamId (time) e idBloco (vincula a um Bloco via dados.idBloco).",
+      "description": "Cria uma task no projeto informado. Campos opcionais: priority (LOW/MEDIUM/HIGH/URGENT), dueDate (ISO 8601), idPai (subtarefa), assigneeTeamId (time), idBloco (vincula a um Bloco via dados.idBloco) e fields (valores das colunas customizaveis da Lista, empacotados em dados.fields).",
       "inputSchema": {
         "type": "object",
         "required": ["projectId", "titulo"],
@@ -80,6 +80,11 @@
           "idBloco": {
             "type": "string",
             "description": "ID do Bloco (DTask -200) a vincular via dados.idBloco"
+          },
+          "fields": {
+            "type": "object",
+            "additionalProperties": { "type": ["string", "number", "boolean", "null"] },
+            "description": "Valores das colunas customizaveis da Lista, chaveados por ColumnDef.key (ex: f_a1b2). Valores: string|number|boolean|null (null limpa o valor). Validados server-side contra o schema da Lista (DProject.tableFields)."
           }
         }
       }
@@ -134,7 +139,7 @@
     },
     {
       "name": "update_task",
-      "description": "Atualiza qualquer combinacao de campos de uma task (name, description, priority, assigneeId, status, dueDate, idPai, idBloco). Para dueDate/idPai/idBloco: ausente=nao toca, null=remove, string=define. Use update_status se for atualizar APENAS o status.",
+      "description": "Atualiza qualquer combinacao de campos de uma task (name, description, priority, assigneeId, status, dueDate, idPai, idBloco, fields). Para dueDate/idPai/idBloco: ausente=nao toca, null=remove, string=define. fields (valores das colunas customizaveis da Lista): presente=merge, ausente=nao toca, null DENTRO de fields limpa a coluna. Use update_status se for atualizar APENAS o status.",
       "inputSchema": {
         "type": "object",
         "required": ["taskId"],
@@ -177,6 +182,11 @@
           "idBloco": {
             "type": ["string", "null"],
             "description": "string=vincula ao Bloco (DTask -200); null=desvincula; ausente=nao toca (via dados.idBloco)"
+          },
+          "fields": {
+            "type": "object",
+            "additionalProperties": { "type": ["string", "number", "boolean", "null"] },
+            "description": "Valores das colunas customizaveis da Lista, chaveados por ColumnDef.key (ex: f_a1b2). Valores: string|number|boolean|null (null limpa o valor). Validados server-side contra o schema da Lista (DProject.tableFields)."
           }
         },
         "anyOf": [
@@ -187,7 +197,8 @@
           { "required": ["status"] },
           { "required": ["dueDate"] },
           { "required": ["idPai"] },
-          { "required": ["idBloco"] }
+          { "required": ["idBloco"] },
+          { "required": ["fields"] }
         ]
       }
     },
