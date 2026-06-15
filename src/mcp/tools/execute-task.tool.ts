@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 
 import { EntidadeService } from '../../entidades/entidades.service';
 import { ExecutionsService } from '../../executions/executions.service';
@@ -9,8 +9,6 @@ import { McpUserContext } from '../interfaces/mcp.types';
 import { McpTool, McpToolError, McpToolResult } from './tool.interface';
 import {
   assertRecord,
-  maxStringLength,
-  optionalString,
   parseBigIntParam,
   requireScope,
   requiredString,
@@ -30,15 +28,10 @@ const EXECUTIONS_CREATE_SCOPE = 'executions:create';
  * persistir DPedido idClasse=-301/-302/-303 sob workflow canônico Devari.
  *
  * Contrato (ADR-V2-066, ADR-V2-049):
- *  - Modo PROMPT puro: `{ taskId }` (mínimo). Backend monta o prompt via
- *    `PromptBuilderService` a partir da DTask (título + descrição + meta).
- *  - `prompt` opcional: hoje NÃO é encaminhado ao service — o caminho oficial
- *    de prompt customizado em F6 é via DTask (PromptBuilder). Foi mantido no
- *    contrato MCP para forward-compat com possível modo PROMPT explícito;
- *    quando presente é apenas logado (audit) e ignorado pelo service. Uso
- *    real do prompt customizado: editar a `descricao` da task via `update_task`.
- *  - `contextHint` opcional: idem `prompt` — reservado, ainda não consumido
- *    pelo PromptBuilder. Logado para audit.
+ *  - Modo PROMPT puro: `{ taskId }` (único parâmetro). Backend monta o prompt
+ *    via `PromptBuilderService` a partir da DTask (título + descrição + meta).
+
+ *    (PromptBuilder lê título e descrição).
  *
  * Fluxo (assíncrono — fire-and-poll, ADR-V2-066):
  *  1. `requireScope(ctx, 'executions:create')` — sem o scope dedicado → FORBIDDEN
@@ -103,8 +96,6 @@ const EXECUTIONS_CREATE_SCOPE = 'executions:create';
  */
 @Injectable()
 export class ExecuteTaskTool implements McpTool {
-  private readonly logger = new Logger(ExecuteTaskTool.name);
-
   readonly name = 'execute_task';
   readonly description =
     'Dispara uma execução Claude Code (IA) para a task informada. Async fire-and-poll: retorna {executionId, status=QUEUED|AWAITING_APPROVAL, riskLevel}. Use get_task(taskId) para acompanhar (EXECUTING → DONE/FAILED). Risk MED/HIGH retorna awaiting_approval (não é erro). Requer scope MCP "executions:create".';
@@ -115,18 +106,6 @@ export class ExecuteTaskTool implements McpTool {
       taskId: {
         type: 'string',
         description: 'ID da DTask a executar (chave da DTask, BigInt-parseável)',
-      },
-      prompt: {
-        type: 'string',
-        maxLength: 8000,
-        description:
-          'RESERVADO (forward-compat): hoje o backend monta o prompt a partir da DTask via PromptBuilderService (ADR-V2-049). Para customizar o prompt, edite a descrição da task via update_task. Se informado, este campo é apenas logado para audit.',
-      },
-      contextHint: {
-        type: 'string',
-        maxLength: 2000,
-        description:
-          'RESERVADO (forward-compat): contexto adicional para o PromptBuilder (ex: "foque em testes"). Ainda não consumido — logado para audit.',
       },
     },
     additionalProperties: false,
@@ -152,7 +131,7 @@ export class ExecuteTaskTool implements McpTool {
    * @throws {McpToolError} FORBIDDEN (-32002) quando o scope `executions:create`
    *   não está na key autenticada
    * @throws {McpToolError} INVALID_PARAMS (-32602) quando `taskId` ausente/
-   *   não-BigInt, ou quando `prompt`/`contextHint` excedem limites
+   *   não-BigInt
    * @throws {McpToolError} INVALID_PARAMS com `reason='risk_gate_blocked'` se
    *   o `CommandValidatorService` rejeitar o command estruturado (defesa em
    *   profundidade — em modo PROMPT o placeholder é seguro por construção)
@@ -171,16 +150,6 @@ export class ExecuteTaskTool implements McpTool {
     const taskIdStr = requiredString(input, 'taskId');
     parseBigIntParam(taskIdStr, 'taskId');
 
-    const prompt = optionalString(input, 'prompt');
-    if (prompt !== undefined) {
-      maxStringLength(prompt, 'prompt', 8000);
-    }
-
-    const contextHint = optionalString(input, 'contextHint');
-    if (contextHint !== undefined) {
-      maxStringLength(contextHint, 'contextHint', 2000);
-    }
-
     // 3. Tenant isolation (ADR-V2-042). `tasksService.findOne` confirma a
     // existência da task; `projectsService.findOne(_, dEntidadeId)` confirma
     // que o usuário tem membership no projeto (DVincula sobre a espelho -158).
@@ -191,13 +160,6 @@ export class ExecuteTaskTool implements McpTool {
     // ExecutionsService.execute espera `userId` no formato DUserGroup.chave
     // (faz a volta com getEntidadeIdFromUserGroup internamente).
     const userGroupId = await this.entidadeService.getUserGroupIdFromEntidade(ctx.dEntidadeId);
-
-    if (prompt !== undefined || contextHint !== undefined) {
-      // Log de audit — campos reservados ainda não consumidos pelo PromptBuilder.
-      this.logger.log(
-        `[execute_task] taskId=${taskIdStr} hasPrompt=${prompt !== undefined} hasContextHint=${contextHint !== undefined} — reservados (PromptBuilder ignora; ver JSDoc)`,
-      );
-    }
 
     // 5. Delega ao service de F6. Modo PROMPT puro: só taskId.
     // Risk Gate (DVFS chave 3) roda DENTRO de op.calcula() — ZERO duplicação.
