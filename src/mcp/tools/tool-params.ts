@@ -1,4 +1,5 @@
 import { MCP_ERROR_CODES } from '../constants';
+import { McpUserContext } from '../interfaces/mcp.types';
 import { McpToolError } from './tool.interface';
 
 export const V3_STATUS_CODES = [
@@ -29,10 +30,7 @@ export function optionalRecord(params: unknown): Record<string, unknown> {
   return assertRecord(params);
 }
 
-export function requiredString(
-  params: Record<string, unknown>,
-  field: string,
-): string {
+export function requiredString(params: Record<string, unknown>, field: string): string {
   const value = params[field];
   if (typeof value !== 'string' || value.trim() === '') {
     throw invalidParams(field, 'required string');
@@ -41,10 +39,7 @@ export function requiredString(
   return value;
 }
 
-export function optionalString(
-  params: Record<string, unknown>,
-  field: string,
-): string | undefined {
+export function optionalString(params: Record<string, unknown>, field: string): string | undefined {
   const value = params[field];
   if (value === undefined || value === null) {
     return undefined;
@@ -175,6 +170,42 @@ export function invalidParams(field: string, issue: string): McpToolError {
     field,
     issue,
   });
+}
+
+/**
+ * Garante que o contexto MCP autenticado possui o scope requerido pela tool.
+ *
+ * Espelha o padrao dos demais helpers deste arquivo (lancar `McpToolError`
+ * com codigo JSON-RPC apropriado). Introduzido pelo ADR-V2-067 como o primeiro
+ * consumidor de `ctx.scopes` no servidor MCP — tools legadas (criadas antes
+ * deste helper) NAO chamam `requireScope` e mantem o comportamento anterior
+ * de "key autenticada = libera tudo" (backward-compat explicito).
+ *
+ * Semantica:
+ *   - `ctx.scopes` ausente, nao-array ou sem o scope alvo → joga FORBIDDEN
+ *   - scope presente → retorna sem efeito (passa)
+ *
+ * @param ctx - Contexto da chamada MCP (preenchido por `McpKeyGuard` a partir
+ *   dos scopes persistidos em DTabela -472 quando a key foi gerada)
+ * @param scope - Scope obrigatorio para executar a tool (ex: 'executions:create')
+ * @throws {McpToolError} FORBIDDEN (-32002) quando o scope nao esta presente;
+ *   `data.requiredScope` traz o scope que faltou para diagnostico cliente-side
+ *
+ * @example
+ * ```typescript
+ * // dentro de uma tool que exige scope
+ * async handler(params: unknown, ctx: McpUserContext) {
+ *   requireScope(ctx, 'executions:create');
+ *   // ... fluxo normal da tool
+ * }
+ * ```
+ */
+export function requireScope(ctx: McpUserContext, scope: string): void {
+  if (!Array.isArray(ctx.scopes) || !ctx.scopes.includes(scope)) {
+    throw new McpToolError(MCP_ERROR_CODES.FORBIDDEN, 'Forbidden', {
+      requiredScope: scope,
+    });
+  }
 }
 
 export function textResult(payload: unknown) {
