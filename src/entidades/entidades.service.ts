@@ -1,4 +1,10 @@
-import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Response } from 'express';
 import { PrismaService } from '../prisma.service';
@@ -109,10 +115,7 @@ export class EntidadeService {
       if (res) {
         res.setHeader('Deprecation', 'true');
         res.setHeader('Sunset', CLASSE_ALIAS_SUNSET);
-        res.setHeader(
-          'Link',
-          `</api/v1/entidades?idClasse=${cached}>; rel="successor-version"`,
-        );
+        res.setHeader('Link', `</api/v1/entidades?idClasse=${cached}>; rel="successor-version"`);
       }
       return cached;
     }
@@ -412,12 +415,55 @@ export class EntidadeService {
     });
 
     if (!entidade) {
-      throw new NotFoundException(
-        `DEntidade não encontrada para DUserGroup ${userGroupId}`,
-      );
+      throw new NotFoundException(`DEntidade não encontrada para DUserGroup ${userGroupId}`);
     }
 
     return entidade.chave;
+  }
+
+  /**
+   * Converte chave de DEntidade para chave do DUserGroup associado (caminho
+   * inverso de {@link getEntidadeIdFromUserGroup}).
+   *
+   * Necessário em fluxos que partem do contexto MCP (`McpUserContext.dEntidadeId`
+   * — DEntidade.chave) e precisam invocar services que esperam `userId` no formato
+   * DUserGroup.chave (ex.: `ExecutionsService.execute`, que internamente faz a
+   * conversão oposta via {@link getEntidadeIdFromUserGroup}).
+   *
+   * FK `DEntidade.dUserGroupId` é opcional no schema — uma DEntidade pode existir
+   * sem credenciais de login (ex.: organizações puras, agents). Nesses casos
+   * lança `NotFoundException` (sem leak: o caller traduz para 404/INVALID_PARAMS
+   * conforme o contrato externo).
+   *
+   * @param entidadeId - Chave BigInt da DEntidade
+   * @returns Chave BigInt do DUserGroup associado
+   *
+   * @throws {NotFoundException} Quando a DEntidade não existe (excluído/inexistente)
+   *   ou não possui `dUserGroupId` (entidade sem login)
+   *
+   * @example
+   * ```typescript
+   * // Em uma MCP tool que dispara F6 a partir de ctx.dEntidadeId
+   * const userId = await entidadeService.getUserGroupIdFromEntidade(ctx.dEntidadeId);
+   * await executionsService.execute(projectId, dto, userId.toString());
+   * ```
+   */
+  async getUserGroupIdFromEntidade(entidadeId: bigint): Promise<bigint> {
+    this.logger.debug(`getUserGroupIdFromEntidade entidadeId=${entidadeId}`);
+
+    const entidade = await this.prisma.dEntidade.findFirst({
+      where: {
+        chave: entidadeId,
+        excluido: false,
+      },
+      select: { dUserGroupId: true },
+    });
+
+    if (!entidade || entidade.dUserGroupId === null || entidade.dUserGroupId === undefined) {
+      throw new NotFoundException(`DUserGroup não encontrado para DEntidade ${entidadeId}`);
+    }
+
+    return entidade.dUserGroupId;
   }
 
   /**
