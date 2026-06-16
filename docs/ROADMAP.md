@@ -2,9 +2,67 @@
 
 **Versao:** 1.0
 **Mantido por:** Documenter Agent V2
-**Atualizado em:** 2026-06-03
+**Atualizado em:** 2026-06-16
 
 > Este documento rastreia tasks por Fase (F0..F17). Strategist abre, Implementer entrega, Reviewer valida, Documenter fecha. Cada task tem entrada com Status, Modulo, Fase, Tempo Real, Quality Score, Pilares aplicados e ADRs vinculados.
+
+---
+
+## Feature: MCP Scope Catalog — Fase 1 COMPLETA ✅
+
+**Status:** ✅ **FASE 1 COMPLETA** — Catálogo de scopes + enforcement per-tool (17 tools)
+**Módulo V2:** mcp (MCP Server)
+**Fase V2:** F11 (MCP Expansion, DEV-13 Task 412)
+**Tempo Real:** ~2h total (Implementer entrega commit `42b8145`)
+**Completado em:** 2026-06-16
+**Quality Score:** N/A (gate rápido — sem Reviewer formal; Implementer Sonnet entregou, Documenter finaliza)
+
+**O Que Foi Feito:**
+
+**Catálogo Canônico de 6 Scopes:**
+- `MCP_SCOPES` em `src/mcp/constants.ts`: TASKS_READ, TASKS_WRITE, NOTIFICATIONS_READ, NOTIFICATIONS_WRITE, PROJECTS_WRITE, EXECUTIONS_CREATE
+- `McpScope` type + `ALL_MCP_SCOPES` array + `MCP_SCOPE_PRESETS` (READ_ONLY, READ_WRITE, FULL_ACCESS)
+- Mapeamento 17 tools → scope requerido
+
+**Enforcement per-tool (17 tools):**
+- 15 tools recebem `requireScope(ctx, scope)` como primeira instrução do handler (antes: nenhuma verificação)
+- 2 tools harmonizadas: `execute_task` (EXECUTIONS_CREATE) + `update_timer` (TASKS_WRITE) — mudaram para usar constante
+- Sem scope → FORBIDDEN (-32002) com `data.reason='missing_scope'`
+
+**Testes Consolidados:**
+- `src/mcp/__tests__/mcp-tools.scope-enforcement.spec.ts` — 17 specs FORBIDDEN, um por tool, cobrindo todos 6 scopes
+- 22 arquivos de spec atualizados (legacy scopes `tools:read`/`tools:write` → scopes canônicos)
+- 100% PASS
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — enforcement não toca DPedido
+- Pilar 2 (Endpoints): REUTILIZADO — enforcement adicionado em inicio de handlers (zero novo controller)
+- Pilar 3 (Seed): N/A — nenhuma DClasse nova (catalogo é código TypeScript)
+
+**Métricas:**
+- Build: PASS (tsc 0 errors em `src/mcp/`, 20 pré-existentes em outras regiões — baseline)
+- ESLint: ZERO warnings em `src/mcp/`
+- Queries: N/A — enforcement é O(n) array de scopes (típ. 1-6 elementos)
+
+**BREAKING CHANGE (MITIGADO POR FASE 3):**
+- Keys MCP legadas com `["tools:read","tools:call"]` recebem FORBIDDEN em todas as 17 tools até Fase 3 (script grandfather) rodar
+- Recomendação: Fases 1+2+3 deployam juntas no mesmo release window
+
+**ADRs Vinculados:**
+- ADR-V2-068 (novo — proposto, a redigir em Fase 5): Catálogo canônico de scopes + regra privilege escalation + grandfathering
+- ADR-V2-067 (existente — estendido): Scope `executions:create` agora parte do catálogo maior
+- ADR-V2-001 (zero tabela nova): Respeitado — scopes vivem em `src/mcp/constants.ts`, não no banco
+- ADR-V2-003 (RBAC duplo): Preparação para Fase 2 (validação de privilege escalation em `POST /mcp/keys`)
+- ADR-V2-004 (API/MCP keys via DTabela): Preparação para Fase 2 (validar scopes solicitados)
+
+**Commits:**
+- `42b8145` feat(mcp): enforce per-tool scope check across all 17 tools (ADR-V2-068)
+
+**Próximos Passos:**
+- **Fase 2 (F11 — ~4h):** Validação de privilege escalation em `POST /mcp/keys` via `RoleResolverService.getAllowedMcpScopes()`
+- **Fase 3 (F11 — ~3h):** Script migration grandfather (reescreve todas as keys legadas para `ACESSO_TOTAL`)
+- **Fase 4 (F11 — ~5h, Frontend):** Redesenho do modal com presets + checkboxes role-aware
+- **Fase 5 (F11 — ~2h):** ADR-V2-068 formal + atualizar ADR-V2-067 com status "Estendido"
 
 ---
 

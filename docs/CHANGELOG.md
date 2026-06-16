@@ -14,6 +14,16 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **MCP Scope Catalog — Fase 1: Enforcement per-tool em 17 tools (ADR-V2-068)** (V2 F11 DEV-13, 2026-06-16)
+  - **Catálogo canônico:** `MCP_SCOPES` com 6 scopes finos em `src/mcp/constants.ts` (`tasks:read`, `tasks:write`, `notifications:read`, `notifications:write`, `projects:write`, `executions:create`)
+  - **Tipos:** `McpScope` exportado; `ALL_MCP_SCOPES` array; `MCP_SCOPE_PRESETS` (READ_ONLY, READ_WRITE, FULL_ACCESS)
+  - **Enforcement:** 17 tools chamam `requireScope(ctx, scope)` como primeira instrução (15 ferramentas recebem verificação nova, 2 harmonizadas com constante)
+  - **Sem scope:** FORBIDDEN (-32002) com `data.reason='missing_scope'`
+  - **Testes:** 17 specs FORBIDDEN consolidadas em `mcp-tools.scope-enforcement.spec.ts` + 22 specs de infraestrutura atualizadas (legacy scopes → canônicos)
+  - **Pilares:** P1 N/A | P2 REUTILIZADO (enforcement em handlers) | P3 N/A (zero DClasse)
+  - **BREAKING (mitigado Fase 3):** Keys MCP legadas `["tools:read","tools:call"]` recebem FORBIDDEN até migration
+  - **ADRs:** ADR-V2-068 (novo — proposto, fase 5), ADR-V2-067 (estendido), ADR-V2-001/003/004 (relacionados)
+
 - **MCP Tool — `update_timer`: controla timer manual de task (start/pause/resume/stop) via MCP (ADR-V2-057)** (V2 F11 DEV-12, 2026-06-15)
   - **update_timer:** novo parâmetro obrigatório `action` (enum: 'start'|'pause'|'resume'|'stop'); retorna envelope `{ taskId, action, timer: TaskTimerStateDto }`
   - **Scope MCP:** `tasks:write` (reutilizado de create_task/update_task)
