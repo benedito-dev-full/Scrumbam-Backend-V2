@@ -191,7 +191,7 @@ export class UpdateTimerTool implements McpTool {
     // projectsService.findOne(projectId, dEntidadeId) valida acesso ao projeto:
     // já trata workspace público (ADR-V2-051 §8 — `hasPublicSpaceAccess`),
     // workspace privado (DVincula -170..-173), e ORG_ADMIN → MANAGER herdado.
-    const task = await this.tasksService.findOne(taskIdStr, ctx.dEntidadeId);
+    const task = await this.tasksService.findOne(taskIdStr);
     await this.projectsService.findOne(task.projectId, ctx.dEntidadeId);
 
     // 4. Delega ao service. actorId = ctx.dEntidadeId (bigint, preenchido pelo
