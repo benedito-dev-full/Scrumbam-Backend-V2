@@ -2,13 +2,14 @@ import { Injectable } from '@nestjs/common';
 
 import { ProjectsService } from '../../projects/projects.service';
 import { TasksService } from '../../tasks/tasks.service';
-import { MCP_ERROR_CODES } from '../constants';
+import { MCP_ERROR_CODES, MCP_SCOPES } from '../constants';
 import { McpUserContext } from '../interfaces/mcp.types';
 import { McpTool, McpToolError, McpToolResult } from './tool.interface';
 import {
   V3_STATUS_CODES,
   assertRecord,
   parseBigIntParam,
+  requireScope,
   requiredString,
   textResult,
 } from './tool-params';
@@ -24,7 +25,8 @@ export class UpdateStatusTool implements McpTool {
       taskId: { type: 'string' },
       statusCode: {
         type: 'string',
-        description: 'Codigo V3: INBOX|READY|EXECUTING|DONE|FAILED|CANCELLED|DISCARDED|VALIDATING|VALIDATED',
+        description:
+          'Codigo V3: INBOX|READY|EXECUTING|DONE|FAILED|CANCELLED|DISCARDED|VALIDATING|VALIDATED',
       },
     },
   };
@@ -35,6 +37,9 @@ export class UpdateStatusTool implements McpTool {
   ) {}
 
   async handler(params: unknown, ctx: McpUserContext): Promise<McpToolResult> {
+    // Gate de autorização (ADR-V2-068). Antes de qualquer query.
+    requireScope(ctx, MCP_SCOPES.TASKS_WRITE);
+
     const input = assertRecord(params);
     const taskId = requiredString(input, 'taskId');
     const statusCode = requiredString(input, 'statusCode');

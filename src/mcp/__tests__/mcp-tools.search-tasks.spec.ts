@@ -19,7 +19,7 @@ import { TaskSearchResultDto } from '../../search/dto/search-response.dto';
 describe('MCP search_tasks tool', () => {
   const userCtx = {
     dEntidadeId: BigInt('9007199254740997'),
-    scopes: ['tools:read'],
+    scopes: ['tasks:read'],
     keyChave: BigInt(10),
     keyPrefix: 'scrumban_mcp',
     keyHash: 'hash',

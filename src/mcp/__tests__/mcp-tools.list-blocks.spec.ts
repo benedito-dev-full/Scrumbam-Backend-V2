@@ -20,7 +20,7 @@ describe('MCP list_blocks tool', () => {
   const otherProjectId = '9007199254740999';
   const userCtx = {
     dEntidadeId: BigInt('9007199254740997'),
-    scopes: ['tools:read'],
+    scopes: ['tasks:read'],
     keyChave: BigInt(10),
     keyPrefix: 'scrumban_mcp',
     keyHash: 'hash',

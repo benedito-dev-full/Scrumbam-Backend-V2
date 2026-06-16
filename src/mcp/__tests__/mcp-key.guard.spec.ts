@@ -16,7 +16,7 @@ describe('McpKeyGuard F11', () => {
       validatePlaintext: jest.fn().mockResolvedValue({
         chave: '10',
         dEntidadeId: '9007199254740993',
-        scopes: ['tools:read'],
+        scopes: ['tasks:read'],
         prefix: 'scrumban_mcp',
         hash: 'abc',
       }),
@@ -29,7 +29,7 @@ describe('McpKeyGuard F11', () => {
       userCtx: {
         dEntidadeId: BigInt('9007199254740993'),
         keyChave: BigInt(10),
-        scopes: ['tools:read'],
+        scopes: ['tasks:read'],
         keyPrefix: 'scrumban_mcp',
         keyHash: 'abc',
       },

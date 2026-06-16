@@ -1,12 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 
 import { NotificationsService } from '../../notifications/notifications.service';
+import { MCP_SCOPES } from '../constants';
 import { McpUserContext } from '../interfaces/mcp.types';
 import { McpTool, McpToolResult } from './tool.interface';
 import {
   assertRecord,
   optionalLimit,
   optionalString,
+  requireScope,
   textResult,
 } from './tool-params';
 
@@ -18,22 +20,6 @@ import {
  *
  * NAO usa Engine: consulta estrutural via `NotificationsService` (Prisma direto).
  * Pilar 1 (Engine) aplica apenas em DPedido idClasse=-300.
- *
- * @example
- * ```json
- * {
- *   "jsonrpc": "2.0",
- *   "id": 1,
- *   "method": "tools/call",
- *   "params": {
- *     "name": "list_notifications",
- *     "arguments": {
- *       "unreadOnly": true,
- *       "limit": 10
- *     }
- *   }
- * }
- * ```
  */
 @Injectable()
 export class ListNotificationsTool implements McpTool {
@@ -56,21 +42,16 @@ export class ListNotificationsTool implements McpTool {
   /**
    * Handler do tools/call para `list_notifications`.
    *
-   * Fluxo:
-   * 1. Valida `params` como Record (todos os campos sao opcionais).
-   * 2. Extrai `limit` (default 20, clampar 1-50 via `optionalLimit`).
-   * 3. Extrai `cursor` como string opcional.
-   * 4. Extrai `unreadOnly` como boolean opcional.
-   * 5. Constroi DTO compativel com `ListNotificationsQueryDto` (unreadOnly como string).
-   * 6. Chama `notificationsService.findMany(ctx.dEntidadeId, query)`.
-   * 7. Retorna resultado via `textResult`.
-   *
    * @param params - Argumentos da chamada (todos opcionais)
    * @param ctx - Contexto MCP autenticado (contém `dEntidadeId` como bigint)
    * @returns Envelope MCP com lista paginada de notificacoes
+   * @throws {McpToolError} FORBIDDEN (-32002) quando scope `notifications:read` ausente
    * @throws {McpToolError} INVALID_PARAMS quando `limit` fora do range 1-50
    */
   async handler(params: unknown, ctx: McpUserContext): Promise<McpToolResult> {
+    // Gate de autorização (ADR-V2-068). Antes de qualquer query.
+    requireScope(ctx, MCP_SCOPES.NOTIFICATIONS_READ);
+
     const input = assertRecord(params);
 
     const limit = optionalLimit(input);
@@ -79,11 +60,7 @@ export class ListNotificationsTool implements McpTool {
     // unreadOnly chega como boolean no MCP mas o service espera string ('true'/'false').
     const unreadOnlyRaw = input.unreadOnly;
     const unreadOnly =
-      unreadOnlyRaw === true
-        ? 'true'
-        : unreadOnlyRaw === false
-          ? 'false'
-          : undefined;
+      unreadOnlyRaw === true ? 'true' : unreadOnlyRaw === false ? 'false' : undefined;
 
     this.logger.debug?.(
       `list_notifications user=${ctx.dEntidadeId} limit=${limit} unreadOnly=${unreadOnly ?? 'all'}`,

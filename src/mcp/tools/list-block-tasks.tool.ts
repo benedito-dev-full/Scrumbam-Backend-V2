@@ -3,6 +3,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ProjectsService } from '../../projects/projects.service';
 import { TaskResponseDto } from '../../tasks/dto/task-response.dto';
 import { TasksService } from '../../tasks/tasks.service';
+import { MCP_SCOPES } from '../constants';
 import { McpUserContext } from '../interfaces/mcp.types';
 import { McpTool, McpToolResult } from './tool.interface';
 import {
@@ -11,6 +12,7 @@ import {
   optionalRecord,
   optionalString,
   parseBigIntParam,
+  requireScope,
   requiredString,
   textResult,
 } from './tool-params';
@@ -56,34 +58,11 @@ const IN_PROGRESS_STATUS = new Set(['EXECUTING', 'VALIDATING']);
  * 5. Se `includeMetrics=true`, calcula `metrics` em memória sobre os `items`
  *    (status code já presente no DTO) — ZERO query extra.
  *
- * **Métricas (semântica do front, sobre a página corrente):**
- *   - `done` ∈ {DONE, VALIDATED, CANCELLED}
- *   - `failed` ∈ {FAILED, DISCARDED}
- *   - `inProgress` ∈ {EXECUTING, VALIDATING} (READY/INBOX → backlog, não inProgress)
- *   - `total` = nº de tasks retornadas
- *   - `percent` = total === 0 ? 0 : round(done / total * 100)
- *
- * **Nota de paginação:** as métricas refletem apenas a página carregada
- * (`limit`, default 20). Para blocos com mais tasks, ajuste `limit`/`cursor`.
- *
  * **Performance:** 2 queries (findOne + findMany), métricas O(n) em memória,
  * ZERO N+1.
  *
  * @see ADR-V2-042 (tenant isolation: findOne gate + defense-in-depth)
  * @see Pilar 2 (endpoints genéricos: reusar TasksService.findMany, não duplicar)
- *
- * @example
- * ```json
- * // Request: tasks do bloco 42 com métricas
- * {"blockId": "42", "includeMetrics": true, "limit": 20}
- * // Response:
- * {
- *   "blockId": "42",
- *   "items": [ /* TaskResponseDto[] — dados.idBloco === "42" *\/ ],
- *   "pagination": { "hasMore": false, "nextCursor": null },
- *   "metrics": { "total": 10, "done": 6, "failed": 1, "inProgress": 2, "percent": 60 }
- * }
- * ```
  */
 @Injectable()
 export class ListBlockTasksTool implements McpTool {
@@ -120,11 +99,14 @@ export class ListBlockTasksTool implements McpTool {
    * @param ctx - Contexto do usuário MCP (resolve tenant via `dEntidadeId`)
    * @returns `McpToolResult` com `{ blockId, items, pagination, metrics? }` serializado.
    *
+   * @throws {McpToolError} FORBIDDEN (-32002) quando scope `tasks:read` ausente
    * @throws {McpToolError} INVALID_PARAMS quando blockId/includeMetrics/limit/cursor inválidos.
-   * @throws {NotFoundException} Quando blockId não acessível ou inexistente
-   *   (404 genérico, sem leak de enumeration — ADR-V2-042).
+   * @throws {NotFoundException} Quando blockId não acessível ou inexistente.
    */
   async handler(params: unknown, ctx: McpUserContext): Promise<McpToolResult> {
+    // Gate de autorização (ADR-V2-068). Antes de qualquer query.
+    requireScope(ctx, MCP_SCOPES.TASKS_READ);
+
     const input = optionalRecord(params);
     const blockId = requiredString(input, 'blockId');
     parseBigIntParam(blockId, 'blockId');
@@ -183,12 +165,6 @@ export class ListBlockTasksTool implements McpTool {
 
   /**
    * Calcula métricas de progresso em memória sobre as tasks da página.
-   *
-   * Usa a semântica do FRONTEND (`calcBlockProgress`) — ver buckets em
-   * {@link DONE_STATUS}, {@link FAILED_STATUS}, {@link IN_PROGRESS_STATUS}.
-   *
-   * @param items - Tasks do bloco (cada uma com `status` code V3 string).
-   * @returns Contagens por bucket + `percent` arredondado.
    */
   private computeBlockMetrics(items: TaskResponseDto[]): BlockMetrics {
     let done = 0;

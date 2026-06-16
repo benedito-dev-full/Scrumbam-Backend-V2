@@ -8,7 +8,7 @@ describe('MCP Bloco B tools', () => {
   const unsafeId = '9007199254740993';
   const userCtx = {
     dEntidadeId: BigInt('9007199254740995'),
-    scopes: ['tools:read', 'tools:write'],
+    scopes: ['tasks:read', 'tasks:write'],
     keyChave: BigInt(10),
     keyPrefix: 'scrumban_mcp',
     keyHash: 'hash',

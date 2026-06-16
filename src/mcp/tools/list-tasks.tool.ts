@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 import { ProjectsService } from '../../projects/projects.service';
 import { TasksService } from '../../tasks/tasks.service';
+import { MCP_SCOPES } from '../constants';
 import { McpUserContext } from '../interfaces/mcp.types';
 import { McpTool, McpToolResult } from './tool.interface';
 import {
@@ -11,6 +12,7 @@ import {
   optionalRecord,
   optionalString,
   parseBigIntParam,
+  requireScope,
   textResult,
 } from './tool-params';
 
@@ -187,6 +189,9 @@ export class ListTasksTool implements McpTool {
    * ```
    */
   async handler(params: unknown, ctx: McpUserContext): Promise<McpToolResult> {
+    // Gate de autorização (ADR-V2-068). Antes de qualquer query.
+    requireScope(ctx, MCP_SCOPES.TASKS_READ);
+
     const input = optionalRecord(params);
     const projectId = optionalString(input, 'projectId');
     const assigneeId = optionalString(input, 'assigneeId');

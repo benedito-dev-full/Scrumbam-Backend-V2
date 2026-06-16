@@ -4,7 +4,7 @@ import { EntidadeService } from '../../entidades/entidades.service';
 import { ExecutionsService } from '../../executions/executions.service';
 import { ProjectsService } from '../../projects/projects.service';
 import { TasksService } from '../../tasks/tasks.service';
-import { MCP_ERROR_CODES } from '../constants';
+import { MCP_ERROR_CODES, MCP_SCOPES } from '../constants';
 import { McpUserContext } from '../interfaces/mcp.types';
 import { McpTool, McpToolError, McpToolResult } from './tool.interface';
 import {
@@ -16,13 +16,6 @@ import {
 } from './tool-params';
 
 /**
- * Scope MCP exigido para disparar execuções de IA via `execute_task`
- * (ADR-V2-067). Distinto de `tasks:write` — uma key com permissão de
- * escrever tasks NÃO pode automaticamente queimar tokens de IA.
- */
-const EXECUTIONS_CREATE_SCOPE = 'executions:create';
-
-/**
  * Tool MCP `execute_task` — wrapper fino sobre `ExecutionsService.execute`,
  * que por sua vez instancia `OperacaoExecucaoClaude` (Pilar 1 — F6) para
  * persistir DPedido idClasse=-301/-302/-303 sob workflow canônico Devari.
@@ -30,13 +23,13 @@ const EXECUTIONS_CREATE_SCOPE = 'executions:create';
  * Contrato (ADR-V2-066, ADR-V2-049):
  *  - Modo PROMPT puro: `{ taskId }` (único parâmetro). Backend monta o prompt
  *    via `PromptBuilderService` a partir da DTask (título + descrição + meta).
-
+ *
  *    (PromptBuilder lê título e descrição).
  *
  * Fluxo (assíncrono — fire-and-poll, ADR-V2-066):
- *  1. `requireScope(ctx, 'executions:create')` — sem o scope dedicado → FORBIDDEN
- *     (-32002). Tools legadas (15) NÃO usam scope check; `execute_task` é a
- *     primeira consumidora desse helper (ADR-V2-067).
+ *  1. `requireScope(ctx, MCP_SCOPES.EXECUTIONS_CREATE)` — sem o scope dedicado →
+ *     FORBIDDEN (-32002). Scope distinto de `tasks:write` (ADR-V2-067): uma key
+ *     com permissão de escrever tasks NÃO pode automaticamente queimar tokens de IA.
  *  2. Tenant isolation (ADR-V2-042): `tasksService.findOne(taskId)` (que já valida
  *     existência) + `projectsService.findOne(task.projectId, ctx.dEntidadeId)`
  *     (que valida membership do usuário no projeto via DVincula -158).
@@ -89,6 +82,7 @@ const EXECUTIONS_CREATE_SCOPE = 'executions:create';
  *
  * @see ADR-V2-066 (async fire-and-poll para `execute_task`)
  * @see ADR-V2-067 (scope MCP `executions:create`)
+ * @see ADR-V2-068 (scope catalog completo)
  * @see ADR-V2-005 (OperacaoExecucaoClaude / Pilar 1)
  * @see ADR-V2-006 (Risk via idClasse -301/-302/-303)
  * @see ADR-V2-042 (tenant isolation MCP)
@@ -129,7 +123,7 @@ export class ExecuteTaskTool implements McpTool {
    *   status, riskLevel, riskClassId, createdAt, pollHint }`
    *
    * @throws {McpToolError} FORBIDDEN (-32002) quando o scope `executions:create`
-   *   não está na key autenticada
+   *   não está na key autenticada (ADR-V2-068)
    * @throws {McpToolError} INVALID_PARAMS (-32602) quando `taskId` ausente/
    *   não-BigInt
    * @throws {McpToolError} INVALID_PARAMS com `reason='risk_gate_blocked'` se
@@ -143,8 +137,8 @@ export class ExecuteTaskTool implements McpTool {
   async handler(params: unknown, ctx: McpUserContext): Promise<McpToolResult> {
     const input = assertRecord(params);
 
-    // 1. Gate de autorização (ADR-V2-067). Antes de qualquer query.
-    requireScope(ctx, EXECUTIONS_CREATE_SCOPE);
+    // 1. Gate de autorização (ADR-V2-067, ADR-V2-068). Antes de qualquer query.
+    requireScope(ctx, MCP_SCOPES.EXECUTIONS_CREATE);
 
     // 2. Validação de input.
     const taskIdStr = requiredString(input, 'taskId');

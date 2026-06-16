@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 
 import { ProjectsService } from '../../projects/projects.service';
 import { UpdateProjectDto } from '../../projects/dto/update-project.dto';
+import { MCP_SCOPES } from '../constants';
 import { McpUserContext } from '../interfaces/mcp.types';
 import { McpTool, McpToolResult } from './tool.interface';
 import {
@@ -9,6 +10,7 @@ import {
   invalidParams,
   optionalString,
   parseBigIntParam,
+  requireScope,
   requiredString,
   textResult,
 } from './tool-params';
@@ -77,12 +79,13 @@ export class UpdateProjectTool implements McpTool {
    * Handler do tools/call para `update_project`.
    *
    * Fluxo:
-   * 1. Valida `params` como Record + `projectId` string não vazia + BigInt parseable.
-   * 2. Valida que ao menos um campo além de `projectId` foi fornecido.
-   * 3. Constrói DTO com APENAS os campos presentes (omite `undefined`).
-   * 4. Chama `projectsService.update(projectId, dto, ctx.dEntidadeId)` —
+   * 1. Gate de autorização (ADR-V2-068).
+   * 2. Valida `params` como Record + `projectId` string não vazia + BigInt parseable.
+   * 3. Valida que ao menos um campo além de `projectId` foi fornecido.
+   * 4. Constrói DTO com APENAS os campos presentes (omite `undefined`).
+   * 5. Chama `projectsService.update(projectId, dto, ctx.dEntidadeId)` —
    *    SEM `organizationId` (MCP é cross-org).
-   * 5. Retorna resultado serializado via `textResult`.
+   * 6. Retorna resultado serializado via `textResult`.
    *
    * ForbiddenException (caller não é MANAGER) e NotFoundException (projeto
    * não existe) propagam para o `McpRouterService.dispatchTool` sem tratamento
@@ -91,11 +94,15 @@ export class UpdateProjectTool implements McpTool {
    * @param params - Argumentos da chamada (projectId + campos opcionais)
    * @param ctx - Contexto MCP autenticado (contém `dEntidadeId` como bigint)
    * @returns Envelope MCP com JSON serializado do projeto atualizado
+   * @throws {McpToolError} FORBIDDEN (-32002) quando scope `projects:write` ausente
    * @throws {McpToolError} INVALID_PARAMS quando projectId ausente/inválido ou nenhum campo fornecido
    * @throws {ForbiddenException} Quando caller não tem role MANAGER no projeto
    * @throws {NotFoundException} Quando projeto não encontrado
    */
   async handler(params: unknown, ctx: McpUserContext): Promise<McpToolResult> {
+    // Gate de autorização (ADR-V2-068). Antes de qualquer query.
+    requireScope(ctx, MCP_SCOPES.PROJECTS_WRITE);
+
     const input = assertRecord(params);
     const projectId = requiredString(input, 'projectId');
     parseBigIntParam(projectId, 'projectId');
@@ -152,7 +159,9 @@ export class UpdateProjectTool implements McpTool {
       dto.teamId = teamId;
     }
 
-    this.logger.debug?.(`update_project projectId=${projectId} fields=[${Object.keys(dto).join(',')}]`);
+    this.logger.debug?.(
+      `update_project projectId=${projectId} fields=[${Object.keys(dto).join(',')}]`,
+    );
 
     // NÃO passa organizationId — MCP é cross-org (ver JSDoc da classe).
     const result = await this.projectsService.update(projectId, dto, ctx.dEntidadeId);
@@ -193,10 +202,7 @@ export class UpdateProjectTool implements McpTool {
    * @returns boolean se presente, undefined caso contrário
    * @throws {McpToolError} INVALID_PARAMS se o valor não for boolean
    */
-  private parseOptionalBoolean(
-    input: Record<string, unknown>,
-    field: string,
-  ): boolean | undefined {
+  private parseOptionalBoolean(input: Record<string, unknown>, field: string): boolean | undefined {
     const value = input[field];
     if (value === undefined || value === null) {
       return undefined;

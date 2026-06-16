@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 
 import { ProjectsService } from '../../projects/projects.service';
 import { TasksService } from '../../tasks/tasks.service';
+import { MCP_SCOPES } from '../constants';
 import { McpUserContext } from '../interfaces/mcp.types';
 import { McpTool, McpToolResult } from './tool.interface';
 import {
@@ -9,6 +10,7 @@ import {
   optionalRecord,
   optionalString,
   parseBigIntParam,
+  requireScope,
   requiredString,
   textResult,
 } from './tool-params';
@@ -65,40 +67,19 @@ export class ListBlocksTool implements McpTool {
    * Lista blocos de um projeto com paginação por cursor.
    *
    * **Fluxo:**
-   * 1. Valida `projectId` (BigInt) e `cursor` (BigInt opcional, via `parseBigIntParam`)
-   * 2. Resolve `accessibleProjectIds` do usuário MCP (defense-in-depth ADR-V2-042)
-   * 3. Se `projectId` não está no scope, retorna lista vazia (anti-enumeration)
-   * 4. Delega para `TasksService.findMany({ projectId, idClasse: '-200', cursor, limit }, accessibleProjectIds)`
-   * 5. Retorna response tipado com items + pagination (hasMore, nextCursor)
+   * 1. Gate de autorização (ADR-V2-068).
+   * 2. Valida `projectId` (BigInt) e `cursor` (BigInt opcional).
+   * 3. Resolve `accessibleProjectIds` do usuário MCP (defense-in-depth ADR-V2-042).
+   * 4. Se `projectId` não está no scope, retorna lista vazia (anti-enumeration).
+   * 5. Delega para `TasksService.findMany({ projectId, idClasse: '-200', cursor, limit })`.
    *
-   * **Tenant Isolation:** `accessibleProjectIds` passado para TasksService como
-   * 2º argumento — defense-in-depth. Se blockId não acessível, erro genérico (404).
-   *
+   * @throws {McpToolError} FORBIDDEN (-32002) quando scope `tasks:read` ausente
    * @throws {McpToolError} INVALID_PARAMS quando projectId/cursor não são BigInt válidos
-   * @throws Não lança NotFoundException — retorna vazio para projeto out-of-scope
-   *
-   * @example
-   * ```json
-   * // Request de paginação
-   * {
-   *   "projectId": "100",
-   *   "limit": 5,
-   *   "cursor": "42"
-   * }
-   * // Response (page 2 de blocos, 5 itens)
-   * {
-   *   "items": [
-   *     { "chave": "43", "nome": "Bloco 2", "idClasse": "-200", "idPai": "100", ... },
-   *     ...
-   *   ],
-   *   "pagination": {
-   *     "hasMore": true,
-   *     "nextCursor": "47"
-   *   }
-   * }
-   * ```
    */
   async handler(params: unknown, ctx: McpUserContext): Promise<McpToolResult> {
+    // Gate de autorização (ADR-V2-068). Antes de qualquer query.
+    requireScope(ctx, MCP_SCOPES.TASKS_READ);
+
     const input = optionalRecord(params);
     const projectId = requiredString(input, 'projectId');
     parseBigIntParam(projectId, 'projectId');

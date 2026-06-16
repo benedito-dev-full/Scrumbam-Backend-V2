@@ -73,7 +73,7 @@ class FakeRateLimitRedis {
 describe('MCP Bloco C - rate limit, auditoria e sanitizacao', () => {
   const userCtx = {
     dEntidadeId: BigInt(123),
-    scopes: ['tools:read'],
+    scopes: ['tasks:read'],
     keyChave: BigInt(456),
     keyPrefix: 'scrumban_mcp',
     keyHash: 'hashabc',

@@ -11,7 +11,7 @@ describe('MCP JSON-RPC envelope e router', () => {
 
   const userCtx = {
     dEntidadeId: BigInt(1),
-    scopes: ['tools:read'],
+    scopes: ['tasks:read'],
     keyChave: BigInt(10),
     keyPrefix: 'scrumban_mcp',
     keyHash: 'hash',

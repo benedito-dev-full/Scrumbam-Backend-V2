@@ -31,7 +31,7 @@ describe('MCP update_task tool', () => {
   const projectId = '9007199254740995';
   const userCtx = {
     dEntidadeId: BigInt('9007199254740997'),
-    scopes: ['tools:write'],
+    scopes: ['tasks:write'],
     keyChave: BigInt(10),
     keyPrefix: 'scrumban_mcp',
     keyHash: 'hash',

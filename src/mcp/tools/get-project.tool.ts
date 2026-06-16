@@ -2,12 +2,14 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 
 import { ProjectMembersService } from '../../projects/project-members.service';
 import { ProjectsService } from '../../projects/projects.service';
+import { MCP_SCOPES } from '../constants';
 import { McpUserContext } from '../interfaces/mcp.types';
 import { McpTool, McpToolResult } from './tool.interface';
 import {
   assertRecord,
   invalidParams,
   parseBigIntParam,
+  requireScope,
   requiredString,
   textResult,
 } from './tool-params';
@@ -115,28 +117,29 @@ export class GetProjectTool implements McpTool {
    * Handler do tools/call para `get_project`.
    *
    * Fluxo:
-   * 1. Valida params (object + `projectId` string nao vazia + BigInt parseable).
-   * 2. Valida `include[]` (array opcional; cada item dentro do enum).
-   * 3. Resolve projetos acessiveis ao caller (ADR-V2-042 — defense in depth).
-   * 4. Gate: se `projectId` nao pertence ao scope, lanca `NotFoundException`
+   * 1. Gate de autorização (ADR-V2-068).
+   * 2. Valida params (object + `projectId` string nao vazia + BigInt parseable).
+   * 3. Valida `include[]` (array opcional; cada item dentro do enum).
+   * 4. Resolve projetos acessiveis ao caller (ADR-V2-042 — defense in depth).
+   * 5. Gate: se `projectId` nao pertence ao scope, lanca `NotFoundException`
    *    com mensagem identica a projeto inexistente (anti enumeration).
-   * 5. Executa em PARALELO via Promise.all:
+   * 6. Executa em PARALELO via Promise.all:
    *    - `findOne(projectId, dEntidadeId)` (sempre — dados base)
    *    - `getMembers(projectId)` se `include` contem `members`
    *    - `getStats(projectId, dEntidadeId)` se `stats`
-   * 6. Compoe resultado mesclando apenas as keys solicitadas.
-   *
-   * Excecoes nao tratadas (`NotFoundException`, etc.) propagam para o
-   * `McpRouterService.dispatchTool`, que NAO traduz para JSON-RPC error
-   * (propaga como exception runtime).
+   * 7. Compoe resultado mesclando apenas as keys solicitadas.
    *
    * @param params - Argumentos da chamada (`{ projectId: string, include?: string[] }`)
    * @param ctx - Contexto MCP autenticado (contem `dEntidadeId`)
    * @returns Envelope MCP com JSON serializado do projeto (+ campos do include)
+   * @throws {McpToolError} FORBIDDEN (-32002) quando scope `tasks:read` ausente
    * @throws {McpToolError} INVALID_PARAMS quando projectId/include invalido
    * @throws {NotFoundException} Quando projeto fora do scope do usuario MCP
    */
   async handler(params: unknown, ctx: McpUserContext): Promise<McpToolResult> {
+    // Gate de autorização (ADR-V2-068). Antes de qualquer query.
+    requireScope(ctx, MCP_SCOPES.TASKS_READ);
+
     const input = assertRecord(params);
     const projectId = requiredString(input, 'projectId');
     parseBigIntParam(projectId, 'projectId');
@@ -191,10 +194,6 @@ export class GetProjectTool implements McpTool {
    *  - Valor nao-array (ex: string, object, number)
    *  - Item nao-string dentro do array
    *  - String fora do enum (ex: `activity`, `tasks`)
-   *
-   * Duplicatas sao toleradas — `wantsX` checa via `includes()`. Mas o schema
-   * JSON declara `uniqueItems: true`; um cliente conformante nunca deve
-   * enviar duplicatas. Toleramos para nao falhar em casos defensivos.
    *
    * @param raw - Valor cru do campo `include` em `params`
    * @returns Array de includes validados (pode ser vazio)

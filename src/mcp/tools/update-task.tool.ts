@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 
 import { ProjectsService } from '../../projects/projects.service';
 import { TasksService } from '../../tasks/tasks.service';
-import { MCP_ERROR_CODES } from '../constants';
+import { MCP_ERROR_CODES, MCP_SCOPES } from '../constants';
 import { McpUserContext } from '../interfaces/mcp.types';
 import { McpTool, McpToolError, McpToolResult } from './tool.interface';
 import {
@@ -12,6 +12,7 @@ import {
   invalidParams,
   optionalRecordField,
   parseBigIntParam,
+  requireScope,
   requiredString,
   textResult,
 } from './tool-params';
@@ -115,7 +116,8 @@ export class UpdateTaskTool implements McpTool {
       },
       idPai: {
         type: ['string', 'null'],
-        description: 'string=novo pai (subtarefa, ADR-V2-047); null=move para raiz; ausente=nao toca',
+        description:
+          'string=novo pai (subtarefa, ADR-V2-047); null=move para raiz; ausente=nao toca',
       },
       idBloco: {
         type: ['string', 'null'],
@@ -151,14 +153,15 @@ export class UpdateTaskTool implements McpTool {
    * Handler do tools/call para `update_task`.
    *
    * Fluxo:
-   * 1. Valida params (assertRecord + taskId required + BigInt parseable).
-   * 2. Extrai e valida campos opcionais com type-checking.
-   * 3. Exige ao menos UM campo de update (caso contrario INVALID_PARAMS —
+   * 1. Gate de autorização (ADR-V2-068).
+   * 2. Valida params (assertRecord + taskId required + BigInt parseable).
+   * 3. Extrai e valida campos opcionais com type-checking.
+   * 4. Exige ao menos UM campo de update (caso contrario INVALID_PARAMS —
    *    redundancia em relacao ao `anyOf` do schema, mas necessaria caso
    *    o cliente envie sem validar contra o schema).
-   * 4. Resolve `accessibleProjectIds` para o caller.
-   * 5. Executa em ordem: update(basicos) → updateStatus.
-   * 6. Re-hidrata via `findOne` e retorna snapshot final.
+   * 5. Resolve `accessibleProjectIds` para o caller.
+   * 6. Executa em ordem: update(basicos) → updateStatus.
+   * 7. Re-hidrata via `findOne` e retorna snapshot final.
    *
    * Excecoes nao tratadas (`NotFoundException`, `BadRequestException`,
    * etc.) propagam ao router e sao tratadas conforme protocolo MCP.
@@ -167,11 +170,15 @@ export class UpdateTaskTool implements McpTool {
    * @param ctx - Contexto MCP autenticado (contem `dEntidadeId`)
    * @returns Envelope MCP com snapshot final da task (apos todas as
    *   atualizacoes aplicadas em sequencia)
+   * @throws {McpToolError} FORBIDDEN (-32002) quando scope `tasks:write` ausente
    * @throws {McpToolError} INVALID_PARAMS quando schema viola
    * @throws {NotFoundException} Task fora do scope ou inexistente
    * @throws {BadRequestException} Transicao de status invalida
    */
   async handler(params: unknown, ctx: McpUserContext): Promise<McpToolResult> {
+    // Gate de autorização (ADR-V2-068). Antes de qualquer query.
+    requireScope(ctx, MCP_SCOPES.TASKS_WRITE);
+
     const input = assertRecord(params);
     const taskId = requiredString(input, 'taskId');
     parseBigIntParam(taskId, 'taskId');

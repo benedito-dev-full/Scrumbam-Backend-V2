@@ -2,9 +2,16 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 
 import { ProjectMembersService } from '../../projects/project-members.service';
 import { ProjectsService } from '../../projects/projects.service';
+import { MCP_SCOPES } from '../constants';
 import { McpUserContext } from '../interfaces/mcp.types';
 import { McpTool, McpToolResult } from './tool.interface';
-import { assertRecord, parseBigIntParam, requiredString, textResult } from './tool-params';
+import {
+  assertRecord,
+  parseBigIntParam,
+  requireScope,
+  requiredString,
+  textResult,
+} from './tool-params';
 
 /**
  * Tool MCP `list_members` — lista membros de um projeto com seus roles
@@ -18,27 +25,8 @@ import { assertRecord, parseBigIntParam, requiredString, textResult } from './to
  * 3. Apenas apos passar o gate, delega para `ProjectMembersService.getMembers`,
  *    que faz uma unica query com `include` (ZERO N+1).
  *
- * Diferenca para `get_task`: o `ProjectMembersService.getMembers` NAO recebe
- * `accessibleProjectIds` como parametro (assinatura legada do controller HTTP
- * que ja e protegido por JwtAuthGuard). Por isso o gate fica na propria tool,
- * antes da chamada.
- *
  * NAO usa Engine: leitura simples em tabela estrutural (DVincula). Pilar 1
  * (Engine) so aplica em DPedido idClasse=-300 (transacional).
- *
- * @example
- * ```json
- * // Request JSON-RPC
- * {
- *   "jsonrpc": "2.0",
- *   "id": 1,
- *   "method": "tools/call",
- *   "params": {
- *     "name": "list_members",
- *     "arguments": { "projectId": "123" }
- *   }
- * }
- * ```
  */
 @Injectable()
 export class ListMembersTool implements McpTool {
@@ -61,26 +49,17 @@ export class ListMembersTool implements McpTool {
   /**
    * Handler do tools/call para `list_members`.
    *
-   * Fluxo:
-   * 1. Valida params (object + `projectId` string nao vazia + BigInt parseable).
-   * 2. Resolve projetos acessiveis ao caller (ADR-V2-042 — defense in depth).
-   * 3. Se `projectId` nao pertence ao scope, lanca `NotFoundException` com
-   *    mensagem identica a projeto inexistente (anti enumeration).
-   * 4. Invoca `ProjectMembersService.getMembers(projectId)` (assinatura HTTP-legada,
-   *    sem `accessibleProjectIds` — o gate fica na tool).
-   * 5. Embrulha resposta em `textResult` (envelope MCP padrao).
-   *
-   * Excecoes nao tratadas (`NotFoundException`, etc.) propagam para o
-   * `McpRouterService.dispatchTool`, que NAO traduz para JSON-RPC error
-   * (propaga como exception runtime).
-   *
    * @param params - Argumentos da chamada (`{ projectId: string }`)
    * @param ctx - Contexto MCP autenticado (contem `dEntidadeId`)
    * @returns Envelope MCP com JSON serializado da lista de membros
+   * @throws {McpToolError} FORBIDDEN (-32002) quando scope `tasks:read` ausente
    * @throws {McpToolError} INVALID_PARAMS quando projectId ausente/invalido
    * @throws {NotFoundException} Quando projeto fora do scope do usuario MCP
    */
   async handler(params: unknown, ctx: McpUserContext): Promise<McpToolResult> {
+    // Gate de autorização (ADR-V2-068). Antes de qualquer query.
+    requireScope(ctx, MCP_SCOPES.TASKS_READ);
+
     const input = assertRecord(params);
     const projectId = requiredString(input, 'projectId');
     parseBigIntParam(projectId, 'projectId');

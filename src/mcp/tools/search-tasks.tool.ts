@@ -2,12 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 
 import { ProjectsService } from '../../projects/projects.service';
 import { SearchService } from '../../search/search.service';
+import { MCP_SCOPES } from '../constants';
 import { McpUserContext } from '../interfaces/mcp.types';
 import { McpTool, McpToolResult } from './tool.interface';
 import {
   assertRecord,
   invalidParams,
   optionalString,
+  requireScope,
   textResult,
 } from './tool-params';
 
@@ -25,23 +27,6 @@ import {
  *
  * NAO usa Engine: busca read-only em DTask (estrutural via Prisma direto).
  * ZERO INSERT/UPDATE/DELETE. Pilar 1 não se aplica.
- *
- * @example
- * ```json
- * {
- *   "jsonrpc": "2.0",
- *   "id": 1,
- *   "method": "tools/call",
- *   "params": {
- *     "name": "search_tasks",
- *     "arguments": {
- *       "q": "login",
- *       "projectId": "123",
- *       "limit": 10
- *     }
- *   }
- * }
- * ```
  */
 @Injectable()
 export class SearchTasksTool implements McpTool {
@@ -68,20 +53,16 @@ export class SearchTasksTool implements McpTool {
   /**
    * Handler do tools/call para `search_tasks`.
    *
-   * Fluxo:
-   * 1. Valida `params` como Record + `q` string com mínimo 2 chars.
-   * 2. Extrai `projectId` (opcional) e `limit` (default 20, clampado 1-50).
-   * 3. Resolve `accessibleProjectIds` via `ProjectsService.findAccessibleProjectIds`.
-   * 4. Se `projectId` fornecido, valida que está em `accessibleProjectIds`.
-   * 5. Invoca `SearchService.searchForMcp` com escopo de IDs resolvido.
-   * 6. Retorna resultado serializado via `textResult`.
-   *
    * @param params - Argumentos da chamada (q obrigatório + projectId/limit opcionais)
    * @param ctx - Contexto MCP autenticado (contém `dEntidadeId` como bigint)
    * @returns Envelope MCP com JSON serializado das tasks encontradas
+   * @throws {McpToolError} FORBIDDEN (-32002) quando scope `tasks:read` ausente
    * @throws {McpToolError} INVALID_PARAMS quando q ausente/curto ou projectId não acessível
    */
   async handler(params: unknown, ctx: McpUserContext): Promise<McpToolResult> {
+    // Gate de autorização (ADR-V2-068). Antes de qualquer query.
+    requireScope(ctx, MCP_SCOPES.TASKS_READ);
+
     const input = assertRecord(params);
 
     // Validar q obrigatório
@@ -120,13 +101,6 @@ export class SearchTasksTool implements McpTool {
     return textResult(result);
   }
 
-  /**
-   * Extrai e valida o parâmetro `q`.
-   *
-   * @param input - Params já validados como Record
-   * @returns string com mínimo 2 chars
-   * @throws {McpToolError} INVALID_PARAMS se ausente, não-string ou < 2 chars
-   */
   private parseQ(input: Record<string, unknown>): string {
     const value = input.q;
     if (typeof value !== 'string' || value.trim() === '') {
@@ -139,13 +113,6 @@ export class SearchTasksTool implements McpTool {
     return value;
   }
 
-  /**
-   * Extrai `limit` do input, aplicando default 20 e clampar 1-50.
-   *
-   * @param input - Params já validados como Record
-   * @returns number entre 1 e 50
-   * @throws {McpToolError} INVALID_PARAMS se o valor não for inteiro entre 1 e 50
-   */
   private parseLimit(input: Record<string, unknown>): number {
     const value = input.limit;
     if (value === undefined || value === null) {

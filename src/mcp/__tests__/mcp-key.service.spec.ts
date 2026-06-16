@@ -36,7 +36,7 @@ describe('McpKeyService', () => {
       criadoEm: new Date('2026-05-10T12:00:00.000Z'),
     });
 
-    const result = await service.generate(BigInt('9007199254740993'), ['tools:read']);
+    const result = await service.generate(BigInt('9007199254740993'), ['tasks:read']);
 
     expect(result.plaintext).toMatch(/^scrumban_mcp_/);
     expect(result.id).toBe('10');
@@ -47,7 +47,7 @@ describe('McpKeyService', () => {
           dEntidadeId: BigInt('9007199254740993'),
           dados: expect.objectContaining({
             hash: McpKeyService.sha256Hex(result.plaintext),
-            scopes: ['tools:read'],
+            scopes: ['tasks:read'],
             disabled: false,
           }),
         }),
@@ -67,7 +67,7 @@ describe('McpKeyService', () => {
         dados: {
           prefix: 'scrumban_mcp',
           hash: 'secret-hash',
-          scopes: ['tools:read'],
+          scopes: ['tasks:read'],
           disabled: false,
           createdAt: '2026-05-10T12:00:00.000Z',
           lastUsedAt: null,
@@ -81,7 +81,7 @@ describe('McpKeyService', () => {
       {
         id: '11',
         prefix: 'scrumban_mcp',
-        scopes: ['tools:read'],
+        scopes: ['tasks:read'],
         disabled: false,
         createdAt: '2026-05-10T12:00:00.000Z',
         lastUsedAt: null,
@@ -107,7 +107,7 @@ describe('McpKeyService', () => {
       dados: {
         prefix: 'scrumban_mcp',
         hash,
-        scopes: ['tools:read'],
+        scopes: ['tasks:read'],
         disabled: false,
       },
     });
@@ -139,7 +139,7 @@ describe('McpKeyService', () => {
         JSON.stringify({
           chave: '15',
           dEntidadeId: '44',
-          scopes: ['tools:read'],
+          scopes: ['tasks:read'],
           prefix: 'scrumban_mcp',
           hash,
         }),

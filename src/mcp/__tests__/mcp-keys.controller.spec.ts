@@ -27,12 +27,12 @@ describe('McpKeysController', () => {
 
   it('converte DUserGroup.chave para DEntidade.chave antes de gerar key', async () => {
     await controller.create(
-      { scopes: ['tools:read'] },
+      { scopes: ['tasks:read'] },
       { user: { sub: '100', entidadeId: 'wrong', organizationId: '', email: '' } } as never,
     );
 
     expect(entidadeService.getEntidadeIdFromUserGroup).toHaveBeenCalledWith(BigInt(100));
-    expect(mcpKeyService.generate).toHaveBeenCalledWith(BigInt(200), ['tools:read']);
+    expect(mcpKeyService.generate).toHaveBeenCalledWith(BigInt(200), ['tasks:read']);
   });
 
   it('lista sem plaintext e revoga usando BigInt para IDs grandes', async () => {

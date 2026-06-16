@@ -30,7 +30,7 @@ import { UpdateNotificationTool } from '../tools/update-notification.tool';
 describe('MCP tools de notificacoes (list_notifications, update_notification, get_unread_count)', () => {
   const userCtx = {
     dEntidadeId: BigInt('9007199254740991'),
-    scopes: ['tools:read'],
+    scopes: ['notifications:read', 'notifications:write'],
     keyChave: BigInt(10),
     keyPrefix: 'scrumban_mcp',
     keyHash: 'hash',

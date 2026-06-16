@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 
 import { NotificationsService } from '../../notifications/notifications.service';
+import { MCP_SCOPES } from '../constants';
 import { McpUserContext } from '../interfaces/mcp.types';
 import { McpTool, McpToolResult } from './tool.interface';
 import {
@@ -8,6 +9,7 @@ import {
   invalidParams,
   optionalString,
   parseBigIntParam,
+  requireScope,
   requiredString,
   textResult,
 } from './tool-params';
@@ -25,22 +27,6 @@ type NotificationAction = (typeof VALID_ACTIONS)[number];
  *
  * NAO usa Engine: operacoes estruturais via `NotificationsService` (Prisma direto).
  * Pilar 1 (Engine) aplica apenas em DPedido idClasse=-300.
- *
- * @example
- * ```json
- * {
- *   "jsonrpc": "2.0",
- *   "id": 1,
- *   "method": "tools/call",
- *   "params": {
- *     "name": "update_notification",
- *     "arguments": {
- *       "action": "mark_read",
- *       "notificationId": "12345"
- *     }
- *   }
- * }
- * ```
  */
 @Injectable()
 export class UpdateNotificationTool implements McpTool {
@@ -63,23 +49,17 @@ export class UpdateNotificationTool implements McpTool {
   /**
    * Handler do tools/call para `update_notification`.
    *
-   * Fluxo:
-   * 1. Valida `params` como Record + `action` string nao vazia.
-   * 2. Valida que `action` pertence ao enum permitido.
-   * 3. Para `mark_all_read`: chama `markAllAsRead` sem `notificationId`.
-   * 4. Para `mark_read`/`delete`: exige `notificationId` → parseBigInt → delega ao service.
-   * 5. Retorna `{ success: true, action }`.
-   *
-   * NotFoundException (notificacao nao encontrada ou de outro usuario) propagada
-   * para o router sem try/catch.
-   *
    * @param params - Argumentos da chamada (action + notificationId opcional)
    * @param ctx - Contexto MCP autenticado (contém `dEntidadeId` como bigint)
    * @returns Envelope MCP com `{ success: true, action }`
+   * @throws {McpToolError} FORBIDDEN (-32002) quando scope `notifications:write` ausente
    * @throws {McpToolError} INVALID_PARAMS quando action invalida ou notificationId ausente/invalido
    * @throws {NotFoundException} Quando notificacao nao encontrada ou pertence a outro usuario
    */
   async handler(params: unknown, ctx: McpUserContext): Promise<McpToolResult> {
+    // Gate de autorização (ADR-V2-068). Antes de qualquer query.
+    requireScope(ctx, MCP_SCOPES.NOTIFICATIONS_WRITE);
+
     const input = assertRecord(params);
     const actionRaw = requiredString(input, 'action');
 

@@ -2,7 +2,7 @@ import { ConflictException, Injectable } from '@nestjs/common';
 
 import { ProjectsService } from '../../projects/projects.service';
 import { TasksService } from '../../tasks/tasks.service';
-import { MCP_ERROR_CODES } from '../constants';
+import { MCP_ERROR_CODES, MCP_SCOPES } from '../constants';
 import { McpUserContext } from '../interfaces/mcp.types';
 import { McpTool, McpToolError, McpToolResult } from './tool.interface';
 import {
@@ -12,13 +12,6 @@ import {
   requiredString,
   textResult,
 } from './tool-params';
-
-/**
- * Scope MCP exigido para mutações de timer (ADR-V2-067).
- * Reutiliza `tasks:write` — controle de timer é escrita em DTask.dados,
- * sem custo de IA, distinto de `executions:create`.
- */
-const TASKS_WRITE_SCOPE = 'tasks:write';
 
 /**
  * Ações de timer aceitas por esta tool.
@@ -36,8 +29,8 @@ type TimerAction = (typeof VALID_TIMER_ACTIONS)[number];
  * Permite que clientes MCP controlem o timer manual de tempo de uma task
  * sem passar pelo HTTP REST (POST /tasks/:id/timer/start|pause|resume|stop).
  *
- * **Escopo necessário (ADR-V2-067):** `tasks:write` — mesma permissão
- * exigida por `create_task` e `update_task`. Uma API key com apenas
+ * **Escopo necessário (ADR-V2-067, ADR-V2-068):** `tasks:write` — mesma
+ * permissão exigida por `create_task` e `update_task`. Uma API key com apenas
  * `tasks:read` NÃO pode acionar o timer.
  *
  * **Tenant isolation (ADR-V2-042):** O `TaskTimerService.start/close` recebe
@@ -108,6 +101,7 @@ type TimerAction = (typeof VALID_TIMER_ACTIONS)[number];
  *
  * @see ADR-V2-057 (timer manual — start/pause/resume/stop + anti-fraude)
  * @see ADR-V2-067 (scope MCP `tasks:write`)
+ * @see ADR-V2-068 (scope catalog completo)
  * @see ADR-V2-042 (tenant isolation MCP)
  */
 @Injectable()
@@ -147,7 +141,8 @@ export class UpdateTimerTool implements McpTool {
    * `TasksService.timer` — ZERO Prisma direto, ZERO lógica de negócio de timer.
    *
    * Fluxo:
-   * 1. `requireScope(ctx, 'tasks:write')` — sem o scope → FORBIDDEN (-32002).
+   * 1. `requireScope(ctx, MCP_SCOPES.TASKS_WRITE)` — sem o scope → FORBIDDEN
+   *    (-32002). Escopo harmonizado com o catalog global (ADR-V2-068).
    * 2. Extrai e valida `taskId` (string BigInt-parseável) e `action` (enum).
    * 3. Delega a `tasksService.timer(id, action, actorId, undefined)`:
    *    - `actorId = ctx.dEntidadeId` (bigint — mesma origem do JWT no controller HTTP).
@@ -170,8 +165,8 @@ export class UpdateTimerTool implements McpTool {
   async handler(params: unknown, ctx: McpUserContext): Promise<McpToolResult> {
     const input = assertRecord(params);
 
-    // 1. Gate de autorização (ADR-V2-067). Antes de qualquer query.
-    requireScope(ctx, TASKS_WRITE_SCOPE);
+    // 1. Gate de autorização (ADR-V2-067, ADR-V2-068). Antes de qualquer query.
+    requireScope(ctx, MCP_SCOPES.TASKS_WRITE);
 
     // 2. Validação de input.
     const taskIdStr = requiredString(input, 'taskId');

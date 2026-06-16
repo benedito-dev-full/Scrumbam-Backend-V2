@@ -27,7 +27,7 @@ describe('MCP list_block_tasks tool', () => {
   const otherBlockId = '99';
   const userCtx = {
     dEntidadeId: BigInt('9007199254740997'),
-    scopes: ['tools:read'],
+    scopes: ['tasks:read'],
     keyChave: BigInt(10),
     keyPrefix: 'scrumban_mcp',
     keyHash: 'hash',

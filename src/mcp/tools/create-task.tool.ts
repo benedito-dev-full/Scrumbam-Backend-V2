@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 import { ProjectsService } from '../../projects/projects.service';
 import { TasksService } from '../../tasks/tasks.service';
+import { MCP_SCOPES } from '../constants';
 import { McpUserContext } from '../interfaces/mcp.types';
 import { McpTool, McpToolResult } from './tool.interface';
 import {
@@ -12,6 +13,7 @@ import {
   optionalRecordField,
   optionalString,
   parseBigIntParam,
+  requireScope,
   requiredString,
   textResult,
 } from './tool-params';
@@ -94,24 +96,26 @@ export class CreateTaskTool implements McpTool {
    * Handler do tools/call para `create_task`.
    *
    * Fluxo:
-   * 1. Valida params (projectId/titulo obrigatorios + limites de string).
-   * 2. Extrai e valida campos opcionais (enum priority, ISO 8601 dueDate,
+   * 1. Gate de autorização (ADR-V2-068).
+   * 2. Valida params (projectId/titulo obrigatorios + limites de string).
+   * 3. Extrai e valida campos opcionais (enum priority, ISO 8601 dueDate,
    *    BigInt-parseabilidade de assigneeId/idPai/assigneeTeamId/idBloco).
-   * 3. Verifica acesso ao projeto (ADR-V2-042).
-   * 4. Monta o DTO espalhando condicionalmente os campos presentes;
-   *    `idBloco` e `fields` viram chaves de um UNICO `dados`
-   *    (`dados: { idBloco, fields }`), incluido apenas quando ao menos um
-   *    estiver presente. Mantem `source: 'mcp'`.
-   * 5. Delega para `tasksService.create` (que valida `fields` server-side
-   *    contra `DProject.tableFields`).
+   * 4. Verifica acesso ao projeto (ADR-V2-042).
+   * 5. Monta o DTO espalhando condicionalmente os campos presentes;
+   *    `idBloco` e `fields` viram chaves de um UNICO `dados`.
+   * 6. Delega para `tasksService.create`.
    *
    * @param params - Argumentos da chamada (ver `inputSchema`)
    * @param ctx - Contexto MCP autenticado (contem `dEntidadeId`)
    * @returns Envelope MCP com a task criada
+   * @throws {McpToolError} FORBIDDEN (-32002) quando scope `tasks:write` ausente
    * @throws {McpToolError} INVALID_PARAMS quando algum campo viola o schema
    * @throws {NotFoundException} Projeto fora do scope ou inexistente
    */
   async handler(params: unknown, ctx: McpUserContext): Promise<McpToolResult> {
+    // Gate de autorização (ADR-V2-068). Antes de qualquer query.
+    requireScope(ctx, MCP_SCOPES.TASKS_WRITE);
+
     const input = assertRecord(params);
     const projectId = requiredString(input, 'projectId');
     const assigneeId = optionalString(input, 'assigneeId');
@@ -148,10 +152,6 @@ export class CreateTaskTool implements McpTool {
 
     await this.projectsService.findOne(projectId, ctx.dEntidadeId);
 
-    // `idBloco` e `fields` sao empacotados numa UNICA chave `dados` para que
-    // ambos possam coexistir na mesma chamada (dois spreads separados de
-    // `{ dados: ... }` se sobrescreveriam). `dados` so e incluido no DTO se
-    // ao menos um deles estiver presente.
     const dados: Record<string, unknown> = {
       ...(idBloco ? { idBloco } : {}),
       ...(fields ? { fields } : {}),
@@ -176,10 +176,6 @@ export class CreateTaskTool implements McpTool {
     return textResult(result);
   }
 
-  /**
-   * Extrai `priority` opcional validando contra o enum canonico. Retorna
-   * `undefined` quando ausente/null.
-   */
   private extractPriority(input: Record<string, unknown>): string | undefined {
     const value = input.priority;
     if (value === undefined || value === null) {
