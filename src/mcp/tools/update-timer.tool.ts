@@ -1,5 +1,6 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 
+import { ProjectsService } from '../../projects/projects.service';
 import { TasksService } from '../../tasks/tasks.service';
 import { MCP_ERROR_CODES } from '../constants';
 import { McpUserContext } from '../interfaces/mcp.types';
@@ -136,7 +137,10 @@ export class UpdateTimerTool implements McpTool {
     additionalProperties: false,
   };
 
-  constructor(private readonly tasksService: TasksService) {}
+  constructor(
+    private readonly tasksService: TasksService,
+    private readonly projectsService: ProjectsService,
+  ) {}
 
   /**
    * Handler do `tools/call` para `update_timer`. Wrapper fino sobre
@@ -182,21 +186,29 @@ export class UpdateTimerTool implements McpTool {
     }
     const action = actionRaw as TimerAction;
 
-    // 3. Delega ao service. actorId = ctx.dEntidadeId (bigint, preenchido pelo
-    // McpKeyGuard via DTabela -472). accessibleProjectIds = undefined →
-    // comportamento de service account (sem restrição de scope por projeto).
+    // 3. Tenant isolation + membership (paridade com execute_task / ADR-V2-042).
+    // tasksService.findOne valida tenant + existência da task. Em seguida,
+    // projectsService.findOne(projectId, dEntidadeId) valida acesso ao projeto:
+    // já trata workspace público (ADR-V2-051 §8 — `hasPublicSpaceAccess`),
+    // workspace privado (DVincula -170..-173), e ORG_ADMIN → MANAGER herdado.
+    const task = await this.tasksService.findOne(taskIdStr, ctx.dEntidadeId);
+    await this.projectsService.findOne(task.projectId, ctx.dEntidadeId);
+
+    // 4. Delega ao service. actorId = ctx.dEntidadeId (bigint, preenchido pelo
+    // McpKeyGuard via DTabela -472). accessibleProjectIds = undefined → o gate
+    // por projeto já foi feito acima via projectsService.findOne.
     try {
-      const task = await this.tasksService.timer(
+      const updated = await this.tasksService.timer(
         taskIdStr,
         action,
         ctx.dEntidadeId,
-        undefined, // sem gate por projeto — autenticação MCP já valida o caller
+        undefined, // gate por projeto já validado acima via projectsService.findOne
       );
 
       return textResult({
         taskId: taskIdStr,
         action,
-        timer: task.timer,
+        timer: updated.timer,
       });
     } catch (err) {
       // ConflictException (409): regra "1 timer por task" (start/resume) ou
