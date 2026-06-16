@@ -95,6 +95,75 @@
 
 ---
 
+## MCP Feature: `update_timer` Tool — Timer Manual via MCP ✅ COMPLETA
+
+**Status:** ✅ **COMPLETA** — Tool MCP 17ª para controle de timer manual (Fase 5, DEV-12)
+**Módulo V2:** mcp (MCP Server — 17 tools)
+**Fase V2:** F11 (MCP — integração com Claude Code / Timer Manual)
+**Tempo Real:** ~2h total (Strategist 30m + Implementer 1h + Reviewer 20m + Documenter 10m)
+**Completado em:** 2026-06-15
+**Quality Score:** 8.0/10 APPROVED (gate CEO 7.0 superado)
+
+**O Que Foi Feito:**
+
+**MCP Tool — Novo wrapper `update_timer` para controle de timer:**
+- Nova tool MCP: `update_timer` (17ª tool) — wrapper fino sobre `TasksService.timer`
+- Input: `{ taskId (string), action: 'start'|'pause'|'resume'|'stop' }`
+- Output: envelope `textResult` com `{ taskId, action, timer: TaskTimerStateDto }`
+- Scope MCP: `tasks:write` (mesmo que `create_task` e `update_task`)
+- Ações: `start`/`resume` abre sessão; `pause`/`stop` encerra sessão aberta do caller
+- Mapeamento 409 (ConflictException) → INVALID_PARAMS (-32602) com `reason='timer_conflict'`
+
+**Tenant Isolation (ADR-V2-042):**
+- Validação tripla: `tasksService.findOne` (task existe) + `projectsService.findOne` (projeto acessível)
+- Workspace público suportado (ADR-V2-051 §8) — mesma paridade de membership com `execute_task`
+- `actorId = ctx.dEntidadeId` (preenchido pelo McpKeyGuard) — anti-fraude
+
+**Registro em Schema:**
+- Adicionado em `tools.schema.json` com inputSchema completo
+- Provider/import em `mcp.module.ts`
+- Referência em `mcp-router.service.ts` (17º parâmetro na interface de tools)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — DTask e estrutural (SELECT/timer control, não INSERT transacional)
+- Pilar 2 (Endpoints): REUTILIZADO — `TasksService.timer` genérico (zero lógica MCP-específica)
+- Pilar 3 (Seed): N/A — zero DClasse nova
+
+**Métricas:**
+- Build: ✅ PASS (tsc 0 erros, eslint 0 warnings)
+- Tests: 14 unit + 4 integration = 18 testes PASS (scope validation, membership, conflict mapeamento)
+- N+1: ZERO (reutiliza TasksService/ProjectsService existentes)
+- Performance: <5ms (gate de membership de projeto)
+
+**Exemplos JSDoc:**
+```typescript
+// Iniciar timer em task 402
+{ "taskId": "402", "action": "start" }
+// Response: { taskId: "402", action: "start", timer: { running: true, runningUserId: "7", ... } }
+
+// Encerrar (pause/stop são semânticos; pause=encerra, stop=alias de pause)
+{ "taskId": "402", "action": "stop" }
+// Response: { taskId: "402", action: "stop", timer: { running: false, ... } }
+
+// 409 timer_conflict (start quando já há timer aberto)
+{ "code": -32602, "message": "Timer conflict", "data": { "reason": "timer_conflict" } }
+```
+
+**ADRs vinculados:**
+- ADR-V2-057 (Timer Manual — start/pause/resume/stop)
+- ADR-V2-067 (Scope per-Tool MCP — `tasks:write`)
+- ADR-V2-042 (Tenant Isolation MCP)
+- ADR-V2-051 (Workspace público — compatibilidade mantida)
+
+**Commits:**
+- `90608ed` feat(mcp): adiciona UpdateTimerTool (Fase 1)
+- `9d024e9` refactor(mcp): paridade membership com execute_task
+- `06c8124` feat(mcp): registra UpdateTimerTool (Fase 2)
+- `562a9eb` test(mcp): 14 unit tests (Fase 3)
+- `f645096` test(mcp): 4 integration tests (Fase 4)
+
+---
+
 ## Task 1: Visibilidade de Tasks em Templates Globais (Prévia Frontend-V2) ✅ COMPLETA
 
 **Status:** ✅ **COMPLETA** — Correção de bypass do tenant guard para leitura de tasks de templates globais

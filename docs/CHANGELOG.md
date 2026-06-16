@@ -14,6 +14,16 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **MCP Tool — `update_timer`: controla timer manual de task (start/pause/resume/stop) via MCP (ADR-V2-057)** (V2 F11 DEV-12, 2026-06-15)
+  - **update_timer:** novo parâmetro obrigatório `action` (enum: 'start'|'pause'|'resume'|'stop'); retorna envelope `{ taskId, action, timer: TaskTimerStateDto }`
+  - **Scope MCP:** `tasks:write` (reutilizado de create_task/update_task)
+  - **Tenant isolation ADR-V2-042:** validação tripla (task existe, projeto acessível, membership)
+  - **Workspace público ADR-V2-051 §8:** paridade com execute_task (workspace público suportado)
+  - **Mapeamento 409:** ConflictException → INVALID_PARAMS (-32602) com `reason='timer_conflict'` (sem alarme)
+  - **Tests:** 14 unit + 4 integration = 18 testes PASS; scope validation, tenant isolation, conflict handling 100%
+  - **Pilares:** P1 N/A (estrutural) | P2 REUTILIZADO (TasksService.timer genérico) | P3 N/A (zero DClasse)
+  - **ADRs:** ADR-V2-057 (timer manual), ADR-V2-067 (scope per-tool), ADR-V2-042 (tenant), ADR-V2-051 (workspace público)
+
 - **MCP Tool — `execute_task`: dispara F6 OperacaoExecucaoClaude via MCP com scope dedicado (ADR-V2-066, ADR-V2-067)** (V2 F6/F11, 2026-06-15)
   - **execute_task:** novo parâmetro obrigatório `taskId`; retorna envelope assíncrono `{ executionId, taskId, projectId, status=QUEUED|AWAITING_APPROVAL, riskLevel, riskClassId, createdAt, pollHint }`
   - **Scope MCP:** `executions:create` dedicado (primeira tool com scope per-tool RBAC) — tasks:write NÃO autoriza
