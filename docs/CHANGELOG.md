@@ -14,6 +14,17 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **MCP Tool — `execute_task`: dispara F6 OperacaoExecucaoClaude via MCP com scope dedicado (ADR-V2-066, ADR-V2-067)** (V2 F6/F11, 2026-06-15)
+  - **execute_task:** novo parâmetro obrigatório `taskId`; retorna envelope assíncrono `{ executionId, taskId, projectId, status=QUEUED|AWAITING_APPROVAL, riskLevel, riskClassId, createdAt, pollHint }`
+  - **Scope MCP:** `executions:create` dedicado (primeira tool com scope per-tool RBAC) — tasks:write NÃO autoriza
+  - **Async fire-and-poll:** Risk LOW enfileira imediatamente; Risk MED/HIGH retorna status `awaiting_approval` (não é erro — cliente sabe pelo response)
+  - **Tenant isolation ADR-V2-042:** validação tripla (task existe, projeto acessível, user tiene membership)
+  - **Helper novo:** `requireScope(ctx, scope)` em `tool-params.ts` — padrão para RBAC fino em novas tools
+  - **Método novo:** `EntidadeService.getUserGroupIdFromEntidade(entidadeId)` — irmão de `getEntidadeIdFromUserGroup`
+  - **Tests:** 15 unit + 5 integration = 20 testes PASS; scope validation, risk gate, tenant isolation testados
+  - **Pilares:** P1 ATIVADO (Engine F6), P2 REUTILIZADO (ExecutionsService genérico), P3 N/A (zero DClasse)
+  - **ADRs:** ADR-V2-066 (async fire-and-poll), ADR-V2-067 (scope executions:create)
+
 - **MCP Tools — Parâmetro `fields` (valores de colunas customizáveis) em `create_task` e `update_task` (escrita)** (V2 F11 Task 4b-valores, 2026-06-07)
   - **create_task:** novo campo opcional `fields` (Record<string, string|number|boolean|null>)
   - **update_task:** novo campo opcional `fields` com semântica merge (presente=merge, ausente=nao toca, null DENTRO de fields limpa coluna)

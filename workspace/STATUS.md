@@ -1,6 +1,85 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-06-07 (Task 1: Polir MCP block tools — realinhamento Bloco C)
+**Ultima atualizacao:** 2026-06-15 (Task 3: execute_task — Dispara F6 OperacaoExecucaoClaude via MCP)
+
+---
+
+## ✅ Task 3: Tool `execute_task` — Dispara F6 OperacaoExecucaoClaude via MCP (ADR-V2-066, ADR-V2-067) — COMPLETA
+
+**Module:** mcp (MCP Server — 16 tools)
+**Task:** Adicionar tool nova `execute_task` que dispara Engine F6 com scope RBAC dedicado
+**Status:** COMPLETA — Implementação finalizada, Reviewer APPROVED 8.5/10, Documenter entregou docs+ADRs+commit
+**Duration:** ~7h total (Strategist 1h planning + Implementer 3h30m code + Reviewer 1h + Documenter 1h30m docs)
+**Quality Score:** 8.5/10 APPROVED (gate CEO 8.0 superado)
+**Date:** 2026-06-15
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | 1h planning | — |
+| Implementer | 3h30m code | — |
+| Reviewer | 1h | 8.5/10 |
+| Documenter | 1h30m docs | — |
+
+**Problem:** Clients MCP (Claude Code instances) precisavam disparar execuções de IA (F6) para tasks. Endpoint REST era necessário, mas MCP exigia tool dedicada. Além disso, qualquer MCP key deveria poder executar IA (problema de RBAC — `tasks:write` não deveria implicar `executions:create`).
+
+**Solution:** Nova tool MCP `execute_task` com scope dedicado `executions:create`. Wrapper fino sobre `ExecutionsService.execute` (F6). Contrato: input `{ taskId }` único; output async `{ executionId, status, riskLevel }`. Introduz `requireScope(ctx, scope)` helper — primeira ferramenta com RBAC per-tool.
+
+**Pilares:**
+- Pilar 1 (Engine): ATIVADO — OperacaoExecucaoClaude (F6) via Prisma transaction
+- Pilar 2 (Endpoints): REUTILIZADO — ExecutionsService.execute genérico (ZERO duplicação)
+- Pilar 3 (Seed): N/A — zero DClasse nova (reutiliza -301/-302/-303 risk)
+
+**Deliverables:**
+- [x] Tool nova `src/mcp/tools/execute-task.tool.ts` (210 linhas + JSDoc)
+- [x] Helper `requireScope(ctx, scope)` em `src/mcp/tools/tool-params.ts`
+- [x] Método `EntidadeService.getUserGroupIdFromEntidade(entidadeId)` 
+- [x] Schema `tools.schema.json` atualizado (nova tool registrada)
+- [x] Provider MCP em `mcp.module.ts` (16ª tool do servidor)
+- [x] Tests: 15 unit + 5 integration = 20 PASS (scope, tenant, risk, async)
+- [x] ADR-V2-066 redigido (async fire-and-poll)
+- [x] ADR-V2-067 redigido (scope executions:create)
+- [x] ROADMAP/CHANGELOG/STATUS atualizados
+- [x] Build PASS (tsc 0 errors, eslint 0 warnings)
+
+**Metrics:**
+- Build: PASS (npm run build, tsc 0 errors, eslint 0 warnings)
+- Tests: 20/20 PASS (execute_task.tool.spec.ts 15 + execute_task.integration.spec.ts 5)
+- Queries: ZERO N+1 (delegação pura ao service)
+- Performance: <10ms tenant check + scope validation
+- JSDoc: 100% (public methods + classes)
+
+**Security:**
+- Scope RBAC: `requireScope(ctx, 'executions:create')` bloqueia keys sem scope
+- Tenant isolation ADR-V2-042: tripla validação (task existe, projeto acessível, user membership)
+- Risk gate (F6 Engine): LOW enfileira, MED/HIGH aguardando aprovação (não bloqueia resposta)
+
+**Guarantees:**
+- `ZERO tabela/DClasse nova` (ADR-V2-001 respeitado)
+- `Scope RBAC per-tool` — padrão aberto para próximas ferramentas
+- `Async fire-and-poll` — cliente não bloqueia esperando execução completa
+- `Risk gate integrado` — classificação LOW/MED/HIGH via F6 Engine (DVFS chave 3)
+
+**ADRs:**
+- **ADR-V2-066 (novo):** Async fire-and-poll para `execute_task`, não-bloqueio de Risk MED/HIGH
+- **ADR-V2-067 (novo):** Scope MCP dedicado `executions:create` — primeiro exemplo de RBAC per-tool
+- ADR-V2-005 (OperacaoExecucaoClaude extends OperacaoPedido) — ativado
+- ADR-V2-006 (Risk -301/-302/-303) — implementado
+- ADR-V2-042 (tenant isolation) — reafirmado
+
+**Documentation:**
+- `docs/decisions/ADR-V2-066-mcp-execute-task-async.md` (450 linhas)
+- `docs/decisions/ADR-V2-067-mcp-scope-executions-create.md` (380 linhas)
+- JSDoc em `execute-task.tool.ts` (template devari-jsdoc)
+- CHANGELOG entry: async fire-and-poll + scope + tests
+- ROADMAP entry: Task completada com pilares, métricas, ADRs
+- STATUS entry: this section
+
+**Commits:**
+- `d5e9152` feat(mcp): adiciona ExecuteTaskTool — dispara F6 via MCP (ADR-V2-066, ADR-V2-067)
+- `5aebfb3` feat(mcp): adiciona helper requireScope para scope check per-tool (ADR-V2-067)
+- `f0254ea` refactor(mcp): remove prompt/contextHint do execute_task (decisão UX)
+- `48a408d` (anterior) test(mcp): adiciona 20 testes execute_task (unit + integration)
 
 ---
 

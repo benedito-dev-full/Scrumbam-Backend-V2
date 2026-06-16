@@ -265,6 +265,72 @@
 
 ---
 
+## Task 3: Tool `execute_task` — Dispara F6 OperacaoExecucaoClaude via MCP (ADR-V2-066, ADR-V2-067) ✅ COMPLETA
+
+**Status:** ✅ **COMPLETA** — Tool nova MCP `execute_task` com scope dedicado `executions:create`, async fire-and-poll
+**Módulo V2:** mcp (MCP Server — 16 tools, agora com execute_task)
+**Fase V2:** F6/F11 (Execução de IA via Engine; MCP integração com Claude Code)
+**Tempo Real:** ~7h total (Strategist planning 1h + Implementer 3h30m + Reviewer 1h + Documenter 1h30m)
+**Completado em:** 2026-06-15
+**Quality Score:** 8.5/10 APPROVED (gate CEO 8.0 superado)
+
+**O Que Foi Feito:**
+
+**MCP Tool — Novo `execute_task` (16ª tool do servidor):**
+- Wrapper fino sobre `ExecutionsService.execute` (Pilar 1 — F6)
+- Contrato: input `{ taskId }` único; output envelope assíncrono `{ executionId, taskId, projectId, status, riskLevel, riskClassId, createdAt, pollHint }`
+- Modo PROMPT puro: backend monta prompt via `PromptBuilderService` a partir de DTask (título + descrição + meta)
+- Fluxo async fire-and-poll (ADR-V2-066): cliente recebe `status=QUEUED|AWAITING_APPROVAL` imediatamente, sonda via `get_task` para evolução
+
+**Scope Check per-Tool (ADR-V2-067):**
+- Helper novo `requireScope(ctx, 'executions:create')` em `src/mcp/tools/tool-params.ts` (primeira consumidora)
+- Lança `McpToolError` FORBIDDEN (-32002) se scope ausente — distinto de `tasks:write` (permissão de escrever tasks NÃO autoriza queimar tokens de IA)
+- Padrão: tools legadas (15) não usam scope check (backward-compat); `execute_task` abre o caminho para novas ferramentas com RBAC fino
+
+**Métodos Novos:**
+- `ExecutionsService.execute(projectId, { taskId }, userId)` — dispara Risk Gate DVFS chave 3, classifica em idClasse=-301/-302/-303, persiste e enfileira
+- `EntidadeService.getUserGroupIdFromEntidade(entidadeId)` — irmão de `getEntidadeIdFromUserGroup`, converte DEntidade.chave → DUserGroup.chave
+
+**Tenant Isolation (ADR-V2-042):**
+- Valida `tasksService.findOne(taskId)` (task existe)
+- Valida `projectsService.findOne(task.projectId, ctx.dEntidadeId)` (usuário tem membership via DVincula -158)
+- Resolve userId via `entidadeService.getUserGroupIdFromEntidade` e repassa ao Engine
+
+**Risk Gate — Comportamento:**
+- Classificação LOW (-301): persiste com `approval.status=QUEUED`, enfileira para execução
+- Classificação MEDIUM (-302): persiste com `approval.status=AWAITING_APPROVAL`, requer aprovação manual (fora do escopo MCP)
+- Classificação HIGH (-303): persiste com `approval.status=AWAITING_APPROVAL`, requer aprovação (não bloqueia resposta — cliente sabe pelo status retornado)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): ATIVADO — OperacaoExecucaoClaude estende OperacaoPedido (F6)
+- Pilar 2 (Endpoints): REUTILIZADO — delegação a ExecutionsService genérico (ZERO duplicação)
+- Pilar 3 (Seed): N/A — ZERO DClasse nova (reutiliza -301/-302/-303 existentes)
+
+**Métricas:**
+- Build: ✅ PASS (npm run build, tsc 0 errors, eslint 0 warnings)
+- Tests: 15 unit + 5 integration = 20 testes PASS (100%, nenhuma regressão)
+- N+1: ZERO (delegação pura ao service)
+- Performance: <10ms validação + tenant check
+
+**JSDoc:**
+- Arquivo `src/mcp/tools/execute-task.tool.ts`: 210 linhas, JSDoc rico com fluxo completo, erros, @example JSONRPC
+- Helper `requireScope` em `tool-params.ts`: JSDoc explicando semantica scope check, primeiro consumidor
+
+**ADRs:**
+- ADR-V2-066 (novo) — async fire-and-poll para `execute_task`, status aguardando aprovação não é erro
+- ADR-V2-067 (novo) — scope MCP dedicado `executions:create`, padrão para RBAC fino per-tool
+- ADR-V2-005 (OperacaoExecucaoClaude extends OperacaoPedido) — ativado nesta feature
+- ADR-V2-006 (Risk via idClasse -301/-302/-303) — implementado
+- ADR-V2-042 (tenant isolation) — reafirmado
+
+**Commits:**
+- `d5e9152` feat(mcp): adiciona ExecuteTaskTool — dispara F6 via MCP (ADR-V2-066, ADR-V2-067)
+- `5aebfb3` feat(mcp): adiciona helper requireScope para scope check per-tool (ADR-V2-067)
+- `f0254ea` refactor(mcp): remove prompt/contextHint do execute_task (decisão UX)
+- `48a408d` (anterior) test(mcp): adiciona 20 testes execute_task (unit + integration)
+
+---
+
 ## Task: Remoção TOTAL da funcionalidade Sprint do backend (hard delete) ✅ COMPLETA
 
 **Status:** ✅ **COMPLETA** — Sprint removida das 6 camadas (IA/webhooks, métricas, endpoint/tasks, seed, schema/migration, módulo/governança)
