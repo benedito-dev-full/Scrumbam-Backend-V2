@@ -16,6 +16,7 @@ import { UpdateNotificationTool } from '../tools/update-notification.tool';
 import { UpdateProjectTool } from '../tools/update-project.tool';
 import { UpdateStatusTool } from '../tools/update-status.tool';
 import { UpdateTaskTool } from '../tools/update-task.tool';
+import { UpdateTimerTool } from '../tools/update-timer.tool';
 
 /**
  * Spec de consistencia generica: garante que toda tool registrada no
@@ -64,6 +65,7 @@ function buildRegisteredTools(): McpTool[] {
     new ListBlocksTool(noop, noop),
     new ListBlockTasksTool(noop, noop),
     new ExecuteTaskTool(noop, noop, noop, noop),
+    new UpdateTimerTool(noop, noop),
   ];
 }
 

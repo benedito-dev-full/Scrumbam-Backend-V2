@@ -34,6 +34,7 @@ import { UpdateNotificationTool } from './tools/update-notification.tool';
 import { UpdateProjectTool } from './tools/update-project.tool';
 import { UpdateStatusTool } from './tools/update-status.tool';
 import { UpdateTaskTool } from './tools/update-task.tool';
+import { UpdateTimerTool } from './tools/update-timer.tool';
 
 @Module({
   imports: [
@@ -71,6 +72,7 @@ import { UpdateTaskTool } from './tools/update-task.tool';
     ListBlocksTool,
     ListBlockTasksTool,
     ExecuteTaskTool,
+    UpdateTimerTool,
   ],
   exports: [McpKeyService, McpRouterService, McpRateLimitService, McpAuditService],
 })

@@ -339,6 +339,26 @@
           "cursor": { "type": "string", "description": "Cursor de paginacao" }
         }
       }
+    },
+    {
+      "name": "update_timer",
+      "description": "Controla o timer manual de tempo de uma task (start/pause/resume/stop). actorId = caller MCP (anti-fraude — nunca do body). 409 mapeado para INVALID_PARAMS reason=timer_conflict: start/resume → 409 se já há timer aberto; pause/stop → 409 se não há sessão aberta do caller. Requer scope MCP \"tasks:write\".",
+      "inputSchema": {
+        "type": "object",
+        "required": ["taskId", "action"],
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "description": "ID da DTask a controlar (chave BigInt-parseável)"
+          },
+          "action": {
+            "type": "string",
+            "enum": ["start", "pause", "resume", "stop"],
+            "description": "start/resume: abre sessão de timer. pause/stop: fecha sessão aberta do caller."
+          }
+        },
+        "additionalProperties": false
+      }
     }
   ]
 }

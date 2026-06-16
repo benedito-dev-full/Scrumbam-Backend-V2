@@ -26,6 +26,7 @@ import { UpdateNotificationTool } from '../tools/update-notification.tool';
 import { UpdateProjectTool } from '../tools/update-project.tool';
 import { UpdateStatusTool } from '../tools/update-status.tool';
 import { UpdateTaskTool } from '../tools/update-task.tool';
+import { UpdateTimerTool } from '../tools/update-timer.tool';
 
 export interface McpDispatchResult {
   result?: unknown;
@@ -77,6 +78,7 @@ export class McpRouterService {
     listBlocksTool?: ListBlocksTool,
     listBlockTasksTool?: ListBlockTasksTool,
     executeTaskTool?: ExecuteTaskTool,
+    updateTimerTool?: UpdateTimerTool,
     configService?: ConfigService,
   ) {
     const tools: Array<McpTool | undefined> = [
@@ -96,6 +98,7 @@ export class McpRouterService {
       listBlocksTool,
       listBlockTasksTool,
       executeTaskTool,
+      updateTimerTool,
     ];
     this.tools = tools.filter((tool): tool is McpTool => tool !== undefined);
     this.cachedToolDefinitions = (toolsSchema.tools as McpToolDefinition[]).map((tool) => ({
