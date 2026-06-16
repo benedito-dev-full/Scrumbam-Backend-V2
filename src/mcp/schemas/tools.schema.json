@@ -308,6 +308,21 @@
       }
     },
     {
+      "name": "execute_task",
+      "description": "Dispara uma execução Claude Code (IA) para a task informada. Async fire-and-poll: retorna {executionId, status=QUEUED|AWAITING_APPROVAL, riskLevel}. Use get_task(taskId) para acompanhar (EXECUTING → DONE/FAILED). Risk MED/HIGH retorna awaiting_approval (não é erro). Requer scope MCP \"executions:create\".",
+      "inputSchema": {
+        "type": "object",
+        "required": ["taskId"],
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "description": "ID da DTask a executar (chave da DTask, BigInt-parseável)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "list_block_tasks",
       "description": "Lista as tasks de um Bloco (via dados.idBloco) como lista plana, com paginacao e metricas opcionais (total/done/failed/inProgress/percent da pagina). Escopo automatico por tenant.",
       "inputSchema": {

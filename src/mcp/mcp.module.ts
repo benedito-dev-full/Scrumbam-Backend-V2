@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 
 import { AuthModule } from '../auth/auth.module';
 import { EntidadesModule } from '../entidades/entidades.module';
+import { ExecutionsModule } from '../executions/executions.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { SearchModule } from '../search/search.module';
@@ -18,6 +19,7 @@ import { McpKeyService } from './services/mcp-key.service';
 import { McpRateLimitService } from './services/mcp-rate-limit.service';
 import { McpRouterService } from './services/mcp-router.service';
 import { CreateTaskTool } from './tools/create-task.tool';
+import { ExecuteTaskTool } from './tools/execute-task.tool';
 import { GetProjectTool } from './tools/get-project.tool';
 import { GetTaskTool } from './tools/get-task.tool';
 import { GetUnreadCountTool } from './tools/get-unread-count.tool';
@@ -42,6 +44,7 @@ import { UpdateTaskTool } from './tools/update-task.tool';
     TabelasModule,
     NotificationsModule,
     SearchModule,
+    ExecutionsModule.forRoot(),
   ],
   controllers: [McpController, McpKeysController],
   providers: [
@@ -67,6 +70,7 @@ import { UpdateTaskTool } from './tools/update-task.tool';
     SearchTasksTool,
     ListBlocksTool,
     ListBlockTasksTool,
+    ExecuteTaskTool,
   ],
   exports: [McpKeyService, McpRouterService, McpRateLimitService, McpAuditService],
 })
