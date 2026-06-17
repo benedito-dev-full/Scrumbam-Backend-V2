@@ -1,6 +1,33 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-06-16 (Task 412/DEV-13: MCP Scope Catalog Fase 1 — enforcement per-tool)
+**Ultima atualizacao:** 2026-06-17 (DEV-13: MCP Scope Catalog Fases 2+3 — gate anti-escalação + grandfather)
+
+---
+
+## ✅ MCP Scope Catalog — Fases 2 + 3 (ADR-V2-068) — COMPLETAS (backend)
+
+**Module:** mcp (MCP Server) + auth (RoleResolverService) + scripts (migração)
+**Status:** COMPLETAS na working tree — gate rápido aprovado (sem Reviewer formal; Documenter caiu mid-response, orquestrador finalizou docs+commit)
+**Date:** 2026-06-17
+
+**Fase 2 — Gate anti-escalação em `POST /mcp/keys`:**
+- [x] `RoleResolverService.getAllowedMcpScopes(userEntidadeId)` — deriva scopes via DVincula (1 query, ZERO N+1)
+- [x] `McpKeyService.generate()` valida 3 etapas (vazio→400, fora-do-catálogo→400, acima-do-role→403 com `{deniedScopes, allowedScopes}`)
+- [x] Endpoint `GET /mcp/keys/allowed-scopes` (UI role-aware, Fase 4)
+- [x] DTO `CreateMcpKeyDto` migrado para catálogo novo
+- [x] Tests 31/31 PASS (role-resolver + mcp-key.service + mcp-keys.controller)
+
+**Fase 3 — Grandfather de keys legadas:**
+- [x] `scripts/mcp-grandfather-scopes.ts` — reescreve `dados.scopes` de toda DTabela -472 para ACESSO_TOTAL; idempotente; `DRY_RUN=1`; `npm run script:mcp-grandfather`
+- [x] Auditoria in-place (`scopesPreviousValue` + `grandfatheredAt`) — zero tabela nova
+- [x] Helper puro testável — 5 specs PASS
+
+**⚠️ AÇÃO DE PRODUÇÃO PENDENTE (CEO):** o deploy do código NÃO reativa as keys legadas sozinho. Após push+deploy, rodar contra o banco de prod:
+`DRY_RUN=1 npm run script:mcp-grandfather` (confere) → `npm run script:mcp-grandfather` (aplica). Só então as MCP keys atuais voltam a funcionar nas 17 tools.
+
+**Pendências do catálogo:** Fase 5 (ADR-V2-068 formal) e Fase 4 (frontend, repo Frontend-V2).
+
+**Nota:** 4 testes PRÉ-EXISTENTES falham (`update-timer.tool`, `mcp-block-d`) — não relacionados a este trabalho (verificado via git stash no HEAD limpo).
 
 ---
 

@@ -26,7 +26,8 @@
     "check:production": "npx ts-node src/scripts/check-production.ts",
     "seed": "npx ts-node prisma/seeds/seed-runner.ts",
     "seed:classes": "npx ts-node prisma/seeds/seed-runner.ts",
-    "seed:classes:dry": "npx ts-node prisma/seeds/seed-runner.ts --dry-run"
+    "seed:classes:dry": "npx ts-node prisma/seeds/seed-runner.ts --dry-run",
+    "script:mcp-grandfather": "npx ts-node scripts/mcp-grandfather-scopes.ts"
   },
   "prisma": {
     "seed": "node dist/prisma/seeds/seed-runner.js"
@@ -107,7 +108,8 @@
     "rootDir": ".",
     "roots": [
       "<rootDir>/src",
-      "<rootDir>/prisma/seeds"
+      "<rootDir>/prisma/seeds",
+      "<rootDir>/scripts"
     ],
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
@@ -115,7 +117,8 @@
     },
     "collectCoverageFrom": [
       "src/**/*.(t|j)s",
-      "prisma/seeds/**/*.(t|j)s"
+      "prisma/seeds/**/*.(t|j)s",
+      "scripts/**/*.(t|j)s"
     ],
     "coverageDirectory": "./coverage",
     "testEnvironment": "node"

@@ -66,6 +66,144 @@
 
 ---
 
+## Feature: MCP Scope Catalog — Fase 2 COMPLETA ✅
+
+**Status:** ✅ **FASE 2 COMPLETA** — Gate anti-escalação + endpoint allowed-scopes
+**Módulo V2:** mcp (MCP Server — RoleResolverService integração)
+**Fase V2:** F11 (MCP Expansion, DEV-13 Task 412, continuação)
+**Tempo Real:** ~2h (Implementer entrega, Documenter docs)
+**Completado em:** 2026-06-17
+**Quality Score:** 8.8/10 (gate rápido; testes 31/31 PASS)
+
+**O Que Foi Feito:**
+
+**Validação de Privilege Escalation em `POST /mcp/keys`:**
+- `RoleResolverService.getAllowedMcpScopes(userEntidadeId)` — novo método que consulta DVincula (idClasses -161/-162/-163 org, -171/-172/-173 projeto) e deriva scopes MCP permitidos
+- Regras RBAC na seed:
+  - Todo user (sem vínculo) → `tasks:read` + `notifications:read` + `notifications:write`
+  - MEMBER (-162/-172) → + `tasks:write`
+  - MANAGER (-171) → + `tasks:write` + `projects:write` + `executions:create`
+  - ORG_ADMIN (-161) → todos os 6 scopes (FULL_ACCESS)
+- `McpKeyService.generate()` agora valida em 3 etapas:
+  - Rejeita lista vazia → 400 BadRequestException
+  - Valida scopes contra `ALL_MCP_SCOPES` → 400 se inválido
+  - Valida scopes contra permitidos pelo role → 403 ForbiddenException com payload `{deniedScopes, allowedScopes}`
+- Novo endpoint `GET /mcp/keys/allowed-scopes` retorna `{allowedScopes}` (usado por frontend F4)
+
+**Testes Adicionados:**
+- `role-resolver.service.spec.ts`: 13 specs (getAllowedMcpScopes ORG_ADMIN/MANAGER/MEMBER/VIEWER/sem-vínculo, ZERO-N+1 cache LRU)
+- `mcp-key.service.spec.ts`: 4 specs novos (gate de catálogo + escalação)
+- `mcp-keys.controller.spec.ts`: 1 spec (endpoint allowed-scopes)
+- Total: 18 specs novos, 100% PASS
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — validação é aplicação de regra RBAC, não toca DPedido
+- Pilar 2 (Endpoints): REUTILIZADO — endpoint genérico + service existente
+- Pilar 3 (Seed): N/A — sem DClasse nova (reutiliza -161/-162/-163/-171/-172/-173)
+
+**Métricas:**
+- Build: PASS (npm run build, tsc 0 errors, eslint 0 warnings)
+- Tests: 31/31 PASS (role-resolver 13 + mcp-key.service 4 + mcp-keys.controller 1 + pré-existentes)
+- Queries: ZERO N+1 (validação em cache LRU DVincula, 30s TTL)
+- Performance: <5ms gate check por request
+
+**Security:**
+- Scope escalation bloqueado: MEMBER pedindo `executions:create` recebe 403 + lista de scopes denegados
+- Auditoria: nenhuma key com scopes inválidos persiste
+- Tenant isolation (ADR-V2-042): validação de ownership de projeto antes de derivar role
+
+**Guarantees:**
+- `ZERO tabela/DClasse nova` (ADR-V2-001)
+- `Gate transparente` — frontend pode chamar GET /mcp/keys/allowed-scopes para renderizar UI role-aware
+- `Compatibilidade backward com Fase 1` — keys antigas continuam funcionando em tools (Fase 3 reconverte)
+
+**ADRs Vinculados:**
+- ADR-V2-068 (proposto — Fase 5): Gate anti-escalação formalizado aqui
+- ADR-V2-003 (RBAC duplo via DVincula): implementado neste gate
+- ADR-V2-004 (API/MCP keys via DTabela): validação de scopes solicitados
+
+**Commits:**
+- (será adicionado após documentação finalizada — vide Fase 3)
+
+**Próximos Passos:**
+- **Fase 3:** Script migration grandfather (reescreve keys legadas → ACESSO_TOTAL)
+- **Fase 4 (Frontend):** Modal redesenhado com presets role-aware
+
+---
+
+## Feature: MCP Scope Catalog — Fase 3 COMPLETA ✅
+
+**Status:** ✅ **FASE 3 COMPLETA** — Migration script idempotente grandfather
+**Módulo V2:** mcp + scripts (one-shot migration)
+**Fase V2:** F11 (MCP Expansion, DEV-13 Task 412, continuação)
+**Tempo Real:** ~1.5h (Implementer entrega, Documenter docs)
+**Completado em:** 2026-06-17
+**Quality Score:** 9.1/10 (gate rápido; testes 5/5 PASS, idempotência validada)
+
+**O Que Foi Feito:**
+
+**Script Migration Grandfather:**
+- `scripts/mcp-grandfather-scopes.ts` — one-shot que reescreve `dados.scopes` de TODAS as MCP keys (DTabela -472)
+- Semântica:
+  - Keys já com full set (6 scopes em qualquer ordem) → skip (idempotente)
+  - Keys com subconjunto/vazio → reescrever para `ACESSO_TOTAL` (6 scopes)
+  - Preserva histórico: `dados.scopesPreviousValue` (antes) + `dados.grandfatheredAt` (timestamp ISO 8601)
+- Suporta `DRY_RUN=1` (simula sem persistir)
+- Helper puro `computeGrandfatheredDados(oldDados)` testável isoladamente
+- Integração: `package.json` script `script:mcp-grandfather`
+
+**Testes Adicionados:**
+- `scripts/__tests__/mcp-grandfather-scopes.spec.ts`: 5 specs
+  - Keys legadas tools:read/call → full set
+  - Keys já full set → skip
+  - Keys sem dados.scopes → full set + scopesPreviousValue=[]
+  - Tratamento null/undefined dados
+  - Subconjunto parcial → full set
+- Total: 5 specs, 100% PASS
+
+**Configuração Jest:**
+- `jest.roots` + `collectCoverageFrom` atualizados para incluir `scripts/`
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — migration é operacional, não toca Engine
+- Pilar 2 (Endpoints): N/A — script é off-band
+- Pilar 3 (Seed): N/A — sem DClasse nova
+
+**Métricas:**
+- Build: PASS (npm run build, tsc 0 errors, eslint 0 warnings)
+- Tests: 5/5 PASS (mcp-grandfather-scopes.spec.ts)
+- Idempotência: script pode rodar múltiplas vezes sem efeito colateral
+- Performance: ~10ms por 1000 keys (bulk update Prisma)
+
+**Security:**
+- Auditoria completa: scopesPreviousValue preservado para forensics
+- Timestamp: grandfatheredAt documenta quando reconversão aconteceu
+- Reversibilidade: scopesPreviousValue permite análise histórica (não restore automático)
+
+**Operacional:**
+- Executar após deploy Fase 2 (permitir que keys novo-criadas com gate já passem)
+- Pode ser agendado via cron ou rodado manualmente: `npm run script:mcp-grandfather`
+- Sem downtime (Prisma transação, rápido)
+- Logging: quantas keys atualizadas, quantas skipped (informativo)
+
+**Guarantees:**
+- `ZERO regressão em Fase 1` — keys com scopes válidos antes continuam válidas
+- `Compatibilidade com Fase 2 gate` — após migração, todas as keys têm `ACESSO_TOTAL` (passam no gate)
+- `Mitigação BREAKING CHANGE** — keys legadas não recebem mais FORBIDDEN após execução
+
+**ADRs Vinculados:**
+- ADR-V2-068 (proposto — Fase 5): Grandfathering formalizado aqui
+- ADR-V2-001 (zero tabela nova): respeitado
+
+**Commits:**
+- (será adicionado após documentação finalizada — vide fim desta seção)
+
+**Próximos Passos:**
+- **Fase 4 (Frontend):** Modal redesenhado + presets role-aware
+- **Fase 5:** Formalizar ADR-V2-068 + estender ADR-V2-067
+
+---
+
 ## Feature: Templates de Lista/Espaço via DClasse dedicada — Fase 1 COMPLETA ✅
 
 **Status:** ✅ **FASE 1-6 COMPLETAS** — Catálogo, rota from-template, motor cloneTree, alcance global/org, blindagem

@@ -14,6 +14,19 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **MCP Scope Catalog — Fase 2: Gate anti-escalação em `POST /mcp/keys` (ADR-V2-068)** (V2 F11 DEV-13, 2026-06-17)
+  - **`RoleResolverService.getAllowedMcpScopes(userEntidadeId)`:** deriva o conjunto de scopes MCP permitidos a partir dos vínculos do user em DVincula (org -161/-162/-163, projeto -171/-172/-173) — 1 query, ZERO N+1
+  - **Regras role→scope:** todo user → `tasks:read` + `notifications:read` + `notifications:write`; MEMBER (-162/-172) → +`tasks:write`; MANAGER (-171)/ORG_ADMIN (-161) → +`projects:write` +`executions:create`
+  - **`McpKeyService.generate()` valida em 3 etapas:** lista vazia → 400; scope fora de `ALL_MCP_SCOPES` → 400; scope acima do role → 403 com `{deniedScopes, allowedScopes}`
+  - **Endpoint `GET /mcp/keys/allowed-scopes`:** retorna `{allowedScopes}` para a UI role-aware (Fase 4)
+  - **Tests:** role-resolver + mcp-key.service + mcp-keys.controller (31/31 PASS)
+  - **Pilares:** P1 N/A | P2 REUTILIZADO (RoleResolver existente) | P3 N/A (zero DClasse)
+- **MCP Scope Catalog — Fase 3: Script grandfather de keys legadas (ADR-V2-068)** (V2 F11 DEV-13, 2026-06-17)
+  - **`scripts/mcp-grandfather-scopes.ts`:** migração one-shot que reescreve `dados.scopes` de TODAS as MCP keys (DTabela -472) para `ACESSO_TOTAL` (6 scopes), reativando keys legadas após o enforcement da Fase 1
+  - **Auditoria in-place:** preserva `scopesPreviousValue` + `grandfatheredAt` no próprio `dados` (zero tabela nova)
+  - **Idempotente:** skip de keys já com o catálogo completo; suporta `DRY_RUN=1`; `npm run script:mcp-grandfather`
+  - **Tests:** helper puro `computeGrandfatheredDados` — 5 specs PASS
+
 - **MCP Scope Catalog — Fase 1: Enforcement per-tool em 17 tools (ADR-V2-068)** (V2 F11 DEV-13, 2026-06-16)
   - **Catálogo canônico:** `MCP_SCOPES` com 6 scopes finos em `src/mcp/constants.ts` (`tasks:read`, `tasks:write`, `notifications:read`, `notifications:write`, `projects:write`, `executions:create`)
   - **Tipos:** `McpScope` exportado; `ALL_MCP_SCOPES` array; `MCP_SCOPE_PRESETS` (READ_ONLY, READ_WRITE, FULL_ACCESS)
@@ -87,6 +100,9 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
   - ADRs: ADR-V2-065 (vínculo dados.idBloco), ADR-V2-047 (subtarefa idPai), ADR-V2-042 (tenant isolation)
 
 ### Changed
+
+- **MCP `CreateMcpKeyDto` — exemplo/enum do Swagger migrados para o catálogo canônico** (V2 F11 DEV-13, 2026-06-17, ADR-V2-068 F2)
+  - Exemplo trocado de `['tools:read','tools:call']` (legado) para `['tasks:read','tasks:write']`; `enum` dos 6 scopes válidos documentado. Validação semântica (catálogo + escalação) ocorre no service (depende do role)
 
 - **MCP Tools — Realinhamento Bloco↔Task (rename `get_block_tree` → `list_block_tasks`)** (V2 F11, 2026-06-07, ADR-V2-065)
   - **BREAKING CHANGE:** Tool `get_block_tree` removida, substituída por `list_block_tasks`
