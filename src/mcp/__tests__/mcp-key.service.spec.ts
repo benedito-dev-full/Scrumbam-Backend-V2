@@ -1,7 +1,9 @@
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-import { MCP_KEY_CACHE_TTL_SECONDS, MCP_KEY_CLASS_ID } from '../constants';
+import { ALL_MCP_SCOPES, MCP_KEY_CACHE_TTL_SECONDS, MCP_KEY_CLASS_ID, MCP_SCOPES, McpScope } from '../constants';
 import { McpKeyService } from '../services/mcp-key.service';
+import { RoleResolverService } from '../../auth/services/role-resolver.service';
 
 describe('McpKeyService', () => {
   let service: McpKeyService;
@@ -13,6 +15,11 @@ describe('McpKeyService', () => {
       update: jest.Mock;
     };
   };
+  let roleResolver: { getAllowedMcpScopes: jest.Mock };
+
+  /** Helper: configura o RoleResolver mock para liberar o conjunto informado. */
+  const allowScopes = (...scopes: McpScope[]) =>
+    roleResolver.getAllowedMcpScopes.mockResolvedValue(new Set<McpScope>(scopes));
 
   beforeEach(() => {
     prisma = {
@@ -24,9 +31,14 @@ describe('McpKeyService', () => {
       },
     };
 
+    roleResolver = {
+      getAllowedMcpScopes: jest.fn().mockResolvedValue(new Set<McpScope>(ALL_MCP_SCOPES)),
+    };
+
     service = new McpKeyService(
       prisma as never,
       { get: jest.fn().mockReturnValue('false') } as unknown as ConfigService,
+      roleResolver as unknown as RoleResolverService,
     );
   });
 
@@ -56,6 +68,58 @@ describe('McpKeyService', () => {
 
     const persisted = prisma.dTabela.create.mock.calls[0][0].data.dados;
     expect(JSON.stringify(persisted)).not.toContain(result.plaintext);
+  });
+
+  describe('gate de catálogo + escalação de privilégio (ADR-V2-068 Fase 2)', () => {
+    it('ORG_ADMIN cria key com FULL_ACCESS (todos os scopes liberados)', async () => {
+      allowScopes(...ALL_MCP_SCOPES);
+      prisma.dTabela.create.mockResolvedValue({ chave: BigInt(20), criadoEm: new Date() });
+
+      const result = await service.generate(BigInt(1), [...ALL_MCP_SCOPES]);
+
+      expect(result.scopes).toEqual(expect.arrayContaining([...ALL_MCP_SCOPES]));
+      expect(prisma.dTabela.create).toHaveBeenCalled();
+    });
+
+    it('MEMBER pedindo executions:create → ForbiddenException com deniedScopes', async () => {
+      allowScopes(
+        MCP_SCOPES.TASKS_READ,
+        MCP_SCOPES.TASKS_WRITE,
+        MCP_SCOPES.NOTIFICATIONS_READ,
+        MCP_SCOPES.NOTIFICATIONS_WRITE,
+      );
+
+      await expect(
+        service.generate(BigInt(2), [MCP_SCOPES.TASKS_WRITE, MCP_SCOPES.EXECUTIONS_CREATE]),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          deniedScopes: [MCP_SCOPES.EXECUTIONS_CREATE],
+          allowedScopes: expect.arrayContaining([MCP_SCOPES.TASKS_WRITE]),
+        }),
+      });
+      await expect(
+        service.generate(BigInt(2), [MCP_SCOPES.EXECUTIONS_CREATE]),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.dTabela.create).not.toHaveBeenCalled();
+    });
+
+    it('scope fora do catálogo → BadRequestException listando inválidos', async () => {
+      await expect(
+        service.generate(BigInt(3), ['tasks:read', 'foo:bar']),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        service.generate(BigInt(3), ['tasks:read', 'foo:bar']),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ invalidScopes: ['foo:bar'] }),
+      });
+      expect(prisma.dTabela.create).not.toHaveBeenCalled();
+    });
+
+    it('lista vazia → BadRequestException (pelo menos 1 scope)', async () => {
+      await expect(service.generate(BigInt(4), [])).rejects.toBeInstanceOf(BadRequestException);
+      expect(roleResolver.getAllowedMcpScopes).not.toHaveBeenCalled();
+      expect(prisma.dTabela.create).not.toHaveBeenCalled();
+    });
   });
 
   it('lista keys sem hash e sem plaintext', async () => {

@@ -4,6 +4,7 @@ import { LRUCache } from '../../common/helpers/lru-cache';
 import { OrgRole } from '../decorators/roles.decorator';
 import { isProjectPubliclyVisible } from '../../projects/utils/public-space.util';
 import { ProjectRefService } from '../../projects/project-ref.service';
+import { MCP_SCOPES, McpScope } from '../../mcp/constants';
 
 /** idClasses de roles de organização (ADR-V2-003). */
 const ORG_ROLE_CLASSES = {
@@ -18,6 +19,20 @@ const PROJECT_ROLE_CLASSES = {
   MEMBER: BigInt(-172),
   VIEWER: BigInt(-173),
 };
+
+/**
+ * idClasses de DVincula consultadas para derivar os scopes MCP permitidos
+ * (ADR-V2-068 Fase 2). Cobre roles de organização (-161/-162/-163) e de
+ * projeto (-171/-172/-173) — a query única busca em todas de uma vez.
+ */
+const MCP_ROLE_VINCULO_CLASSES = [
+  ORG_ROLE_CLASSES.ADMIN,
+  ORG_ROLE_CLASSES.MEMBER,
+  ORG_ROLE_CLASSES.VIEWER,
+  PROJECT_ROLE_CLASSES.MANAGER,
+  PROJECT_ROLE_CLASSES.MEMBER,
+  PROJECT_ROLE_CLASSES.VIEWER,
+];
 
 /** Tipo de role de projeto. */
 export type ProjectRole = 'MANAGER' | 'MEMBER' | 'VIEWER';
@@ -234,6 +249,77 @@ export class RoleResolverService {
     });
 
     return orgVinculo ? 'MEMBER' : null;
+  }
+
+  /**
+   * Resolve o conjunto de scopes MCP permitidos para um usuário, derivado
+   * dos seus vínculos de role (ADR-V2-068 Fase 2 — prevenção de escalação
+   * de privilégio via key MCP).
+   *
+   * Regras de associação role → scope:
+   * - Todo usuário autenticado: `notifications:read` + `notifications:write`
+   *   (notificações são sempre próprias do usuário) + `tasks:read`.
+   * - MEMBER de organização (-162) OU MEMBER de projeto (-172) em ≥1 vínculo:
+   *   adiciona `tasks:write`.
+   * - MANAGER de projeto (-171) OU ADMIN de organização (-161) em ≥1 vínculo:
+   *   adiciona `projects:write` + `executions:create` (implica os scopes acima).
+   * - VIEWER (-163/-173) sem nenhum vínculo de MEMBER/MANAGER/ADMIN: permanece
+   *   apenas com `tasks:read` + `notifications:*`.
+   *
+   * Implementado com 1 única query (`IN` list de 6 idClasses) — N+1 ZERO.
+   * Não recebe projeto-alvo: a permissão é avaliada pelo conjunto de TODOS
+   * os vínculos do usuário (qualquer org/projeto onde ele seja MEMBER/MANAGER/
+   * ADMIN já libera o scope correspondente, independente do recurso-alvo).
+   *
+   * @param userEntidadeId - Chave BigInt da DEntidade (-150 USER)
+   * @returns Set de scopes MCP (`McpScope`) permitidos para o usuário
+   *
+   * @example
+   * ```typescript
+   * const allowed = await roleResolver.getAllowedMcpScopes(BigInt(123));
+   * if (!allowed.has('executions:create')) {
+   *   throw new ForbiddenException('Scope não permitido para este usuário');
+   * }
+   * ```
+   *
+   * @see MCP_SCOPES — catálogo canônico de scopes (src/mcp/constants.ts)
+   * @see McpKeyService.generate — consumidor que valida scopes solicitados
+   */
+  async getAllowedMcpScopes(userEntidadeId: bigint): Promise<Set<McpScope>> {
+    this.logger.debug(`getAllowedMcpScopes userEntidadeId=${userEntidadeId}`);
+
+    const vinculos = await this.prisma.dVincula.findMany({
+      where: {
+        idEntidade: userEntidadeId,
+        idClasse: { in: MCP_ROLE_VINCULO_CLASSES },
+        excluido: false,
+      },
+      select: { idClasse: true },
+    });
+
+    const idClasses = new Set(vinculos.map((v) => v.idClasse));
+
+    const isMember =
+      idClasses.has(ORG_ROLE_CLASSES.MEMBER) || idClasses.has(PROJECT_ROLE_CLASSES.MEMBER);
+    const isManagerOrAdmin =
+      idClasses.has(PROJECT_ROLE_CLASSES.MANAGER) || idClasses.has(ORG_ROLE_CLASSES.ADMIN);
+
+    const allowed = new Set<McpScope>([
+      MCP_SCOPES.TASKS_READ,
+      MCP_SCOPES.NOTIFICATIONS_READ,
+      MCP_SCOPES.NOTIFICATIONS_WRITE,
+    ]);
+
+    if (isMember || isManagerOrAdmin) {
+      allowed.add(MCP_SCOPES.TASKS_WRITE);
+    }
+
+    if (isManagerOrAdmin) {
+      allowed.add(MCP_SCOPES.PROJECTS_WRITE);
+      allowed.add(MCP_SCOPES.EXECUTIONS_CREATE);
+    }
+
+    return allowed;
   }
 
   /**

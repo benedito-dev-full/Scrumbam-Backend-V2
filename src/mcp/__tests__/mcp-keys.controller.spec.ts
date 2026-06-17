@@ -11,6 +11,9 @@ describe('McpKeysController', () => {
   let entidadeService: {
     getEntidadeIdFromUserGroup: jest.Mock;
   };
+  let roleResolver: {
+    getAllowedMcpScopes: jest.Mock;
+  };
   let controller: McpKeysController;
 
   beforeEach(() => {
@@ -22,7 +25,28 @@ describe('McpKeysController', () => {
     entidadeService = {
       getEntidadeIdFromUserGroup: jest.fn().mockResolvedValue(BigInt(200)),
     };
-    controller = new McpKeysController(mcpKeyService as never, entidadeService as never);
+    roleResolver = {
+      getAllowedMcpScopes: jest
+        .fn()
+        .mockResolvedValue(new Set(['tasks:read', 'notifications:read'])),
+    };
+    controller = new McpKeysController(
+      mcpKeyService as never,
+      entidadeService as never,
+      roleResolver as never,
+    );
+  });
+
+  it('expõe allowed-scopes derivados do role do usuário autenticado', async () => {
+    const request = {
+      user: { sub: '100', entidadeId: 'wrong', organizationId: '', email: '' },
+    } as never;
+
+    const result = await controller.getAllowedScopes(request);
+
+    expect(entidadeService.getEntidadeIdFromUserGroup).toHaveBeenCalledWith(BigInt(100));
+    expect(roleResolver.getAllowedMcpScopes).toHaveBeenCalledWith(BigInt(200));
+    expect(result).toEqual({ allowedScopes: ['tasks:read', 'notifications:read'] });
   });
 
   it('converte DUserGroup.chave para DEntidade.chave antes de gerar key', async () => {

@@ -6,6 +6,7 @@ import { ProjectRefService } from '../../projects/project-ref.service';
 const makePrismaMock = () => ({
   dVincula: {
     findFirst: jest.fn(),
+    findMany: jest.fn(),
   },
   dProject: {
     findFirst: jest.fn(),
@@ -164,6 +165,56 @@ describe('RoleResolverService', () => {
       const role = await service.getProjectRole(BigInt(3), BigInt(500));
 
       expect(role).toBeNull();
+    });
+  });
+
+  describe('getAllowedMcpScopes (ADR-V2-068 Fase 2)', () => {
+    const set = (...c: number[]) =>
+      prisma.dVincula.findMany.mockResolvedValue(c.map((x) => ({ idClasse: BigInt(x) })));
+
+    it('ORG_ADMIN (-161) → full set', async () => {
+      set(-161);
+      const s = await service.getAllowedMcpScopes(BigInt(1));
+      expect([...s].sort()).toEqual(
+        [
+          'executions:create',
+          'notifications:read',
+          'notifications:write',
+          'projects:write',
+          'tasks:read',
+          'tasks:write',
+        ].sort(),
+      );
+    });
+
+    it('MANAGER (-171) → full set', async () => {
+      set(-171);
+      const s = await service.getAllowedMcpScopes(BigInt(1));
+      expect(s.has('executions:create')).toBe(true);
+      expect(s.has('projects:write')).toBe(true);
+    });
+
+    it('MEMBER (-172) → tasks:write mas SEM executions/projects', async () => {
+      set(-172);
+      const s = await service.getAllowedMcpScopes(BigInt(1));
+      expect(s.has('tasks:write')).toBe(true);
+      expect(s.has('executions:create')).toBe(false);
+      expect(s.has('projects:write')).toBe(false);
+    });
+
+    it('VIEWER (-173) → só read + notifications', async () => {
+      set(-173);
+      const s = await service.getAllowedMcpScopes(BigInt(1));
+      expect([...s].sort()).toEqual(
+        ['notifications:read', 'notifications:write', 'tasks:read'].sort(),
+      );
+    });
+
+    it('sem vínculo → só read + notifications', async () => {
+      set();
+      const s = await service.getAllowedMcpScopes(BigInt(1));
+      expect(s.has('tasks:write')).toBe(false);
+      expect(s.has('tasks:read')).toBe(true);
     });
   });
 });

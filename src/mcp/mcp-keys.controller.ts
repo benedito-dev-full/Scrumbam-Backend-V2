@@ -22,7 +22,9 @@ import { Request } from 'express';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { JwtPayload } from '../auth/decorators/current-user.decorator';
+import { RoleResolverService } from '../auth/services/role-resolver.service';
 import { EntidadeService } from '../entidades/entidades.service';
+import { McpScope } from './constants';
 import { CreateMcpKeyDto } from './dto/create-mcp-key.dto';
 import { McpKeyCreatedResponseDto, McpKeyListItemDto } from './dto/mcp-key-response.dto';
 import { McpEnabledGuard } from './guards/mcp-enabled.guard';
@@ -40,6 +42,7 @@ export class McpKeysController {
   constructor(
     private readonly mcpKeyService: McpKeyService,
     private readonly entidadeService: EntidadeService,
+    private readonly roleResolver: RoleResolverService,
   ) {}
 
   @Post()
@@ -52,6 +55,36 @@ export class McpKeysController {
   ): Promise<McpKeyCreatedResponseDto> {
     const dEntidadeId = await this.getCurrentDEntidadeId(request);
     return this.mcpKeyService.generate(dEntidadeId, dto.scopes ?? []);
+  }
+
+  @Get('allowed-scopes')
+  @ApiOperation({
+    summary: 'Lista os scopes MCP que o usuário pode conceder a uma key',
+    description:
+      'Deriva os scopes permitidos a partir do role do usuário (ADR-V2-068 Fase 2). ' +
+      'O frontend usa este endpoint para habilitar/desabilitar presets e checkboxes ' +
+      'no modal de criação de key, evitando solicitar scopes que resultariam em 403.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Conjunto de scopes permitidos para o usuário autenticado',
+    schema: {
+      type: 'object',
+      properties: {
+        allowedScopes: {
+          type: 'array',
+          items: { type: 'string' },
+          example: ['tasks:read', 'tasks:write', 'notifications:read', 'notifications:write'],
+        },
+      },
+    },
+  })
+  async getAllowedScopes(
+    @Req() request: JwtRequest,
+  ): Promise<{ allowedScopes: McpScope[] }> {
+    const dEntidadeId = await this.getCurrentDEntidadeId(request);
+    const allowed = await this.roleResolver.getAllowedMcpScopes(dEntidadeId);
+    return { allowedScopes: [...allowed] };
   }
 
   @Get()

@@ -1,11 +1,19 @@
-import { Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { Redis } from 'ioredis';
 
 import { PrismaService } from '../../prisma.service';
-import { MCP_KEY_CACHE_TTL_SECONDS, MCP_KEY_CLASS_ID } from '../constants';
+import { RoleResolverService } from '../../auth/services/role-resolver.service';
+import { ALL_MCP_SCOPES, MCP_KEY_CACHE_TTL_SECONDS, MCP_KEY_CLASS_ID, McpScope } from '../constants';
 import { McpKeyCreatedResponseDto, McpKeyListItemDto } from '../dto/mcp-key-response.dto';
 import { McpKeyCachePayload } from '../interfaces/mcp.types';
 
@@ -27,6 +35,7 @@ export class McpKeyService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly roleResolver: RoleResolverService,
   ) {}
 
   onModuleInit(): void {
@@ -38,12 +47,64 @@ export class McpKeyService implements OnModuleInit {
     this.initRedis();
   }
 
+  /**
+   * Gera uma nova MCP Key (DTabela -472) para o usuário, com gate de
+   * catálogo + escalação de privilégio (ADR-V2-068 Fase 2).
+   *
+   * Antes de persistir, valida em 3 etapas:
+   * 1. `scopes` não pode ser vazio — `BadRequestException`.
+   * 2. Cada scope deve pertencer a `ALL_MCP_SCOPES` (catálogo canônico) —
+   *    senão `BadRequestException` listando os inválidos + scopes válidos.
+   * 3. Cada scope deve estar no conjunto permitido pelo role do usuário
+   *    (via {@link RoleResolverService.getAllowedMcpScopes}) — senão
+   *    `ForbiddenException` com os scopes negados e os permitidos.
+   *
+   * @param userId - Chave BigInt da DEntidade (-150 USER), dono da key
+   * @param scopes - Lista de scopes solicitados (catálogo `MCP_SCOPES`)
+   * @returns Promise com a key criada (plaintext exposto só nesta resposta)
+   *
+   * @throws {BadRequestException} Lista vazia ou scope fora do catálogo
+   * @throws {ForbiddenException} Scope solicitado além do permitido pelo role
+   *
+   * @example
+   * ```typescript
+   * const key = await mcpKeyService.generate(BigInt(123), ['tasks:read', 'tasks:write']);
+   * ```
+   *
+   * @see RoleResolverService.getAllowedMcpScopes
+   * @see ALL_MCP_SCOPES
+   */
   async generate(userId: bigint, scopes: string[] = []): Promise<McpKeyCreatedResponseDto> {
+    const safeScopes = [...new Set(scopes)];
+
+    if (safeScopes.length === 0) {
+      throw new BadRequestException('Pelo menos 1 scope é obrigatório');
+    }
+
+    const validScopes = ALL_MCP_SCOPES as string[];
+    const invalidScopes = safeScopes.filter((scope) => !validScopes.includes(scope));
+    if (invalidScopes.length > 0) {
+      throw new BadRequestException({
+        message: `Scope(s) inválido(s): ${invalidScopes.join(', ')}`,
+        invalidScopes,
+        validScopes,
+      });
+    }
+
+    const allowed = await this.roleResolver.getAllowedMcpScopes(userId);
+    const denied = safeScopes.filter((scope) => !allowed.has(scope as McpScope));
+    if (denied.length > 0) {
+      throw new ForbiddenException({
+        message: `Scope(s) não permitido(s) para o seu nível de acesso: ${denied.join(', ')}`,
+        deniedScopes: denied,
+        allowedScopes: [...allowed],
+      });
+    }
+
     const plaintext = this.generatePlaintext();
     const hash = McpKeyService.sha256Hex(plaintext);
     const prefix = plaintext.slice(0, 12);
     const createdAt = new Date().toISOString();
-    const safeScopes = [...new Set(scopes)];
 
     this.logger.log(`mcp_key_generate userId=${userId} scopes=${safeScopes.length}`);
 
