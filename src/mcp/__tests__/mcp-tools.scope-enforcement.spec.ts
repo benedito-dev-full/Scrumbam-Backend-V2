@@ -28,12 +28,15 @@ import { McpRouterService } from '../services/mcp-router.service';
 import { CreateTaskTool } from '../tools/create-task.tool';
 import { DeleteTaskTool } from '../tools/delete-task.tool';
 import { ExecuteTaskTool } from '../tools/execute-task.tool';
+import { GetProjectMetricsTool } from '../tools/get-project-metrics.tool';
 import { GetProjectTool } from '../tools/get-project.tool';
+import { GetTaskTreeTool } from '../tools/get-task-tree.tool';
 import { GetTaskTool } from '../tools/get-task.tool';
 import { GetUnreadCountTool } from '../tools/get-unread-count.tool';
 import { ListBlockTasksTool } from '../tools/list-block-tasks.tool';
 import { ListBlocksTool } from '../tools/list-blocks.tool';
 import { ListMembersTool } from '../tools/list-members.tool';
+import { ListMyTasksTool } from '../tools/list-my-tasks.tool';
 import { ListNotificationsTool } from '../tools/list-notifications.tool';
 import { ListProjectsTool } from '../tools/list-projects.tool';
 import { ListTasksTool } from '../tools/list-tasks.tool';
@@ -271,6 +274,129 @@ describe('scope gate: tasks:read', () => {
 
     expectForbidden(response, SCOPE);
     expect(searchSvc.search).not.toHaveBeenCalled();
+  });
+
+  it('get_task_tree → FORBIDDEN quando scope ausente', async () => {
+    const phaseTreeSvc = { buildTree: jest.fn() };
+    const tasksSvc = { findOne: jest.fn() };
+    const projSvc = { findAccessibleProjectIds: jest.fn() };
+    // GetTaskTreeTool(phaseTreeService, tasksService, projectsService)
+    const tool = new GetTaskTreeTool(phaseTreeSvc as never, tasksSvc as never, projSvc as never);
+    const router = new McpRouterService(
+      undefined, // listTasksTool
+      undefined, // createTaskTool
+      undefined, // updateStatusTool
+      undefined, // listProjectsTool
+      undefined, // getTaskTool
+      undefined, // updateTaskTool
+      undefined, // listMembersTool
+      undefined, // getProjectTool
+      undefined, // updateProjectTool
+      undefined, // listNotificationsTool
+      undefined, // updateNotificationTool
+      undefined, // getUnreadCountTool
+      undefined, // searchTasksTool
+      undefined, // listBlocksTool
+      undefined, // listBlockTasksTool
+      undefined, // executeTaskTool
+      undefined, // updateTimerTool
+      undefined, // deleteTaskTool
+      tool, // getTaskTreeTool
+    );
+
+    const response = await router.dispatch(
+      'tools/call',
+      { name: 'get_task_tree', arguments: { taskId: '1' } },
+      ctxNoScope,
+    );
+
+    expectForbidden(response, SCOPE);
+    expect(projSvc.findAccessibleProjectIds).not.toHaveBeenCalled();
+    expect(phaseTreeSvc.buildTree).not.toHaveBeenCalled();
+  });
+
+  it('get_project_metrics → FORBIDDEN quando scope ausente', async () => {
+    const dashboardSvc = { getDashboard: jest.fn() };
+    const forecastSvc = { forecast: jest.fn() };
+    const projSvc = { findAccessibleProjectIds: jest.fn() };
+    // GetProjectMetricsTool(dashboardService, forecastService, projectsService)
+    const tool = new GetProjectMetricsTool(
+      dashboardSvc as never,
+      forecastSvc as never,
+      projSvc as never,
+    );
+    const router = new McpRouterService(
+      undefined, // listTasksTool
+      undefined, // createTaskTool
+      undefined, // updateStatusTool
+      undefined, // listProjectsTool
+      undefined, // getTaskTool
+      undefined, // updateTaskTool
+      undefined, // listMembersTool
+      undefined, // getProjectTool
+      undefined, // updateProjectTool
+      undefined, // listNotificationsTool
+      undefined, // updateNotificationTool
+      undefined, // getUnreadCountTool
+      undefined, // searchTasksTool
+      undefined, // listBlocksTool
+      undefined, // listBlockTasksTool
+      undefined, // executeTaskTool
+      undefined, // updateTimerTool
+      undefined, // deleteTaskTool
+      undefined, // getTaskTreeTool
+      tool, // getProjectMetricsTool
+    );
+
+    const response = await router.dispatch(
+      'tools/call',
+      { name: 'get_project_metrics', arguments: { projectId: '1' } },
+      ctxNoScope,
+    );
+
+    expectForbidden(response, SCOPE);
+    expect(projSvc.findAccessibleProjectIds).not.toHaveBeenCalled();
+    expect(dashboardSvc.getDashboard).not.toHaveBeenCalled();
+  });
+
+  it('list_my_tasks → FORBIDDEN quando scope ausente', async () => {
+    const tasksSvc = { findMany: jest.fn() };
+    const projSvc = { findAccessibleProjectIds: jest.fn(), findOne: jest.fn() };
+    // ListMyTasksTool(tasksService, projectsService)
+    const tool = new ListMyTasksTool(tasksSvc as never, projSvc as never);
+    const router = new McpRouterService(
+      undefined, // listTasksTool
+      undefined, // createTaskTool
+      undefined, // updateStatusTool
+      undefined, // listProjectsTool
+      undefined, // getTaskTool
+      undefined, // updateTaskTool
+      undefined, // listMembersTool
+      undefined, // getProjectTool
+      undefined, // updateProjectTool
+      undefined, // listNotificationsTool
+      undefined, // updateNotificationTool
+      undefined, // getUnreadCountTool
+      undefined, // searchTasksTool
+      undefined, // listBlocksTool
+      undefined, // listBlockTasksTool
+      undefined, // executeTaskTool
+      undefined, // updateTimerTool
+      undefined, // deleteTaskTool
+      undefined, // getTaskTreeTool
+      undefined, // getProjectMetricsTool
+      tool, // listMyTasksTool
+    );
+
+    const response = await router.dispatch(
+      'tools/call',
+      { name: 'list_my_tasks', arguments: {} },
+      ctxNoScope,
+    );
+
+    expectForbidden(response, SCOPE);
+    expect(projSvc.findAccessibleProjectIds).not.toHaveBeenCalled();
+    expect(tasksSvc.findMany).not.toHaveBeenCalled();
   });
 });
 

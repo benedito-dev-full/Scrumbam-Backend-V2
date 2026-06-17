@@ -14,6 +14,18 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **MCP tools de leitura `get_task_tree` / `get_project_metrics` / `list_my_tasks` (gate `tasks:read`)** (V2 F11 — PR1, 2026-06-17)
+  - 3 novas tools MCP de LEITURA, todas wrappers finos sobre services de domínio já existentes e testados (ZERO N+1, ZERO Prisma direto, ZERO lógica de negócio):
+    - `get_task_tree` → `PhaseTreeService.buildTree(rootId, { maxDepth, includeMetrics })` — árvore hierárquica fase→task→subtask; retorna `{ root, totalNodes, maxDepthReached }`
+    - `get_project_metrics` → agrega `DashboardService.getDashboard` (cycleTime/leadTime/throughput/wipAge/cfd, sempre) + `ForecastService.forecast` (Monte Carlo p50/p75/p85/p95, opcional). Histórico insuficiente → `forecast: null` + `forecastError`, a tool **nunca falha** (BadRequest capturado no handler)
+    - `list_my_tasks` → `TasksService.findMany({ assigneeId: ctx.dEntidadeId, ... }, scope)` — visão "meu trabalho"; **anti-fraude:** o assignee é SEMPRE o caller (do contexto MCP), nunca do input
+  - **Scope:** `tasks:read` (ADR-V2-068) — `requireScope` como 1ª linha de cada handler; sem o scope → FORBIDDEN (-32002)
+  - **Tenant isolation (ADR-V2-042):** `findAccessibleProjectIds` + 404 anti-enumeration em `get_task_tree`/`get_project_metrics`; lista vazia (não 404) em `list_my_tasks`
+  - **Registro:** `mcp-router.service.ts` (injeção posicional antes de `configService`) + `mcp.module.ts` (+ imports `FlowMetricsModule`/`ForecastModule`) + 3 entradas em `tools.schema.json` (catálogo passa de 18 → 21 tools)
+  - **Tests:** `get-task-tree.tool.spec.ts`, `get-project-metrics.tool.spec.ts`, `list-my-tasks.tool.spec.ts` + atualização de `mcp-tools.scope-enforcement`, `mcp-tools.schema-consistency` e `mcp-block-d` (contagem 18→21)
+  - **Pilares:** P1 N/A (leitura estrutural DTask/DProject, sem Engine) | P2 REUTILIZADO (envelopa services existentes) | P3 N/A (zero DClasse)
+  - **ADRs:** ADR-V2-068 (scope catalog `tasks:read`), ADR-V2-047 (árvore de fases), ADR-V2-042 (tenant isolation)
+
 - **MCP tool `delete_task` (gate `tasks:write`)** (V2 F11, 2026-06-17)
   - Nova tool MCP `delete_task` — wrapper fino sobre `TasksService.delete` (soft-delete; cascateia para subtarefas por padrão, `cascade=false` desvincula filhas)
   - **Scope:** `tasks:write` (ADR-V2-068) — gate `requireScope` antes de qualquer query; sem o scope → FORBIDDEN (-32002)

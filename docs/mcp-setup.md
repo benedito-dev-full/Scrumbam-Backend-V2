@@ -15,7 +15,7 @@ O V2 usa um **catálogo canônico de 6 scopes** para granularidade fina de privi
 
 | Scope | Tools cobertas | Descrição |
 |-------|---|---|
-| **`tasks:read`** | list_tasks, get_task, search_tasks, list_projects, get_project, list_blocks, list_block_tasks | Leitura de tasks e projetos |
+| **`tasks:read`** | list_tasks, get_task, search_tasks, list_projects, get_project, list_blocks, list_block_tasks, list_members, get_task_tree, get_project_metrics, list_my_tasks | Leitura de tasks e projetos |
 | **`tasks:write`** | create_task, update_task, update_status, update_timer, delete_task | Mutação de tasks |
 | **`notifications:read`** | list_notifications, get_unread_count | Leitura de notificações |
 | **`notifications:write`** | update_notification | Mutação de notificações |
@@ -143,6 +143,12 @@ claude mcp list
 `list_projects`: liste meus projetos ativos.
 
 `list_sprints`: liste as sprints do projeto 123.
+
+`get_task_tree`: mostre a arvore (fase -> task -> subtask) abaixo da task 500, com metricas por fase. Requer scope `tasks:read`.
+
+`get_project_metrics`: traga as flow metrics e o forecast do projeto 123. Se nao houver historico suficiente, o forecast vem null (a tool nao falha). Requer scope `tasks:read`.
+
+`list_my_tasks`: liste as tasks atribuidas a mim (assignee = caller) em todos os projetos acessiveis. Requer scope `tasks:read`.
 
 ## Teste Manual JSON-RPC
 

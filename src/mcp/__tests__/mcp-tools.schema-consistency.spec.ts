@@ -2,12 +2,15 @@ import toolsSchema from '../schemas/tools.schema.json';
 import { CreateTaskTool } from '../tools/create-task.tool';
 import { DeleteTaskTool } from '../tools/delete-task.tool';
 import { ExecuteTaskTool } from '../tools/execute-task.tool';
+import { GetProjectMetricsTool } from '../tools/get-project-metrics.tool';
 import { GetProjectTool } from '../tools/get-project.tool';
+import { GetTaskTreeTool } from '../tools/get-task-tree.tool';
 import { GetTaskTool } from '../tools/get-task.tool';
 import { GetUnreadCountTool } from '../tools/get-unread-count.tool';
 import { ListBlockTasksTool } from '../tools/list-block-tasks.tool';
 import { ListBlocksTool } from '../tools/list-blocks.tool';
 import { ListMembersTool } from '../tools/list-members.tool';
+import { ListMyTasksTool } from '../tools/list-my-tasks.tool';
 import { ListNotificationsTool } from '../tools/list-notifications.tool';
 import { ListProjectsTool } from '../tools/list-projects.tool';
 import { ListTasksTool } from '../tools/list-tasks.tool';
@@ -68,6 +71,9 @@ function buildRegisteredTools(): McpTool[] {
     new ExecuteTaskTool(noop, noop, noop, noop),
     new UpdateTimerTool(noop, noop),
     new DeleteTaskTool(noop, noop),
+    new GetTaskTreeTool(noop, noop, noop),
+    new GetProjectMetricsTool(noop, noop, noop),
+    new ListMyTasksTool(noop, noop),
   ];
 }
 

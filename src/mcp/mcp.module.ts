@@ -4,6 +4,8 @@ import { ConfigService } from '@nestjs/config';
 import { AuthModule } from '../auth/auth.module';
 import { EntidadesModule } from '../entidades/entidades.module';
 import { ExecutionsModule } from '../executions/executions.module';
+import { FlowMetricsModule } from '../flow-metrics/flow-metrics.module';
+import { ForecastModule } from '../forecast/forecast.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { SearchModule } from '../search/search.module';
@@ -21,9 +23,12 @@ import { McpRouterService } from './services/mcp-router.service';
 import { CreateTaskTool } from './tools/create-task.tool';
 import { DeleteTaskTool } from './tools/delete-task.tool';
 import { ExecuteTaskTool } from './tools/execute-task.tool';
+import { GetProjectMetricsTool } from './tools/get-project-metrics.tool';
 import { GetProjectTool } from './tools/get-project.tool';
+import { GetTaskTreeTool } from './tools/get-task-tree.tool';
 import { GetTaskTool } from './tools/get-task.tool';
 import { GetUnreadCountTool } from './tools/get-unread-count.tool';
+import { ListMyTasksTool } from './tools/list-my-tasks.tool';
 import { ListBlockTasksTool } from './tools/list-block-tasks.tool';
 import { ListBlocksTool } from './tools/list-blocks.tool';
 import { ListMembersTool } from './tools/list-members.tool';
@@ -47,6 +52,8 @@ import { UpdateTimerTool } from './tools/update-timer.tool';
     NotificationsModule,
     SearchModule,
     ExecutionsModule.forRoot(),
+    FlowMetricsModule,
+    ForecastModule,
   ],
   controllers: [McpController, McpKeysController],
   providers: [
@@ -75,6 +82,9 @@ import { UpdateTimerTool } from './tools/update-timer.tool';
     ExecuteTaskTool,
     UpdateTimerTool,
     DeleteTaskTool,
+    GetTaskTreeTool,
+    GetProjectMetricsTool,
+    ListMyTasksTool,
   ],
   exports: [McpKeyService, McpRouterService, McpRateLimitService, McpAuditService],
 })

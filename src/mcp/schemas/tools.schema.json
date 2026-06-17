@@ -363,6 +363,100 @@
           }
         }
       }
+    },
+    {
+      "name": "get_task_tree",
+      "description": "Retorna a arvore hierarquica (fase->task->subtask) abaixo de uma task/fase raiz, com metricas opcionais por fase. Retorna { root, totalNodes, maxDepthReached }. Escopo automatico por tenant.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["taskId"],
+        "properties": {
+          "taskId": { "type": "string", "description": "ID da task/fase raiz (chave DTask)" },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "description": "Profundidade maxima (1-20). Default 20."
+          },
+          "includeMetrics": {
+            "type": "boolean",
+            "default": false,
+            "description": "Quando true, anexa metricas (total/done/failed/inProgress/percent) nos nos-fase (idClasse=-200)."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_project_metrics",
+      "description": "Retorna flow metrics de um projeto (cycleTime, leadTime, throughput, wipAge, cfd) e, opcionalmente, forecast Monte Carlo (p50/p75/p85/p95 em dias). Se historico insuficiente, forecast vem null. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["projectId"],
+        "properties": {
+          "projectId": { "type": "string", "description": "ID do projeto (chave DProject)" },
+          "period": {
+            "type": "string",
+            "enum": ["today", "week", "month"],
+            "description": "Periodo pre-definido (opcional, mutuamente exclusivo com periodFrom/periodTo)."
+          },
+          "periodFrom": {
+            "type": "string",
+            "description": "Data inicial YYYY-MM-DD (opcional, par com periodTo)."
+          },
+          "periodTo": {
+            "type": "string",
+            "description": "Data final YYYY-MM-DD (opcional, par com periodFrom)."
+          },
+          "includeForecast": {
+            "type": "boolean",
+            "default": true,
+            "description": "Quando true, tenta anexar forecast Monte Carlo. Se historico insuficiente, forecast=null + forecastError; NUNCA falha a tool."
+          },
+          "historicalPeriods": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12,
+            "description": "Forecast: numero de periodos historicos (1-12, default 4). Ignorado se includeForecast=false."
+          },
+          "iterations": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 50000,
+            "description": "Forecast: iteracoes Monte Carlo (100-50000, default 10000). Ignorado se includeForecast=false."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_my_tasks",
+      "description": "Lista as tasks atribuidas ao usuario MCP caller (visao \"meu trabalho\"), em todos os projetos acessiveis, com filtros opcionais de status/projeto. Retorna { items, pagination }. O assignee e SEMPRE o caller.",
+      "inputSchema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "INBOX",
+              "READY",
+              "EXECUTING",
+              "DONE",
+              "FAILED",
+              "CANCELLED",
+              "DISCARDED",
+              "VALIDATING",
+              "VALIDATED"
+            ],
+            "description": "Filtra por status V3 (opcional)."
+          },
+          "projectId": {
+            "type": "string",
+            "description": "Restringe a um projeto acessivel (opcional)."
+          },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 20 },
+          "cursor": { "type": "string", "description": "Cursor de paginacao (chave da ultima task)." }
+        }
+      }
     }
   ]
 }
