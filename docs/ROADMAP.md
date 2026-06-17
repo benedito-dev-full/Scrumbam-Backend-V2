@@ -59,10 +59,10 @@
 - `42b8145` feat(mcp): enforce per-tool scope check across all 17 tools (ADR-V2-068)
 
 **Próximos Passos:**
-- **Fase 2 (F11 — ~4h):** Validação de privilege escalation em `POST /mcp/keys` via `RoleResolverService.getAllowedMcpScopes()`
-- **Fase 3 (F11 — ~3h):** Script migration grandfather (reescreve todas as keys legadas para `ACESSO_TOTAL`)
-- **Fase 4 (F11 — ~5h, Frontend):** Redesenho do modal com presets + checkboxes role-aware
-- **Fase 5 (F11 — ~2h):** ADR-V2-068 formal + atualizar ADR-V2-067 com status "Estendido"
+- ~~**Fase 2 (F11 — ~4h):** Validação de privilege escalation em `POST /mcp/keys` via `RoleResolverService.getAllowedMcpScopes()`~~ ✅ DONE
+- ~~**Fase 3 (F11 — ~3h):** Script migration grandfather (reescreve todas as keys legadas para `ACESSO_TOTAL`)~~ ✅ DONE
+- ~~**Fase 4 (F11 — ~5h, Frontend):** Redesenho do modal com presets + checkboxes role-aware~~ ✅ DONE (commit 06ecbd8 Scrumbam-Frontend-V2)
+- ~~**Fase 5 (F11 — ~2h):** ADR-V2-068 formal + atualizar ADR-V2-067 com status "Estendido"~~ ✅ DONE (este commit)
 
 ---
 

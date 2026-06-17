@@ -1,6 +1,6 @@
 # ADR-V2-067: Scope MCP dedicado `executions:create` para disparar IA
 
-**Status:** Proposto
+**Status:** Aceito, estendido por ADR-V2-068
 **Data:** 2026-06-15
 **Decisores:** Strategist Agent V2 + CEO (a ratificar)
 **Tags:** #V2 #fase-F11 #mcp #seguranca #scopes #execution

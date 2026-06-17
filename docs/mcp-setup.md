@@ -9,6 +9,41 @@ Header: X-MCP-Key: scrumban_mcp_xxx
 
 Nao use JWT nesse endpoint. A key MCP e uma credencial dedicada para clientes como Claude Desktop, Cursor e Claude Code CLI.
 
+## Catálogo de Scopes MCP (ADR-V2-068)
+
+O V2 usa um **catálogo canônico de 6 scopes** para granularidade fina de privilégios:
+
+| Scope | Tools cobertas | Descrição |
+|-------|---|---|
+| **`tasks:read`** | list_tasks, get_task, search_tasks, list_projects, get_project, list_blocks, list_block_tasks | Leitura de tasks e projetos |
+| **`tasks:write`** | create_task, update_task, update_status, update_timer | Mutação de tasks |
+| **`notifications:read`** | list_notifications, get_unread_count | Leitura de notificações |
+| **`notifications:write`** | update_notification | Mutação de notificações |
+| **`projects:write`** | update_project | Mutação de projetos |
+| **`executions:create`** | execute_task | **Disparo de IA (queima tokens — custo financeiro)** |
+
+### Presets de scopes (para UI)
+
+```json
+{
+  "READ_ONLY": ["tasks:read", "notifications:read"],
+  "READ_WRITE": ["tasks:read", "tasks:write", "notifications:read", "notifications:write"],
+  "FULL_ACCESS": ["tasks:read", "tasks:write", "notifications:read", "notifications:write", "projects:write", "executions:create"]
+}
+```
+
+### Regra de privilege escalation
+
+Cada usuário consegue **solicitar APENAS os scopes permitidos pelo seu role**:
+
+| Role | Scopes permitidos |
+|---|---|
+| Qualquer usuário autenticado | `tasks:read`, `notifications:read`, `notifications:write` |
+| MEMBER de org (-162) ou projeto (-172) | ↑ + `tasks:write` |
+| MANAGER de projeto (-171) ou ORG_ADMIN (-161) | ↑ + `projects:write`, `executions:create` |
+
+**Tentativa de solicitar scope acima do role** → `ForbiddenException` com lista de scopes negados e permitidos.
+
 ## Gerar uma MCP Key
 
 Gere a key com um usuario autenticado por JWT:
@@ -17,7 +52,7 @@ Gere a key com um usuario autenticado por JWT:
 curl -X POST https://api.scrumban.app/mcp/keys \
   -H "Authorization: Bearer <jwt>" \
   -H "Content-Type: application/json" \
-  -d '{"scopes":["tools:read","tools:write"]}'
+  -d '{"scopes":["tasks:read","tasks:write","notifications:read"]}'
 ```
 
 Exemplo de resposta:
@@ -27,12 +62,28 @@ Exemplo de resposta:
   "id": "123",
   "prefix": "scrumban_mcp",
   "plaintext": "scrumban_mcp_xxx",
-  "scopes": ["tools:read", "tools:write"],
-  "createdAt": "2026-05-10T12:00:00.000Z"
+  "scopes": ["tasks:read", "tasks:write", "notifications:read"],
+  "createdAt": "2026-06-17T12:00:00.000Z"
 }
 ```
 
 O campo `plaintext` aparece somente na criacao. Guarde a key em um gerenciador de segredos e nunca registre em logs, issues ou documentacao.
+
+### Endpoints relacionados
+
+**Listar scopes permitidos para o usuário autenticado:**
+
+```bash
+curl -X GET https://api.scrumban.app/mcp/keys/allowed-scopes \
+  -H "Authorization: Bearer <jwt>"
+
+Response:
+{
+  "allowedScopes": ["tasks:read", "tasks:write", "notifications:read", "notifications:write"]
+}
+```
+
+Use este endpoint no frontend para habilitar/desabilitar presets e checkboxes no modal de criação de key.
 
 ## Claude Desktop
 

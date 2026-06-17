@@ -14,6 +14,17 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **MCP Scope Catalog — Formalização (ADR-V2-068 Fase 5 — documentação)** (V2 F11, 2026-06-17)
+  - **ADR-V2-068 redigido:** catálogo canônico de 6 scopes MCP (`tasks:read`, `tasks:write`, `notifications:read`, `notifications:write`, `projects:write`, `executions:create`)
+  - **Mapeamento 17 tools → scope:** cada ferramenta MCP requer scope específico (ZERO risk collapse — `executions:create` é separado porque queima tokens)
+  - **Storage ZERO tabela nova:** persiste em DTabela -472 `dados.scopes` (ratifica ADR-V2-001)
+  - **Grandfathering:** script `mcp-grandfather-scopes.ts` reescreve keys legadas para ACESSO_TOTAL (idempotente, auditoria inline em `dados`)
+  - **Documentação:** atualizadas `docs/mcp-setup.md` (catálogo + regras privilege escalation), `docs/decisions/ADR-V2-067` (estendido), `docs/ROADMAP.md`
+  - **Pilares:** P1 N/A | P2 REUTILIZADO (enforcement em handlers) | P3 N/A (zero DClasse)
+  - **ADRs:** ADR-V2-068 (novo), ADR-V2-067 (estendido), ADR-V2-001/003/004 (relacionados)
+
+### Added (anterior)
+
 - **MCP Scope Catalog — Fase 2: Gate anti-escalação em `POST /mcp/keys` (ADR-V2-068)** (V2 F11 DEV-13, 2026-06-17)
   - **`RoleResolverService.getAllowedMcpScopes(userEntidadeId)`:** deriva o conjunto de scopes MCP permitidos a partir dos vínculos do user em DVincula (org -161/-162/-163, projeto -171/-172/-173) — 1 query, ZERO N+1
   - **Regras role→scope:** todo user → `tasks:read` + `notifications:read` + `notifications:write`; MEMBER (-162/-172) → +`tasks:write`; MANAGER (-171)/ORG_ADMIN (-161) → +`projects:write` +`executions:create`
