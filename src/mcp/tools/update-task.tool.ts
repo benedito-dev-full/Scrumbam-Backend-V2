@@ -131,17 +131,11 @@ export class UpdateTaskTool implements McpTool {
           'Valores das colunas customizaveis da Lista, chaveados por ColumnDef.key (ex: f_a1b2). Valores: string|number|boolean|null (null limpa o valor). Validados server-side contra o schema da Lista (DProject.tableFields).',
       },
     },
-    anyOf: [
-      { required: ['name'] },
-      { required: ['description'] },
-      { required: ['priority'] },
-      { required: ['assigneeId'] },
-      { required: ['status'] },
-      { required: ['dueDate'] },
-      { required: ['idPai'] },
-      { required: ['idBloco'] },
-      { required: ['fields'] },
-    ],
+    // IMPORTANTE: NAO usar `anyOf`/`oneOf`/`allOf` na RAIZ do inputSchema.
+    // Clientes MCP (Claude Code, Cursor, Gemini) rejeitam tools cujo input_schema
+    // tem combinadores no topo e as descartam silenciosamente do tools/list —
+    // foi exatamente o que mantinha esta tool invisivel na conexao. A regra
+    // "pelo menos 1 campo de update" e aplicada no handler (ver abaixo).
   };
 
   constructor(
@@ -156,9 +150,9 @@ export class UpdateTaskTool implements McpTool {
    * 1. Gate de autorização (ADR-V2-068).
    * 2. Valida params (assertRecord + taskId required + BigInt parseable).
    * 3. Extrai e valida campos opcionais com type-checking.
-   * 4. Exige ao menos UM campo de update (caso contrario INVALID_PARAMS —
-   *    redundancia em relacao ao `anyOf` do schema, mas necessaria caso
-   *    o cliente envie sem validar contra o schema).
+   * 4. Exige ao menos UM campo de update (caso contrario INVALID_PARAMS).
+   *    Esta e a UNICA aplicacao da regra ">=1 campo" — o inputSchema NAO usa
+   *    `anyOf` na raiz de proposito (clientes MCP descartam a tool nesse caso).
    * 5. Resolve `accessibleProjectIds` para o caller.
    * 6. Executa em ordem: update(basicos) → updateStatus.
    * 7. Re-hidrata via `findOne` e retorna snapshot final.

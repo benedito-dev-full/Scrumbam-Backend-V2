@@ -188,18 +188,7 @@
             "additionalProperties": { "type": ["string", "number", "boolean", "null"] },
             "description": "Valores das colunas customizaveis da Lista, chaveados por ColumnDef.key (ex: f_a1b2). Valores: string|number|boolean|null (null limpa o valor). Validados server-side contra o schema da Lista (DProject.tableFields)."
           }
-        },
-        "anyOf": [
-          { "required": ["name"] },
-          { "required": ["description"] },
-          { "required": ["priority"] },
-          { "required": ["assigneeId"] },
-          { "required": ["status"] },
-          { "required": ["dueDate"] },
-          { "required": ["idPai"] },
-          { "required": ["idBloco"] },
-          { "required": ["fields"] }
-        ]
+        }
       }
     },
     {
