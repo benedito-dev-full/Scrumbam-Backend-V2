@@ -14,6 +14,15 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **MCP tool `delete_task` (gate `tasks:write`)** (V2 F11, 2026-06-17)
+  - Nova tool MCP `delete_task` — wrapper fino sobre `TasksService.delete` (soft-delete; cascateia para subtarefas por padrão, `cascade=false` desvincula filhas)
+  - **Scope:** `tasks:write` (ADR-V2-068) — gate `requireScope` antes de qualquer query; sem o scope → FORBIDDEN (-32002)
+  - **Tenant isolation (ADR-V2-042):** `findOne(taskId)` + `projectsService.findOne(projectId, dEntidadeId)` (paridade com `update_status`/`update_timer`); `accessibleProjectIds=[task.projectId]` (gate restrito ao projeto autorizado)
+  - **Registro:** `mcp-router.service.ts` + `mcp.module.ts` + entrada em `tools.schema.json` (catálogo passa de 17 → 18 tools)
+  - **Tests:** `delete-task.tool.spec.ts` (12 casos: happy paths cascade default/true/false, FORBIDDEN scope/vazio/undefined, INVALID_PARAMS taskId/cascade, NotFound/Forbidden propagados) + atualização de `scope-enforcement` e `schema-consistency`
+  - **Pilares:** P1 N/A (delete estrutural via service, sem Engine) | P2 REUTILIZADO (envelopa endpoint existente) | P3 N/A (zero DClasse)
+  - **ADRs:** ADR-V2-068 (scope catalog), ADR-V2-047 Q6 (cascade default), ADR-V2-042 (tenant)
+
 - **MCP Scope Catalog — Formalização (ADR-V2-068 Fase 5 — documentação)** (V2 F11, 2026-06-17)
   - **ADR-V2-068 redigido:** catálogo canônico de 6 scopes MCP (`tasks:read`, `tasks:write`, `notifications:read`, `notifications:write`, `projects:write`, `executions:create`)
   - **Mapeamento 17 tools → scope:** cada ferramenta MCP requer scope específico (ZERO risk collapse — `executions:create` é separado porque queima tokens)

@@ -10,6 +10,7 @@ import {
 import toolsSchema from '../schemas/tools.schema.json';
 import { McpJsonRpcError, McpToolDefinition, McpUserContext } from '../interfaces/mcp.types';
 import { CreateTaskTool } from '../tools/create-task.tool';
+import { DeleteTaskTool } from '../tools/delete-task.tool';
 import { ExecuteTaskTool } from '../tools/execute-task.tool';
 import { GetProjectTool } from '../tools/get-project.tool';
 import { GetTaskTool } from '../tools/get-task.tool';
@@ -79,6 +80,7 @@ export class McpRouterService {
     listBlockTasksTool?: ListBlockTasksTool,
     executeTaskTool?: ExecuteTaskTool,
     updateTimerTool?: UpdateTimerTool,
+    deleteTaskTool?: DeleteTaskTool,
     configService?: ConfigService,
   ) {
     const tools: Array<McpTool | undefined> = [
@@ -99,6 +101,7 @@ export class McpRouterService {
       listBlockTasksTool,
       executeTaskTool,
       updateTimerTool,
+      deleteTaskTool,
     ];
     this.tools = tools.filter((tool): tool is McpTool => tool !== undefined);
     this.cachedToolDefinitions = (toolsSchema.tools as McpToolDefinition[]).map((tool) => ({

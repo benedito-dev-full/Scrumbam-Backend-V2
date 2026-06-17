@@ -19,6 +19,7 @@ import { McpKeyService } from './services/mcp-key.service';
 import { McpRateLimitService } from './services/mcp-rate-limit.service';
 import { McpRouterService } from './services/mcp-router.service';
 import { CreateTaskTool } from './tools/create-task.tool';
+import { DeleteTaskTool } from './tools/delete-task.tool';
 import { ExecuteTaskTool } from './tools/execute-task.tool';
 import { GetProjectTool } from './tools/get-project.tool';
 import { GetTaskTool } from './tools/get-task.tool';
@@ -73,6 +74,7 @@ import { UpdateTimerTool } from './tools/update-timer.tool';
     ListBlockTasksTool,
     ExecuteTaskTool,
     UpdateTimerTool,
+    DeleteTaskTool,
   ],
   exports: [McpKeyService, McpRouterService, McpRateLimitService, McpAuditService],
 })

@@ -1,7 +1,7 @@
 /**
  * Spec consolidada: gate de scope por tool (ADR-V2-068).
  *
- * Valida que TODAS as 17 tools MCP lançam FORBIDDEN (-32002) quando o
+ * Valida que TODAS as 18 tools MCP lançam FORBIDDEN (-32002) quando o
  * contexto não contém o scope correto para a tool chamada.
  *
  * Padrão de cada case:
@@ -15,7 +15,8 @@
  * Scope por tool (ADR-V2-068):
  *  tasks:read          — list_tasks, get_task, list_projects, get_project,
  *                        list_blocks, list_block_tasks, list_members, search_tasks
- *  tasks:write         — create_task, update_task, update_status, update_timer
+ *  tasks:write         — create_task, update_task, update_status, update_timer,
+ *                        delete_task
  *  notifications:read  — list_notifications, get_unread_count
  *  notifications:write — update_notification
  *  projects:write      — update_project
@@ -25,6 +26,7 @@
 import { MCP_ERROR_CODES } from '../constants';
 import { McpRouterService } from '../services/mcp-router.service';
 import { CreateTaskTool } from '../tools/create-task.tool';
+import { DeleteTaskTool } from '../tools/delete-task.tool';
 import { ExecuteTaskTool } from '../tools/execute-task.tool';
 import { GetProjectTool } from '../tools/get-project.tool';
 import { GetTaskTool } from '../tools/get-task.tool';
@@ -373,6 +375,42 @@ describe('scope gate: tasks:write', () => {
     expectForbidden(response, SCOPE);
     expect(tasksSvc.findOne).not.toHaveBeenCalled();
     expect(tasksSvc.timer).not.toHaveBeenCalled();
+  });
+
+  it('delete_task → FORBIDDEN quando scope ausente', async () => {
+    const tasksSvc = { findOne: jest.fn(), delete: jest.fn() };
+    // DeleteTaskTool(tasksService, projectsService)
+    const tool = new DeleteTaskTool(tasksSvc as never, noop);
+    const router = new McpRouterService(
+      undefined, // listTasksTool
+      undefined, // createTaskTool
+      undefined, // updateStatusTool
+      undefined, // listProjectsTool
+      undefined, // getTaskTool
+      undefined, // updateTaskTool
+      undefined, // listMembersTool
+      undefined, // getProjectTool
+      undefined, // updateProjectTool
+      undefined, // listNotificationsTool
+      undefined, // updateNotificationTool
+      undefined, // getUnreadCountTool
+      undefined, // searchTasksTool
+      undefined, // listBlocksTool
+      undefined, // listBlockTasksTool
+      undefined, // executeTaskTool
+      undefined, // updateTimerTool
+      tool, // deleteTaskTool
+    );
+
+    const response = await router.dispatch(
+      'tools/call',
+      { name: 'delete_task', arguments: { taskId: '1' } },
+      ctxNoScope,
+    );
+
+    expectForbidden(response, SCOPE);
+    expect(tasksSvc.findOne).not.toHaveBeenCalled();
+    expect(tasksSvc.delete).not.toHaveBeenCalled();
   });
 });
 

@@ -1,5 +1,6 @@
 import toolsSchema from '../schemas/tools.schema.json';
 import { CreateTaskTool } from '../tools/create-task.tool';
+import { DeleteTaskTool } from '../tools/delete-task.tool';
 import { ExecuteTaskTool } from '../tools/execute-task.tool';
 import { GetProjectTool } from '../tools/get-project.tool';
 import { GetTaskTool } from '../tools/get-task.tool';
@@ -66,6 +67,7 @@ function buildRegisteredTools(): McpTool[] {
     new ListBlockTasksTool(noop, noop),
     new ExecuteTaskTool(noop, noop, noop, noop),
     new UpdateTimerTool(noop, noop),
+    new DeleteTaskTool(noop, noop),
   ];
 }
 

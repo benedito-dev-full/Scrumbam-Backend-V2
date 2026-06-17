@@ -16,7 +16,7 @@ O V2 usa um **catálogo canônico de 6 scopes** para granularidade fina de privi
 | Scope | Tools cobertas | Descrição |
 |-------|---|---|
 | **`tasks:read`** | list_tasks, get_task, search_tasks, list_projects, get_project, list_blocks, list_block_tasks | Leitura de tasks e projetos |
-| **`tasks:write`** | create_task, update_task, update_status, update_timer | Mutação de tasks |
+| **`tasks:write`** | create_task, update_task, update_status, update_timer, delete_task | Mutação de tasks |
 | **`notifications:read`** | list_notifications, get_unread_count | Leitura de notificações |
 | **`notifications:write`** | update_notification | Mutação de notificações |
 | **`projects:write`** | update_project | Mutação de projetos |
@@ -137,6 +137,8 @@ claude mcp list
 `create_task`: crie uma task no projeto 123 chamada "Revisar contrato MCP".
 
 `update_status`: mova a task 456 para DONE.
+
+`delete_task`: delete a task 456 (soft-delete; cascateia para subtarefas por padrao, use cascade=false para desvincular). Requer scope `tasks:write`.
 
 `list_projects`: liste meus projetos ativos.
 

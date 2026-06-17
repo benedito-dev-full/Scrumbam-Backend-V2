@@ -359,6 +359,21 @@
         },
         "additionalProperties": false
       }
+    },
+    {
+      "name": "delete_task",
+      "description": "Deleta (soft-delete) uma task; cascateia para subtarefas por padrao.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["taskId"],
+        "properties": {
+          "taskId": { "type": "string" },
+          "cascade": {
+            "type": "boolean",
+            "description": "Cascateia soft-delete para subtarefas (default true). false = desvincular filhas."
+          }
+        }
+      }
     }
   ]
 }
