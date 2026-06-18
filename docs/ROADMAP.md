@@ -66,6 +66,31 @@
 
 ---
 
+## Task 1 — Herança + Rollup de Timer em Tasks Filhas — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA
+**Módulo V2:** entidades (escopo real: `src/tasks/` — DTask estrutural)
+**Fase V2:** F5 (Domínio estrutural DTask) + F8 (Flow Metrics on-read)
+**Tempo Real:** ~6h (Implementer) + ~0.5h (Documenter)
+**Completado em:** 2026-06-18
+**Quality Score:** 8.8/10 (APPROVED pelo Reviewer)
+
+**O Que Foi Feito:**
+- Herança de 4 campos do pai (`idAssignee`, `dueDate`, `idPriority`, `idStatus`) no `create()` — DTO-vence-pai, INBOX preservado para raiz, PHASE ignorado
+- Novo helper `buildChildrenTimeRollupMap` — 1 query batch por lote, ZERO N+1
+- Rollup on-read 1-nível: mãe exibe soma do tempo das filhas diretas; folha mantém own-time
+- 2 campos novos em `TaskResponseDto`: `hasChildren` e `timeSpentIsRollup` (computed, zero coluna no banco)
+- 13 novos testes (suítes `tasks-inheritance.spec.ts` + `tasks-time-rollup.spec.ts`), 13/13 PASS, zero regressão
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — DTask é tabela estrutural; Prisma direto correto. OperacaoExecucaoClaude intocada
+- Pilar 2 (Endpoints): REUTILIZADO — zero controller novo; 2 campos adicionados ao DTO existente
+- Pilar 3 (Seed): N/A — zero DClasse nova; seed intocado (17 tabelas confirmadas)
+
+**ADRs vinculados:** ADR-V2-001, ADR-V2-047, ADR-V2-050, ADR-V2-057
+
+---
+
 ## Feature: MCP Scope Catalog — Fase 2 COMPLETA ✅
 
 **Status:** ✅ **FASE 2 COMPLETA** — Gate anti-escalação + endpoint allowed-scopes

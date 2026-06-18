@@ -186,10 +186,36 @@ export class TaskResponseDto {
       'durationMs de todas as sessões fechadas em dados.telemetry.manualTimers[], ' +
       'de todos os usuários) e JÁ FORMATADO como rótulo humano ("2h 45min", "45min", ' +
       '"—" quando zero). Fonte da coluna builtin read-only "Tempo gasto" (timeSpent) ' +
-      'da grade Blocos — Fase 3 / ADR-V2-057. O frontend NUNCA recalcula: apenas exibe.',
+      'da grade Blocos — Fase 3 / ADR-V2-057. O frontend NUNCA recalcula: apenas exibe. ' +
+      'IMPORTANTE: quando a task é MÃE (tem ≥1 filha direta), este rótulo passa a ser a ' +
+      'SOMA do tempo das filhas DIRETAS (rollup 1-nível, on-read) e o own-time da mãe é ' +
+      'suprimido. Use `timeSpentIsRollup` para distinguir os dois casos.',
     example: '2h 45min',
   })
   timeSpentLabel!: string;
+
+  @ApiProperty({
+    description:
+      'Indica se a task possui ao menos uma filha direta (idPai = chave desta task). ' +
+      '`true` = task MÃE; `false` = task FOLHA. Permite ao frontend distinguir mãe de ' +
+      'folha sem heurística e exibir o badge de subtarefas. Calculado on-read (rollup ' +
+      '1-nível). Em respostas de mutação (create/update/updateStatus/timer) reflete o ' +
+      'estado leve do próprio caminho — a leitura (GET /tasks, GET /tasks/:id) é a fonte ' +
+      'canônica do valor real.',
+    example: true,
+  })
+  hasChildren!: boolean;
+
+  @ApiProperty({
+    description:
+      'Indica se `timeSpentLabel` representa a SOMA do tempo das filhas diretas (rollup) ' +
+      'em vez do tempo próprio da task. `true` somente quando a task é MÃE e o label foi ' +
+      'sobrescrito pelo rollup das filhas; `false` para folhas (own-time). Evita ' +
+      'ambiguidade no frontend (badge "soma das subtarefas"). On-read, 1-nível, ' +
+      'NÃO recursivo (ADR-V2-001 — sem coluna materializada).',
+    example: true,
+  })
+  timeSpentIsRollup!: boolean;
 
   @ApiProperty({ description: 'Data de criação ISO 8601' })
   criadoEm!: string;

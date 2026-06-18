@@ -1,6 +1,53 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-06-17 (DEV-13: MCP Scope Catalog Fases 2+3 — gate anti-escalação + grandfather)
+**Ultima atualizacao:** 2026-06-18 (Task 1: Herança + Rollup de Timer em Tasks Filhas — COMPLETE, Score 8.8)
+
+---
+
+## Task 1 — COMPLETE (V2 Fase F5/F8)
+
+**Module:** entidades (src/tasks/ — DTask estrutural)
+**Task:** Herança + Rollup de Timer em Tasks Filhas
+**Status:** COMPLETA
+**Duration:** ~6h (Implementer) + ~0.5h (Documenter)
+**Quality Score:** 8.8/10
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | ~1h | — |
+| Implementer | ~6h | — |
+| Reviewer | ~0.5h | 8.8/10 |
+| Documenter | ~0.5h | — |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DTask é tabela estrutural; Prisma direto correto. OperacaoExecucaoClaude intocada
+- Pilar 2 (Endpoints): REUTILIZADO — zero controller novo; 2 campos adicionados ao DTO existente
+- Pilar 3 (Seed): N/A — zero DClasse nova; seed intocado; 17 modelos confirmados
+
+**Deliverables:**
+- [x] Herança de 4 campos (`idAssignee`, `dueDate`, `idPriority`, `idStatus`) no `create()` — DTO-vence-pai
+- [x] INBOX preservado para task raiz (anti-regressão crítica confirmada)
+- [x] `buildChildrenTimeRollupMap` — 1 query batch, ZERO N+1
+- [x] Rollup on-read 1-nível: mãe mostra soma das filhas diretas; folha mantém own-time
+- [x] Campos novos `hasChildren` e `timeSpentIsRollup` no `TaskResponseDto` (computed on-read)
+- [x] Anti-bug timer: `TaskTimerService.start/close` intocado (folha inicia timer normalmente)
+- [x] 2 suítes de testes: `tasks-inheritance.spec.ts` + `tasks-time-rollup.spec.ts` (13/13 PASS)
+- [x] Zero regressão (49 falhas pré-existentes mantidas, delta +0)
+- [x] JSDoc completo (`buildChildrenTimeRollupMap`, `buildResponse`, `create`, campos DTO)
+
+**Metrics:**
+- Build: PASS (TSC 0 errors em src/tasks/)
+- TypeScript: 0 errors
+- ESLint: 0 warnings
+- N+1 Queries: ZERO (1 query batch por lote — teste 13 valida)
+- Queries/request: +1 (rollup batch) em findMany/findOne/update/updateStatus
+- Testes novos: 13/13 PASS
+- Regressão: 0 (baseline 49 failures intacto)
+
+**ADRs:** ADR-V2-001, ADR-V2-047, ADR-V2-050, ADR-V2-057
+
+---
 
 ---
 

@@ -14,6 +14,14 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Herança de campos do pai + rollup de tempo on-read em tasks filhas (V2 F5/F8, Task 1, 2026-06-18)**
+  - **Frente 1 — Herança na criação (`create()`):** quando `dto.idPai` presente, filha herda do pai direto `idAssignee`, `dueDate`, `idPriority` e `idStatus` sempre que o DTO não traz o campo (DTO-vence-pai). INBOX preservado para tasks raiz (zero regressão). Ramo PHASE (-200) ignorado (fase nasce null). Pai sem status → filha cai em INBOX. Sem query extra (reusa o `select` do pai já existente — ZERO N+1).
+  - **Frente 2 — Rollup de tempo on-read (`findMany`/`findOne`):** novo helper `buildChildrenTimeRollupMap` em 1 query agregada `idPai IN (lote)` (ZERO N+1); task mãe (com ≥1 filha direta) exibe a soma do tempo das filhas diretas em `timeSpentLabel`; folha mantém own-time. Rollup 1-nível (NÃO recursivo — ADR-V2-001). Nenhuma coluna/tabela nova.
+  - **DTO:** 2 campos novos em `TaskResponseDto`: `hasChildren: boolean` (mãe vs folha) e `timeSpentIsRollup: boolean` (label veio do rollup). Campos computados on-read — schema intocado.
+  - **Testes:** 13 novos testes em 2 suítes (`tasks-inheritance.spec.ts` e `tasks-time-rollup.spec.ts`), 13/13 PASS, zero regressão no baseline (49 falhas pré-existentes mantidas).
+  - **Pilares:** P1 N/A (DTask estrutural, Prisma direto correto) | P2 REUTILIZADO (zero controller novo, 2 campos adicionados ao DTO existente) | P3 N/A (zero DClasse nova — seed intocado)
+  - **ADRs:** ADR-V2-001 (zero tabela nova), ADR-V2-047 (hierarquia DTask.idPai), ADR-V2-050 (ramo TASK vs PHASE), ADR-V2-057 (telemetry/manualTimers fonte única)
+
 - **MCP tools de leitura `get_task_tree` / `get_project_metrics` / `list_my_tasks` (gate `tasks:read`)** (V2 F11 — PR1, 2026-06-17)
   - 3 novas tools MCP de LEITURA, todas wrappers finos sobre services de domínio já existentes e testados (ZERO N+1, ZERO Prisma direto, ZERO lógica de negócio):
     - `get_task_tree` → `PhaseTreeService.buildTree(rootId, { maxDepth, includeMetrics })` — árvore hierárquica fase→task→subtask; retorna `{ root, totalNodes, maxDepthReached }`

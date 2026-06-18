@@ -270,19 +270,33 @@ export class TasksService {
    * 2. identifierService.getNextIdentifier() — incremento atômico em DTabela -475
    * 3. DTask.create() com dados.identifier e dados.v3.state=INBOX
    *
+   * **Frente 1 — Herança de campos do pai (ADR-V2-047):**
+   * Quando `dto.idPai` está presente, a filha herda do pai direto os campos
+   * `idAssignee`, `dueDate`, `idPriority` e `idStatus` sempre que o DTO NÃO
+   * trouxer o campo explicitamente (DTO-vence-pai). Apenas no ramo TASK (-154);
+   * PHASE (-200) ignora herança e mantém `null` em todos os campos (ADR-V2-050).
+   * Pai sem status (null) → filha cai no INBOX hardcoded (comportamento legado
+   * preservado). Task sem pai nasce INBOX independentemente (sem regressão).
+   *
    * Audit DEvento -497 emitido APÓS commit.
    *
-   * @param dto - Dados da task (nome, projectId, priority, assigneeId)
+   * @param dto - Dados da task (nome, projectId, priority, assigneeId, idPai opcional)
    * @param creatorId - Chave BigInt da DEntidade do criador
-   * @returns TaskResponseDto com identifier e status=INBOX
+   * @param accessibleProjectIds - scope tenant (ADR-V2-042); undefined = sem gate
+   * @returns TaskResponseDto com identifier, status=INBOX e herança do pai quando aplicável
    *
-   * @throws {NotFoundException} Se projeto não encontrado
+   * @throws {NotFoundException} Se projeto não encontrado ou fora do scope do usuário
+   * @throws {BadRequestException} Se `idPai` inválido (ciclo, projeto diferente, profundidade máxima)
    *
    * @example
    * ```typescript
+   * // Task raiz — nasce INBOX
    * const task = await service.create({ nome: 'Task 1', projectId: '1' }, BigInt(100));
-   * // task.identifier = "DEV-1"
-   * // task.status = "INBOX"
+   * // task.identifier = "DEV-1", task.status = "INBOX"
+   *
+   * // Subtarefa — herda assignee/priority/dueDate/status do pai quando DTO omite
+   * const sub = await service.create({ nome: 'Sub', projectId: '1', idPai: '7' }, BigInt(100));
+   * // sub.assigneeId === pai.assigneeId  (se DTO não trouxe assigneeId)
    * ```
    */
   async create(
@@ -332,12 +346,32 @@ export class TasksService {
     // No create taskId ainda nao existe, entao usamos newParentId apenas
     // para descer a cadeia ascendente e validar profundidade.
     let idPaiBigInt: bigint | null = null;
+    // Frente 1 (herança): valores herdados do pai direto quando `idPai` presente.
+    // Permanece null quando a task nasce raiz (sem pai) → comportamento legado
+    // intacto (INBOX para status, demais do DTO/null). DTO-vence-pai é aplicado
+    // no ramo TASK abaixo. Ramo PHASE ignora (fase não herda campos de task).
+    let inheritedFromParent: {
+      idAssignee: bigint | null;
+      idStatus: bigint | null;
+      idPriority: bigint | null;
+      dueDate: Date | null;
+    } | null = null;
     if (dto.idPai !== undefined && dto.idPai !== null) {
       idPaiBigInt = BigInt(dto.idPai);
 
       const paiExiste = await this.prisma.dTask.findFirst({
         where: { chave: idPaiBigInt, excluido: false },
-        select: { idProject: true, idClasse: true },
+        select: {
+          idProject: true,
+          idClasse: true,
+          // Herança de campos do pai (ADR-V2-001: reusa a query que já existe,
+          // ZERO query nova). Os 4 campos abaixo só são consumidos no ramo TASK;
+          // o ramo PHASE ignora (fase nasce com status/priority/assignee null).
+          idAssignee: true,
+          idStatus: true,
+          idPriority: true,
+          dueDate: true,
+        },
       });
       if (!paiExiste) {
         throw new NotFoundException(`Pai ${dto.idPai} nao encontrado`);
@@ -363,6 +397,15 @@ export class TasksService {
       // a cadeia ascendente — taskId sentinela aqui e BigInt(0) (nao existe
       // como chave real, portanto nunca colide). Garante MAX_DEPTH.
       await this.phaseHierarchy.validateNoCycle(BigInt(0), idPaiBigInt);
+
+      // Frente 1 (herança): captura os 4 campos do pai para o merge DTO-vence-pai
+      // no ramo TASK. Pai com campos null → filha herda null (sem erro).
+      inheritedFromParent = {
+        idAssignee: paiExiste.idAssignee ?? null,
+        idStatus: paiExiste.idStatus ?? null,
+        idPriority: paiExiste.idPriority ?? null,
+        dueDate: paiExiste.dueDate ?? null,
+      };
     }
 
     const projectDados = project.dados as Record<string, unknown> | null;
@@ -375,10 +418,7 @@ export class TasksService {
     // ADR-V2-050: logger.warn (telemetria barata) quando frontend manda campos
     // que não fazem sentido para fase. Não bloqueia (reduz fricção de clients
     // genéricos como Telegram/MCP).
-    if (
-      isPhase &&
-      (dto.assigneeId || dto.priority || dto.taskType || dto.assigneeTeamId)
-    ) {
+    if (isPhase && (dto.assigneeId || dto.priority || dto.taskType || dto.assigneeTeamId)) {
       this.logger.warn(
         `create_phase_ignored_fields projectId=${dto.projectId} ` +
           `assignee=${!!dto.assigneeId} ` +
@@ -395,6 +435,13 @@ export class TasksService {
       let dadosPayload: unknown;
       let inboxStatusChave: bigint | null = null;
       let idPriority: bigint | null = null;
+      // Frente 1 (herança): valores finais dos 4 campos no ramo TASK, já com o
+      // merge DTO-vence-pai aplicado. Para PHASE permanecem null (fase não herda
+      // status/priority/assignee/dueDate — ADR-V2-050).
+      let finalIdStatus: bigint | null = null;
+      let finalIdPriority: bigint | null = null;
+      let finalIdAssignee: bigint | null = null;
+      let finalDueDate: Date | null | undefined = dto.dueDate ? new Date(dto.dueDate) : undefined;
 
       if (isPhase) {
         // ADR-V2-050: ramo FASE — pula identifier (sequence intacta), pula
@@ -460,6 +507,31 @@ export class TasksService {
         idPriority = dto.priority
           ? await this.resolvePriorityId(tx, projectId, dto.priority)
           : null;
+
+        // Frente 1 (herança) — merge DTO-vence-pai (ramo TASK).
+        // Tabela de decisão (§7 do plano):
+        //  - idStatus: herda do pai SE `idPai` presente E `pai.idStatus != null`;
+        //    senão INBOX (-441) resolvido acima. Task raiz (sem pai) → INBOX
+        //    (anti-regressão crítica). Pai PHASE (idStatus null) → cai no INBOX.
+        //  - idPriority/idAssignee/dueDate: DTO explícito vence; ausente herda do
+        //    pai; pai vazio → filha vazia. Os valores herdados pertencem ao MESMO
+        //    projeto (cross-project já rejeitado acima), portanto são seguros.
+        finalIdStatus =
+          inheritedFromParent && inheritedFromParent.idStatus !== null
+            ? inheritedFromParent.idStatus
+            : inboxStatusChave;
+
+        finalIdPriority = dto.priority ? idPriority : (inheritedFromParent?.idPriority ?? null);
+
+        finalIdAssignee = dto.assigneeId
+          ? BigInt(dto.assigneeId)
+          : (inheritedFromParent?.idAssignee ?? null);
+
+        // dueDate ternário: DTO definido (string) vence; ausente herda do pai;
+        // pai vazio → undefined (coluna não tocada, fica null por default).
+        finalDueDate = dto.dueDate
+          ? new Date(dto.dueDate)
+          : (inheritedFromParent?.dueDate ?? undefined);
       }
 
       // Criar DTask
@@ -469,14 +541,18 @@ export class TasksService {
           idProject: projectId,
           nome: dto.nome,
           descricao: dto.descricao ?? null,
-          idStatus: isPhase ? null : inboxStatusChave,
-          idPriority: isPhase ? null : idPriority,
-          idAssignee: isPhase ? null : dto.assigneeId ? BigInt(dto.assigneeId) : null,
+          // Frente 1 (herança): no ramo TASK os finais já incorporam o merge
+          // DTO-vence-pai (status herda do pai quando pai.idStatus != null;
+          // demais herdam quando o DTO não traz). PHASE permanece null.
+          idStatus: isPhase ? null : finalIdStatus,
+          idPriority: isPhase ? null : finalIdPriority,
+          idAssignee: isPhase ? null : finalIdAssignee,
           idCreator: creatorId,
           idPai: idPaiBigInt,
           dados: dadosPayload as Prisma.InputJsonValue,
-          // D1 — dueDate como DateTime? (não em `dados` JSON)
-          dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
+          // D1 — dueDate como DateTime? (não em `dados` JSON). Frente 1: herda do
+          // pai quando o DTO não traz dueDate (PHASE sempre undefined).
+          dueDate: isPhase ? undefined : finalDueDate,
         },
       });
     });
@@ -548,6 +624,8 @@ export class TasksService {
     }
 
     const priorityMap = await this.buildPriorityMap([task.idPriority]);
+    // Frente 2: task recém-criada não tem filhas ainda → `hasChildren=false`
+    // (default do buildResponse sem rollupMap). Sem query extra na rota de create.
     return this.buildResponse(task, priorityMap);
   }
 
@@ -800,7 +878,12 @@ export class TasksService {
     const executionsMap = await this.findActiveExecutionsForTasks(pageTasks.map((t) => t.chave));
     // ADR-V2-057: timer agregado por usuário — 1 query batch de nomes (ZERO N+1).
     const timerMap = await this.taskTimerService.buildTimerStateMap(pageTasks);
-    const items = pageTasks.map((t) => this.buildResponse(t, priorityMap, executionsMap, timerMap));
+    // Frente 2 (rollup on-read): 1 query agregada `idPai IN (lote)` descobre as
+    // mães do lote e soma o tempo das filhas diretas (ZERO N+1).
+    const rollupMap = await this.buildChildrenTimeRollupMap(pageTasks.map((t) => t.chave));
+    const items = pageTasks.map((t) =>
+      this.buildResponse(t, priorityMap, executionsMap, timerMap, rollupMap),
+    );
     const nextCursor = hasMore ? pageTasks[pageTasks.length - 1].chave.toString() : null;
 
     return { items, pagination: { hasMore, nextCursor } };
@@ -898,7 +981,9 @@ export class TasksService {
     const executionsMap = await this.findActiveExecutionsForTasks([task.chave]);
     // ADR-V2-057: timer agregado (1 query batch de nomes — ZERO N+1).
     const timerMap = await this.taskTimerService.buildTimerStateMap([task]);
-    return this.buildResponse(task, priorityMap, executionsMap, timerMap);
+    // Frente 2 (rollup on-read): 1 query agregada das filhas diretas desta task.
+    const rollupMap = await this.buildChildrenTimeRollupMap([task.chave]);
+    return this.buildResponse(task, priorityMap, executionsMap, timerMap, rollupMap);
   }
 
   /**
@@ -1112,7 +1197,11 @@ export class TasksService {
     }
 
     const priorityMap = await this.buildPriorityMap([updated.idPriority]);
-    return this.buildResponse(updated, priorityMap);
+    // Frente 2: rollup coerente no retorno da mutação (1 query agregada das
+    // filhas diretas — ZERO N+1). Mantém `timeSpentLabel`/`hasChildren` em sync
+    // com a leitura (findOne/findMany) sem depender de re-fetch do frontend.
+    const rollupMap = await this.buildChildrenTimeRollupMap([updated.chave]);
+    return this.buildResponse(updated, priorityMap, undefined, undefined, rollupMap);
   }
 
   /**
@@ -1345,7 +1434,10 @@ export class TasksService {
     }
 
     const priorityMap = await this.buildPriorityMap([updated.idPriority]);
-    return this.buildResponse(updated, priorityMap);
+    // Frente 2: rollup coerente no retorno do updateStatus (1 query agregada das
+    // filhas diretas — ZERO N+1), em sync com a leitura.
+    const rollupMap = await this.buildChildrenTimeRollupMap([updated.chave]);
+    return this.buildResponse(updated, priorityMap, undefined, undefined, rollupMap);
   }
 
   /**
@@ -1838,6 +1930,60 @@ export class TasksService {
   }
 
   /**
+   * Constrói o mapa de rollup de tempo das filhas DIRETAS (1 nível) para um
+   * lote de tasks, em UMA query agregada (ZERO N+1).
+   *
+   * Frente 2 (rollup on-read — ADR-V2-057): uma task MÃE (com ≥1 filha direta)
+   * exibe a SOMA do tempo manual das filhas diretas em vez do próprio own-time.
+   * Este helper retorna `Map<taskChave(string), somaMs>`. A PRESENÇA da chave no
+   * mapa significa "tem ≥1 filha direta" (= é mãe), mesmo quando a soma é 0
+   * (filhas sem timer → label "—", own-time da mãe suprimido).
+   *
+   * **Importante (escopo travado):** rollup é 1-nível, NÃO recursivo — só agrega
+   * filhas cujo `idPai` está no lote. Netos não entram (um neto só conta para a
+   * própria filha quando ELA é consultada como mãe). É 100% LEITURA: nenhum guard
+   * de hierarquia é adicionado ao timer; o `TaskTimerService.start/close` segue
+   * intacto e folhas iniciam timer normalmente.
+   *
+   * Reusa `TaskTimerService.totalMs()` como fonte ÚNICA de soma (mesma aritmética
+   * server-side do own-time), garantindo coerência entre folha e mãe.
+   *
+   * @param taskChaves - chaves (BigInt) das tasks do lote. Vazio ⇒ Map vazio sem hit no banco.
+   * @returns Map onde key=`idPai.toString()`, value=soma de `manualTimers` das filhas diretas (ms)
+   *
+   * @example
+   * ```typescript
+   * const rollup = await this.buildChildrenTimeRollupMap([BigInt(7)]);
+   * // rollup.get('7') === 9900000  // 2h45min somados das filhas diretas de 7
+   * ```
+   */
+  private async buildChildrenTimeRollupMap(taskChaves: bigint[]): Promise<Map<string, number>> {
+    const map = new Map<string, number>();
+    if (taskChaves.length === 0) return map;
+
+    // Todas as filhas DIRETAS (1 nível) do lote, em 1 query (ZERO N+1).
+    const children = await this.prisma.dTask.findMany({
+      where: { idPai: { in: taskChaves }, excluido: false },
+      select: { idPai: true, dados: true },
+    });
+    // Guard defensivo: Prisma sempre devolve array, mas mantém robustez se a
+    // query retornar vazio/indefinido (sem filhas → todas as tasks são folhas).
+    if (!Array.isArray(children) || children.length === 0) return map;
+
+    // Soma manualTimers por idPai (reusa TaskTimerService.totalMs — fonte única).
+    for (const c of children) {
+      if (c.idPai == null) continue;
+      const dados = (c.dados as Record<string, unknown> | null) ?? null;
+      const telemetry = (dados?.telemetry as Record<string, unknown> | null) ?? null;
+      const manualTimers =
+        (telemetry?.manualTimers as ManualTimerSession[] | undefined) ?? undefined;
+      const key = c.idPai.toString();
+      map.set(key, (map.get(key) ?? 0) + this.taskTimerService.totalMs(manualTimers));
+    }
+    return map;
+  }
+
+  /**
    * Aplica uma ação de timer manual (start/pause/resume/stop) a uma task.
    *
    * Delega a lógica de domínio (tenant gate, regra 1-timer, aritmética
@@ -1885,17 +2031,27 @@ export class TasksService {
    * Resolve prioridade via priorityMap (batch lookup, ZERO N+1).
    * Busca execução ativa Claude Code (DPedido ativa) via executionsMap (batch lookup).
    *
+   * **Frente 2 — Rollup on-read (ADR-V2-057):**
+   * Quando `rollupMap` está presente e contém a chave desta task, ela é MÃE:
+   * `timeSpentLabel` é substituído pela soma do tempo das filhas diretas (1 nível),
+   * `hasChildren=true` e `timeSpentIsRollup=true`. Folha (ausente do map) mantém
+   * own-time, `hasChildren=false` e `timeSpentIsRollup=false`. Soma 0 (filhas sem
+   * timer) ainda marca como mãe com label "—". Nenhum efeito no timer próprio.
+   *
    * @param task - Registro DTask com dados completos (inclusive JSON polimórfico)
    * @param priorityMap - Map pré-calculado chave-DTabela → enum priority (opcional)
    * @param executionsMap - Map pré-calculado taskId → ActiveExecutionDto (opcional)
-   * @returns TaskResponseDto com todos os campos expostos no top-level
+   * @param timerMap - Map pré-calculado taskId → TaskTimerStateDto (opcional)
+   * @param rollupMap - Map pré-calculado por `buildChildrenTimeRollupMap`; presença da
+   *   chave indica mãe com ≥1 filha direta, valor é soma de ms das filhas (opcional)
+   * @returns TaskResponseDto com todos os campos expostos no top-level, incluindo
+   *   `hasChildren`, `timeSpentLabel` (rollup ou own) e `timeSpentIsRollup`
    *
    * @example
    * ```typescript
-   * const response = service.buildResponse(task, priorityMap, executionsMap);
-   * // Expõe assigneeTeamId (extraído de dados.assigneeTeamId)
-   * // Expõe taskType (extraído de dados.taskType)
-   * // Expõe status derivado de dados.v3.state
+   * const response = service.buildResponse(task, priorityMap, executionsMap, timerMap, rollupMap);
+   * // Folha: response.hasChildren=false, response.timeSpentIsRollup=false
+   * // Mãe:  response.hasChildren=true,  response.timeSpentLabel="2h 45min" (soma das filhas)
    * ```
    */
   private buildResponse(
@@ -1917,6 +2073,7 @@ export class TasksService {
     priorityMap?: Map<string, string>,
     executionsMap?: Map<string, ActiveExecutionDto>,
     timerMap?: Map<string, TaskTimerStateDto>,
+    rollupMap?: Map<string, number>,
   ): TaskResponseDto {
     const dados = task.dados as Record<string, unknown> | null;
     const v3 = dados?.v3 as { state?: string } | null;
@@ -1936,9 +2093,21 @@ export class TasksService {
     const manualTimers = (dados?.telemetry as Record<string, unknown> | null)?.manualTimers as
       | ManualTimerSession[]
       | undefined;
-    const timeSpentLabel = this.taskTimerService.formatTotalLabel(
+    const ownTimeLabel = this.taskTimerService.formatTotalLabel(
       this.taskTimerService.totalMs(manualTimers),
     );
+
+    // Frente 2 (rollup on-read — ADR-V2-057): quando esta task é MÃE (presente
+    // no rollupMap = tem ≥1 filha direta), `timeSpentLabel` passa a ser a SOMA do
+    // tempo das filhas diretas (own-time da mãe suprimido). Folha (ausente do
+    // map) mantém o own-time. A presença da chave no map é a fonte de verdade de
+    // `hasChildren`; soma 0 (filhas sem timer) ainda marca como mãe → label "—".
+    // 100% leitura: nenhum efeito sobre o timer próprio da task.
+    const hasChildren = rollupMap?.has(taskIdStr) ?? false;
+    const timeSpentIsRollup = hasChildren;
+    const timeSpentLabel = hasChildren
+      ? this.taskTimerService.formatTotalLabel(rollupMap!.get(taskIdStr) ?? 0)
+      : ownTimeLabel;
 
     return {
       id: taskIdStr,
@@ -1963,6 +2132,8 @@ export class TasksService {
       // garante o estado correto mesmo sem o map pré-computado (sem nomes).
       timer: timerMap?.get(taskIdStr) ?? this.taskTimerService.buildTimerState(manualTimers),
       timeSpentLabel,
+      hasChildren,
+      timeSpentIsRollup,
       criadoEm: task.criadoEm.toISOString(),
       atualizadoEm: task.atualizadoEm.toISOString(),
     };
