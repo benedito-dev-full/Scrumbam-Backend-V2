@@ -1,4 +1,5 @@
 import toolsSchema from '../schemas/tools.schema.json';
+import { CreateBlockTool } from '../tools/create-block.tool';
 import { CreateTaskTool } from '../tools/create-task.tool';
 import { DeleteTaskTool } from '../tools/delete-task.tool';
 import { ExecuteTaskTool } from '../tools/execute-task.tool';
@@ -74,6 +75,7 @@ function buildRegisteredTools(): McpTool[] {
     new GetTaskTreeTool(noop, noop, noop),
     new GetProjectMetricsTool(noop, noop, noop),
     new ListMyTasksTool(noop, noop),
+    new CreateBlockTool(noop, noop),
   ];
 }
 

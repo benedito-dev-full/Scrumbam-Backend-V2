@@ -14,6 +14,16 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **MCP tool `create_block` — CRUD completo de blocos/fases (V2 F11, Task 2, 2026-07-03)**
+  - Nova tool MCP `create_block` — wrapper fino sobre `TasksService.create` com `idClasse=-200` (FASE/BLOCO, ADR-V2-047/050)
+  - Permite agente criar blocos e sub-fases (via `idPai`) — completa o CRUD de blocos no MCP
+  - **Scope:** `tasks:write` (ADR-V2-068) — gate de autorização antes de qualquer query
+  - **Tenant isolation:** validação via `projectsService.findOne` (ADR-V2-042/069) — paridade byte-a-byte com `create_task`
+  - **Pilar 2 (Endpoints):** delega 100% a `TasksService.create` — zero duplicação de lógica
+  - **Testes:** 10/10 PASS (escopo, validação de params, BigInt, maxLength, tenant, presença em tools/list) + zero regressão
+  - **Registro:** 4 pontos (tools.schema.json, mcp-router.service.ts, mcp.module.ts, spec updates)
+  - **ADRs:** ADR-V2-047, ADR-V2-050, ADR-V2-042, ADR-V2-068, ADR-V2-069
+
 - **Herança de campos do pai + rollup de tempo on-read em tasks filhas (V2 F5/F8, Task 1, 2026-06-18)**
   - **Frente 1 — Herança na criação (`create()`):** quando `dto.idPai` presente, filha herda do pai direto `idAssignee`, `dueDate`, `idPriority` e `idStatus` sempre que o DTO não traz o campo (DTO-vence-pai). INBOX preservado para tasks raiz (zero regressão). Ramo PHASE (-200) ignorado (fase nasce null). Pai sem status → filha cai em INBOX. Sem query extra (reusa o `select` do pai já existente — ZERO N+1).
   - **Frente 2 — Rollup de tempo on-read (`findMany`/`findOne`):** novo helper `buildChildrenTimeRollupMap` em 1 query agregada `idPai IN (lote)` (ZERO N+1); task mãe (com ≥1 filha direta) exibe a soma do tempo das filhas diretas em `timeSpentLabel`; folha mantém own-time. Rollup 1-nível (NÃO recursivo — ADR-V2-001). Nenhuma coluna/tabela nova.

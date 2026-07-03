@@ -457,6 +457,23 @@
           "cursor": { "type": "string", "description": "Cursor de paginacao (chave da ultima task)." }
         }
       }
+    },
+    {
+      "name": "create_block",
+      "description": "Cria um Bloco/Fase (DTask idClasse=-200) no projeto informado. Use idPai (outra fase) para criar uma sub-fase (ADR-V2-050). Vincule tasks ao bloco depois via create_task(idBloco).",
+      "inputSchema": {
+        "type": "object",
+        "required": ["projectId", "titulo"],
+        "properties": {
+          "projectId": { "type": "string", "description": "ID do projeto (DProject.chave)" },
+          "titulo": { "type": "string", "maxLength": 512, "description": "Nome do bloco/fase" },
+          "descricao": { "type": "string", "maxLength": 10000, "description": "Descricao opcional" },
+          "idPai": {
+            "type": "string",
+            "description": "ID de outra FASE (-200) para criar sub-fase (ADR-V2-050). Opcional."
+          }
+        }
+      }
     }
   ]
 }

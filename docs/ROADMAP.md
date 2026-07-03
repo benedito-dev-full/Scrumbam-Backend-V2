@@ -8,6 +8,46 @@
 
 ---
 
+## Task 2 — MCP tool `create_block` (CRUD de blocos/fases) — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA
+**Módulo V2:** mcp (MCP Server — tools)
+**Fase V2:** F11 (MCP Expansion)
+**Tempo Real:** ~4h total (Strategist ~1h plan + Implementer ~2h code + Reviewer ~0.5h + Documenter ~0.5h)
+**Completado em:** 2026-07-03
+**Quality Score:** 8.5/10 (APPROVED pelo Reviewer)
+
+**O Que Foi Feito:**
+
+**Tool nova `create_block` — wrapper fino sobre `TasksService.create` com `idClasse=-200` (FASE/BLOCO):**
+- Expõe criação de blocos/fases que antes era possível apenas via HTTP `POST /tasks` (não havia tool MCP)
+- Completa CRUD de blocos no MCP: `list_blocks` (read) + `create_block` (write)
+- Permite agente criar sub-fases via `idPai` (ADR-V2-050)
+- Scope `tasks:write` (ADR-V2-068), tenant gate via `projectsService.findOne` (ADR-V2-042/069)
+- **Pilar 2 respeitado:** delega 100% a `TasksService.create` — zero duplicação de lógica de negócio
+
+**Arquivos:**
+- [x] Criados: `src/mcp/tools/create-block.tool.ts` + `src/mcp/__tests__/mcp-tools.create-block.spec.ts`
+- [x] Alterados (registro — 4 pontos): `tools.schema.json`, `mcp-router.service.ts`, `mcp.module.ts`, `mcp-tools.schema-consistency.spec.ts`, `mcp-block-d.spec.ts`
+
+**Testes:**
+- [x] 10 specs novos: `create-block.tool.spec.ts` (a–j, scope ausente, params faltando, BigInt inválido, maxLength, tenant NotFound, presença em tools/list) — 10/10 PASS
+- [x] Schema consistency: `tools.schema.json` espelho fiel do `inputSchema` da classe — PASS
+- [x] Zero regressão: pré-existentes falhas (`update-timer.tool`, `mcp-block-d` fake-timer flake) mantidas, sem delta
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — DTask é tabela estrutural; Prisma direto via service (correto)
+- Pilar 2 (Endpoints): REUTILIZADO — wrapper fino sobre `TasksService.create` (idêntica ao HTTP `POST /tasks` e à tool `create_task`)
+- Pilar 3 (Seed): N/A — usa `-200` (PHASE) já existente no seed F1; zero DClasse nova
+
+**ADRs vinculados:** ADR-V2-047 (hierarquia DTask via idPai), ADR-V2-050 (FASE/BLOCO -200 + sub-fases), ADR-V2-042 (tenant isolation), ADR-V2-068 (scope catalog per-tool), ADR-V2-069 (Camada A no MCP)
+
+**Próximos passos (fora de escopo):**
+- Task 2 de 3: `create_project` (criar DProject no MCP)
+- Task 3 de 3: `create_from_template` (clonar estrutura de projeto existente)
+
+---
+
 ## Feature: MCP Scope Catalog — Fase 1 COMPLETA ✅
 
 **Status:** ✅ **FASE 1 COMPLETA** — Catálogo de scopes + enforcement per-tool (17 tools)

@@ -1,6 +1,53 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-06-18 (Task 1: Herança + Rollup de Timer em Tasks Filhas — COMPLETE, Score 8.8)
+**Ultima atualizacao:** 2026-07-03 (Task 2: MCP tool `create_block` — COMPLETE, Score 8.5)
+
+---
+
+## Task 2 — MCP tool `create_block` (CRUD de blocos/fases) — COMPLETE (V2 Fase F11)
+
+**Module:** mcp (MCP Server — tools)
+**Task:** Nova tool `create_block` — wrapper fino sobre `TasksService.create` com `idClasse=-200`
+**Status:** COMPLETA
+**Duration:** ~4h total (Strategist ~1h + Implementer ~2h + Reviewer ~0.5h + Documenter ~0.5h)
+**Quality Score:** 8.5/10 (APPROVED pelo Reviewer)
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | ~1h | — |
+| Implementer | ~2h | — |
+| Reviewer | ~0.5h | 8.5/10 |
+| Documenter | ~0.5h | — |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DTask é tabela estrutural; Prisma direto via service correto
+- Pilar 2 (Endpoints): REUTILIZADO — wrapper fino sobre `TasksService.create` (idêntico ao HTTP `POST /tasks` e à tool `create_task`)
+- Pilar 3 (Seed): N/A — usa `-200` (PHASE) já existente no seed F1; zero DClasse nova
+
+**Deliverables:**
+- [x] Tool `create_block` criada: `src/mcp/tools/create-block.tool.ts` — wrapper fino 100% Pilar 2
+- [x] JSDoc completo (descrição do que faz, ADRs, workflow, @param, @returns, @throws, @example)
+- [x] Campos mínimos expostos (`projectId`, `titulo`, `descricao`, `idPai` — sem priority/assignee/taskType mortos)
+- [x] `inputSchema` com raiz `type:object` — SEM anyOf/oneOf/allOf na raiz (anti-footgun)
+- [x] Scope gate `tasks:write` (ADR-V2-068) — `requireScope(ctx, ...)` como primeira instrução
+- [x] Tenant isolation via `projectsService.findOne(projectId, ctx.dEntidadeId)` — paridade com `create_task`
+- [x] Validações (BigInt-parseabilidade de `projectId`/`idPai`, maxLength 512/10000, strings obrigatórias) com `INVALID_PARAMS` limpo
+- [x] Registro em 4 pontos: `tools.schema.json` (espelho do inputSchema), `mcp-router.service.ts` (import + param ctor + push), `mcp.module.ts` (import + provider), spec updates
+- [x] Testes: `mcp-tools.create-block.spec.ts` — 10/10 PASS (scope ausente, params faltando, BigInt inválido, maxLength, tenant NotFound, presença em tools/list)
+- [x] Schema consistency check: `tools.schema.json` vs `inputSchema` — byte-espelho validado
+- [x] Zero regressão: pré-existentes falhas (`update-timer.tool`, `mcp-block-d` fake-timer flake) mantidas, sem delta
+
+**Metrics:**
+- Build: PASS (tsc 0 errors em `src/mcp/`)
+- TypeScript: 0 errors
+- ESLint: 0 warnings em `src/mcp/`
+- N+1 Queries: ZERO (1 `findOne` + 1 `create` — sem loop)
+- Tests novos: 10/10 PASS
+- Regressão: 0 (pré-existentes intactas)
+- Tool visibility: `create_block` presente em `tools/list` (validado em spec)
+
+**ADRs:** ADR-V2-047 (hierarquia DTask via idPai), ADR-V2-050 (FASE/BLOCO -200 + sub-fases), ADR-V2-042 (tenant isolation), ADR-V2-068 (scope catalog per-tool), ADR-V2-069 (Camada A no MCP — já merged)
 
 ---
 
