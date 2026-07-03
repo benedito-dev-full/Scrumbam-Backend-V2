@@ -26,7 +26,11 @@ import {
 import { DeleteProjectResponseDto } from './dto/delete-project-response.dto';
 import { fallbackSlug, slugify } from './utils/slugify';
 import { validateNoCycle } from './utils/anti-cycle.util';
-import { isProjectPubliclyVisible, listPublicSpaceProjectIds } from './utils/public-space.util';
+import {
+  isProjectPubliclyVisible,
+  listPublicSpaceProjectIds,
+  listPublicSpaceProjectIdsForOrgs,
+} from './utils/public-space.util';
 import { validateTableFields } from '../tasks/table-fields/table-fields.validator';
 import { mergeBuiltinColumns } from '../tasks/table-fields/builtin-columns';
 import {
@@ -678,12 +682,15 @@ export class ProjectsService implements OnModuleInit {
     });
 
     // ADR-V2 herança: ADMIN da org dona é MANAGER em qualquer projeto dela.
-    // Resolvido UMA vez para a org do token (evita N+1 no map de items).
-    let isOrgAdmin = false;
+    // Conjunto de orgs onde o usuário é ADMIN — usado por-projeto na montagem do
+    // `myRole` (um projeto herda MANAGER se sua `idEstab` está aqui). No caminho
+    // HTTP (org-present) há no máximo 1 org; no MCP (no-org) pode haver várias.
+    const adminOrgIdsSet = new Set<string>();
 
-    // Camada A: espaços públicos da org (apenas quando orgIdBig está presente).
+    // Camada A: espaços públicos.
     let publicProjectIds: bigint[] = [];
     if (orgIdBig !== undefined) {
+      // HTTP (ADR-V2-042): org ativa vem do token. Comportamento inalterado.
       // Verifica se o usuário é membro da org (tem qualquer DVincula -161/-162/-163).
       const orgVinculo = await this.prisma.dVincula.findFirst({
         where: {
@@ -695,7 +702,9 @@ export class ProjectsService implements OnModuleInit {
         select: { idClasse: true },
       });
 
-      isOrgAdmin = orgVinculo?.idClasse === ID_CLASSE_ORG_ADMIN;
+      if (orgVinculo?.idClasse === ID_CLASSE_ORG_ADMIN) {
+        adminOrgIdsSet.add(orgIdBig.toString());
+      }
 
       if (orgVinculo) {
         const publicProjects = await this.prisma.dProject.findMany({
@@ -707,6 +716,32 @@ export class ProjectsService implements OnModuleInit {
             // ADR-V2-061 (blindagem): templates -401/-402 nunca entram nas
             // visões normais. Quando `idClasse` é específico, o filtro abaixo já
             // exclui templates; quando ausente, excluímos explicitamente.
+            ...(idClasse !== undefined
+              ? { idClasse: BigInt(idClasse) }
+              : { idClasse: { notIn: TEMPLATE_CLASSES } }),
+            ...(idPai !== undefined ? { idPai: BigInt(idPai) } : {}),
+          },
+          select: { chave: true },
+        });
+        publicProjectIds = publicProjects.map((p) => p.chave);
+      }
+    } else {
+      // MCP / cross-org (ADR-V2-069): sem org ativa de token. Deriva as orgs das
+      // memberships do usuário e liga a Camada A pública de TODAS elas — paridade
+      // plena com o HTTP (qualquer membro vê espaços públicos; ADMIN herda
+      // MANAGER). Leak-free: só projetos `privado=false` de orgs às quais o
+      // usuário pertence — privados de terceiros e orgs alheias nunca entram.
+      const orgIds = await this.resolveOrgIdsForUser(userEntidadeId);
+      if (orgIds.length > 0) {
+        const adminOrgIds = await this.resolveOrgIdsForUser(userEntidadeId, { adminOnly: true });
+        adminOrgIds.forEach((oid) => adminOrgIdsSet.add(oid.toString()));
+
+        const publicProjects = await this.prisma.dProject.findMany({
+          where: {
+            idEstab: { in: orgIds },
+            privado: false,
+            excluido: false,
+            ...(teamProjectIds ? { chave: { in: teamProjectIds } } : {}),
             ...(idClasse !== undefined
               ? { idClasse: BigInt(idClasse) }
               : { idClasse: { notIn: TEMPLATE_CLASSES } }),
@@ -874,10 +909,14 @@ export class ProjectsService implements OnModuleInit {
 
     const items: ProjectResponseDto[] = projects.map((p) => {
       const pidStr = p.chave.toString();
-      // Papel do usuário: herança ORG_ADMIN→MANAGER tem precedência; senão o
-      // papel explícito do vínculo; senão MEMBER (chegou aqui só via Camada A,
-      // espaço público — edita tasks mas não faz ops estruturais).
-      const myRole: ProjectResponseDto['myRole'] = isOrgAdmin
+      // Papel do usuário: herança ORG_ADMIN→MANAGER tem precedência (admin da
+      // org dona — `p.idEstab` ∈ orgs-admin do usuário); senão o papel explícito
+      // do vínculo; senão MEMBER (chegou aqui só via Camada A, espaço público —
+      // edita tasks mas não faz ops estruturais). A checagem por-projeto suporta
+      // o caminho MCP cross-org (vários `idEstab` na mesma página); no HTTP toda
+      // a página tem `idEstab=orgIdBig`, então é equivalente ao antigo booleano.
+      const inheritsManager = p.idEstab !== null && adminOrgIdsSet.has(p.idEstab.toString());
+      const myRole: ProjectResponseDto['myRole'] = inheritsManager
         ? 'MANAGER'
         : (explicitRoleByProjectId.get(pidStr) ?? 'MEMBER');
       return this.buildResponse(
@@ -1002,9 +1041,21 @@ export class ProjectsService implements OnModuleInit {
       vinculos.map((v) => v.idLocEscritu),
     );
 
-    // Sem org → comportamento legado (MCP keys, callers internos): sem Camada A.
+    // Sem org (caminho MCP / cross-org by design): não há "org ativa" de token.
+    // ADR-V2-069 — em vez de exigir DVincula explícita (que deixava ADMIN/membro
+    // de org sem ver espaços públicos via MCP), liga a Camada A derivando as orgs
+    // das MEMBERSHIPS do usuário. União: Camada B (membership direto, já em
+    // `candidateIds`) ∪ Camada A (projetos de SPACEs públicos de TODAS as orgs do
+    // usuário). Leak-free: só públicos (privado=false) e só de orgs às quais o
+    // usuário pertence — privados de terceiros e orgs alheias nunca entram.
     if (!organizationId) {
-      return candidateIds;
+      const accessible = new Set<string>(candidateIds);
+      const orgIds = await this.resolveOrgIdsForUser(userEntidadeId);
+      if (orgIds.length > 0) {
+        const publicIds = await listPublicSpaceProjectIdsForOrgs(this.prisma, orgIds);
+        publicIds.forEach((id) => accessible.add(id.toString()));
+      }
+      return Array.from(accessible);
     }
 
     if (!/^-?\d+$/.test(organizationId)) {
@@ -2647,11 +2698,13 @@ export class ProjectsService implements OnModuleInit {
    * Se a cadeia não tem SPACE (anomalia de dados / projeto órfão), faz fallback
    * para o flag `privado` do próprio projeto.
    *
-   * Só se aplica quando `organizationId` está presente (paths HTTP autenticados).
-   * Callers internos/MCP sem org continuam exigindo DVincula explícita —
-   * comportamento conservador (não amplia escopo de chaves MCP).
+   * Org-alvo (ADR-V2-069): vem do `organizationId` do token (HTTP) ou, na sua
+   * ausência (caminho MCP/cross-org), é DERIVADA de `project.idEstab`. Assim a
+   * Camada A passa a funcionar para chaves MCP — mas continua leak-free: exige
+   * que o SPACE raiz seja público E que o usuário seja membro da org DONA do
+   * projeto (`idEstab`). Projeto privado, ou de org alheia, segue negado.
    *
-   * @param project - Projeto-alvo (precisa de `chave`)
+   * @param project - Projeto-alvo (precisa de `chave`; `idEstab` usado no MCP)
    * @param userEntidadeId - Chave BigInt da DEntidade do usuário
    * @param organizationId - `DEntidade.chave` da org ativa (string). Opcional.
    * @returns `true` se o acesso público herdado se aplica; `false` caso contrário
@@ -2659,17 +2712,24 @@ export class ProjectsService implements OnModuleInit {
    * @see findOne — consumidor desta verificação (Camada A)
    * @see isProjectPubliclyVisible — fonte de verdade da visibilidade hierárquica
    * @see ADR-V2-051 §8 — Visibilidade de espaços
+   * @see ADR-V2-069 — Camada A no caminho MCP (org derivada de idEstab)
    */
   private async hasPublicSpaceAccess(
-    project: { chave: bigint },
+    project: { chave: bigint; idEstab?: bigint | null },
     userEntidadeId: bigint,
     organizationId?: string,
   ): Promise<boolean> {
-    // Sem org no token → não aplica Camada A (mantém exigência de DVincula).
-    if (!organizationId || !/^-?\d+$/.test(organizationId)) {
+    // Org-alvo: token (HTTP) ou, sem token, derivada de project.idEstab (MCP).
+    // Sem nenhuma das duas (projeto órfão sem idEstab) → não aplica Camada A.
+    let orgIdBig: bigint | null = null;
+    if (organizationId && /^-?\d+$/.test(organizationId)) {
+      orgIdBig = BigInt(organizationId);
+    } else if (project.idEstab !== null && project.idEstab !== undefined) {
+      orgIdBig = project.idEstab;
+    }
+    if (orgIdBig === null) {
       return false;
     }
-    const orgIdBig = BigInt(organizationId);
 
     // 1) Visibilidade efetiva: o SPACE raiz da cadeia é público?
     const publicVisible = await isProjectPubliclyVisible(this.prisma, project.chave);
@@ -2709,26 +2769,36 @@ export class ProjectsService implements OnModuleInit {
    * promove a MANAGER (decisão CEO 2026-06-02, espelha `requireManagerRole`).
    *
    * Usa `project.idEstab` como org-alvo para garantir escopo de tenant: admin
-   * da org A nunca herda MANAGER em projeto da org B. Só consulta quando há um
-   * `organizationId` no token coerente com a org dona.
+   * da org A nunca herda MANAGER em projeto da org B. No HTTP exige coerência
+   * com o `organizationId` do token; no caminho MCP/cross-org (ADR-V2-069), sem
+   * token, a org-alvo é a própria `idEstab` do projeto.
    *
    * @param project - Projeto com `idEstab` (org dona)
    * @param userEntidadeId - Chave BigInt do usuário
-   * @param organizationId - DEntidade.chave da org ativa (JWT)
+   * @param organizationId - DEntidade.chave da org ativa (JWT). Opcional.
    * @returns `true` se o usuário é ADMIN da org dona
+   *
+   * @see ADR-V2-069 — herança ORG_ADMIN no caminho MCP (org derivada de idEstab)
    */
   private async isOrgAdminForProject(
     project: { idEstab?: bigint | null },
     userEntidadeId: bigint,
     organizationId?: string,
   ): Promise<boolean> {
-    if (!organizationId || !/^-?\d+$/.test(organizationId)) {
+    // Sem org dona (projeto órfão) → nunca há admin a herdar.
+    if (project.idEstab === null || project.idEstab === undefined) {
       return false;
     }
-    const orgIdBig = BigInt(organizationId);
-    // Coerência de tenant: a org do token tem que ser a org dona do projeto.
-    if (project.idEstab === null || project.idEstab === undefined || project.idEstab !== orgIdBig) {
-      return false;
+    // Org-alvo: token (com coerência de tenant) ou, sem token, a idEstab.
+    let orgIdBig: bigint;
+    if (organizationId && /^-?\d+$/.test(organizationId)) {
+      orgIdBig = BigInt(organizationId);
+      // Coerência de tenant: a org do token tem que ser a org dona do projeto.
+      if (project.idEstab !== orgIdBig) {
+        return false;
+      }
+    } else {
+      orgIdBig = project.idEstab;
     }
     const orgAdmin = await this.prisma.dVincula.findFirst({
       where: {
@@ -2740,6 +2810,43 @@ export class ProjectsService implements OnModuleInit {
       select: { chave: true },
     });
     return orgAdmin !== null;
+  }
+
+  /**
+   * Resolve as orgs (DEntidade ORGANIZATION) às quais um usuário pertence,
+   * via DVincula de role de org (ADR-V2-003).
+   *
+   * É a fonte de "contexto de tenant" para o caminho MCP/cross-org (ADR-V2-069),
+   * onde não há `organizationId` de token: deriva as orgs das memberships do
+   * próprio usuário. 1 query (N+1 ZERO), resultado distinct por `idLocEscritu`.
+   *
+   * Sem cache (vs. {@link RoleResolverService}): mudanças de papel refletem na
+   * próxima chamada imediatamente — preferível para uma decisão de visibilidade.
+   *
+   * @param userEntidadeId - Chave BigInt da DEntidade (-150 USER)
+   * @param opts.adminOnly - Quando `true`, restringe às orgs onde o usuário é
+   *   ADMIN (-161). Default `false` (qualquer role de org -161/-162/-163),
+   *   alinhando a Camada A do MCP à do HTTP (qualquer membro vê públicos).
+   * @returns Lista distinct de `DEntidade.chave` (BigInt) das orgs do usuário
+   *
+   * @see ADR-V2-069 — Camada A no caminho MCP (sem token de org)
+   * @see ORG_ROLE_CLASSES — roles de org consultadas
+   */
+  private async resolveOrgIdsForUser(
+    userEntidadeId: bigint,
+    opts: { adminOnly?: boolean } = {},
+  ): Promise<bigint[]> {
+    const orgVinculos = await this.prisma.dVincula.findMany({
+      where: {
+        idEntidade: userEntidadeId,
+        idClasse: opts.adminOnly ? ID_CLASSE_ORG_ADMIN : { in: ORG_ROLE_CLASSES },
+        excluido: false,
+      },
+      select: { idLocEscritu: true },
+    });
+
+    // BigInt é comparado por valor em Set → dedupe direto, sem stringify.
+    return Array.from(new Set(orgVinculos.map((v) => v.idLocEscritu)));
   }
 
   /**

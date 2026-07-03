@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 
 /** idClasse DProject para SPACE (ADR-V2-051 §3.2). Raiz da hierarquia — sem pai. */
@@ -92,6 +93,58 @@ export async function listPublicSpaceProjectIds(
       WHERE "idClasse" = ${ID_CLASSE_SPACE}
         AND "privado" = false
         AND "idEstab" = ${orgId}
+        AND "excluido" = false
+
+      UNION ALL
+
+      SELECT p."chave"
+      FROM "DProject" p
+      INNER JOIN pub ON p."idPai" = pub."chave"
+      WHERE p."excluido" = false
+    )
+    SELECT "chave" FROM pub
+  `;
+
+  return rows.map((r) => r.chave);
+}
+
+/**
+ * Variante em LOTE de {@link listPublicSpaceProjectIds}: lista os IDs de TODOS
+ * os projetos pertencentes a SPACEs públicos de UM CONJUNTO de orgs, numa única
+ * query (CTE recursiva com `idEstab IN (...)`).
+ *
+ * Usada pelo caminho MCP/cross-org (ADR-V2-069), onde não há "org ativa" de
+ * token — o contexto de org é derivado das *memberships* do usuário, que podem
+ * abranger várias orgs. Mantém N+1 ZERO: uma só CTE cobre todas as orgs em vez
+ * de N chamadas a `listPublicSpaceProjectIds`.
+ *
+ * Leak-free por construção: só retorna descendentes de SPACEs com
+ * `privado = false`. O caller é responsável por restringir `orgIds` às orgs às
+ * quais o usuário pertence (assim orgs alheias nunca entram).
+ *
+ * @param prisma - PrismaService
+ * @param orgIds - `DEntidade.chave` das orgs (DProject.idEstab) do usuário
+ * @returns IDs (BigInt) dos SPACEs públicos e de todos os seus descendentes.
+ *   Array vazio quando `orgIds` é vazio (sem query ao banco).
+ *
+ * @see ADR-V2-069 — Camada A no caminho MCP (sem token de org)
+ * @see listPublicSpaceProjectIds — variante single-org
+ */
+export async function listPublicSpaceProjectIdsForOrgs(
+  prisma: PrismaService,
+  orgIds: bigint[],
+): Promise<bigint[]> {
+  if (orgIds.length === 0) {
+    return [];
+  }
+
+  const rows = await prisma.$queryRaw<Array<{ chave: bigint }>>`
+    WITH RECURSIVE pub AS (
+      SELECT "chave"
+      FROM "DProject"
+      WHERE "idClasse" = ${ID_CLASSE_SPACE}
+        AND "privado" = false
+        AND "idEstab" IN (${Prisma.join(orgIds)})
         AND "excluido" = false
 
       UNION ALL

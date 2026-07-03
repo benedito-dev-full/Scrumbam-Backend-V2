@@ -603,6 +603,207 @@ describe('ProjectsService', () => {
     });
   });
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // ADR-V2-069 — Camada A no caminho MCP (sem token de org). A "org ativa" é
+  // derivada das memberships do usuário em vez de exigir um organizationId.
+  // Corrige o bug: ADMIN/membro de org via chave MCP só via projetos próprios.
+  // Decisões CEO: (1) paridade plena (qualquer membro, não só ADMIN);
+  // (2) somente públicos (nenhum vazamento de privado/org alheia).
+  // ─────────────────────────────────────────────────────────────────────────
+  describe('ADR-V2-069 — Camada A no caminho MCP (findAccessibleProjectIds sem org)', () => {
+    it('membro de org vê projetos de espaços públicos da org via MCP (sem organizationId)', async () => {
+      prisma.dVincula.findMany
+        .mockResolvedValueOnce([]) // Camada B: sem DVincula de projeto
+        .mockResolvedValueOnce([{ idLocEscritu: BigInt(50) }]); // resolveOrgIdsForUser: membro da org 50
+      prisma.$queryRaw.mockResolvedValue([{ chave: BigInt(10) }, { chave: BigInt(25) }]);
+
+      const ids = await service.findAccessibleProjectIds(BigInt(999));
+
+      expect(ids.sort()).toEqual(['10', '25']);
+      expect(prisma.$queryRaw).toHaveBeenCalled();
+    });
+
+    it('usuário SEM orgs não ganha Camada A — só Camada B (não-membro continua sem ver)', async () => {
+      prisma.dVincula.findMany
+        .mockResolvedValueOnce([]) // Camada B vazia
+        .mockResolvedValueOnce([]); // resolveOrgIdsForUser: nenhuma org
+      const ids = await service.findAccessibleProjectIds(BigInt(999));
+
+      expect(ids).toEqual([]);
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('cross-org: vê públicos de TODAS as orgs do usuário em 1 query batch (N+1 ZERO)', async () => {
+      prisma.dVincula.findMany
+        .mockResolvedValueOnce([]) // Camada B
+        .mockResolvedValueOnce([{ idLocEscritu: BigInt(50) }, { idLocEscritu: BigInt(60) }]); // O1, O2
+      prisma.$queryRaw.mockResolvedValue([{ chave: BigInt(10) }, { chave: BigInt(20) }]);
+
+      const ids = await service.findAccessibleProjectIds(BigInt(999));
+
+      expect(ids.sort()).toEqual(['10', '20']);
+      // 1 só CTE em lote mesmo com múltiplas orgs — sem N+1.
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    });
+
+    it('une Camada B (membership direto) com Camada A pública, deduplicado', async () => {
+      prisma.dVincula.findMany
+        .mockResolvedValueOnce([{ idLocEscritu: BigInt(30) }]) // Camada B: projeto 30
+        .mockResolvedValueOnce([{ idLocEscritu: BigInt(50) }]); // org 50
+      prisma.$queryRaw.mockResolvedValue([{ chave: BigInt(25) }, { chave: BigInt(30) }]); // 30 repete → dedup
+
+      const ids = await service.findAccessibleProjectIds(BigInt(999));
+
+      expect(ids.sort()).toEqual(['25', '30']);
+    });
+  });
+
+  describe('ADR-V2-069 — Camada A no caminho MCP (findMany sem org)', () => {
+    it('ADMIN de org vê espaços públicos da org via MCP com myRole=MANAGER', async () => {
+      const pub = {
+        ...mockProject,
+        chave: BigInt(7),
+        idEstab: BigInt(50),
+        idClasse: BigInt(-352),
+        privado: false,
+      };
+      prisma.dVincula.findMany
+        .mockResolvedValueOnce([]) // Camada B: sem DVincula de projeto
+        .mockResolvedValueOnce([{ idLocEscritu: BigInt(50) }]) // resolveOrgIdsForUser(all): membro org 50
+        .mockResolvedValueOnce([{ idLocEscritu: BigInt(50) }]) // resolveOrgIdsForUser(adminOnly): ADMIN org 50
+        .mockResolvedValueOnce([]) // team links batch
+        .mockResolvedValueOnce([]); // folder links batch
+      prisma.dProject.findMany
+        .mockResolvedValueOnce([{ chave: BigInt(7) }]) // Camada A: públicos da org (select chave)
+        .mockResolvedValueOnce([pub]); // página final
+      prisma.dVincula.groupBy.mockResolvedValue([]);
+      prisma.dTask.groupBy.mockResolvedValue([]);
+      prisma.dTabela.findMany.mockResolvedValue([]);
+
+      const result = await service.findMany(BigInt(999), {});
+
+      expect(result.items.map((i) => i.id)).toEqual(['7']);
+      expect(result.items[0].myRole).toBe('MANAGER');
+      // Camada A consultada APENAS com a org do usuário e só públicos (leak-free).
+      const publicCall = prisma.dProject.findMany.mock.calls[0][0];
+      expect(publicCall.where).toMatchObject({ idEstab: { in: [BigInt(50)] }, privado: false });
+    });
+
+    it('MEMBER de org vê espaços públicos da org via MCP com myRole=MEMBER (paridade plena)', async () => {
+      const pub = {
+        ...mockProject,
+        chave: BigInt(7),
+        idEstab: BigInt(50),
+        idClasse: BigInt(-352),
+        privado: false,
+      };
+      prisma.dVincula.findMany
+        .mockResolvedValueOnce([]) // Camada B vazia
+        .mockResolvedValueOnce([{ idLocEscritu: BigInt(50) }]) // all orgs: membro
+        .mockResolvedValueOnce([]) // admin orgs: nenhuma (não é ADMIN)
+        .mockResolvedValueOnce([]) // team links
+        .mockResolvedValueOnce([]); // folder links
+      prisma.dProject.findMany
+        .mockResolvedValueOnce([{ chave: BigInt(7) }])
+        .mockResolvedValueOnce([pub]);
+      prisma.dVincula.groupBy.mockResolvedValue([]);
+      prisma.dTask.groupBy.mockResolvedValue([]);
+      prisma.dTabela.findMany.mockResolvedValue([]);
+
+      const result = await service.findMany(BigInt(999), {});
+
+      expect(result.items.map((i) => i.id)).toEqual(['7']);
+      expect(result.items[0].myRole).toBe('MEMBER');
+    });
+
+    it('usuário SEM orgs não enxerga espaços públicos via MCP (no-leak)', async () => {
+      prisma.dVincula.findMany
+        .mockResolvedValueOnce([]) // Camada B vazia
+        .mockResolvedValueOnce([]); // resolveOrgIdsForUser(all): nenhuma org → short-circuit
+
+      const result = await service.findMany(BigInt(999), {});
+
+      expect(result.items).toEqual([]);
+      // allIds vazio retorna cedo — nem Camada A nem página são consultadas.
+      expect(prisma.dProject.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('ADR-V2-069 — Camada A no caminho MCP (findOne sem org)', () => {
+    const buildPublicList = (idEstab: bigint) => ({
+      ...mockProject,
+      idClasse: BigInt(-352),
+      idPai: BigInt(10),
+      idEstab,
+      privado: false,
+    });
+    /** CTE: SPACE raiz público (-350) governando a lista. */
+    const publicChain = [
+      { chave: BigInt(10), idClasse: BigInt(-350), privado: false },
+      { chave: BigInt(1), idClasse: BigInt(-352), privado: false },
+    ];
+
+    it('ADMIN abre projeto público da sua org sem DVincula → MANAGER', async () => {
+      prisma.dProject.findFirst.mockResolvedValue(buildPublicList(BigInt(50)));
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce(null) // vínculo de projeto: nenhum
+        .mockResolvedValueOnce(null) // teamLink
+        .mockResolvedValueOnce(null) // folderLink
+        .mockResolvedValueOnce({ chave: BigInt(77) }) // hasPublicSpaceAccess: membro da org 50
+        .mockResolvedValueOnce({ chave: BigInt(9) }); // isOrgAdminForProject: ADMIN -161
+      prisma.$queryRaw.mockResolvedValue(publicChain);
+      prisma.dVincula.count.mockResolvedValue(0);
+
+      const result = await service.findOne('1', BigInt(999)); // sem organizationId (MCP)
+
+      expect(result.id).toBe('1');
+      expect(result.myRole).toBe('MANAGER');
+    });
+
+    it('MEMBER abre projeto público da sua org sem DVincula → MEMBER', async () => {
+      prisma.dProject.findFirst.mockResolvedValue(buildPublicList(BigInt(50)));
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce(null) // vínculo de projeto
+        .mockResolvedValueOnce(null) // teamLink
+        .mockResolvedValueOnce(null) // folderLink
+        .mockResolvedValueOnce({ chave: BigInt(77) }) // membro da org (hasPublicSpaceAccess)
+        .mockResolvedValueOnce(null); // isOrgAdminForProject: NÃO admin
+      prisma.$queryRaw.mockResolvedValue(publicChain);
+      prisma.dVincula.count.mockResolvedValue(0);
+
+      const result = await service.findOne('1', BigInt(999));
+
+      expect(result.myRole).toBe('MEMBER');
+    });
+
+    it('projeto PRIVADO sem membership → ForbiddenException (no-leak)', async () => {
+      prisma.dProject.findFirst.mockResolvedValue(buildPublicList(BigInt(50)));
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce(null) // vínculo de projeto
+        .mockResolvedValueOnce(null) // teamLink
+        .mockResolvedValueOnce(null); // folderLink
+      // SPACE raiz PRIVADO → isProjectPubliclyVisible=false → sem acesso herdado.
+      prisma.$queryRaw.mockResolvedValue([
+        { chave: BigInt(10), idClasse: BigInt(-350), privado: true },
+        { chave: BigInt(1), idClasse: BigInt(-352), privado: false },
+      ]);
+
+      await expect(service.findOne('1', BigInt(999))).rejects.toThrow(ForbiddenException);
+    });
+
+    it('projeto público de org ALHEIA (usuário sem papel nela) → ForbiddenException (no-leak cross-org)', async () => {
+      prisma.dProject.findFirst.mockResolvedValue(buildPublicList(BigInt(99))); // org 99, não do usuário
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce(null) // vínculo de projeto
+        .mockResolvedValueOnce(null) // teamLink
+        .mockResolvedValueOnce(null) // folderLink
+        .mockResolvedValueOnce(null); // hasPublicSpaceAccess: NÃO é membro da org 99
+      prisma.$queryRaw.mockResolvedValue(publicChain);
+
+      await expect(service.findOne('1', BigInt(999))).rejects.toThrow(ForbiddenException);
+    });
+  });
+
   describe('create() — vínculo de team (ADR-V2-029)', () => {
     it('deve criar DVincula -182 quando teamId fornecido (LEAD do time)', async () => {
       const txVinculaCreate = jest.fn().mockResolvedValue({ chave: BigInt(99) });
@@ -2223,6 +2424,7 @@ describe('ProjectsService', () => {
       // ambos têm DVincula -171. A blindagem exclui o template via notIn.
       prisma.dVincula.findMany
         .mockResolvedValueOnce([{ idLocEscritu: BigInt(1) }, { idLocEscritu: BigInt(401) }]) // roles
+        .mockResolvedValueOnce([]) // ADR-V2-069: resolveOrgIdsForUser (no-org) — user sem orgs
         .mockResolvedValueOnce([]); // team links batch
       // O DProject.findMany final aplica o notIn — só o projeto normal volta.
       prisma.dProject.findMany.mockResolvedValue([mockProject]);
