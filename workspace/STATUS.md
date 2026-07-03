@@ -1,6 +1,53 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-07-03 (Task 2: MCP tool `create_block` — COMPLETE, Score 8.5)
+**Ultima atualizacao:** 2026-07-03 (Task 3: MCP tool `create_project` — COMPLETE, Score 8.8)
+
+---
+
+## Task 3 — MCP tool `create_project` (criar Space/Folder/List) — COMPLETE (V2 Fase F11)
+
+**Module:** mcp (MCP Server — tools)
+**Task:** Nova tool `create_project` — wrapper fino sobre `ProjectsService.create` com RBAC/org resolution por tipo
+**Status:** COMPLETA
+**Duration:** ~5h total (Strategist ~1.5h + Implementer ~2.5h + Reviewer ~0.5h + Documenter ~0.5h)
+**Quality Score:** 8.8/10 (APPROVED pelo Reviewer)
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | ~1.5h | — |
+| Implementer | ~2.5h | — |
+| Reviewer | ~0.5h | 8.8/10 |
+| Documenter | ~0.5h | — |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DProject é tabela estrutural; Prisma direto via service correto
+- Pilar 2 (Endpoints): REUTILIZADO — wrapper fino sobre `ProjectsService.create` (idêntico ao HTTP `POST /projects`)
+- Pilar 3 (Seed): N/A — usa -350/-351/-352 já existentes no seed F1; zero DClasse nova
+
+**Deliverables:**
+- [x] Tool `create_project` criada: `src/mcp/tools/create-project.tool.ts` — wrapper fino 100% Pilar 2, JSDoc completo
+- [x] inputSchema plano (raiz `type:object`) SEM anyOf/oneOf/allOf (anti-footgun)
+- [x] Scope gate `projects:write` (ADR-V2-068/070) — `requireScope(ctx, ...)` primeira instrução
+- [x] Resolução de org por tipo: SPACE via `resolveOrgIdsForUser` (1 org auto, N orgs erro, 0 orgs erro); FOLDER/LIST herdam via `findOne(idPai)`
+- [x] Tenant isolation via `projectsService.findOne(idPai, ctx.dEntidadeId)` — paridade com HTTP
+- [x] Validações (idClasse whitelist -350/-351/-352, maxLength nome/descricao/prefix/icon, color regex #RRGGBB, BigInt parse) com INVALID_PARAMS limpo
+- [x] Registro em 4 pontos: `tools.schema.json` (espelho inputSchema com enum), `mcp-router.service.ts` (import + param APÓS createBlockTool + push), `mcp.module.ts` (import + provider), contagem 22→23 em specs
+- [x] Testes: `mcp-tools.create-project.spec.ts` — 19/19 PASS (scope ausente, params obrigatórios, idClasse fora whitelist, maxLength, color regex, BigInt parse idPai/orgId, org resolution 1/N/alheia/0, SPACE idPai proibido, FOLDER/LIST idPai obrigatório, herança org, presença em tools/list)
+- [x] Schema consistency check: `tools.schema.json` vs `inputSchema` — byte-espelho validado
+- [x] Zero regressão: pré-existentes falhas (projects.service.spec mock drift, mcp-block-d fake-timer) mantidas, sem delta
+- [x] ADR-V2-070 redigido: formaliza widening de `projects:write` para cobrir `create_project` (bounded by membership)
+
+**Metrics:**
+- Build: PASS (tsc 0 errors em `src/mcp/`)
+- TypeScript: 0 errors
+- ESLint: 0 warnings em `src/mcp/`
+- N+1 Queries: ZERO (1 `resolveOrgIdsForUser` OU 1 `findOne(idPai)` + 1 `create` — sem loop)
+- Tests novos: 19/19 PASS
+- Regressão: 0 (pré-existentes intactas)
+- Tool visibility: `create_project` presente em `tools/list` (validado em spec)
+
+**ADRs:** ADR-V2-051 (hierarquia Space/Folder/List), ADR-V2-042 (tenant isolation), ADR-V2-068 (scope catalog), ADR-V2-069 (Camada A no MCP), **ADR-V2-070 (novo — widening `projects:write`)**
 
 ---
 

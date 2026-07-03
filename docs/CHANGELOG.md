@@ -14,6 +14,15 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **MCP tool `create_project` — criar Space/Folder/List via MCP (V2 F11, Task 3, 2026-07-03)**
+  - Nova tool MCP `create_project` — wrapper fino sobre `ProjectsService.create` para criar projetos na hierarquia canônica (Space -350, Folder -351, List -352)
+  - **Resolução de org (RBAC por tipo):** SPACE deriva via `resolveOrgIdsForUser` (1 org auto, N orgs erro, 0 orgs erro); FOLDER/LIST herdam via `findOne(idPai)`
+  - **Scope:** `projects:write` (ADR-V2-068/070) — estende escopo existente para cobrir criação (widening bounded por membership)
+  - **Tenant isolation:** validação via `projectsService.findOne` (ADR-V2-042/069) — paridade com HTTP
+  - **Pilar 2 (Endpoints):** delega 100% a `ProjectsService.create` — zero duplicação de lógica
+  - **Testes:** 19/19 PASS (escopo, params, idClasse whitelist, org resolution, FOLDER/LIST idPai, presença em tools/list, contagem 22→23)
+  - **ADRs:** ADR-V2-051, ADR-V2-042, ADR-V2-068, ADR-V2-069, **ADR-V2-070 (novo)**
+
 - **MCP tool `create_block` — CRUD completo de blocos/fases (V2 F11, Task 2, 2026-07-03)**
   - Nova tool MCP `create_block` — wrapper fino sobre `TasksService.create` com `idClasse=-200` (FASE/BLOCO, ADR-V2-047/050)
   - Permite agente criar blocos e sub-fases (via `idPai`) — completa o CRUD de blocos no MCP

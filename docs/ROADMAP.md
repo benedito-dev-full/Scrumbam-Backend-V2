@@ -8,6 +8,49 @@
 
 ---
 
+## Task 3 — MCP tool `create_project` (criar Space/Folder/List) — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA
+**Módulo V2:** mcp (MCP Server — tools)
+**Fase V2:** F11 (MCP Expansion)
+**Tempo Real:** ~5h total (Strategist ~1.5h plan + Implementer ~2.5h code + Reviewer ~0.5h + Documenter ~0.5h)
+**Completado em:** 2026-07-03
+**Quality Score:** 8.8/10 (APPROVED pelo Reviewer)
+
+**O Que Foi Feito:**
+
+**Tool nova `create_project` — wrapper fino sobre `ProjectsService.create` com RBAC/org resolution por tipo:**
+- Expõe criação de projetos (Space -350, Folder -351, List -352) via MCP — antes possível apenas via HTTP `POST /projects`
+- Completa CRUD de projetos no MCP: `list_projects` (read) + `update_project` (write) + `create_project` (write)
+- **Resolução de org (o miolo):**
+  - SPACE: deriva org via `resolveOrgIdsForUser` (única autoridade); 1 org → auto; N orgs → erro claro exigindo `orgId`; 0 orgs → erro
+  - FOLDER/LIST: herdam org do pai via `findOne(idPai)` (ADR-V2-042/069); `orgId` input ignorado (subtree unificada)
+- Scope `projects:write` — estende ADR-V2-068 via ADR-V2-070 (widening bounded by membership)
+- **Pilar 2 respeitado:** delega 100% a `ProjectsService.create` — zero duplicação de transação/seed/DVincula/espelho
+- Schema raiz `type:object` SEM `anyOf/oneOf/allOf` (anti-footgun tools/list)
+
+**Arquivos:**
+- [x] Criados: `src/mcp/tools/create-project.tool.ts` + `src/mcp/__tests__/mcp-tools.create-project.spec.ts` (19 specs)
+- [x] Alterados (registro — 4 pontos): `tools.schema.json`, `mcp-router.service.ts`, `mcp.module.ts`, specs (contagem 22→23)
+- [x] ADR criado: `docs/decisions/ADR-V2-070-mcp-create-project-extends-projects-write.md`
+
+**Testes:**
+- [x] 19 specs novos: scope ausente, params obrigatórios (nome/idClasse), idClasse fora de whitelist, validações (maxLength, color regex, BigInt), org resolution (1-org/N-orgs/org-alheia/0-orgs), FOLDER/LIST idPai (obrigatório/herança org), presença em tools/list + contagem 23 — 19/19 PASS
+- [x] Schema consistency: `tools.schema.json` espelho fiel do `inputSchema` — PASS
+- [x] Zero regressão: pré-existentes (mock drift projects.service.spec, fake-timer mcp-block-d) mantidas
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — DProject é tabela estrutural; Prisma direto via service (correto)
+- Pilar 2 (Endpoints): REUTILIZADO — wrapper fino sobre `ProjectsService.create` (idêntica ao HTTP `POST /projects`)
+- Pilar 3 (Seed): N/A — usa -350/-351/-352 já existentes no seed F1; zero DClasse nova
+
+**ADRs vinculados:** ADR-V2-051 (hierarquia Space/Folder/List -350/-351/-352), ADR-V2-042 (tenant isolation via findOne), ADR-V2-068 (scope catalog per-tool), ADR-V2-069 (Camada A no MCP), **ADR-V2-070 (NOVO — estende `projects:write` para cobrir `create_project`)**
+
+**Próximos passos (fora de escopo):**
+- Task 3 de 3: `create_from_template` (clonar estrutura de projeto existente)
+
+---
+
 ## Task 2 — MCP tool `create_block` (CRUD de blocos/fases) — ✅ COMPLETA
 
 **Status:** ✅ COMPLETA

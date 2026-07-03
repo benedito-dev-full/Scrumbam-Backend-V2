@@ -2830,9 +2830,12 @@ export class ProjectsService implements OnModuleInit {
    * @returns Lista distinct de `DEntidade.chave` (BigInt) das orgs do usuário
    *
    * @see ADR-V2-069 — Camada A no caminho MCP (sem token de org)
+   * @see ADR-V2-070 — consumido pela tool MCP `create_project` para resolver a
+   *   org de destino de um SPACE (o adaptador MCP não tem org de token); é a
+   *   única autoridade de membership — SPACE nunca nasce em org alheia.
    * @see ORG_ROLE_CLASSES — roles de org consultadas
    */
-  private async resolveOrgIdsForUser(
+  async resolveOrgIdsForUser(
     userEntidadeId: bigint,
     opts: { adminOnly?: boolean } = {},
   ): Promise<bigint[]> {

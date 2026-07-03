@@ -474,6 +474,47 @@
           }
         }
       }
+    },
+    {
+      "name": "create_project",
+      "description": "Cria um projeto na hierarquia Space/Folder/List: -350 SPACE (raiz numa org), -351 FOLDER (dentro de um SPACE), -352 LIST (dentro de FOLDER ou SPACE; recebe os 9 statuses V3). Para SPACE a org e resolvida automaticamente quando o usuario pertence a uma unica org; informe orgId quando pertence a varias. FOLDER/LIST herdam a org do pai (idPai obrigatorio). Depois use create_block e create_task.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["nome", "idClasse"],
+        "properties": {
+          "nome": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 255,
+            "description": "Nome do projeto/espaco/lista"
+          },
+          "idClasse": {
+            "type": "string",
+            "enum": ["-350", "-351", "-352"],
+            "description": "Tipo: -350 SPACE (raiz, sem idPai), -351 FOLDER (idPai=SPACE), -352 LIST (idPai=FOLDER ou SPACE; recebe seed de statuses V3)"
+          },
+          "idPai": {
+            "type": "string",
+            "description": "ID do projeto pai. OBRIGATORIO p/ FOLDER/LIST; PROIBIDO p/ SPACE."
+          },
+          "orgId": {
+            "type": "string",
+            "description": "ID da org (DEntidade -152). So para SPACE quando o usuario pertence a mais de uma org. Ignorado p/ FOLDER/LIST (herdam a org do pai)."
+          },
+          "descricao": { "type": "string", "maxLength": 2000, "description": "Descricao opcional" },
+          "prefix": {
+            "type": "string",
+            "maxLength": 8,
+            "description": "Prefixo das tasks (LIST): DEV -> DEV-1. Default DEV."
+          },
+          "privado": {
+            "type": "boolean",
+            "description": "SPACE privado (visivel so a membros explicitos). Default false."
+          },
+          "color": { "type": "string", "description": "Cor hex #RRGGBB" },
+          "icon": { "type": "string", "maxLength": 50, "description": "Emoji ou slug do icone" }
+        }
+      }
     }
   ]
 }

@@ -85,6 +85,35 @@ export function optionalRecordField(
   return value as Record<string, unknown>;
 }
 
+/**
+ * Extrai um campo booleano opcional. Diferente de coerção "truthy": exige o
+ * tipo `boolean` real quando presente — string/number viram INVALID_PARAMS,
+ * evitando que `"false"` (string) seja interpretado como `true`.
+ *
+ * Semantica:
+ *   - ausente/null/undefined → retorna `undefined` (campo nao informado)
+ *   - `true`/`false` → retorna o boolean fiel
+ *   - qualquer outro tipo → lanca INVALID_PARAMS
+ *
+ * @param params - Objeto de argumentos da chamada MCP
+ * @param field - Nome do campo a extrair
+ * @returns O boolean quando valido, ou `undefined` se ausente/null
+ * @throws {McpToolError} INVALID_PARAMS quando o valor existe mas nao e boolean
+ */
+export function optionalBoolean(
+  params: Record<string, unknown>,
+  field: string,
+): boolean | undefined {
+  const value = params[field];
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== 'boolean') {
+    throw invalidParams(field, 'boolean expected');
+  }
+  return value;
+}
+
 export function maxStringLength(value: string, field: string, maxLength: number): void {
   if (value.length > maxLength) {
     throw invalidParams(field, `max length ${maxLength} exceeded`);
