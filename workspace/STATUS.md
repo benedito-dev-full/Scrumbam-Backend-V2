@@ -1,6 +1,75 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-07-03 (Task 3: MCP tool `create_project` — COMPLETE, Score 8.8)
+**Ultima atualizacao:** 2026-07-03 (Iniciativa "MCP cria estrutura" — 3/3 COMPLETA, Score médio 8.76)
+
+---
+
+## Iniciativa "MCP cria estrutura" — 3/3 COMPLETA (V2 Fase F11)
+
+**Status:** ✅ TODAS 3 FERRAMENTAS NO AR — agente MCP pode montar workspace inteiro com 1 comando
+
+| Tool | Task # | Repo | Score | Testes |
+|------|--------|------|-------|--------|
+| `create_block` | Task 2 | V2 | 8.5/10 | 10/10 PASS |
+| `create_project` | Task 3 | V2 | 8.8/10 | 19/19 PASS |
+| `create_from_template` | Task 1 | V2 | 9.0/10 | 15/15 PASS |
+| **MÉDIA** | — | — | **8.76/10** | **44/44 PASS** |
+
+**Deliverables da Iniciativa:**
+- [x] 3 tools de CRIAÇÃO MCP (wrappers finos Pilar 2) no ar
+- [x] Schema cleanup: raiz `type:object` SEM anyOf/oneOf/allOf em TODAS (anti-footgun tools/list)
+- [x] Scope gates: `tasks:write` (create_block) + `projects:write` (create_project, create_from_template)
+- [x] Tenant isolation: 3 estratégias diferentes (findOne idPai, resolveOrgIdsForUser, herança org)
+- [x] Tool visibility: 24 tools no catálogo `/tools/list` (contagem 21→22→23→24)
+- [x] ADRs vinculados: ADR-V2-051, ADR-V2-042, ADR-V2-047, ADR-V2-050, ADR-V2-061, ADR-V2-068, ADR-V2-069, ADR-V2-070
+- [x] JSDoc completo em todas 3 tools
+- [x] Zero regressão: pré-existentes (projects.service.spec, mcp-block-d) intactas
+
+---
+
+## Task 1 — MCP tool `create_from_template` (materializar template) — COMPLETE (V2 Fase F11)
+
+**Module:** mcp (MCP Server — tools)
+**Task:** Nova tool `create_from_template` — wrapper fino sobre `ProjectsService.createFromTemplate` para clonar estrutura de projeto
+**Status:** COMPLETA (ÚLTIMA da iniciativa 3/3)
+**Duration:** ~4h total (Strategist ~1h + Implementer ~2h + Reviewer ~0.5h + Documenter ~0.5h)
+**Quality Score:** 9.0/10 (APPROVED pelo Reviewer)
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | ~1h | — |
+| Implementer | ~2h | — |
+| Reviewer | ~0.5h | 9.0/10 |
+| Documenter | ~0.5h | — |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DProject é tabela estrutural; Prisma direto via service correto
+- Pilar 2 (Endpoints): REUTILIZADO — wrapper fino sobre `ProjectsService.createFromTemplate` (idêntica ao HTTP `POST /projects/from-template`)
+- Pilar 3 (Seed): N/A — usa -401/-402 já existentes no seed F1; zero DClasse nova
+
+**Deliverables:**
+- [x] Tool `create_from_template` criada: `src/mcp/tools/create-from-template.tool.ts` — wrapper fino 100% Pilar 2, JSDoc completo (22-68)
+- [x] inputSchema plano (raiz `type:object`) SEM anyOf/oneOf/allOf (anti-footgun)
+- [x] Scope gate `projects:write` (ADR-V2-068/070) — `requireScope(ctx, ...)` primeira instrução
+- [x] Resolução de org de DESTINO (o miolo — MCP sem org de token): LISTA via `findOne(idPai)` herda org; ESPAÇO via `resolveOrgIdsForUser` (1 org auto, N orgs erro, 0 orgs erro)
+- [x] Autorização de ORIGEM delegada ao service (template global idEstab=null OU org-scoped, 404 leak-free)
+- [x] Validações (templateId obrigatório, idPai/orgId BigInt-parseáveis, maxLength novoNome/novoIcone, shape de params) com INVALID_PARAMS limpo
+- [x] Registro em 4 pontos: `tools.schema.json` (espelho inputSchema), `mcp-router.service.ts` (import + param + push), `mcp.module.ts` (import + provider), contagem 23→24 em specs
+- [x] Testes: `mcp-tools.create-from-template.spec.ts` — 15/15 PASS (a-o: scope, params obrigatórios, templateId BigInt, idPai/orgId parseáveis, LISTA vs ESPAÇO, org resolution, herança org, includeTasks, novoNome/novoIcone, presença em tools/list)
+- [x] Schema consistency check: `tools.schema.json` vs `inputSchema` — byte-espelho validado
+- [x] Zero regressão: pré-existentes falhas intactas
+
+**Metrics:**
+- Build: PASS (tsc 0 errors em `src/mcp/`)
+- TypeScript: 0 errors
+- ESLint: 0 warnings em `src/mcp/`
+- N+1 Queries: ZERO (1 findOne(idPai) OU resolveOrgIdsForUser + 1 createFromTemplate — sem loop)
+- Tests novos: 15/15 PASS
+- Regressão: 0 (pré-existentes intactas)
+- Tool visibility: `create_from_template` presente em `tools/list` (validado em spec)
+
+**ADRs:** ADR-V2-051 (hierarquia Space/Folder/List), ADR-V2-042 (tenant isolation), ADR-V2-061 (Feature Templates — clone com remap), ADR-V2-068 (scope catalog `projects:write`), ADR-V2-069 (Camada A no MCP), ADR-V2-070 (widening `projects:write`)
 
 ---
 

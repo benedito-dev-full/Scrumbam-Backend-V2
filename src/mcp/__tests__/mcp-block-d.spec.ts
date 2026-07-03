@@ -57,7 +57,7 @@ describe('MCP Bloco D - compatibilidade, timeout, metricas e doc', () => {
       id: 'tools',
       result: { tools: toolsSchema.tools },
     });
-    expect(toolsSchema.tools).toHaveLength(23);
+    expect(toolsSchema.tools).toHaveLength(24);
     expect(toolsSchema.tools.map((tool) => tool.name)).toEqual([
       'list_tasks',
       'create_task',
@@ -82,6 +82,7 @@ describe('MCP Bloco D - compatibilidade, timeout, metricas e doc', () => {
       'list_my_tasks',
       'create_block',
       'create_project',
+      'create_from_template',
     ]);
     for (const tool of toolsSchema.tools) {
       expect(tool.inputSchema).toEqual(expect.objectContaining({ type: 'object' }));

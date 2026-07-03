@@ -14,6 +14,16 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **MCP tool `create_from_template` — materializar template pronto (V2 F11, Task 1 de 3, 2026-07-03)**
+  - Nova tool MCP `create_from_template` — wrapper fino sobre `ProjectsService.createFromTemplate` para clonar estrutura de projeto existente (DClasse -401/-402 TEMPLATE → List/Space real)
+  - **Resolução de org de DESTINO (o miolo — MCP sem org de token):** LISTA (idPai) herda org via `findOne(idPai)`; ESPAÇO (sem idPai) deriva via `resolveOrgIdsForUser` (1 org auto, N orgs erro claro)
+  - **Autorização de ORIGEM delegada ao service:** template global (idEstab=null) ou org-scoped, 404 leak-free
+  - **Pilar 2 (Endpoints):** delega 100% a `ProjectsService.createFromTemplate` — zero reimplementação de clone/seed/remap
+  - **Schema:** raiz `type:object` SEM anyOf/oneOf/allOf (anti-footgun tools/list)
+  - **Testes:** 15/15 PASS (scope, params, org resolution, herança org, includeTasks, novoNome/novoIcone, presença em tools/list, contagem 23→24)
+  - **ADRs:** ADR-V2-051, ADR-V2-042, ADR-V2-061, ADR-V2-068, ADR-V2-069, ADR-V2-070
+  - **INICIATIVA "MCP cria estrutura" — 3/3 COMPLETA:** create_block (8.5) + create_project (8.8) + create_from_template (9.0)
+
 - **MCP tool `create_project` — criar Space/Folder/List via MCP (V2 F11, Task 3, 2026-07-03)**
   - Nova tool MCP `create_project` — wrapper fino sobre `ProjectsService.create` para criar projetos na hierarquia canônica (Space -350, Folder -351, List -352)
   - **Resolução de org (RBAC por tipo):** SPACE deriva via `resolveOrgIdsForUser` (1 org auto, N orgs erro, 0 orgs erro); FOLDER/LIST herdam via `findOne(idPai)`

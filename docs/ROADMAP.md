@@ -8,6 +8,52 @@
 
 ---
 
+## Task 1 — MCP tool `create_from_template` (materializar template pronto) — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (ÚLTIMA da iniciativa "MCP cria estrutura" — 3/3)
+**Módulo V2:** mcp (MCP Server — tools)
+**Fase V2:** F11 (MCP Expansion)
+**Tempo Real:** ~4h total (Strategist ~1h plan + Implementer ~2h code + Reviewer ~0.5h + Documenter ~0.5h)
+**Completado em:** 2026-07-03
+**Quality Score:** 9.0/10 (APPROVED pelo Reviewer)
+
+**O Que Foi Feito:**
+
+**Tool nova `create_from_template` — wrapper fino sobre `ProjectsService.createFromTemplate` para materializar templates:**
+- Materializa um template (DClasse -401/-402) numa árvore real (List/Space com blocos e tasks molde-limpo)
+- **Resolução de org de DESTINO (o miolo — MCP sem org de token):**
+  - LISTA (idPai presente): herda org do pai via `findOne(idPai)` (autoriza acesso)
+  - ESPAÇO (idPai ausente): deriva via `resolveOrgIdsForUser` (1 org auto; N orgs erro claro; 0 orgs erro)
+- Autorização de ORIGEM delegada ao service (template global idEstab=null ou org-scoped)
+- **Pilar 2 respeitado:** delega 100% a `ProjectsService.createFromTemplate` — zero reimplementação de clone/seed/remap
+- Schema raiz `type:object` SEM anyOf/oneOf/allOf (anti-footgun tools/list)
+
+**Arquivos:**
+- [x] Criado: `src/mcp/tools/create-from-template.tool.ts` + `src/mcp/__tests__/mcp-tools.create-from-template.spec.ts` (15 specs)
+- [x] Alterados (registro — 4 pontos): `tools.schema.json`, `mcp-router.service.ts`, `mcp.module.ts`, specs (contagem 23→24)
+- [x] ADR criado: `docs/decisions/ADR-V2-061-feature-templates.md` (existente, confirmado)
+
+**Testes:**
+- [x] 15 specs novos: scope ausente, params obrigatórios (templateId), validações (maxLength, BigInt), org resolution (LISTA vs ESPAÇO, 1-org/N-orgs/org-alheia/0-orgs), herança org, includeTasks (default/true/false), novoNome/novoIcone, presença em tools/list, contagem 23→24 — 15/15 PASS
+- [x] Schema consistency: `tools.schema.json` espelho fiel do `inputSchema` — PASS
+- [x] Zero regressão: pré-existentes mantidas
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — DProject é tabela estrutural; Prisma direto via service (correto)
+- Pilar 2 (Endpoints): REUTILIZADO — wrapper fino sobre `ProjectsService.createFromTemplate` (idêntica ao HTTP `POST /projects/from-template`)
+- Pilar 3 (Seed): N/A — usa -401/-402 já existentes no seed F1; zero DClasse nova
+
+**ADRs vinculados:** ADR-V2-051 (hierarquia Space/Folder/List), ADR-V2-042 (tenant isolation via findOne), ADR-V2-061 (Feature Templates — clone com remap -401/-402), ADR-V2-068 (scope catalog `projects:write`), ADR-V2-069 (Camada A no MCP), ADR-V2-070 (widening `projects:write`)
+
+**Iniciativa "MCP cria estrutura" — 3 Tools COMPLETAS (3/3):**
+1. create_block (Task 2 — CRUD de blocos/fases) — Score 8.5/10 ✅
+2. create_project (Task 3 — criar Space/Folder/List) — Score 8.8/10 ✅
+3. create_from_template (Task 1 — materializar template) — Score 9.0/10 ✅
+
+Todas as 3 ferramentas de CRIAÇÃO via MCP estão no ar. Agente pode montar workspace inteiro com 1 comando (`create_from_template`).
+
+---
+
 ## Task 3 — MCP tool `create_project` (criar Space/Folder/List) — ✅ COMPLETA
 
 **Status:** ✅ COMPLETA

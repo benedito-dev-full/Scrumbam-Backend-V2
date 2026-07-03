@@ -515,6 +515,42 @@
           "icon": { "type": "string", "maxLength": 50, "description": "Emoji ou slug do icone" }
         }
       }
+    },
+    {
+      "name": "create_from_template",
+      "description": "Materializa um template (idClasse -401 TEMPLATE_LIST / -402 TEMPLATE_SPACE) numa arvore real (List/Space com blocos e tasks molde-limpo). Para template de LISTA informe idPai (SPACE/FOLDER destino — herda a org do destino). Para template de ESPACO omita idPai (nasce como raiz — a org e resolvida automaticamente quando o usuario pertence a uma unica org; informe orgId quando pertence a varias). Templates GLOBAIS sao visiveis a todas as orgs; templates de outra org retornam nao-encontrado.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["templateId"],
+        "properties": {
+          "templateId": {
+            "type": "string",
+            "description": "ID do template (-401 TEMPLATE_LIST / -402 TEMPLATE_SPACE) a materializar."
+          },
+          "idPai": {
+            "type": "string",
+            "description": "Destino p/ template de LISTA (-401): SPACE/FOLDER onde a Lista nasce. OMITIR p/ template de ESPACO (-402), que nasce como raiz."
+          },
+          "orgId": {
+            "type": "string",
+            "description": "Desambiguacao de org p/ template de ESPACO quando o usuario pertence a varias orgs. Ignorado quando idPai e informado (herda a org do destino)."
+          },
+          "novoNome": {
+            "type": "string",
+            "maxLength": 255,
+            "description": "Sobrescreve o nome do no raiz materializado. Opcional."
+          },
+          "novoIcone": {
+            "type": "string",
+            "maxLength": 50,
+            "description": "Sobrescreve o icone (dados.icon) do no raiz. Opcional."
+          },
+          "includeTasks": {
+            "type": "boolean",
+            "description": "Copiar as tasks do template (molde-limpo: INBOX, sem assignee/prazo). Default true."
+          }
+        }
+      }
     }
   ]
 }
