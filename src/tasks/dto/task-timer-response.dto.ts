@@ -1,4 +1,69 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+/**
+ * Sessão manual **crua** de timer de uma task (ADR-V2-057).
+ *
+ * Espelho 1:1 de um item de `DTask.dados.telemetry.manualTimers[]` — o registro
+ * individual de um intervalo cronometrado por um humano (start → pause/stop). É a
+ * FONTE para o cliente recortar tempo focado por intervalo de datas (ex.: "quanto
+ * foi trabalhado nesta task nesta semana"), algo que o agregado
+ * {@link TaskTimerStateDto} (total por usuário, sem quebra por data) não permite.
+ *
+ * **Anti-fraude (ADR-V2-057):** `endedAt` e `durationMs` são gravados server-side
+ * no momento do pause/stop (`Date` do servidor). O cliente NUNCA envia duração; a
+ * aritmética é sempre do servidor. O front deve exibir/somar estes valores, não
+ * recalculá-los a partir de relógio local.
+ *
+ * Uma sessão **aberta** (timer em andamento) tem `endedAt` e `durationMs` iguais a
+ * `null`.
+ *
+ * @example
+ * ```json
+ * {
+ *   "userId": "42",
+ *   "startedAt": "2026-06-01T13:00:00.000Z",
+ *   "endedAt": "2026-06-01T13:45:00.000Z",
+ *   "durationMs": 2700000
+ * }
+ * ```
+ *
+ * @see TaskTimerStateDto — agregado total por usuário (sem recorte por data)
+ * @see ADR-V2-057 — timer manual via dados.telemetry.manualTimers
+ */
+export class TaskTimerSessionDto {
+  @ApiProperty({
+    description: 'DEntidade.chave (string) do humano dono da sessão.',
+    example: '42',
+  })
+  userId!: string;
+
+  @ApiProperty({
+    description:
+      'ISO 8601 do início da sessão (gravado server-side no start/resume). ' +
+      'É a âncora temporal usada pelo cliente para recorte por intervalo de datas.',
+    example: '2026-06-01T13:00:00.000Z',
+  })
+  startedAt!: string;
+
+  @ApiPropertyOptional({
+    description:
+      'ISO 8601 do fim da sessão (gravado server-side no pause/stop). ' +
+      'Null quando a sessão ainda está aberta (timer em andamento).',
+    nullable: true,
+    example: '2026-06-01T13:45:00.000Z',
+  })
+  endedAt!: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Duração em milissegundos (endedAt − startedAt), calculada server-side ' +
+      '(anti-fraude — ADR-V2-057). Null quando a sessão ainda está aberta.',
+    nullable: true,
+    example: 2700000,
+    minimum: 0,
+  })
+  durationMs!: number | null;
+}
 
 /**
  * Total de tempo manual acumulado por um usuário em uma task (ADR-V2-057).

@@ -2133,6 +2133,16 @@ export class TasksService {
       // o campo fica null. Derivação síncrona via buildTimerState como fallback
       // garante o estado correto mesmo sem o map pré-computado (sem nomes).
       timer: timerMap?.get(taskIdStr) ?? this.taskTimerService.buildTimerState(manualTimers),
+      // ADR-V2-057: sessões manuais cruas (com data) para o cliente somar tempo
+      // focado por intervalo. Deriva do MESMO array `manualTimers` já em mãos —
+      // ZERO query extra. Vazio `[]` quando a task nunca teve timer (nunca null).
+      // endedAt/durationMs = null em sessão aberta; aritmética é server-side.
+      timerSessions: (manualTimers ?? []).map((s) => ({
+        userId: s.userId,
+        startedAt: s.startedAt,
+        endedAt: s.endedAt ?? null,
+        durationMs: typeof s.durationMs === 'number' ? s.durationMs : null,
+      })),
       timeSpentLabel,
       hasChildren,
       timeSpentIsRollup,

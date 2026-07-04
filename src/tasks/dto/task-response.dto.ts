@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { TaskTimerStateDto } from './task-timer-response.dto';
+import { TaskTimerSessionDto, TaskTimerStateDto } from './task-timer-response.dto';
 
 /**
  * Estado de execução ativa de uma task (DPedido idClasse=-300..-304 com
@@ -179,6 +179,18 @@ export class TaskResponseDto {
     nullable: true,
   })
   timer!: TaskTimerStateDto | null;
+
+  @ApiProperty({
+    description:
+      'Sessões manuais individuais de `dados.telemetry.manualTimers[]`, para o ' +
+      'cliente somar tempo focado por intervalo de datas (recorte temporal que o ' +
+      'agregado `timer` não permite). Array — NUNCA null: vazio `[]` quando a task ' +
+      'nunca teve timer. Cada item é a sessão crua (userId, startedAt, endedAt, ' +
+      'durationMs), com aritmética server-side (anti-fraude — ADR-V2-057). O ' +
+      'agregado total por usuário continua em `timer`.',
+    type: () => [TaskTimerSessionDto],
+  })
+  timerSessions!: TaskTimerSessionDto[];
 
   @ApiProperty({
     description:
