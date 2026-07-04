@@ -2090,9 +2090,11 @@ export class TasksService {
     // ADR-V2-057 (Fase 3): total de tempo manual JÁ FORMATADO para a coluna
     // builtin read-only "Tempo gasto". Mesma fonte server-side do painel do
     // sidebar (totalMs agrega todos os usuários); o front nunca recalcula.
-    const manualTimers = (dados?.telemetry as Record<string, unknown> | null)?.manualTimers as
-      | ManualTimerSession[]
-      | undefined;
+    const telemetry = dados?.telemetry as Record<string, unknown> | null;
+    const manualTimers = telemetry?.manualTimers as ManualTimerSession[] | undefined;
+    // Data de conclusão (entrada em DONE) — lida defensivamente de
+    // dados.telemetry.doneAt. null quando a task nunca foi concluída.
+    const completedAt = (telemetry?.doneAt as string | undefined) ?? null;
     const ownTimeLabel = this.taskTimerService.formatTotalLabel(
       this.taskTimerService.totalMs(manualTimers),
     );
@@ -2134,6 +2136,7 @@ export class TasksService {
       timeSpentLabel,
       hasChildren,
       timeSpentIsRollup,
+      completedAt,
       criadoEm: task.criadoEm.toISOString(),
       atualizadoEm: task.atualizadoEm.toISOString(),
     };

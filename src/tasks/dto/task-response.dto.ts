@@ -217,6 +217,15 @@ export class TaskResponseDto {
   })
   timeSpentIsRollup!: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Data/hora ISO 8601 em que a task foi concluída (entrou em DONE), ' +
+      'lida de dados.telemetry.doneAt. null quando a task nunca foi concluída.',
+    nullable: true,
+    example: '2026-06-30T03:00:00.000Z',
+  })
+  completedAt!: string | null;
+
   @ApiProperty({ description: 'Data de criação ISO 8601' })
   criadoEm!: string;
 
