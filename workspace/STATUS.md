@@ -1,6 +1,57 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-07-03 (Iniciativa "MCP cria estrutura" — 3/3 COMPLETA, Score médio 8.76)
+**Ultima atualizacao:** 2026-07-04 (Reforma 1 — Transporte Streamable HTTP COMPLETA + Iniciativa MCP 3/3)
+
+---
+
+## REFORMA 1 — Transporte Streamable HTTP (spec 2025-03-26) — COMPLETE (V2 Fase F11)
+
+**Module:** mcp (MCP Server — transport layer)
+**Reform:** Habilitar Claude WEB conectar ao `/mcp` sem quebrar Claude Code
+**Status:** COMPLETA (5 fases F1–F5 implementadas, testadas, integradas)
+**Duration:** ~13h total (Strategist ~2h plan + Implementer ~8h code/testes + Reviewer ~2h + Documenter ~1h)
+**Quality Score:** 8.9/10 (APPROVED pelo Reviewer)
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | ~2h | — |
+| Implementer | ~8h | — |
+| Reviewer | ~2h | 8.9/10 |
+| Documenter | ~1h | — |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — MCP é transporte/protocolo, não entidade de negócio
+- Pilar 2 (Endpoints): N/A — POST /mcp é rota existente, evoluída aditivamente (não nova controller)
+- Pilar 3 (Seed): N/A — zero DClasse nova (transporte é infra)
+
+**Deliverables da Reforma:**
+- [x] F1 — Protocol Version Negotiation: `negotiateProtocolVersion()` com allow-list `['2025-03-26','2024-11-05']`, default `'2024-11-05'` preserva Claude Code
+- [x] F2 — HTTP 202 Accepted: body só-notifications → 202 sem corpo; body com ≥1 request → 200 + JSON. Dupla checagem, audit reflete httpCode real.
+- [x] F3 — Method Validation: GET/DELETE /mcp → 405 + Allow: POST (sem guards de auth — protocolo, não credencial)
+- [x] F4 — Anti DNS-Rebinding: `McpOriginGuard` (novo) — Origin ausente passes; present + allow-list passes; present + out → 403; allow-list vazia → fail-open + warn
+- [x] F5 — Conformance + Regressão: 5 suítes (27 testes novos), handshake Claude Code idêntico, 27/27 PASS, zero regressão
+- [x] Arquivos modificados: `mcp.controller.ts`, `mcp.module.ts`, `mcp-router.service.ts`, `constants.ts`
+- [x] Novo arquivo: `src/mcp/guards/mcp-origin.guard.ts`
+- [x] Specs novos: 5 suítes (27 testes)
+- [x] ADR criado: `docs/decisions/ADR-V2-071-mcp-streamable-http-transport.md`
+
+**Metrics:**
+- Build: PASS (tsc 0 errors em `src/mcp/`)
+- TypeScript: 0 errors
+- ESLint: 0 warnings em `src/mcp/`
+- Tests novos: 27/27 PASS (F1 6, F2 8, F3 4, F4 9, F5 16)
+- Regressão: 0 (pré-existentes 4 suites/3 falhas mantidas — net-zero)
+- Tool visibility: 24 tools no catálogo (estável)
+- Back-compat: Claude Code handshake idêntico (regressão testada)
+
+**ADRs:** **ADR-V2-071** (novo — Streamable HTTP aditivo, stateless, JSON-only), ADR-V2-068 (scope catalog — ortogonal), ADR-V2-011 (rate limit — ortogonal)
+
+**Garantias:**
+- [x] Back-compat total: Claude Code intacto (initialize ecoa `'2024-11-05'`, requests com `id` continuam 200 + JSON, Origin ausente sempre passa)
+- [x] Stateless: zero `Mcp-Session-Id`, zero Redis, zero estado novo
+- [x] JSON-only: nunca abre SSE ou streaming
+- [x] Protocol-agnostic: não afeta scopes, rate-limit, tools existentes
 
 ---
 

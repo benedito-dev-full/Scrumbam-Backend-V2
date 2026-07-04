@@ -6,6 +6,7 @@ import {
   MCP_PROTOCOL_VERSION,
   MCP_SERVER_NAME,
   MCP_SERVER_VERSION,
+  MCP_SUPPORTED_PROTOCOL_VERSIONS,
 } from '../constants';
 import toolsSchema from '../schemas/tools.schema.json';
 import { McpJsonRpcError, McpToolDefinition, McpUserContext } from '../interfaces/mcp.types';
@@ -144,7 +145,7 @@ export class McpRouterService {
       case 'initialize':
         return {
           result: {
-            protocolVersion: MCP_PROTOCOL_VERSION,
+            protocolVersion: this.negotiateProtocolVersion(params),
             capabilities: { tools: {} },
             serverInfo: {
               name: MCP_SERVER_NAME,
@@ -171,6 +172,32 @@ export class McpRouterService {
           },
         };
     }
+  }
+
+  /**
+   * Negocia a `protocolVersion` a devolver no `initialize`.
+   *
+   * Ecoa exatamente a versao pedida pelo cliente quando ela pertence a
+   * allow-list {@link MCP_SUPPORTED_PROTOCOL_VERSIONS}. Se a versao estiver
+   * ausente, nao for string ou nao for suportada, devolve o default
+   * {@link MCP_PROTOCOL_VERSION} — comportamento tolerante, sem erro.
+   *
+   * Regra de seguranca: NUNCA ecoa uma string arbitraria do cliente; apenas
+   * valores da allow-list sao devolvidos.
+   *
+   * @param params - `params` do request `initialize` (pode conter `protocolVersion`).
+   * @returns Versao de protocolo suportada a ecoar na resposta.
+   */
+  private negotiateProtocolVersion(params: Record<string, unknown> | undefined): string {
+    const requested = params?.protocolVersion;
+    if (
+      typeof requested === 'string' &&
+      (MCP_SUPPORTED_PROTOCOL_VERSIONS as readonly string[]).includes(requested)
+    ) {
+      return requested;
+    }
+
+    return MCP_PROTOCOL_VERSION;
   }
 
   private async dispatchTool(

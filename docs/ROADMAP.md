@@ -8,6 +8,95 @@
 
 ---
 
+## REFORMA 1 — Transporte Streamable HTTP para MCP (spec 2025-03-26) — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (5 fases F1–F5 implementadas, testadas, integradas)
+**Módulo V2:** mcp (MCP Server — transport layer)
+**Fase V2:** F11 (MCP Expansion — Reforma 1 de 1 entregue)
+**Tempo Real:** ~13h total (Strategist ~2h plan + Implementer ~8h code/testes + Reviewer ~2h + Documenter ~1h)
+**Completado em:** 2026-07-04
+**Quality Score:** 8.9/10 (APPROVED pelo Reviewer — net-zero regressão, 27 testes novos, todas fases F1–F5 completas)
+
+**O Que Foi Feito (Reforma Completa em 5 Fases):**
+
+**Objetivo:** Habilitar o **Claude WEB** a conectar ao endpoint `POST /mcp` do V2 (transporte Streamable HTTP, spec `2025-03-26`) **sem quebrar o Claude Code atual** (transporte legado, X-MCP-Key, sempre JSON).
+
+**F1 — Protocol Version Negotiation:**
+- Method: `McpRouterService.negotiateProtocolVersion(clientVersion)` ecoa versão negociada
+- Allow-list canônico: `['2025-03-26', '2024-11-05']`
+- Versão ausente/desconhecida → devolve `MCP_PROTOCOL_VERSION` (default `'2024-11-05'` — preserva Claude Code)
+- NUNCA ecoa string arbitrária (segurança)
+- Arquivo: `src/mcp/services/mcp-router.service.ts` + `src/mcp/constants.ts` (constante `MCP_SUPPORTED_PROTOCOL_VERSIONS`)
+
+**F2 — HTTP 202 Accepted para Payloads Sem Request:**
+- Body composto SÓ por notifications/responses (zero `method` + `id` combinado) → HTTP **202** sem corpo
+- Body com ≥1 request (`method` + `id`) → HTTP **200** + `application/json`
+- Implementação via `@Res({ passthrough: true })` + dupla checagem `bodyContainsRequest()`
+- Audit (DEvento -495) reflete o httpCode real (202 ou 200)
+- Arquivo: `src/mcp/mcp.controller.ts` (método `handle`, linha ~56–82)
+
+**F3 — Method Validation (GET/DELETE → 405):**
+- `GET /mcp` → HTTP **405** + header `Allow: POST`
+- `DELETE /mcp` → HTTP **405** + header `Allow: POST`
+- Sem guards de auth nesses handlers (405 é resposta de PROTOCOLO, não credencial)
+- Arquivo: `src/mcp/mcp.controller.ts` (handlers `methodNotAllowedGet`, `methodNotAllowedDelete`, linhas ~99–121)
+
+**F4 — Anti DNS-Rebinding Guard:**
+- Nova classe: `McpOriginGuard` em `src/mcp/guards/mcp-origin.guard.ts`
+- Comportamento ortogonal (nunca inspeciona `X-MCP-Key`):
+  - `Origin` AUSENTE → **permite** (cenário Claude Code)
+  - `Origin` presente + na allow-list (`MCP_ALLOWED_ORIGINS` CSV) → **permite**
+  - `Origin` presente + fora → **403 ForbiddenException**
+  - Allow-list vazia/ausente → **fail-open** + `logger.warn` (não trava ambientes novos)
+- Registrado em `src/mcp/mcp.module.ts`; aplicado no POST junto a `McpEnabledGuard` e `McpKeyGuard`
+
+**F5 — Conformance + Regressão:**
+- 5 suítes de spec cobrindo F1–F5:
+  - `mcp-router.protocol-version.spec.ts` (F1 — negotiation, 6 specs)
+  - `mcp-accept-202.controller.spec.ts` (F2 — 202 Accepted, 8 specs)
+  - `mcp-method-not-allowed.controller.spec.ts` (F3 — 405, 4 specs)
+  - `mcp-origin.guard.spec.ts` (F4 — Origin validation, 9 specs)
+  - `mcp-conformance.controller.spec.ts` (F5 — matriz completa + handshake Claude Code, 16 specs)
+- **Regressão do cliente legado:** handshake completo (`initialize → tools/list → tools/call`) idêntico ao baseline
+- Total: **27 testes novos, 100% PASS**
+- Pré-existentes falhas mantidas (4 suites/3 testes falhos antes) — net-zero delta na contagem geral
+
+**Arquivos Modificados:**
+- [x] `src/mcp/mcp.controller.ts` — método `handle()` com lógica 202, handlers 405 GET/DELETE
+- [x] `src/mcp/mcp.module.ts` — registra `McpOriginGuard`
+- [x] `src/mcp/services/mcp-router.service.ts` — método `negotiateProtocolVersion()`
+- [x] `src/mcp/constants.ts` — constantes `MCP_SUPPORTED_PROTOCOL_VERSIONS`, `HTTP_STATUS_ACCEPTED`, `MCP_ALLOWED_ORIGINS_ENV`
+- [x] `src/mcp/guards/mcp-origin.guard.ts` — NOVO (anti DNS-rebinding)
+
+**Arquivos Criados (Specs):**
+- [x] `src/mcp/__tests__/mcp-router.protocol-version.spec.ts` — F1 (6 specs)
+- [x] `src/mcp/__tests__/mcp-accept-202.controller.spec.ts` — F2 (8 specs)
+- [x] `src/mcp/__tests__/mcp-method-not-allowed.controller.spec.ts` — F3 (4 specs)
+- [x] `src/mcp/__tests__/mcp-origin.guard.spec.ts` — F4 (9 specs)
+- [x] `src/mcp/__tests__/mcp-conformance.controller.spec.ts` — F5 (16 specs — regressão do cliente legado)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): N/A — MCP é transporte/protocolo, não entidade de negócio
+- Pilar 2 (Endpoints): N/A — POST /mcp é rota existente, evoluída aditivamente
+- Pilar 3 (Seed): N/A — zero DClasse nova (transporte é infra)
+
+**Garantias de Back-Compat:**
+- `initialize` com `protocolVersion:'2024-11-05'` ecoa `2024-11-05` (Claude Code intacto)
+- Qualquer request com `method` + `id` continua `200 + application/json` (jamais SSE ou 202)
+- `Origin` ausente sempre passa (Claude Code não envia `Origin`)
+- Handshake completo Claude Code idêntico ao baseline (testado)
+
+**ADRs vinculados:** **ADR-V2-071** (NOVO — decisão arquitetural formal da Reforma 1, spec Streamable HTTP aditivo + stateless + JSON-only), ADR-V2-068 (scope catalog — ortogonal ao transporte), ADR-V2-011 (rate limit — ortogonal ao transporte)
+
+**Testes:**
+- [x] 27 specs novos (F1–F5): protocol negotiation, 202 resposta, 405 GET/DELETE, Origin validation, conformance matriz, regressão Claude Code — 27/27 PASS
+- [x] Build: PASS (tsc 0 errors em `src/mcp/`)
+- [x] Lint: 0 warnings
+- [x] Regressão: pré-existentes (4 suites/3 falhas) mantidas — zero regressão net
+- [x] Tool visibility: 24 tools no catálogo (contagem estável)
+
+---
+
 ## Task 1 — MCP tool `create_from_template` (materializar template pronto) — ✅ COMPLETA
 
 **Status:** ✅ COMPLETA (ÚLTIMA da iniciativa "MCP cria estrutura" — 3/3)

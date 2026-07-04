@@ -13,6 +13,7 @@ import { TabelasModule } from '../tabelas/tabelas.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { McpEnabledGuard } from './guards/mcp-enabled.guard';
 import { McpKeyGuard } from './guards/mcp-key.guard';
+import { McpOriginGuard } from './guards/mcp-origin.guard';
 import { McpKeysController } from './mcp-keys.controller';
 import { McpController } from './mcp.controller';
 import { McpJsonRpcService } from './services/mcp-json-rpc.service';
@@ -65,6 +66,7 @@ import { UpdateTimerTool } from './tools/update-timer.tool';
     McpRateLimitService,
     McpAuditService,
     McpEnabledGuard,
+    McpOriginGuard,
     McpKeyGuard,
     McpRouterService,
     ListTasksTool,

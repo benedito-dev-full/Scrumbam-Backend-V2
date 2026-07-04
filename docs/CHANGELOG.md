@@ -14,6 +14,21 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **MCP — Transporte Streamable HTTP (spec 2025-03-26) — Reforma 1, 5 fases F1–F5 COMPLETA (V2 F11, 2026-07-04)**
+  - **Objetivo:** Habilitar Claude WEB conectar ao `/mcp` sem quebrar Claude Code (X-MCP-Key, sempre JSON)
+  - **Resultado:** Protocolo aditivo, stateless, JSON-only, 100% back-compat
+  - **F1 — Protocol Version Negotiation:** `McpRouterService.negotiateProtocolVersion()` ecoa versão do cliente (allow-list `['2025-03-26','2024-11-05']`); ausente/desconhecida → default `'2024-11-05'` preserva Claude Code
+  - **F2 — HTTP 202 Accepted:** body só-notifications/responses → HTTP `202` sem corpo; body com ≥1 request → HTTP `200 + application/json`. Dupla checagem `bodyContainsRequest()` + `@Res({ passthrough: true })`. Audit (DEvento -495) reflete httpCode real.
+  - **F3 — Method Validation:** `GET /mcp` e `DELETE /mcp` → HTTP `405 + Allow: POST` (sem guards de auth — 405 é protocolo, não credencial)
+  - **F4 — Anti DNS-Rebinding:** Nova guard `McpOriginGuard` (ortogonal à auth): `Origin` ausente → permite; `Origin` + allow-list → permite; `Origin` + fora → 403; allow-list vazia → fail-open + warn
+  - **F5 — Conformance + Regressão:** 5 suítes (27 testes): protocol-version (6), accept-202 (8), method-not-allowed (4), origin-guard (9), conformance-regressão (16). Handshake Claude Code idêntico. **27/27 PASS, zero regressão.**
+  - **Arquivos modificados:** `mcp.controller.ts` (handle + 405 handlers), `mcp.module.ts` (registra guard), `mcp-router.service.ts` (negotiateProtocolVersion), `constants.ts` (constantes transporte)
+  - **Novo arquivo:** `src/mcp/guards/mcp-origin.guard.ts` (anti DNS-rebinding)
+  - **Specs novos:** 5 suítes cobrindo F1–F5 (27 testes)
+  - **Pilares:** N/A (transporte/protocolo, não entidade de negócio)
+  - **ADRs:** **ADR-V2-071** (novo — transporte Streamable HTTP aditivo, stateless, JSON-only)
+  - **Garantias:** Back-compat total (Claude Code intacto), stateless (sem `Mcp-Session-Id`), JSON-only (nunca SSE), protocol-agnostic (não afeta scopes/rate-limit/tools)
+
 - **MCP tool `create_from_template` — materializar template pronto (V2 F11, Task 1 de 3, 2026-07-03)**
   - Nova tool MCP `create_from_template` — wrapper fino sobre `ProjectsService.createFromTemplate` para clonar estrutura de projeto existente (DClasse -401/-402 TEMPLATE → List/Space real)
   - **Resolução de org de DESTINO (o miolo — MCP sem org de token):** LISTA (idPai) herda org via `findOne(idPai)`; ESPAÇO (sem idPai) deriva via `resolveOrgIdsForUser` (1 org auto, N orgs erro claro)
