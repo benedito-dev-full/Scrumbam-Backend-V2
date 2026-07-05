@@ -36,7 +36,12 @@ async function bootstrap(): Promise<void> {
   );
 
   const apiPrefix = process.env.API_PREFIX || 'api/v1';
-  app.setGlobalPrefix(apiPrefix);
+  // O discovery OAuth (RFC 9728) DEVE viver na raiz do dominio
+  // (/.well-known/oauth-protected-resource), fora do prefixo global, pois e la
+  // que o Claude Web procura. Excluido do setGlobalPrefix por isso. (Reforma 2 F1)
+  app.setGlobalPrefix(apiPrefix, {
+    exclude: ['.well-known/oauth-protected-resource'],
+  });
 
   app.useGlobalPipes(
     new ValidationPipe({
