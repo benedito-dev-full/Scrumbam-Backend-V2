@@ -79,20 +79,21 @@ describe('MCP F3 — GET/DELETE → 405 Method Not Allowed', () => {
   });
 
   describe('POST /mcp permanece protegido (regressão F3 + F4)', () => {
-    it('DoD 4: handle() mantém McpEnabledGuard + McpOriginGuard + McpKeyGuard', () => {
+    it('DoD 4: handle() mantém McpEnabledGuard + McpOriginGuard + McpAuthGuard', () => {
       const guards = guardsOf('handle');
-      // Três guards no POST (após F4): enabled + origin + key. Os nomes
-      // confirmam que a blindagem de credencial NÃO vazou para os handlers 405.
+      // Três guards no POST (após OAuth F4): enabled + origin + auth (dual-auth,
+      // que delega ao McpKeyGuard internamente). Os nomes confirmam que a
+      // blindagem de credencial NÃO vazou para os handlers 405.
       expect(guards).toHaveLength(3);
       const names = guards.map((g) => (g as { name: string }).name);
       expect(names).toEqual(
-        expect.arrayContaining(['McpEnabledGuard', 'McpOriginGuard', 'McpKeyGuard']),
+        expect.arrayContaining(['McpEnabledGuard', 'McpOriginGuard', 'McpAuthGuard']),
       );
     });
 
-    it('F4: McpOriginGuard vem ANTES de McpKeyGuard (barra cedo)', () => {
+    it('OAuth F4: McpOriginGuard vem ANTES de McpAuthGuard (barra cedo)', () => {
       const names = guardsOf('handle').map((g) => (g as { name: string }).name);
-      expect(names.indexOf('McpOriginGuard')).toBeLessThan(names.indexOf('McpKeyGuard'));
+      expect(names.indexOf('McpOriginGuard')).toBeLessThan(names.indexOf('McpAuthGuard'));
     });
   });
 });

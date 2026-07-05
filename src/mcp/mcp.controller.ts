@@ -17,8 +17,8 @@ import { Response } from 'express';
 import { HTTP_STATUS_ACCEPTED, HTTP_STATUS_OK, MCP_ERROR_CODES } from './constants';
 import { JsonRpcRequestDto } from './dto/json-rpc-request.dto';
 import { JsonRpcResponse } from './dto/json-rpc-response.dto';
+import { McpAuthGuard } from './guards/mcp-auth.guard';
 import { McpEnabledGuard } from './guards/mcp-enabled.guard';
-import { McpKeyGuard } from './guards/mcp-key.guard';
 import { McpOriginGuard } from './guards/mcp-origin.guard';
 import { McpAuthenticatedRequest } from './interfaces/mcp.types';
 import { McpAuditService } from './services/mcp-audit.service';
@@ -38,7 +38,7 @@ export class McpController {
 
   @Post()
   @HttpCode(200)
-  @UseGuards(McpEnabledGuard, McpOriginGuard, McpKeyGuard)
+  @UseGuards(McpEnabledGuard, McpOriginGuard, McpAuthGuard)
   @ApiOperation({ summary: 'Endpoint JSON-RPC 2.0 único do MCP' })
   @ApiHeader({ name: 'X-MCP-Key', required: true })
   @ApiBody({ type: Object })

@@ -301,12 +301,14 @@ describe('MCP F5 — Conformance (Streamable HTTP transport, ADR-V2-071)', () =>
       });
     });
 
-    it('POST mantém McpEnabledGuard + McpOriginGuard + McpKeyGuard (Origin antes de Key)', () => {
+    it('POST mantém McpEnabledGuard + McpOriginGuard + McpAuthGuard (Origin antes de Auth)', () => {
       const names = guardsOf('handle').map((g) => (g as { name: string }).name);
+      // OAuth F4: o McpKeyGuard foi substituído pelo McpAuthGuard (dual-auth),
+      // que delega ao McpKeyGuard internamente no caminho X-MCP-Key legado.
       expect(names).toEqual(
-        expect.arrayContaining(['McpEnabledGuard', 'McpOriginGuard', 'McpKeyGuard']),
+        expect.arrayContaining(['McpEnabledGuard', 'McpOriginGuard', 'McpAuthGuard']),
       );
-      expect(names.indexOf('McpOriginGuard')).toBeLessThan(names.indexOf('McpKeyGuard'));
+      expect(names.indexOf('McpOriginGuard')).toBeLessThan(names.indexOf('McpAuthGuard'));
     });
   });
 

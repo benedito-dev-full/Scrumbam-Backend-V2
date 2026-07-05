@@ -11,11 +11,14 @@ import { ProjectsModule } from '../projects/projects.module';
 import { SearchModule } from '../search/search.module';
 import { TabelasModule } from '../tabelas/tabelas.module';
 import { TasksModule } from '../tasks/tasks.module';
+import { McpAuthGuard } from './guards/mcp-auth.guard';
 import { McpEnabledGuard } from './guards/mcp-enabled.guard';
 import { McpKeyGuard } from './guards/mcp-key.guard';
 import { McpOriginGuard } from './guards/mcp-origin.guard';
 import { McpKeysController } from './mcp-keys.controller';
 import { McpController } from './mcp.controller';
+import { WellKnownController } from './well-known.controller';
+import { McpBearerService } from './services/mcp-bearer.service';
 import { McpJsonRpcService } from './services/mcp-json-rpc.service';
 import { McpAuditService } from './services/mcp-audit.service';
 import { McpKeyService } from './services/mcp-key.service';
@@ -59,15 +62,17 @@ import { UpdateTimerTool } from './tools/update-timer.tool';
     FlowMetricsModule,
     ForecastModule,
   ],
-  controllers: [McpController, McpKeysController],
+  controllers: [McpController, McpKeysController, WellKnownController],
   providers: [
     McpJsonRpcService,
     McpKeyService,
+    McpBearerService,
     McpRateLimitService,
     McpAuditService,
     McpEnabledGuard,
     McpOriginGuard,
     McpKeyGuard,
+    McpAuthGuard,
     McpRouterService,
     ListTasksTool,
     CreateTaskTool,
