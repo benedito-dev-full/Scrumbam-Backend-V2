@@ -9,19 +9,19 @@ import {
 import { McpController } from '../mcp.controller';
 
 /**
- * F3 — `GET /mcp` e `DELETE /mcp` → `405 Method Not Allowed` (spec Streamable
- * HTTP 2025-03-26). Cobre o DoD:
- *   1. GET responde 405 + `Allow: POST`, corpo informativo
- *   2. DELETE responde 405 + `Allow: POST`, corpo informativo
- *   3. Handlers NÃO exigem `McpKeyGuard` (405 é protocolo, não credencial —
- *      o cliente MCP sonda o método antes de autenticar)
- *   4. `POST /mcp` permanece intocado (guards McpEnabledGuard + McpKeyGuard)
+ * F3/F5.1 — Transporte GET/DELETE do MCP.
+ *   1. GET `/mcp` → abre stream SSE (F5.1, destrava Claude Web) — protegido
+ *      pelos guards `McpEnabledGuard + McpOriginGuard + McpAuthGuard` (o Web
+ *      manda o Bearer também no GET). NÃO é mais 405.
+ *   2. DELETE `/mcp` → segue `405 Method Not Allowed` + `Allow: POST` (stateless,
+ *      sem sessão a terminar — ADR-V2-071).
+ *   3. DELETE não exige guard de credencial (405 é protocolo).
+ *   4. `POST /mcp` permanece intocado (McpEnabledGuard + McpOriginGuard + McpAuthGuard).
  *
- * Como os handlers são síncronos e sem dependências, os asserts de status/header
- * são feitos via metadata dos decorators (@HttpCode / @Header) — a mesma fonte
- * de verdade que o Nest usa em runtime para montar a resposta.
+ * Asserts via metadata dos decorators — a mesma fonte de verdade que o Nest usa
+ * em runtime.
  */
-describe('MCP F3 — GET/DELETE → 405 Method Not Allowed', () => {
+describe('MCP F3/F5.1 — transporte GET(SSE)/DELETE(405)', () => {
   /** Lê o status HTTP declarado por @HttpCode no método. */
   const httpCodeOf = (method: keyof McpController): number =>
     Reflect.getMetadata(HTTP_CODE_METADATA, McpController.prototype[method] as object);
@@ -44,21 +44,21 @@ describe('MCP F3 — GET/DELETE → 405 Method Not Allowed', () => {
       | unknown[]
       | undefined) ?? [];
 
-  describe('GET /mcp', () => {
-    it('DoD 1: retorna 405 com Allow: POST e corpo informativo', () => {
-      const controller = Object.create(McpController.prototype) as McpController;
-
-      expect(httpCodeOf('methodNotAllowedGet')).toBe(405);
-      expect(headersOf('methodNotAllowedGet')).toEqual({ Allow: 'POST' });
-      expect(controller.methodNotAllowedGet()).toEqual({
-        error: 'Method Not Allowed. Use POST.',
-      });
+  describe('GET /mcp → SSE (F5.1)', () => {
+    it('DoD 1: GET é protegido pelos 3 guards (Bearer no GET do Claude Web)', () => {
+      // O GET agora abre stream SSE e exige credencial (como o POST), pois o
+      // Claude Web manda o Authorization: Bearer também no GET.
+      const guards = guardsOf('openSseStream');
+      expect(guards).toHaveLength(3);
+      const names = guards.map((g) => (g as { name: string }).name);
+      expect(names).toEqual(
+        expect.arrayContaining(['McpEnabledGuard', 'McpOriginGuard', 'McpAuthGuard']),
+      );
     });
 
-    it('DoD 3: não exige McpKeyGuard (protocolo, não credencial)', () => {
-      // Sonda de método precede a autenticação; o handler deve responder 405
-      // sem nenhum guard de chave no seu nível.
-      expect(guardsOf('methodNotAllowedGet')).toHaveLength(0);
+    it('DoD 1b: GET não declara mais 405 (deixou de ser method-not-allowed)', () => {
+      // Sem @HttpCode(405): o handler controla a Response manualmente (200 + SSE).
+      expect(httpCodeOf('openSseStream')).toBeUndefined();
     });
   });
 

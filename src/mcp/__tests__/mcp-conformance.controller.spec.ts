@@ -283,13 +283,13 @@ describe('MCP F5 — Conformance (Streamable HTTP transport, ADR-V2-071)', () =>
         | unknown[]
         | undefined) ?? [];
 
-    it('GET → 405 + Allow: POST, sem guard de credencial', () => {
-      expect(httpCodeOf('methodNotAllowedGet')).toBe(405);
-      expect(headersOf('methodNotAllowedGet')).toEqual({ Allow: 'POST' });
-      expect(guardsOf('methodNotAllowedGet')).toHaveLength(0);
-      expect(controller.methodNotAllowedGet()).toEqual({
-        error: 'Method Not Allowed. Use POST.',
-      });
+    it('GET → SSE protegido pelos 3 guards (F5.1, destrava Claude Web)', () => {
+      // O GET deixou de ser 405: abre stream SSE e exige credencial como o POST
+      // (o Claude Web manda o Bearer também no GET).
+      const names = guardsOf('openSseStream').map((g) => (g as { name: string }).name);
+      expect(names).toEqual(
+        expect.arrayContaining(['McpEnabledGuard', 'McpOriginGuard', 'McpAuthGuard']),
+      );
     });
 
     it('DELETE → 405 + Allow: POST, sem guard de credencial', () => {

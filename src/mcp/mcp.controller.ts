@@ -83,28 +83,68 @@ export class McpController {
   }
 
   /**
-   * `GET /mcp` → 405 Method Not Allowed (spec Streamable HTTP 2025-03-26).
+   * `GET /mcp` → abre um stream SSE (`text/event-stream`) mínimo e stateless.
    *
-   * Este servidor é STATELESS e NÃO oferece stream SSE server-push, logo o
-   * método GET (usado por clientes para abrir um stream de eventos) não é
-   * suportado. Conforme a spec, a resposta correta é 405 com header
-   * `Allow: POST` — o cliente MCP sonda o método ANTES de autenticar, por
-   * isso este handler NÃO exige `McpKeyGuard` (405 é sobre o método, não
-   * sobre credencial). O único método servido é `POST`.
+   * A spec Streamable HTTP (2025-03-26) permite que o servidor responda 405 ao
+   * GET quando não oferece SSE server-push. Porém, na prática, o **Claude Web**
+   * NÃO tolera o 405: após completar o OAuth, ele abre `GET /mcp` esperando um
+   * `200 text/event-stream` e, sem isso, entra em loop e nunca envia o `POST
+   * initialize` — resultando em "authorization failed" (ver issues públicas
+   * anthropics/claude-ai-mcp #291). O Claude Code, ao contrário, tolera o 405.
    *
-   * @returns Corpo simples informando que apenas POST é aceito.
+   * Para destravar o Web sem virar servidor stateful, este handler abre um
+   * stream SSE keep-alive que NÃO faz server-push (mantemos o stateless de
+   * ADR-V2-071): apenas emite comentários `:keep-alive` periódicos para manter
+   * a conexão viva. O trabalho real continua 100% no `POST /mcp` (JSON-RPC).
    *
-   * @see ADR-V2-071 (transporte Streamable HTTP aditivo, stateless)
+   * Passa pelos guards `McpEnabledGuard, McpOriginGuard, McpAuthGuard` — o
+   * Claude Web envia o `Authorization: Bearer` também no GET. Sem credencial
+   * válida, o guard responde 401 (ou soft-fail) exatamente como no POST.
+   *
+   * @param request - Request autenticada (userCtx populado pelos guards).
+   * @param res - Response do Express, usado em modo raw para o stream SSE.
+   *
+   * @see ADR-V2-071 (transporte Streamable HTTP aditivo)
+   * @see ADR-V2-073 (GET SSE keep-alive aditivo p/ Claude Web — F5.1)
    */
   @Get()
-  @HttpCode(405)
-  @Header('Allow', 'POST')
-  @ApiOperation({
-    summary: 'Método não suportado (servidor stateless, sem SSE server-push)',
-  })
-  @ApiResponse({ status: 405, description: 'Method Not Allowed. Use POST.' })
-  methodNotAllowedGet(): { error: string } {
-    return { error: 'Method Not Allowed. Use POST.' };
+  @UseGuards(McpEnabledGuard, McpOriginGuard, McpAuthGuard)
+  @ApiOperation({ summary: 'Abre stream SSE keep-alive (Streamable HTTP)' })
+  @ApiResponse({ status: 200, description: 'SSE stream (text/event-stream)' })
+  openSseStream(
+    @Req() request: McpAuthenticatedRequest,
+    @Res() res: Response,
+  ): void {
+    // Credencial inválida no GET: espelha o POST (401 hard-fail já foi lançado
+    // pelo McpAuthGuard para Bearer inválido; resta o soft-fail do X-MCP-Key).
+    if (request.mcpAuthError || !request.userCtx) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    res.status(200);
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    // Sessão sintética (stateless): ecoada para satisfazer clientes que
+    // esperam um Mcp-Session-Id, sem que o servidor guarde estado algum.
+    res.setHeader('Mcp-Session-Id', randomUUID());
+    res.flushHeaders?.();
+
+    // Evento inicial + keep-alive periódico. NÃO fazemos server-push de
+    // mensagens JSON-RPC (stateless): o stream existe só para o cliente
+    // considerar a conexão "aberta" e então prosseguir com o POST initialize.
+    res.write(': connected\n\n');
+    const keepAlive = setInterval(() => {
+      res.write(': keep-alive\n\n');
+    }, 15000);
+
+    const close = (): void => {
+      clearInterval(keepAlive);
+      res.end();
+    };
+    request.on('close', close);
+    request.on('aborted', close);
   }
 
   /**
