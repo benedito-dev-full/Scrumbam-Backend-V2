@@ -1,5 +1,7 @@
 import type { ConfigService } from '@nestjs/config';
 
+import { ALL_MCP_SCOPES } from './constants';
+
 /**
  * Constantes e helpers OAuth 2.1 do MCP (Reforma 2 — Resource Server).
  *
@@ -123,13 +125,25 @@ export function deriveResourceMetadataUrl(resource: string): string {
  * spec) que instrui o cliente a descobrir o Authorization Server via o resource
  * metadata. Formato:
  *
- *   `Bearer resource_metadata="<resourceMetadataUrl>"`
+ *   `Bearer resource_metadata="<url>", scope="<s1> <s2> ..."`
+ *
+ * O parâmetro `scope` é OBRIGATÓRIO para o Claude Web: a doc oficial de
+ * connectors da Anthropic afirma que o Claude lê os scopes a solicitar ao
+ * Authorization Server a partir do parâmetro `scope` deste header no 401 — NÃO
+ * do `scopes_supported` do discovery. Sem ele, o Claude registra/autoriza sem
+ * os scopes da API (token sai com `scope: null`) e o handshake falha após o
+ * login. Os scopes são os do catálogo canônico (ADR-V2-068).
  *
  * @param resourceMetadataUrl - URL absoluta do endpoint de discovery.
+ * @param scopes - Scopes a anunciar (default: catálogo canônico completo).
  * @returns O valor pronto para `res.setHeader('WWW-Authenticate', ...)`.
  */
-export function buildWwwAuthenticate(resourceMetadataUrl: string): string {
-  return `Bearer resource_metadata="${resourceMetadataUrl}"`;
+export function buildWwwAuthenticate(
+  resourceMetadataUrl: string,
+  scopes: readonly string[] = ALL_MCP_SCOPES,
+): string {
+  const scopeParam = scopes.length > 0 ? `, scope="${scopes.join(' ')}"` : '';
+  return `Bearer resource_metadata="${resourceMetadataUrl}"${scopeParam}`;
 }
 
 /**

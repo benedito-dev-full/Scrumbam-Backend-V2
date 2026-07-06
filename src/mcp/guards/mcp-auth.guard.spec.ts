@@ -23,8 +23,12 @@ import { McpAuthGuard } from './mcp-auth.guard';
 describe('McpAuthGuard (F4 — dual-auth OAuth + X-MCP-Key)', () => {
   const RESOURCE_URI = 'https://host.example.com/mcp';
   const ISSUER = 'https://tenant.us.auth0.com/';
+  // Inclui o parâmetro `scope` (F5.1): o Claude Web lê os scopes a solicitar ao
+  // Authorization Server a partir daqui (doc oficial de connectors). Os 6 scopes
+  // do catálogo canônico (ADR-V2-068), na ordem de ALL_MCP_SCOPES.
   const EXPECTED_WWW_AUTH =
-    'Bearer resource_metadata="https://host.example.com/.well-known/oauth-protected-resource"';
+    'Bearer resource_metadata="https://host.example.com/.well-known/oauth-protected-resource", ' +
+    'scope="tasks:read tasks:write notifications:read notifications:write projects:write executions:create"';
 
   const OAUTH_ENV: Record<string, string> = {
     [MCP_OAUTH_RESOURCE_URI_ENV]: RESOURCE_URI,
