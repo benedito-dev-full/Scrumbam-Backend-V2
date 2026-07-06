@@ -5,7 +5,6 @@ import {
   Get,
   Header,
   HttpCode,
-  Logger,
   Post,
   Req,
   Res,
@@ -30,8 +29,6 @@ import { McpRouterService } from './services/mcp-router.service';
 @ApiTags('MCP')
 @Controller('mcp')
 export class McpController {
-  private readonly logger = new Logger(McpController.name);
-
   constructor(
     private readonly jsonRpc: McpJsonRpcService,
     private readonly router: McpRouterService,
@@ -39,26 +36,6 @@ export class McpController {
     private readonly audit?: McpAuditService,
   ) {}
 
-  /**
-   * Log de diagnóstico temporário (F5.1) — registra a assinatura de cada
-   * request que chega ao MCP (método, accept, presença de auth/session/proto),
-   * SEM vazar o token. Serve para observar a sequência exata que o Claude Web
-   * executa após o OAuth. Remover após fechar o handshake do Web.
-   */
-  private logInbound(method: string, request: McpAuthenticatedRequest): void {
-    const h = request.headers ?? {};
-    const has = (k: string): string => (h[k] ? 'yes' : 'no');
-    const authKind = h.authorization
-      ? String(h.authorization).slice(0, 7)
-      : 'none';
-    this.logger.log(
-      `MCP_INBOUND ${method} accept=${String(h.accept ?? '')} ` +
-        `auth=${authKind} x-mcp-key=${has('x-mcp-key')} ` +
-        `mcp-session-id=${has('mcp-session-id')} ` +
-        `mcp-protocol-version=${String(h['mcp-protocol-version'] ?? 'none')} ` +
-        `origin=${String(h.origin ?? 'none')}`,
-    );
-  }
 
   @Post()
   @HttpCode(200)
@@ -72,7 +49,6 @@ export class McpController {
     @Res({ passthrough: true }) res?: Response,
   ): Promise<JsonRpcResponse | JsonRpcResponse[] | null> {
     const startedAt = Date.now();
-    this.logInbound('POST', request);
 
     // A spec Streamable HTTP manda o servidor devolver um `Mcp-Session-Id` no
     // header da resposta ao `initialize`; o cliente o ecoa nas requisições
@@ -151,7 +127,6 @@ export class McpController {
     @Req() request: McpAuthenticatedRequest,
     @Res() res: Response,
   ): void {
-    this.logInbound('GET', request);
     // Credencial inválida no GET: espelha o POST (401 hard-fail já foi lançado
     // pelo McpAuthGuard para Bearer inválido; resta o soft-fail do X-MCP-Key).
     if (request.mcpAuthError || !request.userCtx) {

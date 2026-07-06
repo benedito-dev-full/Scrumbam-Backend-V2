@@ -100,9 +100,7 @@ export class McpBearerService {
       // Não confiar apenas no jwtVerify: qualquer falha (assinatura, iss, aud,
       // exp, malformado) cai aqui e vira null. Nunca vaza o token no log.
       const reason = error instanceof Error ? error.message : 'unknown';
-      // TEMPORÁRIO (F5.1 diagnóstico Claude Web): warn em vez de debug para
-      // aparecer no log de produção. Reverter para debug após o handshake.
-      this.logger.warn(`MCP_BEARER_FAIL: ${reason}`);
+      this.logger.debug(`Validação Bearer falhou: ${reason}`);
       return null;
     }
 
