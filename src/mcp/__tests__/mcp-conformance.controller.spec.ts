@@ -59,7 +59,8 @@ describe('MCP F5 — Conformance (Streamable HTTP transport, ADR-V2-071)', () =>
    */
   const buildResMock = (): { res: Response; statusSpy: jest.Mock } => {
     const statusSpy = jest.fn();
-    const res = { status: statusSpy } as unknown as Response;
+    // setHeader é chamado no initialize (F5.1 — Mcp-Session-Id); mock no-op.
+    const res = { status: statusSpy, setHeader: jest.fn() } as unknown as Response;
     statusSpy.mockReturnValue(res);
     return { res, statusSpy };
   };
@@ -162,7 +163,17 @@ describe('MCP F5 — Conformance (Streamable HTTP transport, ADR-V2-071)', () =>
   });
 
   describe('MATRIZ — negociação de protocolVersion', () => {
-    it('ecoa 2025-03-26 quando pedido (Claude Web)', async () => {
+    it('ecoa 2025-06-18 quando pedido (Claude Web atual — F5.1)', async () => {
+      const res = await call({
+        jsonrpc: '2.0',
+        method: 'initialize',
+        id: 1,
+        params: { protocolVersion: '2025-06-18' },
+      });
+      expect((res.result as { protocolVersion: string }).protocolVersion).toBe('2025-06-18');
+    });
+
+    it('ecoa 2025-03-26 quando pedido', async () => {
       const res = await call({
         jsonrpc: '2.0',
         method: 'initialize',

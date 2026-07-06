@@ -76,7 +76,11 @@ export const MCP_PROTOCOL_VERSION = '2024-11-05';
  *
  * @see ADR-V2-071 (transporte Streamable HTTP aditivo)
  */
-export const MCP_SUPPORTED_PROTOCOL_VERSIONS = ['2025-03-26', '2024-11-05'] as const;
+export const MCP_SUPPORTED_PROTOCOL_VERSIONS = [
+  '2025-06-18',
+  '2025-03-26',
+  '2024-11-05',
+] as const;
 
 export type McpSupportedProtocolVersion = (typeof MCP_SUPPORTED_PROTOCOL_VERSIONS)[number];
 
