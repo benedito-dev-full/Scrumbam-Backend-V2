@@ -45,7 +45,11 @@ async function bootstrap(): Promise<void> {
   // (/.well-known/oauth-protected-resource), fora do prefixo global, pois e la
   // que o Claude Web procura. Excluido do setGlobalPrefix por isso. (Reforma 2 F1)
   app.setGlobalPrefix(apiPrefix, {
-    exclude: ['.well-known/oauth-protected-resource'],
+    exclude: [
+      '.well-known/oauth-protected-resource',
+      // Variante RFC 9728 §3.1 (recurso com path) — onde o Claude Web busca.
+      '.well-known/oauth-protected-resource/api/v1/mcp',
+    ],
   });
 
   app.useGlobalPipes(

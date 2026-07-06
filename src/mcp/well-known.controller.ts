@@ -53,7 +53,7 @@ export class WellKnownController {
   @Get('.well-known/oauth-protected-resource')
   @Header('Cache-Control', MCP_OAUTH_DISCOVERY_CACHE_CONTROL)
   @ApiOperation({
-    summary: 'OAuth Protected Resource Metadata (RFC 9728)',
+    summary: 'OAuth Protected Resource Metadata (RFC 9728) — raiz',
     description:
       'Discovery público que anuncia o Authorization Server (Auth0) e os scopes do MCP. 404 quando OAuth não está configurado.',
   })
@@ -64,6 +64,44 @@ export class WellKnownController {
   })
   @ApiResponse({ status: 404, description: 'OAuth não configurado (envs ausentes)' })
   getProtectedResourceMetadata(): OAuthProtectedResourceDto {
+    return this.buildMetadata();
+  }
+
+  /**
+   * `GET /.well-known/oauth-protected-resource/api/v1/mcp` — variante da RFC 9728
+   * §3.1 para recursos COM path.
+   *
+   * Quando o `resource` tem um componente de path (ex.: `/api/v1/mcp`), a RFC
+   * 9728 manda inserir `/.well-known/oauth-protected-resource` ENTRE o host e o
+   * path — resultando neste endpoint. Clientes estritos (o Claude Web) buscam o
+   * metadata AQUI, não na raiz; sem este handler recebem 404 e abortam o
+   * handshake OAuth silenciosamente. O path é fixo porque reflete o nosso
+   * canonical resource URI (`https://host/api/v1/mcp`).
+   *
+   * @see RFC 9728 §3.1 (Well-Known URI path insertion para recursos com path)
+   * @see ADR-V2-073 (F5.1 — discovery no path do recurso p/ Claude Web)
+   */
+  @Get('.well-known/oauth-protected-resource/api/v1/mcp')
+  @Header('Cache-Control', MCP_OAUTH_DISCOVERY_CACHE_CONTROL)
+  @ApiOperation({
+    summary: 'OAuth Protected Resource Metadata (RFC 9728) — path do recurso',
+    description:
+      'Variante RFC 9728 §3.1 para recurso com path; é onde clientes estritos (Claude Web) buscam o metadata.',
+  })
+  @ApiResponse({ status: 200, type: OAuthProtectedResourceDto })
+  @ApiResponse({ status: 404, description: 'OAuth não configurado (envs ausentes)' })
+  getProtectedResourceMetadataWithPath(): OAuthProtectedResourceDto {
+    return this.buildMetadata();
+  }
+
+  /**
+   * Monta o corpo do metadata RFC 9728 a partir da config OAuth resolvida.
+   * Compartilhado pelos dois endpoints (raiz + path do recurso).
+   *
+   * @returns O metadata de discovery.
+   * @throws {NotFoundException} Quando as env vars OAuth estão ausentes.
+   */
+  private buildMetadata(): OAuthProtectedResourceDto {
     const oauthConfig = resolveMcpOAuthConfig(this.configService);
 
     if (!oauthConfig) {
