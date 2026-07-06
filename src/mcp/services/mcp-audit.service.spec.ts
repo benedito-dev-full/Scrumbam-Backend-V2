@@ -65,9 +65,12 @@ describe('McpAuditService (caminho Bearer OAuth)', () => {
 
     // Classe canônica -495 (MCP call) — intocada.
     expect(data.idClasse).toBe(MCP_CALL_EVENT_CLASS_ID);
-    // idEntidade vem do dEntidadeId SINTÉTICO do Bearer.
-    expect(data.idEntidade).toBe(bearerCtx.dEntidadeId);
-    expect(typeof data.idEntidade).toBe('bigint');
+    // OAuth: idEntidade é NULL (o dEntidadeId sintético não é uma DEntidade
+    // real — gravá-lo violaria a FK DEvento_idEntidade_fkey, o que derrubava a
+    // auditoria no handshake do Claude Web). A identidade sintética é preservada
+    // em metaDados.syntheticEntidadeId. (F5.1)
+    expect(data.idEntidade).toBeNull();
+    expect(data.metaDados.syntheticEntidadeId).toBe(bearerCtx.dEntidadeId.toString());
     // keyPrefix sintético do Bearer propaga para o metaDados do evento.
     expect(data.metaDados.keyPrefix).toBe('oauth');
     expect(data.metaDados.method).toBe('tools/call');

@@ -27,10 +27,19 @@ export class McpAuditService {
         JSON.stringify(input.params ?? {}),
       );
 
+      // Identidades OAuth (keyPrefix='oauth') têm `dEntidadeId` SINTÉTICO
+      // (hash do `sub` do token) que NÃO corresponde a uma DEntidade real —
+      // gravá-lo em `idEntidade` viola a FK DEvento_idEntidade_fkey e derruba
+      // a auditoria (observado no handshake do Claude Web). Nesse caso gravamos
+      // `idEntidade: null` e preservamos a identidade sintética em metaDados
+      // (`syntheticEntidadeId`). O mapeamento rico OAuth↔DEntidade é follow-up
+      // (ADR-V2-072). Identidades X-MCP-Key seguem com o FK real. (F5.1)
+      const isOAuth = input.userCtx.keyPrefix === 'oauth';
+
       await this.prisma.dEvento.create({
         data: {
           idClasse: MCP_CALL_EVENT_CLASS_ID,
-          idEntidade: input.userCtx.dEntidadeId,
+          idEntidade: isOAuth ? null : input.userCtx.dEntidadeId,
           identificadorExterno: input.correlationId,
           descricao: `MCP call ${input.method}`,
           metaDados: {
@@ -40,6 +49,9 @@ export class McpAuditService {
             durationMs: input.durationMs,
             keyPrefix: input.userCtx.keyPrefix,
             correlationId: input.correlationId,
+            ...(isOAuth
+              ? { syntheticEntidadeId: input.userCtx.dEntidadeId.toString() }
+              : {}),
           } as Prisma.JsonObject,
         },
       });

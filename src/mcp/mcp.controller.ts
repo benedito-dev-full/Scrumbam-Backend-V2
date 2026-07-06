@@ -74,6 +74,17 @@ export class McpController {
     const startedAt = Date.now();
     this.logInbound('POST', request);
 
+    // A spec Streamable HTTP manda o servidor devolver um `Mcp-Session-Id` no
+    // header da resposta ao `initialize`; o cliente o ecoa nas requisições
+    // seguintes. Clientes tolerantes (MCP Inspector) funcionam sem ele, mas o
+    // Claude Web o EXIGE — sem o header no initialize ele considera a sessão
+    // inválida e reporta "authorization failed". Somos stateless (ADR-V2-071):
+    // o id é sintético (UUID) e NÃO é validado nas requisições subsequentes —
+    // existe só para satisfazer o cliente. (Reforma 2 F5.1)
+    if (res && this.bodyContainsInitialize(body)) {
+      res.setHeader('Mcp-Session-Id', randomUUID());
+    }
+
     // Classifica o input ANTES de despachar: um body sem nenhuma request
     // (só notifications/responses) deve responder 202 Accepted sem corpo,
     // conforme spec MCP Streamable HTTP (2025-03-26). Erro/rate-limit/body
@@ -209,6 +220,19 @@ export class McpController {
     }
 
     return this.itemIsRequest(body);
+  }
+
+  /**
+   * Indica se o body (single ou batch) contém um request `initialize` — é nele
+   * que a spec Streamable HTTP manda emitir o header `Mcp-Session-Id`.
+   */
+  private bodyContainsInitialize(body: unknown): boolean {
+    const isInit = (item: unknown): boolean =>
+      !!item &&
+      typeof item === 'object' &&
+      !Array.isArray(item) &&
+      (item as Record<string, unknown>).method === 'initialize';
+    return Array.isArray(body) ? body.some(isInit) : isInit(body);
   }
 
   private itemIsRequest(item: unknown): boolean {
