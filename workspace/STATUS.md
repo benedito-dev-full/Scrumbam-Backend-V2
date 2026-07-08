@@ -1,6 +1,53 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-07-04 (Reforma 1 — Transporte Streamable HTTP COMPLETA + Iniciativa MCP 3/3)
+**Ultima atualizacao:** 2026-07-08 (Task 7 — Promover Projeto/Lista a Template COMPLETA + Iniciativa MCP 3/3)
+
+---
+
+## Task 7 — Promover Projeto/Lista a Template — COMPLETE (V2 Fase F11)
+
+**Module:** endpoints (projects/)
+**Task:** Nova rota `POST /projects/:id/promote-to-template` — promove List/Space real a template reutilizável (CÓPIA, não mutação)
+**Status:** COMPLETA
+**Duration:** ~2h15 total (Strategist ~0.5h plan + Implementer ~1h15 code + Reviewer ~0.25h + Documenter ~0.15h)
+**Quality Score:** 9.0/10 (APPROVED)
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | ~0.5h | — |
+| Implementer | ~1h15 | — |
+| Reviewer | ~0.25h | 9.0/10 |
+| Documenter | ~0.15h | — |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DProject estrutural, Prisma direto correto
+- Pilar 2 (Endpoints): ✅ REUTILIZADO — cloneTree motor existente + ProjectsController existente (zero novo)
+- Pilar 3 (Seed): N/A — usa -401/-402 já existentes
+
+**Deliverables:**
+- [x] DTO `PromoteToTemplateDto` (categoria obrigatório + novoNome opcional)
+- [x] Método `promoteToTemplate()` em ProjectsService (valida origem + delega a cloneTree)
+- [x] Endpoint `POST /projects/:id/promote-to-template` em ProjectsController
+- [x] Constante `REAL_TO_TEMPLATE_CLASS_REMAP` (mapa inverso de classe)
+- [x] Extensão `CloneTreeOptions` com `toTemplate` + `categoriaTemplate`
+- [x] 10 testes novos (promove LIST, SPACE com filhas, validações, tenant, idEstab)
+
+**Metrics:**
+- Build: PASS
+- TypeScript: 0 errors
+- ESLint: 0 warnings
+- Testes novos: 10/10 PASS
+- Regressão: 0 (duplicate/createFromTemplate intactos)
+
+**Decisão Crítica:**
+- ✅ CÓPIA, não mutação — projeto original intacto com suas ~49 tasks
+- ✅ Remap bidirecional: -352↔-401, -350↔-402
+- ✅ Categoria obrigatória, texto livre (sem enum, permite novas categorias)
+- ✅ Template org-scoped (idEstab = org ativa, nunca global)
+- ✅ Blocos copiados, tasks NÃO copiadas (molde-limpo)
+
+**ADRs:** **ADR-V2-062** (novo — cópia + remap), ADR-V2-061 (pai), ADR-V2-042/058
 
 ---
 
@@ -6235,5 +6282,49 @@ Ambos comportamentos já estavam no código; testes documentam o contrato.
 **Task:** #412
 **Timestamp:** 16/06/2026 18:12:09
 **Agent:** reviewer
+**Status:** Completo
+
+
+---
+
+<!-- dedup:documenter:7 -->
+### Agent Concluído: documenter
+
+**Task:** #7
+**Timestamp:** 08/07/2026 20:10:41
+**Agent:** documenter
+**Status:** Completo
+
+
+---
+
+<!-- dedup:strategist:7 -->
+### Agent Concluído: strategist
+
+**Task:** #7
+**Timestamp:** 08/07/2026 20:10:41
+**Agent:** strategist
+**Status:** Completo
+
+
+---
+
+<!-- dedup:reviewer:7 -->
+### Agent Concluído: reviewer
+
+**Task:** #7
+**Timestamp:** 08/07/2026 20:10:41
+**Agent:** reviewer
+**Status:** Completo
+
+
+---
+
+<!-- dedup:implementer:7 -->
+### Agent Concluído: implementer
+
+**Task:** #7
+**Timestamp:** 08/07/2026 20:10:41
+**Agent:** implementer
 **Status:** Completo
 

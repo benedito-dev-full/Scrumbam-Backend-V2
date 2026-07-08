@@ -2332,6 +2332,310 @@ describe('ProjectsService', () => {
     });
   });
 
+  describe('promoteToTemplate() — extensão Templates (ADR-V2-062)', () => {
+    /**
+     * Monta a tx do cloneTree para o caminho `toTemplate`: dProject.create
+     * devolve o nó materializado com a classe já remapeada (real→template);
+     * dTask.findMany distingue fases/-200 de tasks/-154 (deve vir vazio no
+     * caminho promote, pois includeTasks nunca é true aqui).
+     */
+    function mockPromoteTx(args: { phases?: Array<Record<string, unknown>> } = {}) {
+      const { phases = [] } = args;
+      let projChaveSeq = 900;
+      const dProjectCreate = jest
+        .fn()
+        .mockImplementation(
+          ({ data }: { data: { idClasse: bigint; idEstab?: bigint; dados: Record<string, unknown> } }) =>
+            Promise.resolve({
+              chave: BigInt(projChaveSeq++),
+              idClasse: data.idClasse,
+              nome: 'Promovido',
+              idEstab: data.idEstab ?? BigInt(50),
+              dados: data.dados,
+            }),
+        );
+      const dProjectFindFirst = jest.fn().mockResolvedValue(null); // slug livre
+      const findFirstOrThrow = jest.fn().mockResolvedValue({
+        ...mockProject,
+        chave: BigInt(900),
+        idClasse: BigInt(-401),
+        idEstab: BigInt(50),
+        nome: 'Promovido',
+        dados: { prefix: 'DEV', categoria: 'Desenvolvimento' },
+      });
+      const dTaskFindMany = jest
+        .fn()
+        .mockImplementation(({ where }: { where: { idClasse: bigint } }) =>
+          Promise.resolve(where.idClasse === BigInt(-200) ? phases : []),
+        );
+      const dTaskCreate = jest.fn().mockResolvedValue({ chave: BigInt(800) });
+
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
+        fn({
+          dProject: { create: dProjectCreate, findFirst: dProjectFindFirst, findFirstOrThrow },
+          dTask: { findMany: dTaskFindMany, create: dTaskCreate },
+        }),
+      );
+      return { dProjectCreate, dTaskCreate, findFirstOrThrow };
+    }
+
+    /** Nó de origem único (LIST -352 ou SPACE -350, conforme informado). */
+    function originNode(idClasse: bigint, chave = BigInt(108)) {
+      prisma.$queryRaw.mockResolvedValue([
+        {
+          chave,
+          idClasse,
+          idPai: null,
+          nome: 'Testes E2E',
+          descricao: null,
+          idEstab: BigInt(50),
+          repoUrl: null,
+          privado: false,
+          dados: { prefix: 'DEV' },
+          tableFields: null,
+          depth: 0,
+        },
+      ]);
+    }
+
+    it('promove uma LIST com blocos e tasks: resultado -401, blocos copiados, ZERO tasks, categoria correta', async () => {
+      // #1 = validação de origem (promoteToTemplate); #2 = tenant peek (cloneTree).
+      prisma.dProject.findFirst
+        .mockResolvedValueOnce({ idClasse: BigInt(-352) }) // validação origem
+        .mockResolvedValueOnce({ idEstab: BigInt(50) }); // tenant peek
+      prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(1) }); // MANAGER na origem
+      originNode(BigInt(-352));
+      const { dProjectCreate, dTaskCreate } = mockPromoteTx({
+        phases: [
+          { chave: BigInt(50), idPai: null, nome: 'Bugs', descricao: null, dados: {} },
+        ],
+      });
+
+      const result = await service.promoteToTemplate('108', BigInt(100), '50', {
+        categoria: 'Desenvolvimento',
+      });
+
+      // Nó materializado: classe TEMPLATE (-352→-401) e idEstab da org ativa.
+      const createArg = dProjectCreate.mock.calls[0][0] as {
+        data: { idClasse: bigint; idEstab: bigint; dados: Record<string, unknown> };
+      };
+      expect(createArg.data.idClasse).toBe(BigInt(-401));
+      expect(createArg.data.idEstab).toBe(BigInt(50));
+      expect(createArg.data.dados.categoria).toBe('Desenvolvimento');
+      // Blocos DEVEM ser copiados: o gate de `cloneTree` testa a classe
+      // ORIGINAL do nó (`node.idClasse === ID_CLASSE_LIST`, -352) quando
+      // `opts.toTemplate` está ativo — não a materializada (-401) — então
+      // `copyPhases` roda e o bloco "Bugs" é recriado na List-template.
+      const phaseCreates = dTaskCreate.mock.calls
+        .map((c) => c[0] as { data: Record<string, unknown> })
+        .filter((c) => c.data.idClasse === BigInt(-200));
+      expect(phaseCreates).toHaveLength(1);
+      expect(phaseCreates[0].data.nome).toBe('Bugs');
+      // seedProject (seed de statuses V3) é PULADO — o resultado é uma
+      // List-template (-401), não uma List real (-352); statuses V3 não se
+      // aplicam ao editor de templates.
+      expect(seedBootstrap.seedProject).not.toHaveBeenCalled();
+      // ZERO tasks -154 copiadas (includeTasks ausente/default false).
+      const taskCreates = dTaskCreate.mock.calls
+        .map((c) => c[0] as { data: Record<string, unknown> })
+        .filter((c) => c.data.idClasse === BigInt(-154));
+      expect(taskCreates).toHaveLength(0);
+      expect(result.myRole).toBe('MANAGER');
+    });
+
+    it('emite project.created com promotedToTemplate=true', async () => {
+      prisma.dProject.findFirst
+        .mockResolvedValueOnce({ idClasse: BigInt(-352) })
+        .mockResolvedValueOnce({ idEstab: BigInt(50) });
+      prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(1) });
+      originNode(BigInt(-352));
+      mockPromoteTx();
+
+      await service.promoteToTemplate('108', BigInt(100), '50', { categoria: 'Desenvolvimento' });
+
+      expect(eventProducer.addInternalEvent).toHaveBeenCalledWith(
+        'project.created',
+        expect.objectContaining({ promotedToTemplate: true, duplicatedFrom: '108' }),
+        'test-corr-id',
+        expect.objectContaining({ source: 'ProjectsService' }),
+      );
+    });
+
+    it('promove um SPACE com Folder+List filhas: raiz vira -402, List interna vira -401, Folder permanece -351', async () => {
+      prisma.dProject.findFirst
+        .mockResolvedValueOnce({ idClasse: BigInt(-350) }) // validação origem: é SPACE
+        .mockResolvedValueOnce({ idEstab: BigInt(50) }); // tenant peek
+      prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(1) }); // MANAGER na origem
+      prisma.$queryRaw.mockResolvedValue([
+        {
+          chave: BigInt(200),
+          idClasse: BigInt(-350),
+          idPai: null,
+          nome: 'Space Raiz',
+          descricao: null,
+          idEstab: BigInt(50),
+          repoUrl: null,
+          privado: false,
+          dados: {},
+          tableFields: null,
+          depth: 0,
+        },
+        {
+          chave: BigInt(201),
+          idClasse: BigInt(-351),
+          idPai: BigInt(200),
+          nome: 'Folder Filho',
+          descricao: null,
+          idEstab: BigInt(50),
+          repoUrl: null,
+          privado: false,
+          dados: {},
+          tableFields: null,
+          depth: 1,
+        },
+        {
+          chave: BigInt(202),
+          idClasse: BigInt(-352),
+          idPai: BigInt(201),
+          nome: 'List Neta',
+          descricao: null,
+          idEstab: BigInt(50),
+          repoUrl: null,
+          privado: false,
+          dados: { prefix: 'DEV' },
+          tableFields: null,
+          depth: 2,
+        },
+      ]);
+      const { dProjectCreate, dTaskCreate } = mockPromoteTx({
+        phases: [
+          { chave: BigInt(60), idPai: null, nome: 'Ajustes Estruturais', descricao: null, dados: {} },
+        ],
+      });
+
+      await service.promoteToTemplate('200', BigInt(100), '50', { categoria: 'Desenvolvimento' });
+
+      const createdClasses = dProjectCreate.mock.calls.map(
+        (c) => (c[0] as { data: { idClasse: bigint } }).data.idClasse,
+      );
+      // Space raiz -350→-402; Folder -351 fora do mapa (permanece -351); List -352→-401.
+      expect(createdClasses).toEqual([BigInt(-402), BigInt(-351), BigInt(-401)]);
+
+      // Blocos da List INTERNA (neta do Space, chave 202) também DEVEM ser
+      // copiados: o gate usa `node.idClasse` (classe original) mesmo para
+      // nós que não são a raiz da árvore promovida.
+      const phaseCreates = dTaskCreate.mock.calls
+        .map((c) => c[0] as { data: Record<string, unknown> })
+        .filter((c) => c.data.idClasse === BigInt(-200));
+      expect(phaseCreates).toHaveLength(1);
+      expect(phaseCreates[0].data.nome).toBe('Ajustes Estruturais');
+    });
+
+    it('REJEITA quando categoria ausente/vazia no DTO (class-validator upstream — service não valida, mas categoriaTemplate falsy não grava dados.categoria)', async () => {
+      // Esta suíte valida o comportamento do SERVICE quando dto.categoria é ''
+      // (class-validator no controller já bloquearia isso em runtime real via
+      // @IsNotEmpty — aqui cobrimos que o service não grava categoria vazia).
+      prisma.dProject.findFirst
+        .mockResolvedValueOnce({ idClasse: BigInt(-352) })
+        .mockResolvedValueOnce({ idEstab: BigInt(50) });
+      prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(1) });
+      originNode(BigInt(-352));
+      const { dProjectCreate } = mockPromoteTx();
+
+      await service.promoteToTemplate('108', BigInt(100), '50', { categoria: '' });
+
+      const createArg = dProjectCreate.mock.calls[0][0] as { data: { dados: Record<string, unknown> } };
+      expect(createArg.data.dados.categoria).toBeUndefined();
+    });
+
+    it('REJEITA quando usuário SEM MANAGER na origem → ForbiddenException', async () => {
+      prisma.dProject.findFirst
+        .mockResolvedValueOnce({ idClasse: BigInt(-352) }) // validação de origem em promoteToTemplate
+        .mockResolvedValueOnce({ idEstab: BigInt(50) }); // tenant peek (dentro de cloneTree)
+      prisma.dVincula.findFirst
+        .mockResolvedValueOnce(null) // sem MANAGER -171
+        .mockResolvedValueOnce(null); // sem ORG_ADMIN -161
+      await expect(
+        service.promoteToTemplate('108', BigInt(999), '50', { categoria: 'Desenvolvimento' }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('REJEITA origem inexistente/excluída → NotFoundException', async () => {
+      prisma.dProject.findFirst.mockResolvedValueOnce(null); // validação de origem: não encontrado
+      await expect(
+        service.promoteToTemplate('999', BigInt(100), '50', { categoria: 'Desenvolvimento' }),
+      ).rejects.toThrow(NotFoundException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('REJEITA origem é um Folder (-351) isolado → BadRequestException', async () => {
+      prisma.dProject.findFirst.mockResolvedValueOnce({ idClasse: BigInt(-351) });
+      await expect(
+        service.promoteToTemplate('201', BigInt(100), '50', { categoria: 'Desenvolvimento' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('REJEITA org ativa ausente no token → BadRequestException', async () => {
+      await expect(
+        service.promoteToTemplate('108', BigInt(100), undefined, { categoria: 'Desenvolvimento' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.dProject.findFirst).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('template nasce com idEstab da org ativa do JWT (nunca herda idEstab da origem quando organizationId difere)', async () => {
+      // NOTA: cloneTree valida tenant ANTES (peek.idEstab !== orgIdBig → 404) —
+      // então para materializar com sucesso a org do JWT deve BATER com a
+      // origem. Este teste confirma que o idEstabDestino carimbado é
+      // exatamente o organizationId passado (mesmo padrão createFromTemplate).
+      prisma.dProject.findFirst
+        .mockResolvedValueOnce({ idClasse: BigInt(-352) }) // validação origem
+        .mockResolvedValueOnce({ idEstab: BigInt(77) }); // tenant peek: origem é da org 77
+      prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(1) });
+      originNode(BigInt(-352));
+      const { dProjectCreate } = mockPromoteTx();
+
+      // Ajusta o node para a mesma org (77) do tenant peek, evitando 404.
+      prisma.$queryRaw.mockResolvedValue([
+        {
+          chave: BigInt(108),
+          idClasse: BigInt(-352),
+          idPai: null,
+          nome: 'Testes E2E',
+          descricao: null,
+          idEstab: BigInt(77),
+          repoUrl: null,
+          privado: false,
+          dados: { prefix: 'DEV' },
+          tableFields: null,
+          depth: 0,
+        },
+      ]);
+
+      await service.promoteToTemplate('108', BigInt(100), '77', { categoria: 'Desenvolvimento' });
+
+      const createArg = dProjectCreate.mock.calls[0][0] as { data: { idEstab: bigint } };
+      expect(createArg.data.idEstab).toBe(BigInt(77));
+    });
+
+    it('projeto original permanece intacto (idClasse, tasks) após a promoção — a promoção só CRIA um novo DProject, não altera o original', async () => {
+      prisma.dProject.findFirst
+        .mockResolvedValueOnce({ idClasse: BigInt(-352) })
+        .mockResolvedValueOnce({ idEstab: BigInt(50) });
+      prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(1) });
+      originNode(BigInt(-352));
+      const { dProjectCreate } = mockPromoteTx();
+
+      await service.promoteToTemplate('108', BigInt(100), '50', { categoria: 'Desenvolvimento' });
+
+      // Nenhuma chamada a dProject.update/delete — só create (cópia nova).
+      expect(prisma.dProject.update).not.toHaveBeenCalled();
+      expect(dProjectCreate).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('findMany() — catálogo de templates + blindagem (Sub-fase 5, ADR-V2-061)', () => {
     /** Template org-scoped (-401, org 50) com categoria. */
     const tplListOrg = {

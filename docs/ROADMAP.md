@@ -97,6 +97,59 @@
 
 ---
 
+## Task 7 — Promover Projeto/Lista a Template (V2 Fase F11) — ✅ COMPLETA
+
+**Status:** Completo (APROVADO pelo Reviewer — Score 9.0/10)
+**Módulo V2:** endpoints (projects/)
+**Fase V2:** F11 (Feature Templates, extensão ADR-V2-061)
+**Tempo Real:** ~2h15 total (Strategist ~0.5h plan + Implementer ~1h15 code/testes + Reviewer ~0.25h + Documenter ~0.15h)
+**Completado em:** 2026-07-08
+**Quality Score:** 9.0/10 (APPROVED)
+
+**O Que Foi Feito:**
+
+Endpoint novo `POST /projects/:id/promote-to-template` que **promove um projeto real (List/Space) a template reutilizável**, criando uma CÓPIA (projeto original permanece intacto).
+
+**Decisão "CÓPIA, não mutação":**
+- Projeto original (ex: "Testes E2E", id 108) continua acessível com suas ~49 tasks
+- Template resultante (nova instância) aparece no catálogo de templates
+- Reusa motor `cloneTree()` já provado em produção (duplicate/from-template)
+- Remap inverso de classe bidirecional: -352→-401 (LIST→TEMPLATE_LIST), -350→-402 (SPACE→TEMPLATE_SPACE)
+
+**Arquivos Criados:**
+- `src/projects/dto/promote-to-template.dto.ts` — DTO com `categoria` obrigatório (texto livre, sem enum), `novoNome` opcional
+
+**Arquivos Modificados:**
+- `src/projects/projects.service.ts` — Novo método `promoteToTemplate()`, constante `REAL_TO_TEMPLATE_CLASS_REMAP`, extensão `CloneTreeOptions` com `toTemplate`/`categoriaTemplate`
+- `src/projects/projects.controller.ts` — Novo endpoint `POST /projects/:id/promote-to-template` com Swagger completo
+- `src/projects/projects.service.spec.ts` — 10 testes novos (LIST promoção, SPACE com filhas, validações, tenant isolation, idEstab)
+
+**Testes:**
+- 10 novos testes para `promoteToTemplate()` — 100% PASS
+- Pré-existentes `duplicate()`/`createFromTemplate()` — 100% intactas, zero regressão
+- Build/TypeScript/ESLint — PASS (0 errors)
+
+**Pilares Aplicados:**
+- Pilar 1 (Engine): N/A — DProject é tabela estrutural (Prisma direto via service correto)
+- Pilar 2 (Endpoints): ✅ REUTILIZADO — endpoint em `ProjectsController` existente (zero controller novo), motor em `cloneTree` existente (zero reimplementação)
+- Pilar 3 (Seed): N/A — usa -401/-402 já existentes no seed
+
+**ADRs Vinculados:**
+- **ADR-V2-062 (NOVO)** — Decisão "cópia, não mutação" + remap inverso de classe bidirecional
+- ADR-V2-061 (pai — catálogo de templates)
+- ADR-V2-042 (tenant isolation heredada de cloneTree)
+- ADR-V2-058 (espelho -158 + DVincula MANAGER)
+
+**Garantias:**
+- ✅ Projeto original permanece idClasse -352/-350 com tasks intactas
+- ✅ Template resultante nascecom idClasse -401/-402 e `dados.categoria` do DTO
+- ✅ Categoria obrigatória, sem default (escolha explícita do usuário)
+- ✅ Template org-scoped (idEstab = org ativa), nunca global
+- ✅ RBAC MANAGER na origem herdado de `cloneTree`
+- ✅ Zero tabelas novas, zero migrations
+
+---
+
 ## Task 1 — MCP tool `create_from_template` (materializar template pronto) — ✅ COMPLETA
 
 **Status:** ✅ COMPLETA (ÚLTIMA da iniciativa "MCP cria estrutura" — 3/3)

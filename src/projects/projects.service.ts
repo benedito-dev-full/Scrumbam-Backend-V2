@@ -17,6 +17,7 @@ import { TasksIdentifierService } from '../tasks/tasks-identifier.service';
 import { parseTaskDados } from '../tasks/schemas/task-dados.schema';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { CreateFromTemplateDto } from './dto/create-from-template.dto';
+import { PromoteToTemplateDto } from './dto/promote-to-template.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import {
   ProjectResponseDto,
@@ -75,6 +76,22 @@ const TEMPLATE_CLASS_REMAP: ReadonlyMap<bigint, bigint> = new Map([
   [ID_CLASSE_TEMPLATE_LIST, ID_CLASSE_LIST],
   [ID_CLASSE_TEMPLATE_SPACE, ID_CLASSE_SPACE],
 ]);
+
+/**
+ * Mapa de remap de DClasse real→template aplicado a CADA nó do clone quando
+ * `opts.toTemplate === true` (extensão da feature Templates — ADR-V2-062):
+ * -352→-401, -350→-402. Construído como o INVERSO de `TEMPLATE_CLASS_REMAP`
+ * (fonte única de verdade — evita hardcode duplicado).
+ *
+ * Só contém as chaves -352 (LIST) e -350 (SPACE) — logo um Folder (-351)
+ * filho NUNCA é remapeado (não está no mapa), e uma List (-352) filha DENTRO
+ * de um Space promovido É remapeada para -401 também, no mesmo padrão
+ * simétrico já usado por `TEMPLATE_CLASS_REMAP` (aplicado a QUALQUER
+ * profundidade da árvore, não só à raiz).
+ */
+const REAL_TO_TEMPLATE_CLASS_REMAP: ReadonlyMap<bigint, bigint> = new Map(
+  [...TEMPLATE_CLASS_REMAP].map(([templateClasse, realClasse]) => [realClasse, templateClasse]),
+);
 
 /**
  * `true` quando o `idClasse` (string do query) referencia um template
@@ -294,6 +311,31 @@ interface CloneTreeOptions {
    * correto já no caminho org-scoped (Sub-fase 4a).
    */
   idEstabDestino?: bigint;
+
+  /**
+   * Ativa o remap INVERSO de DClasse (real→template — extensão da feature
+   * Templates, ADR-V2-062): -352→-401 LIST, -350→-402 SPACE. Mutuamente
+   * exclusivo com `fromTemplate` (promoção é o caminho oposto de uso de
+   * template).
+   *
+   * Aplicado por nó (raiz e descendentes) — mesmo padrão simétrico de
+   * `fromTemplate`. Se a origem for um SPACE com Folders/Lists filhas, os
+   * Folders (-351) NÃO são remapeados (fora do mapa) mas Lists (-352) filhas
+   * SÃO remapeadas para -401 também, reproduzindo a mesma árvore "toda
+   * template" que `fromTemplate` já produz no sentido contrário.
+   *
+   * Default `false` = comportamento de `duplicate()`/`createFromTemplate()`
+   * (sem remap real→template).
+   */
+  toTemplate?: boolean;
+
+  /**
+   * Valor gravado em `dados.categoria` da raiz materializada quando
+   * `toTemplate === true` (extensão da feature Templates — ADR-V2-062).
+   * Usado por `GET /projects?idClasse=-401&categoria=X` para popular a
+   * galeria de templates. Sem efeito quando `toTemplate` é falso/ausente.
+   */
+  categoriaTemplate?: string;
 }
 
 /**
@@ -1834,9 +1876,15 @@ export class ProjectsService implements OnModuleInit {
         // gravar a classe REAL faz o `if (novo.idClasse === ID_CLASSE_LIST)`
         // abaixo disparar `seedProject`/`copyPhases` na List materializada — sem
         // isso a List nasceria sem statuses V3 e o editor não a reconheceria.
+        //
+        // Remap INVERSO real→template (ADR-V2-062) SOMENTE no caminho
+        // `toTemplate`: -352→-401 LIST, -350→-402 SPACE, aplicado por nó (não
+        // só a raiz) — ver JSDoc de `CloneTreeOptions.toTemplate`.
         const idClasseMaterializada = opts.fromTemplate
           ? (TEMPLATE_CLASS_REMAP.get(node.idClasse) ?? node.idClasse)
-          : node.idClasse;
+          : opts.toTemplate
+            ? (REAL_TO_TEMPLATE_CLASS_REMAP.get(node.idClasse) ?? node.idClasse)
+            : node.idClasse;
 
         // idEstab: carimbo da org de DESTINO em TODOS os nós quando
         // `idEstabDestino` é fornecido (feature Templates); caso contrário,
@@ -1874,6 +1922,13 @@ export class ProjectsService implements OnModuleInit {
           dadosCopia.icon = opts.novoIcone;
         }
 
+        // Categoria do catálogo de templates: só a raiz recebe (ADR-V2-062).
+        // A própria idClasse -401/-402 já identifica "é template" — não requer
+        // flag adicional, mesmo padrão já usado pelo catálogo (ADR-V2-061).
+        if (isRoot && opts.toTemplate && opts.categoriaTemplate) {
+          dadosCopia.categoria = opts.categoriaTemplate;
+        }
+
         const novo = await tx.dProject.create({
           data: {
             idClasse: idClasseMaterializada,
@@ -1897,9 +1952,30 @@ export class ProjectsService implements OnModuleInit {
         const refId = await this.projectRef.ensureEntidadeRef(tx, novo);
         await this.projectMembers.createManagerLink(tx, refId, userEntidadeId);
 
-        // Seed de statuses V3 apenas para List (-352) — Space/Folder não têm.
-        if (novo.idClasse === ID_CLASSE_LIST) {
-          await this.seedBootstrap.seedProject(tx, refId);
+        // Gate "é uma List (para fins de seed V3 + cópia de blocos)":
+        //  - Caminhos padrão/`fromTemplate`: testar a classe MATERIALIZADA
+        //    (`novo.idClasse`) — já é -352 real nesses casos (comportamento
+        //    legado intacto, coberto por `duplicate()`/`createFromTemplate()`).
+        //  - Caminho `toTemplate` (ADR-V2-062): a classe materializada da
+        //    List promovida é -401 (template), NUNCA -352 — testar a classe
+        //    ORIGINAL do nó (`node.idClasse`) para não perder o gate. Sem
+        //    isso, `copyPhases`/`seedProject` nunca rodam ao promover uma
+        //    List (ou uma List filha de um Space) a template, e o molde nasce
+        //    sem blocos — violação do MUST HAVE do plano (blocos copiados,
+        //    tasks não).
+        const eraListOriginalmente = opts.toTemplate
+          ? node.idClasse === ID_CLASSE_LIST
+          : novo.idClasse === ID_CLASSE_LIST;
+
+        // Seed de statuses V3 (bootstrap de status) só faz sentido quando o
+        // RESULTADO é uma List REAL (-352) — uma List-template (-401) não usa
+        // status V3 (o editor de templates não os exibe). No caminho
+        // `toTemplate` o resultado é -401, então `seedProject` é pulado ali;
+        // `copyPhases` (estrutura de blocos) roda de qualquer forma.
+        if (eraListOriginalmente) {
+          if (novo.idClasse === ID_CLASSE_LIST) {
+            await this.seedBootstrap.seedProject(tx, refId);
+          }
 
           // Copiar as FASES/BLOCOS (-200) da List original para a nova.
           // `copyPhases` retorna o phaseIdMap (old -200 → new -200); consumido
@@ -1953,6 +2029,9 @@ export class ProjectsService implements OnModuleInit {
         // Feature Templates: distingue uma materialização from-template de uma
         // duplicação comum no audit (evento único agregado, não N task.created).
         ...(opts.fromTemplate ? { fromTemplate: true } : {}),
+        // Extensão Templates (ADR-V2-062): distingue uma promoção real→template
+        // de uma duplicação/materialização comum no audit trail.
+        ...(opts.toTemplate ? { promotedToTemplate: true } : {}),
       },
       this.correlationIdService.getOrGenerate(),
       { source: ProjectsService.name },
@@ -2100,6 +2179,94 @@ export class ProjectsService implements OnModuleInit {
       idPaiDestino,
       fromTemplate: true,
       idEstabDestino: orgIdBig,
+    });
+  }
+
+  /**
+   * Promove um projeto real (List/Space) a Template reutilizável (extensão da
+   * feature Templates — ADR-V2-062). O `:id` é um DProject real (`idClasse`
+   * -352 LIST ou -350 SPACE); o resultado é uma CÓPIA da árvore inteira, com a
+   * DClasse remapeada para o template (-352→-401 TEMPLATE_LIST, -350→-402
+   * TEMPLATE_SPACE), blocos copiados, tasks de trabalho NÃO copiadas
+   * (molde-limpo), `dados.categoria` carimbado na raiz e `idEstab` carimbado
+   * com a org ativa.
+   *
+   * **Decisão: CÓPIA, não mutação** — o projeto original permanece intacto
+   * (idClasse, tasks, tudo), consistente com o padrão já estabelecido por
+   * `duplicate()`/`createFromTemplate()` (ver seção 2 do plano de
+   * implementação, `workspace/plans/plan-templates-promote-to-template-task7.md`).
+   *
+   * Permissão: `requireManagerRole` roda DENTRO de `cloneTree` (gate
+   * tenant-rígido + RBAC de ORIGEM ATIVOS, pois `opts.fromTemplate` está
+   * ausente) — exige MANAGER na origem, sem reimplementar nada aqui.
+   *
+   * Evento emitido `project.created` (via `cloneTree`) com discriminador
+   * `promotedToTemplate: true` para rastreabilidade no audit trail.
+   *
+   * @param id - Chave BigInt do projeto (List -352 ou Space -350) a promover (string)
+   * @param userEntidadeId - Chave BigInt do MANAGER executante
+   * @param organizationId - `DEntidade.chave` da org ativa (string) — usada
+   *   para carimbar `idEstab` do template resultante (nunca nasce global)
+   * @param dto - Categoria obrigatória + nome opcional (ver {@link PromoteToTemplateDto})
+   * @returns ProjectResponseDto do template resultante (já -401/-402, myRole=MANAGER)
+   *
+   * @throws {BadRequestException} Se org ativa ausente no token, ou origem não
+   *   é List (-352) nem Space (-350)
+   * @throws {NotFoundException} Se o projeto de origem não existe ou está excluído
+   * @throws {ForbiddenException} Se o usuário não é MANAGER na origem
+   *
+   * @example
+   * ```typescript
+   * const template = await service.promoteToTemplate(
+   *   '108',
+   *   BigInt(userId),
+   *   '5',
+   *   { categoria: 'Desenvolvimento', novoNome: 'Molde QA E2E' },
+   * );
+   * ```
+   *
+   * @see cloneTree — motor de deep-clone (acionado com toTemplate+idEstabDestino)
+   * @see ADR-V2-061 — marcação por DClasse -401/-402 + catálogo via dados.categoria
+   */
+  async promoteToTemplate(
+    id: string,
+    userEntidadeId: bigint,
+    organizationId: string | undefined,
+    dto: PromoteToTemplateDto,
+  ): Promise<ProjectResponseDto> {
+    // Org ativa é obrigatória — o template resultante nasce escopado a ela
+    // (nunca global), mesmo padrão de `createFromTemplate`.
+    if (!organizationId || !/^-?\d+$/.test(organizationId)) {
+      throw new BadRequestException(
+        'Org ativa ausente no token (necessária para promote-to-template)',
+      );
+    }
+    const orgIdBig = BigInt(organizationId);
+
+    // Validar que a origem é LIST (-352) ou SPACE (-350) — não faz sentido
+    // promover um Folder (-351) isolado ou um template já existente (-401/-402).
+    const projectId = BigInt(id);
+    const origem = await this.prisma.dProject.findFirst({
+      where: { chave: projectId, excluido: false },
+      select: { idClasse: true },
+    });
+    if (!origem) {
+      throw new NotFoundException(`Projeto ${id} não encontrado`);
+    }
+    if (origem.idClasse !== ID_CLASSE_LIST && origem.idClasse !== ID_CLASSE_SPACE) {
+      throw new BadRequestException(
+        'Somente List (-352) ou Space (-350) podem ser promovidos a template',
+      );
+    }
+
+    // requireManagerRole roda DENTRO de cloneTree (opts.fromTemplate ausente
+    // → gate tenant-rígido + RBAC de origem ATIVOS, igual a duplicate()).
+    return this.cloneTree(id, userEntidadeId, organizationId, {
+      novoNome: dto.novoNome,
+      toTemplate: true,
+      categoriaTemplate: dto.categoria,
+      idEstabDestino: orgIdBig,
+      // includeTasks ausente/false (default) → molde-limpo, SEM as tasks.
     });
   }
 

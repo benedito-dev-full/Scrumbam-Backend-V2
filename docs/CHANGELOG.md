@@ -14,6 +14,19 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Endpoint `POST /projects/:id/promote-to-template` — promover List/Space a template reutilizável (V2 F11, Task 7, 2026-07-08)**
+  - Nova rota para promover um projeto real (List -352 ou Space -350) a template reutilizável (idClasse -401/-402), criando uma CÓPIA — projeto original permanece intacto
+  - **Decisão:** CÓPIA, não mutação (requisito CEO: "Testes E2E" continua com ~49 tasks, enquanto template resultante aparece no catálogo)
+  - **Motor:** Reutiliza `cloneTree()` provado em produção (duplicate/from-template) com remap inverso de classe (-352→-401, -350→-402)
+  - **DTO:** `PromoteToTemplateDto` com `categoria` obrigatório (texto livre, sem enum — permite novas categorias em runtime) e `novoNome` opcional
+  - **RBAC:** MANAGER na origem (herdado de `cloneTree`, sem reimplementar)
+  - **Tenant isolation:** Template org-scoped (idEstab = org ativa do JWT), nunca global
+  - **Blocos:** Copiados sem tasks (molde-limpo) — conforme plano aceito pelo CEO
+  - **Testes:** 10 testes novos (100% PASS) cobrindo promoção LIST, SPACE com filhas, validações, tenant, idEstab
+  - **Build/Lint:** PASS (0 errors, 0 warnings)
+  - **Pilares:** P2 REUTILIZADO (cloneTree + ProjectsController existentes); P1/P3 N/A (estrutural)
+  - **ADRs:** **ADR-V2-062** (novo — cópia + remap bidirecional), ADR-V2-061 (pai), ADR-V2-042/058 (tenant/espelho)
+
 - **MCP — Transporte Streamable HTTP (spec 2025-03-26) — Reforma 1, 5 fases F1–F5 COMPLETA (V2 F11, 2026-07-04)**
   - **Objetivo:** Habilitar Claude WEB conectar ao `/mcp` sem quebrar Claude Code (X-MCP-Key, sempre JSON)
   - **Resultado:** Protocolo aditivo, stateless, JSON-only, 100% back-compat

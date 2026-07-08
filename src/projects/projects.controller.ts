@@ -24,6 +24,7 @@ import { ProjectsService } from './projects.service';
 import { ProjectActivityService } from './project-activity.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { CreateFromTemplateDto } from './dto/create-from-template.dto';
+import { PromoteToTemplateDto } from './dto/promote-to-template.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import {
   ProjectResponseDto,
@@ -314,6 +315,54 @@ export class ProjectsController {
     @Request() req: JwtRequest,
   ): Promise<ProjectResponseDto> {
     return this.projectsService.createFromTemplate(
+      id,
+      BigInt(req.user.entidadeId),
+      req.user.organizationId,
+      dto,
+    );
+  }
+
+  /**
+   * Promove um projeto (List/Space) real a Template reutilizável (extensão da
+   * feature Templates — ADR-V2-062).
+   *
+   * O `:id` é um DProject real (idClasse -352 LIST ou -350 SPACE). O
+   * resultado é uma CÓPIA da árvore inteira: DClasse remapeada para o
+   * template (-352→-401 LIST, -350→-402 SPACE), blocos copiados, tasks de
+   * trabalho NÃO copiadas (molde-limpo), `dados.categoria` gravado na raiz
+   * (obrigatório, texto livre) e `idEstab` carimbado na org ativa. O projeto
+   * original permanece intacto (CÓPIA, não mutação).
+   *
+   * Exige MANAGER na origem (herdado de `cloneTree`, sem reimplementar).
+   *
+   * @param id - ID do projeto (List -352 ou Space -350) a promover.
+   * @param dto - Categoria obrigatória + nome opcional (ver {@link PromoteToTemplateDto}).
+   * @returns ProjectResponseDto do template resultante (myRole=MANAGER).
+   *
+   * @example
+   * ```bash
+   * curl -X POST "http://localhost:3000/projects/108/promote-to-template" \
+   *   -H "Authorization: Bearer {token}" \
+   *   -H "Content-Type: application/json" \
+   *   -d '{ "categoria": "Desenvolvimento", "novoNome": "Molde QA E2E" }'
+   * ```
+   */
+  @Post(':id/promote-to-template')
+  @ApiOperation({ summary: 'Promover List/Space a Template reutilizável (MANAGER na origem)' })
+  @ApiParam({ name: 'id', description: 'ID do projeto (List -352 ou Space -350) a promover' })
+  @ApiResponse({ status: 201, description: 'Template criado (cópia)', type: ProjectResponseDto })
+  @ApiResponse({
+    status: 400,
+    description: 'Origem incompatível (não é List/Space) ou categoria ausente',
+  })
+  @ApiResponse({ status: 403, description: 'Requer role MANAGER na origem' })
+  @ApiResponse({ status: 404, description: 'Projeto não encontrado' })
+  async promoteToTemplate(
+    @Param('id') id: string,
+    @Body() dto: PromoteToTemplateDto,
+    @Request() req: JwtRequest,
+  ): Promise<ProjectResponseDto> {
+    return this.projectsService.promoteToTemplate(
       id,
       BigInt(req.user.entidadeId),
       req.user.organizationId,
