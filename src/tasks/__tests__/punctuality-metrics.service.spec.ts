@@ -148,4 +148,63 @@ describe('PunctualityMetricsService (Task 8 — Pontualidade)', () => {
     expect(arg.values).toContain(BigInt(7));
     expect(arg.values).toContain(BigInt(8));
   });
+
+  // ─── computeStrictDelayForProject (Margem de Atraso — DEV-132) ────────────
+
+  describe('computeStrictDelayForProject (Margem de Atraso)', () => {
+    it('5. a query adiciona o filtro de atraso ESTRITO (> interval 0) além dos filtros-base', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([{ averageDelayDays: '3.8', sampleSize: BigInt(7) }]);
+
+      await service.computeStrictDelayForProject(BigInt(5));
+
+      const sql = sqlTextOf(prisma.$queryRaw);
+      // Filtros-base de sempre (mesmos de computeForProject).
+      expect(sql).toContain('"dueDate" IS NOT NULL');
+      expect(sql).toContain("'doneAt') IS NOT NULL");
+      expect(sql).toContain('"idClasse" IN (');
+      expect(sql).toContain('t.excluido = false');
+      // Filtro adicional de atraso estrito — exclui diffDays = 0 e diffDays < 0.
+      expect(sql).toContain("interval '0'");
+      expect(sql).toContain('> ');
+    });
+
+    it('5b. computeStrictDelayForProject filtra por idProject (parâmetro vinculado)', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([{ averageDelayDays: '3.8', sampleSize: BigInt(7) }]);
+
+      await service.computeStrictDelayForProject(BigInt(42));
+
+      const arg = prisma.$queryRaw.mock.calls[0][0] as Prisma.Sql;
+      expect(arg.values).toContain(BigInt(42));
+      expect((arg.strings ?? []).join(' ')).toContain('"idProject"');
+    });
+
+    it('6. média calculada só sobre as tasks atrasadas → repassa o AVG (sempre positivo)', async () => {
+      // Ex.: apenas tasks com diffDays > 0 entram no AVG do banco (ex.: +5, +2, +4 → 3.67).
+      prisma.$queryRaw.mockResolvedValueOnce([{ averageDelayDays: '3.6666666667', sampleSize: BigInt(3) }]);
+
+      const result = await service.computeStrictDelayForProject(BigInt(5));
+
+      expect(result.averageDelayDays).toBeCloseTo(3.6666666667);
+      expect(result.sampleSize).toBe(3);
+    });
+
+    it('7. sem tasks atrasadas (só pontuais/adiantadas) → averageDelayDays null, sampleSize 0', async () => {
+      // A query já filtra diffDays > 0 no banco — se não há linhas, COUNT=0/AVG=null.
+      prisma.$queryRaw.mockResolvedValueOnce([{ averageDelayDays: null, sampleSize: BigInt(0) }]);
+
+      const result = await service.computeStrictDelayForProject(BigInt(5));
+
+      expect(result.averageDelayDays).toBeNull();
+      expect(result.sampleSize).toBe(0);
+    });
+
+    it('8. array vazio do driver (defensivo) → também null/0', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([]);
+
+      const result = await service.computeStrictDelayForProject(BigInt(5));
+
+      expect(result.averageDelayDays).toBeNull();
+      expect(result.sampleSize).toBe(0);
+    });
+  });
 });

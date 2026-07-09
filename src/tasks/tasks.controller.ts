@@ -345,6 +345,69 @@ export class TasksController {
   }
 
   /**
+   * Métrica de "margem de atraso" agregada de um projeto — irmã da Pontualidade.
+   *
+   * Retorna a média (em dias corridos) de `completedAt - dueDate` SÓ das tasks
+   * que atrasaram de fato (`diffDays > 0`, atraso estrito). Tasks entregues
+   * exatamente no prazo (`diffDays = 0`) e tasks adiantadas (`diffDays < 0`)
+   * são EXCLUÍDAS do cálculo. Diferente de `GET .../punctuality`, que agrega
+   * atraso E adiantamento juntos (média líquida) — esta rota responde "quando
+   * o projeto atrasa, de quanto costuma ser esse atraso?".
+   *
+   * Sub-rota nova (em vez de query param na rota de pontualidade) para manter
+   * cada endpoint com uma única responsabilidade e cacheabilidade/semântica
+   * HTTP simples — mesmo padrão de path de `GET .../punctuality`.
+   *
+   * **Ordem de rotas:** declarada ANTES de `@Get(':id')`, mesmo cuidado da
+   * rota de pontualidade — o prefixo literal `projects/` garante 3 segmentos,
+   * que não colidem com o wildcard de 1 segmento `:id`.
+   *
+   * Tenant gate: reaproveita `resolveScopedProjectIds(req)` — 404
+   * anti-enumeration idêntico ao de `getProjectPunctuality`.
+   *
+   * @param projectId - ID do projeto (List, chave DProject)
+   * @param req - Request com user.entidadeId / organizationId
+   * @returns `{ averageDelayDays, sampleSize, computedAt }`. `averageDelayDays`
+   *   nunca é negativo quando não-null (só atrasos estritos entram).
+   *
+   * @throws {NotFoundException} Projeto fora do scope (404 anti-enumeration)
+   *
+   * @example
+   * ```bash
+   * curl "http://localhost:3000/api/v1/tasks/projects/5/delay-margin" \
+   *   -H "Authorization: Bearer {token}"
+   * ```
+   */
+  @Get('projects/:projectId/delay-margin')
+  @ApiOperation({
+    summary: 'Métrica de margem de atraso agregada de um projeto',
+    description:
+      'Média de dias de atraso SÓ das tasks que atrasaram de fato (diffDays > 0). ' +
+      'Tasks pontuais (diffDays = 0) e adiantadas (diffDays < 0) são excluídas. ' +
+      'Irmã de GET .../punctuality (que agrega atraso e adiantamento juntos).',
+  })
+  @ApiParam({ name: 'projectId', description: 'ID do projeto (List)', example: '5' })
+  @ApiResponse({ status: 200, description: 'Métrica calculada', type: PunctualityMetricsResponseDto })
+  @ApiResponse({ status: 404, description: 'Projeto não encontrado ou fora do scope' })
+  async getProjectDelayMargin(
+    @Param('projectId') projectId: string,
+    @Request() req: JwtRequest,
+  ): Promise<PunctualityMetricsResponseDto> {
+    this.logger.log(`GET /tasks/projects/${projectId}/delay-margin — user=${req.user.entidadeId}`);
+
+    // Tenant gate: 404 padrão se fora do scope (mensagem idêntica = anti enumeration).
+    const allowed = await this.resolveScopedProjectIds(req);
+    if (!allowed.includes(projectId)) {
+      this.logger.warn(
+        `tenant_mismatch_delay_margin projectId=${projectId} fora do scope do user=${req.user.entidadeId}`,
+      );
+      throw new NotFoundException(`Projeto ${projectId} não encontrado`);
+    }
+
+    return this.punctualityMetricsService.computeStrictDelayForProject(BigInt(projectId));
+  }
+
+  /**
    * Busca task por ID — restrito ao scope da org ativa.
    *
    * @param id - ID da task (chave DTask)

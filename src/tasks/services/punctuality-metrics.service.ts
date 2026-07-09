@@ -28,19 +28,26 @@ const STATUS_DONE_IDCLASSE = -444 as const;
 const STATUS_VALIDATED_IDCLASSE = -449 as const;
 
 /**
- * Service de métrica de pontualidade / margem de atraso (agregada por projeto).
+ * Service de métricas de pontualidade / margem de atraso (agregadas por projeto).
  *
- * Calcula, para um projeto, a média (em dias corridos) da diferença entre a data
- * de conclusão de cada task (`dados.telemetry.doneAt`) e o prazo combinado
- * (`DTask.dueDate`):
+ * Expõe DUAS métricas irmãs sobre a mesma base (`completedAt - dueDate`):
+ *
+ * - `computeForProject` — **Pontualidade**: média de TODAS as tasks concluídas
+ *   com prazo (atraso E adiantamento juntos). Responde "no saldo geral, o
+ *   projeto está adiantado ou atrasado?".
+ * - `computeStrictDelayForProject` — **Margem de Atraso**: média SÓ das tasks
+ *   que atrasaram de fato (`diffDays > 0`, atraso estrito). Responde "quando o
+ *   projeto atrasa, de quanto costuma ser esse atraso?".
  *
  * ```
  * dias = completedAt - dueDate   (positivo = atrasou, negativo = adiantou)
  * ```
  *
  * Regras de negócio (fechadas):
- * - Valores negativos (entrega adiantada) contam normalmente na média — NÃO são
- *   clampados a zero.
+ * - Pontualidade: valores negativos (entrega adiantada) contam normalmente na
+ *   média — NÃO são clampados a zero.
+ * - Margem de Atraso: SÓ `diffDays > 0` entra; `diffDays = 0` (prazo exato) e
+ *   `diffDays < 0` (adiantada) são EXCLUÍDOS do cálculo (não contam como 0).
  * - Tasks concluídas SEM `dueDate` são EXCLUÍDAS do cálculo (não entram nem como 0).
  * - Tasks sem `doneAt` (nunca de fato concluídas, ou concluídas antes da
  *   telemetria existir) são EXCLUÍDAS.
@@ -85,6 +92,55 @@ export class PunctualityMetricsService {
     this.logger.log(`computeForProject(${projectId.toString()})`);
 
     const row = await this.aggregate([Prisma.sql`t."idProject" = ${projectId}`]);
+
+    return this.buildResponse(row);
+  }
+
+  /**
+   * Calcula a "margem de atraso" — média de dias corridos SÓ das tasks que
+   * atrasaram de fato (`diffDays > 0`, atraso ESTRITO) do projeto.
+   *
+   * Diferença central para `computeForProject`: enquanto a Pontualidade agrega
+   * TODAS as tasks concluídas com prazo (atraso e adiantamento se cancelam na
+   * média — responde "no saldo geral, o projeto está adiantado ou atrasado?"),
+   * a Margem de Atraso agrega SÓ o subconjunto que atrasou (responde "quando o
+   * projeto atrasa, de quanto costuma ser esse atraso?").
+   *
+   * Regras de negócio (fechadas com o CEO):
+   * - Só entram tasks com `diffDays > 0` (atraso estrito).
+   * - Tasks entregues exatamente no prazo (`diffDays = 0`) são EXCLUÍDAS — não
+   *   contam como "0 dias de atraso" (mesmo padrão de exclusão de amostra que
+   *   `dueDate`/`doneAt` ausentes já usam em `computeForProject`).
+   * - Tasks adiantadas (`diffDays < 0`) são EXCLUÍDAS.
+   * - Mesmas exclusões-base de `computeForProject`: sem `dueDate`, sem
+   *   `doneAt`, ou fora de status terminal (DONE/VALIDATED) — ver `aggregate`.
+   *
+   * Reaproveita o núcleo compartilhado (`aggregate`) — mesma query base, com 1
+   * filtro adicional (`(doneAt - dueDate) > 0`) concatenado ao WHERE.
+   *
+   * @param projectId - chave BigInt do projeto (List) alvo
+   * @returns `{ averageDelayDays, sampleSize, computedAt }`. `averageDelayDays`
+   *   é sempre `>= 0` quando não-null (nunca negativo — só atrasos estritos
+   *   entram); `null` e `sampleSize: 0` quando não há amostras.
+   *
+   * @example
+   * ```typescript
+   * const m = await service.computeStrictDelayForProject(BigInt(5));
+   * // { averageDelayDays: 3.8, sampleSize: 7, computedAt: '2026-07-09T...' }
+   *
+   * // Projeto sem tasks atrasadas (só pontuais/adiantadas):
+   * // { averageDelayDays: null, sampleSize: 0, computedAt: '...' }
+   * ```
+   */
+  async computeStrictDelayForProject(projectId: bigint): Promise<PunctualityMetricsResponseDto> {
+    this.logger.log(`computeStrictDelayForProject(${projectId.toString()})`);
+
+    const row = await this.aggregate([
+      Prisma.sql`t."idProject" = ${projectId}`,
+      Prisma.sql`(
+        (t."dados"->'telemetry'->>'doneAt')::timestamptz - t."dueDate"
+      ) > interval '0'`,
+    ]);
 
     return this.buildResponse(row);
   }
