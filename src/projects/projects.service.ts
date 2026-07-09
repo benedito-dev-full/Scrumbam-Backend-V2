@@ -1019,7 +1019,13 @@ export class ProjectsService implements OnModuleInit {
         excluido: false,
         OR: orgScope,
         // Filtro opcional por categoria via JSON-path dados->>'categoria'.
-        ...(categoria !== undefined ? { dados: { path: ['categoria'], equals: categoria } } : {}),
+        // Normalizado para minúsculo (dados.categoria é sempre gravado em
+        // minúsculo — ver promoteToTemplate) para tolerar variação de caixa
+        // vinda do cliente sem depender de `mode: 'insensitive'` (não
+        // suportado pelo Prisma em filtros de JSON path).
+        ...(categoria !== undefined
+          ? { dados: { path: ['categoria'], equals: categoria.toLowerCase() } }
+          : {}),
         // Cursor: chave estritamente menor (ordenação desc por chave).
         ...(cursor ? { chave: { lt: BigInt(cursor) } } : {}),
       },
@@ -1926,7 +1932,10 @@ export class ProjectsService implements OnModuleInit {
         // A própria idClasse -401/-402 já identifica "é template" — não requer
         // flag adicional, mesmo padrão já usado pelo catálogo (ADR-V2-061).
         if (isRoot && opts.toTemplate && opts.categoriaTemplate) {
-          dadosCopia.categoria = opts.categoriaTemplate;
+          // Normalizado para minúsculo — consistente com o filtro de leitura
+          // em listTemplates (evita templates "invisíveis" no catálogo por
+          // diferença de caixa entre o valor gravado e o filtro do cliente).
+          dadosCopia.categoria = opts.categoriaTemplate.toLowerCase();
         }
 
         const novo = await tx.dProject.create({

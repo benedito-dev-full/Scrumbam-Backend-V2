@@ -2421,7 +2421,10 @@ describe('ProjectsService', () => {
       };
       expect(createArg.data.idClasse).toBe(BigInt(-401));
       expect(createArg.data.idEstab).toBe(BigInt(50));
-      expect(createArg.data.dados.categoria).toBe('Desenvolvimento');
+      // Categoria normalizada para minúsculo na gravação (consistente com o
+      // filtro de leitura em listTemplates — evita templates "invisíveis"
+      // no catálogo por diferença de caixa).
+      expect(createArg.data.dados.categoria).toBe('desenvolvimento');
       // Blocos DEVEM ser copiados: o gate de `cloneTree` testa a classe
       // ORIGINAL do nó (`node.idClasse === ID_CLASSE_LIST`, -352) quando
       // `opts.toTemplate` está ativo — não a materializada (-401) — então
