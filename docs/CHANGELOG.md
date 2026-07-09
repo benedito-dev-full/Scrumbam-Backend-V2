@@ -30,7 +30,23 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
   - **ADRs:** **ADR-V2-072** (novo — Justificativa via DEvento + supersede), ADR-V2-001/008/058/003 (vinculados)
   - **Score:** 9.0/10 (APPROVED — 3 desvios do Implementer auditados/validados, ZERO N+1, net-zero regressão)
   - **Frontend (Fase 1 separada):** Modal na aba "Em atraso" de `/assigned` + badge — pendente de integração no Scrumbam-Frontend-V2
-  - **Próximos:** Fase 2 (painel admin agregado por usuário × projeto × motivo × período — 1 query `$queryRaw`)
+
+- **Justificativa de Atraso de Tarefas — Fase 2 (Painel Admin) Backend Completa (V2 Feature Transversal, Backend F2, 2026-07-09)**
+  - **Agregação:** 1 query `$queryRaw` com GROUP BY `idEntidade` (usuário), `metaDados->>'motivoClasse'` (motivo), `metaDados->>'projetoId'` (projeto), período
+  - **Endpoints Fase 2 (painel admin):**
+    - `GET /reports/delay-reasons?groupBy=[motivo|usuario|projeto]&userId=&projectId=&motivoClasse=&from=&to=` — agregação ranking (org ADMIN -161 SOMENTE; Project MANAGER -171 negado via RBAC duplo)
+    - `GET /tasks/:taskId/delay-justification/history` — histórico completo (todas as versões, inclui superseded `excluido=true`)
+  - **Migration:** Índice parcial jsonb (`CREATE INDEX ... ON "DEvento" ... WHERE idClasse=-503 AND excluido=false`) — idempotente, rollback documentado
+  - **SQL Injection:** Whitelist estática `GROUP_COLUMN: Record<DelayReasonsGroupBy, Prisma.Sql>` com validação `@IsIn` no DTO — ZERO risco, auditado
+  - **RBAC:** Org-alvo = `DProject.idEstab` (org dona do projeto) quando filtrado; org ADMIN (-161) SOMENTE acessa — cross-tenant prevenido
+  - **N+1 Queries:** 2 queries totais (1 agregação + 1 batch de rótulos), testado com DATABASE_LOGGING
+  - **Testes:** 36/36 PASS (4 suites: SELECT, filtros, período, RBAC 403)
+  - **Build/Lint:** PASS (0 errors, 0 warnings)
+  - **Pilares:** P1 N/A (estrutural); P2 ✅ controller próprio (lógica RBAC + agregação específica); P3 N/A (sem DClasses novas)
+  - **ADRs:** **ADR-V2-072 Fase 2** (endpoints agregação + history + migration + RBAC org-alvo), ADR-V2-001/008/003 (vinculados)
+  - **Score:** 9.0/10 (APPROVED — SQL injection auditada, RBAC testada, ZERO N+1)
+  - **Frontend (Fase 2 separada):** Gaveta admin de distribuição de motivos com charts (skill dataviz) — pendente de integração
+  - **Status:** Fase 1+2 backend 100% COMPLETA, pronto para consumo frontend
 
 - **Endpoint `POST /projects/:id/promote-to-template` — promover List/Space a template reutilizável (V2 F11, Task 7, 2026-07-08)**
   - Nova rota para promover um projeto real (List -352 ou Space -350) a template reutilizável (idClasse -401/-402), criando uma CÓPIA — projeto original permanece intacto

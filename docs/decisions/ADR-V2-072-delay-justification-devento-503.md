@@ -171,6 +171,39 @@ Fonte do "dia de conclusão" (CEO decisão 2):
 
 ---
 
+## Implementação — Fase 2 (Painel Admin) — COMPLETA
+
+| Item | Status |
+|------|--------|
+| Migration (índice parcial jsonb) | ✅ DONE — `20260709000000_add_devento_delay_reason_agg_idx` (idempotente, rollback documentado) |
+| `DelayReasonsService` (agregação $queryRaw) | ✅ DONE — GROUP BY `idEntidade`/`motivoClasse`/período + whitelist SQL (sem injection) |
+| DTOs (query, response) | ✅ DONE — `DelayReasonsQueryDto` (filtros + `groupBy` validado), `DelayReasonsResponseDto` (ranking) |
+| `DelayReasonsController` | ✅ DONE — `GET /reports/delay-reasons` — org ADMIN (-161) SOMENTE; Project MANAGER (-171) negado |
+| GET `/history` endpoint | ✅ DONE — `GET /tasks/:taskId/delay-justification/history` — retorna todas as versões (inclui superseded) |
+| **RBAC** (Fase 2) | ✅ DONE — org-alvo = `DProject.idEstab` (org dona do projeto); só ADMIN (-161) dessa org acessa |
+| Resolução de rótulos (batch) | ✅ DONE — 1 query agregação + 1 query batch de rótulos (motivo, usuário, projeto); ZERO N+1 |
+| Testes (agregação, filtros, período) | ✅ DONE — 4 suites, 36/36 testes PASS (SELECT + agregação + RBAC 403) |
+| README atualizado (endpoints Fase 2) | ✅ DONE — documentação de `groupBy`, filtros, RBAC org-ADMIN-only |
+| **Frontend (painel admin + charts)** | ❌ FORA — Task F2 backend COMPLETA; frontend/gaveta F2 é Task separada (em andamento) |
+
+**Quality Score:** 9.0/10 (APPROVED pelo Reviewer — SQL injection auditada, RBAC testada, ZERO N+1 confirmado via DATABASE_LOGGING)
+
+---
+
+## Sumário das 2 Fases
+
+| Fase | O Quê | Status |
+|------|-------|--------|
+| **F1** | Captura (modal, radio, textarea, badge) | ✅ COMPLETA — backend 9.0/10, frontend separado |
+| **F2** | Painel admin (agregação, filtros, ranking) | ✅ COMPLETA — backend 9.0/10, frontend/gaveta separada |
+
+**Próximos passos (fora de escopo desta ADR):**
+- Frontend Fase 1: integração de modal na aba "Em atraso" + badge
+- Frontend Fase 2: painel admin com charts (skill dataviz)
+- Potencial Fase 3: webhooks de notificação ao admin quando novo atraso justificado
+
+---
+
 ## Decisões do CEO Travadas (2026-07-09 — Não reabrí)
 
 1. **Membro SÓ justifica.** Assignee cria/edita a justificativa da PRÓPRIA task e lê a própria vigente. Painel/agregação é **exclusivo do admin**. Membro NÃO vê justificativa de terceiros. → Aplicado em endpoints Fase 1, RBAC no controller.

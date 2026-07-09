@@ -21,6 +21,7 @@ import { AuthCompositeGuard } from '../auth/guards/auth-composite.guard';
 import { DelayJustificationsService } from './delay-justifications.service';
 import { CreateDelayJustificationDto } from './dto/create-delay-justification.dto';
 import { DelayJustificationResponseDto } from './dto/delay-justification-response.dto';
+import { DelayJustificationHistoryResponseDto } from './dto/delay-justification-history-response.dto';
 import { PendingCountResponseDto } from './dto/pending-count-response.dto';
 
 /**
@@ -137,6 +138,49 @@ export class DelayJustificationsController {
   ): Promise<DelayJustificationResponseDto | null> {
     this.logger.log(`GET /tasks/${taskId}/delay-justification — user=${req.user.entidadeId}`);
     return this.service.getVigente(taskId, BigInt(req.user.entidadeId));
+  }
+
+  /**
+   * Lista TODAS as versões da justificativa de atraso da tarefa (vigente +
+   * superseded), ordenadas por versão desc (Fase 2 — painel de auditoria).
+   *
+   * Autorização idêntica à leitura da vigente (Fase 1): assignee OU org ADMIN
+   * (-161). Não-assignee/não-admin → 403.
+   *
+   * @param taskId - `DTask.chave`.
+   * @param req - Request com `user.entidadeId`.
+   * @returns `{ taskId, total, items[] }` (mais recente primeiro).
+   *
+   * @example
+   * ```bash
+   * curl http://localhost:3000/tasks/777/delay-justification/history \
+   *   -H "Authorization: Bearer ..."
+   * ```
+   */
+  @Get('tasks/:taskId/delay-justification/history')
+  @ApiOperation({
+    summary: 'Histórico completo da justificativa de atraso da tarefa',
+    description:
+      'Todas as versões (vigente + superseded) ordenadas por versão desc. ' +
+      'Autorizado a: responsável (assignee) OU org ADMIN (-161).',
+  })
+  @ApiParam({ name: 'taskId', description: 'ID da task (DTask.chave)', example: '777' })
+  @ApiResponse({
+    status: 200,
+    description: 'Histórico de versões',
+    type: DelayJustificationHistoryResponseDto,
+  })
+  @ApiResponse({ status: 401, description: 'Não autenticado' })
+  @ApiResponse({ status: 403, description: 'Não é assignee nem org ADMIN' })
+  @ApiResponse({ status: 404, description: 'Tarefa não encontrada' })
+  async getHistory(
+    @Param('taskId') taskId: string,
+    @Request() req: JwtRequest,
+  ): Promise<DelayJustificationHistoryResponseDto> {
+    this.logger.log(
+      `GET /tasks/${taskId}/delay-justification/history — user=${req.user.entidadeId}`,
+    );
+    return this.service.getHistory(taskId, BigInt(req.user.entidadeId));
   }
 
   /**

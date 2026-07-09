@@ -64,6 +64,63 @@
 
 ---
 
+## Task 1 — Justificativa de Atraso de Tarefas (Fase 2 — Painel Admin) — COMPLETE (V2 Feature Transversal)
+
+**Module:** eventos / delay-justifications (painel admin + agregação)
+**Task:** Agregação de motivos de atraso por usuário × projeto × motivo × período, exclusivo org ADMIN
+**Status:** COMPLETA (Backend Fase 2 — painel admin, agregação, endpoints, migration, RBAC, testes 36/36)
+**Duration:** ~2.5d total (Implementer ~1.5d code/testes + Reviewer ~4h + Documenter ~2h)
+**Quality Score:** 9.0/10 (APPROVED pelo Reviewer)
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Implementer | ~1.5d | — |
+| Reviewer | ~4h | 9.0/10 |
+| Documenter | ~2h | — |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DEvento é estrutural (tabela de auditoria, Prisma direto + $transaction)
+- Pilar 2 (Endpoints): ✅ REUTILIZADO — controller próprio justificado (lógica RBAC + agregação específica de DEvento -503)
+- Pilar 3 (Seed): ✅ HERDADO — 9 DClasses de Fase 1 (nenhuma DClasse nova em F2)
+
+**Deliverables:**
+- [x] Migration `20260709000000_add_devento_delay_reason_agg_idx` — índice parcial jsonb (idempotente, rollback documentado)
+- [x] `DelayReasonsService.aggregate()` — $queryRaw com GROUP BY user/motivo/projeto, batch rótulos
+- [x] `DelayReasonsController` — `GET /reports/delay-reasons` (org ADMIN -161 SOMENTE, Project MANAGER -171 negado)
+- [x] DTOs — `DelayReasonsQueryDto` (filtros + `groupBy` validado @IsIn), `DelayReasonsResponseDto` (ranking)
+- [x] Endpoint GET `/tasks/:taskId/delay-justification/history` — histórico completo (inclui superseded)
+- [x] RBAC — org-alvo = `DProject.idEstab` (dona do projeto); org ADMIN (-161) SOMENTE; Project MANAGER (-171) negado
+- [x] README.md — documentação endpoints Fase 2, RBAC org-alvo, agregação 1 query
+- [x] Tests — 36/36 (4 suites: SELECT, filtros, período, RBAC 403)
+
+**Metrics:**
+- Build: PASS (npm run build)
+- TypeScript: 0 errors (npm run typecheck)
+- ESLint: 0 warnings (npx eslint src/delay-justifications)
+- Testes novos: 36/36 PASS (4 suites cobrindo agregação, filtros, período, RBAC)
+- Regressão: 0 (Fase 1 intacta)
+- N+1 queries: ZERO (2 queries totais: 1 agregação + 1 batch rótulos, testado DATABASE_LOGGING)
+
+**Decisões Críticas:**
+- ✅ Agregação via `$queryRaw` com GROUP BY (Prisma `groupBy` insuficiente para jsonb path)
+- ✅ Whitelist SQL estática `GROUP_COLUMN: Record<DelayReasonsGroupBy, Prisma.Sql>` (ZERO SQL injection)
+- ✅ RBAC org-alvo = `DProject.idEstab` (org dona do projeto), nunca org ativa do JWT (prevenção cross-tenant)
+- ✅ Project MANAGER (-171) negado; org ADMIN (-161) SOMENTE (CEO decisão 3)
+- ✅ Migration idempotente com `CREATE INDEX IF NOT EXISTS` (safe para replay)
+
+**Validações Críticas (auditadas pelo Reviewer):**
+- **SQL Injection:** Whitelist estática + validação `@IsIn` no DTO — 0 risco, verificado linha a linha
+- **RBAC:** org-alvo = `resolveTargetOrg` (linhas 124-143) — se `projectId`, resolve `DProject.idEstab`; org ADMIN testada explicitamente (403 para terceiro, 200 para admin)
+- **N+1:** 2 queries fixas (agregação + batch rótulos), testado com DATABASE_LOGGING
+
+**ADRs:** **ADR-V2-072 Fase 2** (endpoints agregação + history + migration + RBAC org-alvo), ADR-V2-001/008/003 (vinculados)
+
+**Frontend Next:**
+- Fase 2 — Gaveta admin de distribuição de motivos com charts (skill dataviz) — task separada
+
+---
+
 ## Task 7 — Promover Projeto/Lista a Template — COMPLETE (V2 Fase F11)
 
 **Module:** endpoints (projects/)

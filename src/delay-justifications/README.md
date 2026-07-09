@@ -108,7 +108,81 @@ consumer (cópia de auditoria — o painel conta só `-503`, sem double-count).
 
 ---
 
-## Fora de escopo desta fase (Fase 2)
+## Fase 2 — Painel admin + histórico
 
-`GET /tasks/:taskId/delay-justification/history`,
-`GET /reports/delay-reasons` (painel admin agregado) e o índice parcial jsonb.
+### Endpoints
+
+| Método | Rota | Autorização |
+|--------|------|-------------|
+| `GET` | `/tasks/:taskId/delay-justification/history` | assignee **OU** org ADMIN (-161) |
+| `GET` | `/reports/delay-reasons?groupBy=&userId=&projectId=&motivoClasse=&from=&to=` | **org ADMIN (-161) SOMENTE** |
+
+#### `GET /tasks/:taskId/delay-justification/history`
+
+Lista TODAS as versões da justificativa daquela task (vigente + superseded),
+ordenadas por `version` desc. Mesma autorização da leitura da vigente (Fase 1):
+assignee OU org ADMIN. Resposta:
+
+```json
+{
+  "taskId": "777",
+  "total": 2,
+  "items": [
+    { "id": "9002", "version": 2, "isVigente": true,  "supersededBy": null,   "motivoClasse": "-535", "texto": "...", "autorId": "42", "autorNome": "Maria", "delayDays": 3, "delayKind": "OPEN", "createdAt": "..." },
+    { "id": "9001", "version": 1, "isVigente": false, "supersededBy": "9002", "motivoClasse": "-531", "...": "..." }
+  ]
+}
+```
+
+#### `GET /reports/delay-reasons` (painel admin — org ADMIN SOMENTE)
+
+Agrega justificativas **vigentes** (`DEvento` -503, `excluido=false`) da
+organização, por **motivo / usuário / projeto**, com filtros. **1 query de
+agregação (`$queryRaw`) + 1 query batch de rótulos — ZERO N+1.**
+
+**Query params** (todos opcionais exceto `groupBy`):
+
+| Param | Tipo | Descrição |
+|-------|------|-----------|
+| `groupBy` | `motivo \| usuario \| projeto` | **obrigatório** — dimensão do ranking |
+| `userId` | string numérica | filtro por autor (DEntidade.chave) |
+| `projectId` | string numérica | filtro por projeto; **também** define a org-alvo (`DProject.idEstab`) |
+| `motivoClasse` | `-531..-537` | filtro por motivo |
+| `from` / `to` | ISO 8601 | período (`criadoEm`, TZ Brasil — start/end of day) |
+
+**Escopo de org (tenant):** a org-alvo é a org DONA do `projectId` (quando
+filtrado) ou a org ativa do JWT. O SQL faz `INNER JOIN DProject` por
+`(metaDados->>'projetoId')::bigint` e filtra `DProject.idEstab = orgId` →
+admin da org A nunca vê a org B. **Justificativas de tasks sem projeto não
+entram** (não há org a que atribuí-las).
+
+**RBAC:** apenas `getOrgRole(...) === 'ADMIN'` (-161) da org-alvo. Membro/VIEWER
+→ **403**. **NUNCA** `getProjectRole`/MANAGER (CEO decisão 3).
+
+Resposta (shape estável para os 3 cortes da gaveta):
+
+```json
+{
+  "groupBy": "motivo",
+  "orgId": "10",
+  "total": 42,
+  "groups": [
+    { "key": "-535", "label": "Problema técnico / bug",   "count": 18, "avgDelayDays": 3.4 },
+    { "key": "-531", "label": "Dependência não entregue",  "count": 12, "avgDelayDays": 5.1 }
+  ],
+  "filters": { "userId": null, "projectId": null, "motivoClasse": null, "from": null, "to": null }
+}
+```
+
+`key`/`label` variam por `groupBy`: motivo → DClasse.nome; usuario →
+DEntidade.nome; projeto → DProject.nome. `label` é `null` se a entidade não
+pôde ser resolvida.
+
+### Migration (índice — ZERO tabela nova)
+
+`prisma/migrations/20260709000000_add_devento_delay_reason_agg_idx` cria o
+índice **parcial de expressão** `DEvento_delay_reason_agg_idx` sobre o working
+set `WHERE idClasse=-503 AND excluido=false`, cobrindo a chave de JOIN
+(`metaDados->>'projetoId'`), o group-by por usuário (`idEntidade`), por motivo
+(`metaDados->>'motivoClasse'`) e a poda de período (`criadoEm`). Idempotente
+(`IF NOT EXISTS`); rollback manual documentado no `.sql` (`DROP INDEX IF EXISTS`).

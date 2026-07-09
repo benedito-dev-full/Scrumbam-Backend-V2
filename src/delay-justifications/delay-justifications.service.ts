@@ -16,6 +16,10 @@ import { parseTaskDados } from '../tasks/schemas/task-dados.schema';
 import { computeOverdue, OverdueResult } from './overdue.util';
 import { CreateDelayJustificationDto } from './dto/create-delay-justification.dto';
 import { DelayJustificationResponseDto } from './dto/delay-justification-response.dto';
+import {
+  DelayJustificationHistoryItemDto,
+  DelayJustificationHistoryResponseDto,
+} from './dto/delay-justification-history-response.dto';
 import { PendingCountResponseDto } from './dto/pending-count-response.dto';
 
 /** DClasse do evento de justificativa de atraso (seed F1 — ADR-V2-070). */
@@ -306,6 +310,50 @@ export class DelayJustificationsService {
   }
 
   /**
+   * Lista TODAS as versões da justificativa de atraso de uma tarefa (vigente +
+   * superseded), ordenadas por `version` desc (mais recente primeiro).
+   *
+   * Painel de auditoria (Fase 2): mostra como a justificativa evoluiu. A
+   * **vigente** é a linha `excluido=false`; as **superseded** (`excluido=true`)
+   * são versões anteriores substituídas por edição.
+   *
+   * Autorização idêntica à Fase 1 (`assertCanAccess`): responsável (assignee)
+   * OU org ADMIN (-161) da org dona do projeto. Não-assignee/não-admin → 403.
+   *
+   * 2 queries (task + histórico com JOIN do autor) — ZERO N+1.
+   *
+   * @param taskId - `DTask.chave` (path param).
+   * @param requesterEntidadeId - `DEntidade.chave` do requester (do JWT).
+   * @returns `{ taskId, total, items }` com as versões (mais recente primeiro).
+   *
+   * @throws {NotFoundException} Task inexistente.
+   * @throws {ForbiddenException} Não é assignee nem org ADMIN.
+   */
+  async getHistory(
+    taskId: string,
+    requesterEntidadeId: bigint,
+  ): Promise<DelayJustificationHistoryResponseDto> {
+    const task = await this.loadTaskOrThrow(taskId);
+    await this.assertCanAccess(task, requesterEntidadeId);
+
+    const linhas = await this.prisma.dEvento.findMany({
+      where: {
+        idClasse: ID_CLASSE_DELAY_JUSTIFICATION,
+        identificadorExterno: taskId,
+      },
+      orderBy: { criadoEm: 'desc' },
+      include: { entidade: { select: { chave: true, nome: true } } },
+    });
+
+    const items = linhas
+      .map((linha) => this.toHistoryItem(linha, !linha.excluido))
+      // Ordena por versão desc (mais recente primeiro); desempate por id desc.
+      .sort((a, b) => b.version - a.version || Number(BigInt(b.id) - BigInt(a.id)));
+
+    return { taskId, total: items.length, items };
+  }
+
+  /**
    * Carrega os campos da task necessários para atraso + RBAC. 404 se ausente.
    */
   private async loadTaskOrThrow(taskId: string): Promise<{
@@ -405,6 +453,27 @@ export class DelayJustificationsService {
       delayKind: meta.delayKind ?? null,
       version: meta.version ?? 1,
       createdAt: evento.criadoEm.toISOString(),
+    };
+  }
+
+  /**
+   * Mapeia uma linha de DEvento -503 → item de histórico (vigente ou superseded).
+   *
+   * Reusa `toResponseDto` (mesmo shape da vigente) e acrescenta `isVigente`
+   * (derivado de `!excluido`) e `supersededBy` (lido de `metaDados`).
+   *
+   * @param evento - Linha de DEvento -503 (+ JOIN do autor).
+   * @param isVigente - `true` se `excluido=false` (versão atual).
+   */
+  private toHistoryItem(
+    evento: EventoComAutor,
+    isVigente: boolean,
+  ): DelayJustificationHistoryItemDto {
+    const meta = this.readMeta(evento.metaDados);
+    return {
+      ...this.toResponseDto(evento),
+      isVigente,
+      supersededBy: meta.supersededBy ?? null,
     };
   }
 }

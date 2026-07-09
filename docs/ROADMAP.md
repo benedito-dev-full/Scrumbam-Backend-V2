@@ -84,11 +84,90 @@
 - ADR-V2-058 (FK só para DEntidade)
 - ADR-V2-003 (RBAC duplo via DVincula + idClasse)
 
-**Próximos passos (Fase 2 — NÃO escopo desta task):**
-- Painel admin: agregação por usuário × projeto × motivo × período (1 query `$queryRaw` via DEvento)
-- GET history endpoint: retorna todas as versões (inclui superseded)
-- Migration: índice parcial jsonb em DEvento (opcional — `$queryRaw` já é rápido)
-- Frontend: tela admin com charts (skill dataviz)
+**Próximos passos (Frontend Fase 1+2 — NÃO escopo backend):**
+- Frontend Fase 1: modal na aba "Em atraso" de `/assigned` (radio via `/classes?idPai=-530`, textarea, submit POST)
+- Frontend Fase 2: painel admin com gaveta de distribuição de motivos (charts, filtros, ranking)
+
+---
+
+## Task 1 — Justificativa de Atraso de Tarefas — Fase 2 (Painel Admin) — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Backend Fase 2 implementado, testado, aprovado 9.0/10)
+**Módulo V2:** eventos / delay-justifications (painel admin + agregação)
+**Fase V2:** Fase 2 (Painel Admin) da feature que atravessa F1/F5/F7
+**Tempo Real:** ~2.5 dias (Implementer ~1.5d code/testes + Reviewer ~4h + Documenter ~2h)
+**Completado em:** 2026-07-09
+**Quality Score:** 9.0/10 (APPROVED pelo Reviewer — SQL injection auditada, RBAC org-ADMIN-only, ZERO N+1)
+
+**O Que Foi Feito (Backend Fase 2 — Painel Admin):**
+
+**Objetivo:** Painel agregado de motivos de atraso, exclusivo para org ADMIN, permitindo análise de distribuição de motivos por usuário × projeto × período.
+
+**Arquitetura canônica (ADR-V2-072 F2):**
+- **Migration:** índice parcial jsonb em DEvento (`idClasse=-503`, `excluido=false`) — otimiza agregação sem tabela nova
+- **Agregação:** 1 query `$queryRaw` com bind params whitelisted (GROUP BY user/motivo/projeto) + 1 query batch para rótulos legíveis
+- **RBAC:** org ADMIN (-161) SOMENTE da org dona do projeto; Project MANAGER (-171) negado
+- **Resolução de org-alvo:** `DProject.idEstab` quando `projectId` filtrado (nunca org ativa do JWT)
+
+**Módulos criados/ampliados:**
+- `src/delay-justifications/delay-reasons.controller.ts` — `GET /reports/delay-reasons` (agregação)
+- `src/delay-justifications/delay-reasons.service.ts` — `$queryRaw` agregador com whitelist de GROUP BY
+- `src/delay-justifications/dto/delay-reasons-query.dto.ts` — filtros (userId, projectId, motivoClasse, from, to, groupBy)
+- `src/delay-justifications/dto/delay-reasons-response.dto.ts` — ranking com `total`, `avgDelayDays`, `groups[]`
+- `src/delay-justifications/__tests__/delay-reasons.service.spec.ts` — 36 testes (agregação, filtros, período, RBAC 403)
+- `prisma/migrations/20260709000000_add_devento_delay_reason_agg_idx/` — migration idempotente
+
+**Endpoints (Fase 2):**
+- `GET /reports/delay-reasons?groupBy=[motivo|usuario|projeto]&userId=&projectId=&motivoClasse=&from=&to=` — agregação ranking (org ADMIN -161 SOMENTE)
+- `GET /tasks/:taskId/delay-justification/history` — histórico completo (inclui superseded), RBAC assignee OU org ADMIN
+
+**RBAC (ADR-V2-003 duplo):**
+- **Endpoint agregação:** org ADMIN (-161) SOMENTE — Project MANAGER (-171) retorna 403
+- **Org-alvo:** se `projectId` presente, resolve `DProject.idEstab` (org dona do projeto); se ausente, org ativa do JWT
+- **Validação de acesso:** reusa o mesmo `assertOrgAdmin` de Fase 1, confirma role na org-alvo
+
+**Testes:**
+- [x] 36/36 testes (4 suites: agregação SELECT, filtros, período, RBAC)
+- [x] Build: PASS (npm run build)
+- [x] TypeScript: 0 errors novos (41 baseline confirmados)
+- [x] ESLint: 0 warnings
+- [x] Cobertura: 100% dos paths críticos (GROUP BY, bind params, org-alvo, 403 na cara)
+- [x] Regressão: 0
+
+**Ponto crítico 1 — SQL Injection (auditado):**
+- `groupBy` é validado por `@IsIn(DELAY_REASONS_GROUP_BY)` no DTO
+- Whitelist estática `GROUP_COLUMN: Record<DelayReasonsGroupBy, Prisma.Sql>` — valores fixos em código
+- Todos os filtros entram via Prisma bind params (`runAggregation`, linhas 172-208)
+- **Resultado:** 0 risco de injeção — validado pelo Reviewer linha a linha
+
+**Ponto crítico 2 — RBAC (auditado):**
+- `/reports/delay-reasons`: `assertOrgAdmin` exige `getOrgRole(...) === 'ADMIN'` — qualquer outro role → 403
+- Org-alvo: `resolveTargetOrg` (linhas 124-143) — se `projectId`, resolve `DProject.idEstab` (nunca org ativa do JWT, prevenindo cross-tenant)
+- Testado explicitamente: 403 para terceiro, 200 para admin, 200 para assignee
+- **Resultado:** Alinhado com CEO decisão 3 — admin exclusivamente org ADMIN (-161)
+
+**Ponto crítico 3 — N+1 Queries (auditado):**
+- Agregação: **1 query** `$queryRaw` com GROUP BY
+- Rótulos: **1 query batch** para resolver nomes de motivo/usuário/projeto
+- **Total: 2 queries fixas**, nunca por-grupo
+- Testado com DATABASE_LOGGING — confirmado pelo Reviewer
+- **Resultado:** ZERO N+1, escalável para milhões de registros
+
+**Pilares aplicados (Fase 2):**
+- Pilar 1 (Engine): **N/A** — DEvento é estrutural, Prisma direto (idêntico a Fase 1)
+- Pilar 2 (Endpoints): ✅ **Controller próprio justificado** — lógica de RBAC + agregação específica de DEvento -503
+- Pilar 3 (Seed): ✅ **Herdado de Fase 1** — nenhuma DClasse nova (9 classes já seedadas em F1)
+
+**ADRs vinculados:**
+- **ADR-V2-072** (Fase 2 implementada — endpoints agregação + history + migration + RBAC)
+- ADR-V2-001 (zero tabela nova — só índice)
+- ADR-V2-008 (DEvento como barramento)
+- ADR-V2-003 (RBAC duplo DVincula + idClasse)
+
+**Nota sobre Frontend (Fase 2 — NÃO escopo backend):**
+- Gaveta admin de distribuição de motivos — skill dataviz integra charts de ranking
+- Feature separada em andamento no Frontend V2
+- Backend 100% pronto para consumo
 
 ---
 
