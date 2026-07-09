@@ -14,6 +14,24 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Justificativa de Atraso de Tarefas — Fase 1 (Captura) Backend Completa (V2 Feature Transversal, Backend F1, 2026-07-09)**
+  - **Motivos:** 9 DClasses novas (-503, -530..-537) — `DELAY_JUSTIFICATION` (DEvento) + `DELAY_REASON` (agrupador) + 7 motivos concretos
+  - **Arquitetura:** Justificativa via `DEvento -503` com `idEntidade`=autorId + `identificadorExterno`=taskId; versioning via supersede em `$transaction` atomica
+  - **Endpoints Fase 1 (captura):**
+    - `GET /classes?idPai=-530` — radio de motivos (Pilar 2: endpoint genérico reutilizado)
+    - `POST /tasks/:taskId/delay-justification` — cria/edita justificativa vigente (RBAC: assignee OU org ADMIN -161 somente)
+    - `GET /tasks/:taskId/delay-justification` — lê vigente (CEO decisão 1: membro NÃO lê de terceiros)
+    - `GET /me/delay-justifications/pending-count?projectId=` — badge "N atrasos sem justificativa" (global + por projeto)
+  - **RBAC travado:** Membro justifica PRÓPRIA task; Admin (-161) edita qualquer; Project MANAGER (-171) NÃO autoriza
+  - **Critério de atraso:** Por DIA de calendário TZ Brasil — `dados.telemetry.doneAt` (primário) → `dados.v3.movedAt` (fallback) → `atualizadoEm` (último recurso)
+  - **Testes:** 22/22 PASS (overdue.util: 22 casos incluindo virada de dia; service: create, supersede, RBAC, pending-count)
+  - **Build/Lint:** PASS (0 errors, 0 warnings)
+  - **Pilares:** P1 N/A (estrutural, Prisma direto + $transaction correto); P2 ✅ reutilizado (classes genérico); P3 ✅ seed 9 DClasses validadas
+  - **ADRs:** **ADR-V2-072** (novo — Justificativa via DEvento + supersede), ADR-V2-001/008/058/003 (vinculados)
+  - **Score:** 9.0/10 (APPROVED — 3 desvios do Implementer auditados/validados, ZERO N+1, net-zero regressão)
+  - **Frontend (Fase 1 separada):** Modal na aba "Em atraso" de `/assigned` + badge — pendente de integração no Scrumbam-Frontend-V2
+  - **Próximos:** Fase 2 (painel admin agregado por usuário × projeto × motivo × período — 1 query `$queryRaw`)
+
 - **Endpoint `POST /projects/:id/promote-to-template` — promover List/Space a template reutilizável (V2 F11, Task 7, 2026-07-08)**
   - Nova rota para promover um projeto real (List -352 ou Space -350) a template reutilizável (idClasse -401/-402), criando uma CÓPIA — projeto original permanece intacto
   - **Decisão:** CÓPIA, não mutação (requisito CEO: "Testes E2E" continua com ~49 tasks, enquanto template resultante aparece no catálogo)

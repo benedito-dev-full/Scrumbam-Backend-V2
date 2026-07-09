@@ -23,6 +23,7 @@ import { WorkflowStatusesModule } from './workflow-statuses/workflow-statuses.mo
 import { ProjectsModule } from './projects/projects.module';
 import { TasksModule } from './tasks/tasks.module';
 import { CommentsModule } from './comments/comments.module';
+import { DelayJustificationsModule } from './delay-justifications/delay-justifications.module';
 
 // F6 — Engine + Executions (OperacaoExecucaoClaude + ApprovalFlow + Sweeper)
 import { ExecutionsModule } from './executions/executions.module';
@@ -108,6 +109,8 @@ import { RealtimeModule } from './realtime/realtime.module';
     ProjectsModule,
     TasksModule,
     CommentsModule,
+    // Justificativa de Atraso de Tarefas (Fase 1 — Captura, ADR-V2-070)
+    DelayJustificationsModule,
     // F6 — Automation Claude Code (Engine + Executions + ApprovalFlow)
     ExecutionsModule.forRoot(),
     // F7 — Eventos Canônicos (EventProducerService global + /events/health)

@@ -1,6 +1,66 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-07-08 (Task 7 — Promover Projeto/Lista a Template COMPLETA + Iniciativa MCP 3/3)
+**Ultima atualizacao:** 2026-07-09 (Task 1 — Justificativa de Atraso Fase 1 COMPLETA + APPROVED 9.0/10)
+
+---
+
+## Task 1 — Justificativa de Atraso de Tarefas (Fase 1 — Captura) — COMPLETE (V2 Feature Transversal)
+
+**Module:** eventos / delay-justifications (feature transversal: backend F1, frontend F1 separada)
+**Task:** Capturar justificativa de atraso com motivo (obrigatório) + detalhe (opcional); versioning via supersede
+**Status:** COMPLETA (Backend Fase 1 — captura de dados, endpoints, RBAC, testes 22/22)
+**Duration:** ~3.5d total (Strategist ~1h plan + Implementer ~2d code/testes + Reviewer ~4h + Documenter ~2h)
+**Quality Score:** 9.0/10 (APPROVED pelo Reviewer)
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | ~1h | — |
+| Implementer | ~2d | — |
+| Reviewer | ~4h | 9.0/10 |
+| Documenter | ~2h | — |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DEvento é estrutural (tabela de auditoria, Prisma direto + $transaction correto, padrão idêntico a TASK_COMMENT -507)
+- Pilar 2 (Endpoints): ✅ REUTILIZADO — radio de motivos via `/classes?idClasse=-530` endpoint genérico (ZERO controller novo)
+- Pilar 3 (Seed): ✅ COMPLETO — 9 DClasses novas (-503, -530..-537), hierarquia validada, sem colisão
+
+**Deliverables:**
+- [x] 9 DClasses seedadas (motivos -531..-537, agrupador -530, DEvento -503)
+- [x] `DelayJustificationsService` — createOrEdit (supersede + transaction), getVigente, getPendingCount, historia
+- [x] `DelayJustificationsController` — POST/GET task-scoped, GET /me/...
+- [x] DTOs — CreateDelayJustificationDto (motivoClasse + texto?), DelayJustificationResponseDto, PendingCountResponseDto
+- [x] `overdue.util.ts` — critério "atrasada" por DIA (TZ Brasil, data conclusão cascata: telemetry → v3.movedAt → atualizadoEm)
+- [x] RBAC — assignee + org ADMIN (-161); Project MANAGER (-171) negado; membro NÃO lê de terceiros
+- [x] Eventos — `delay.justified` emitido APÓS persistência
+- [x] README.md — documentação Pilar 2 (motivos via genérico, payload, RBAC)
+- [x] Tests — 22/22 (overdue.util 22 cases + service 22 cases)
+
+**Metrics:**
+- Build: PASS (npm run build)
+- TypeScript: 0 errors (npm run typecheck)
+- ESLint: 0 warnings (npx eslint src/delay-justifications)
+- Testes novos: 22/22 PASS (overdue 22 + service 22)
+- Regressão: 0 (pré-existentes TS 41 erros confirmados baseline via git stash -u)
+- N+1 queries: ZERO (verified in code review)
+
+**Decisões Críticas:**
+- ✅ Justificativa via **DEvento -503**, não inline em DTask.dados (permite histórico, agregação 1 query)
+- ✅ Motivos via **DClasse -530..-537**, não enum hardcoded (permite evolução, Pilar 3, reutilizável)
+- ✅ Supersede via `$transaction` atomica — editar = marcar anterior `excluido=true` + inserir nova vigente
+- ✅ RBAC: assignee OU org ADMIN (-161 DVincula); membro NÃO vê de terceiros; Project MANAGER (-171) negado (CEO decisões 1, 3)
+- ✅ Atraso: por DIA de calendário TZ Brasil, cascata telemetry.doneAt → v3.movedAt → atualizadoEm (CEO decisão 2)
+
+**Desvios do Implementer — Auditados pelo Reviewer:**
+- **a) Org-alvo = DProject.idEstab (dona do projeto), não org ativa do JWT** — ✅ VÁLIDO (mais seguro, amarra ao recurso real)
+- **b) VALIDATING incluído em "concluídos"** — ✅ VÁLIDO (telemetry.doneAt persiste, evita bug UX)
+- **c) req.user.entidadeId direto** — ✅ VÁLIDO (JWT V2 já resolve, padrão replicado em tasks)
+
+**ADRs:** **ADR-V2-072** (novo — Justificativa via DEvento + motivos DClasse + supersede + CEO decisões travadas), ADR-V2-001/008/058/003 (vinculados)
+
+**Fases Next:**
+- Fase 2 — Painel admin: agregação por usuário × projeto × motivo × período (1 query `$queryRaw`, não escopo F1)
+- Frontend F1 — Modal `/assigned` aba "Em atraso" + badge (task separada no Scrumbam-Frontend-V2)
 
 ---
 

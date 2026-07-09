@@ -8,6 +8,90 @@
 
 ---
 
+## Task 1 — Justificativa de Atraso de Tarefas — Fase 1 (Captura) — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Backend Fase 1 implementado, testado, aprovado 9.0/10)
+**Módulo V2:** eventos / delay-justifications (feature transversal)
+**Fase V2:** Fase 1 (Captura) de feature que atravessa F1/F5/F7
+**Tempo Real:** ~3.5 dias (Strategist ~1h plan + Implementer ~2d code/testes + Reviewer ~4h + Documenter ~2h)
+**Completado em:** 2026-07-09
+**Quality Score:** 9.0/10 (APPROVED pelo Reviewer — 22/22 testes, ZERO N+1, 3 desvios auditados/validados)
+
+**O Que Foi Feito (Backend Fase 1 — Captura):**
+
+**Objetivo:** Capturar justificativa de atraso de tarefas com categoria (obrigatória) + detalhe (opcional), com histórico via supersede de DEvento.
+
+**Arquitetura canônica (ADR-V2-072):**
+- **Motivos:** DClasse -530..-537 (agrupador + 7 folhas: dependency, external block, underestimated, priority shift, technical, overload, other)
+- **Justificativa:** DEvento -503 `DELAY_JUSTIFICATION` com `idEntidade`=autorId (FK válida), `identificadorExterno`=taskId (índice para vigente)
+- **Versioning:** Editar = supersede em `$transaction` (marca anterior `excluido=true`, insere nova)
+- **Atraso:** Critério por DIA de calendário (TZ Brasil) — `dados.telemetry.doneAt` (primário) → `dados.v3.movedAt` (fallback) → `atualizadoEm` (último recurso)
+
+**Módulos criados:**
+- `src/delay-justifications/` — service (createOrEdit com supersede + transaction), controller (POST/GET), DTOs (create, response, pending-count)
+- `overdue.util.ts` — critério de atraso (22 testes cobrindo virada de dia TZ Brasil)
+
+**Endpoints (Fase 1):**
+- `GET /classes?idPai=-530` — radio de motivos (Pilar 2 — Endpoint genérico reutilizado)
+- `POST /tasks/:taskId/delay-justification` — cria/edita vigente (RBAC: assignee OU org ADMIN -161)
+- `GET /tasks/:taskId/delay-justification` — lê vigente (CEO decisão 1: membro NÃO lê de terceiros)
+- `GET /me/delay-justifications/pending-count?projectId=` — badge de atrasos sem justificativa (global + por projeto)
+
+**RBAC (CEO decisões 1, 3):**
+- **Escrita (POST) e leitura vigente (GET):** Assignee da task OU org ADMIN (DVincula -161 SOMENTE)
+- **Project MANAGER (-171) NÃO autoriza** editar/ler justificativa de terceiros
+- **Membro só enxerga a própria** — NUNCA de terceiros
+
+**Seed (Pilar 3):**
+- 9 DClasses novas (Fase 1): -503 (DELAY_JUSTIFICATION), -530 (DELAY_REASON agrupador), -531..-537 (7 motivos)
+- Colisão checada: `-503/-504` e `-528..-537` estavam livres
+- `validateHierarchy` passou silenciosamente (166 classes totais)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): **Corretamente NÃO aplicado** — DEvento não é transação financeira (tabela estrutural, Prisma direto + `$transaction` para atomicidade — padrão idêntico a TASK_COMMENT -507)
+- Pilar 2 (Endpoints): ✅ **REUTILIZADO** — radio via `/classes?idPai=-530` genérico (ZERO controller novo para motivos)
+- Pilar 3 (Seed): ✅ **COMPLETO** — 9 DClasses novas, hierarquia validada, sem sequestro
+
+**Testes:**
+- [x] 22/22 testes (overdue.util.spec.ts 22 + delay-justifications.service.spec.ts 22)
+- [x] Build: PASS (npm run build — nest build sem erros)
+- [x] TypeScript: 0 errors (npm run typecheck)
+- [x] ESLint: 0 warnings (npx eslint src/delay-justifications --max-warnings 0)
+- [x] Cobertura: 100% dos paths críticos (criar, editar, história, RBAC, atraso)
+- [x] Regressão: 0 (baseline TS 41 erros confirmados como pré-existentes via git stash -u)
+
+**Eventos emitidos:**
+- `delay.justified` (via EventProducerService APÓS persistência — ordem crítica, sem evento órfão)
+
+**Nota sobre frontend (Task F1 separada — NÃO escopo desta task):**
+- Modal na aba "Em atraso" de `/assigned` — radio via `GET /classes?idPai=-530`, textarea, submit `POST`
+- Badge de pendências via `/me/.../pending-count` — pendente de integração frontend
+
+**Desvios do Implementer — Validados pelo Reviewer:**
+- **a) Org-alvo do ADMIN = `DProject.idEstab` (org dona do projeto), não a org ativa do JWT**
+  - Verificado contra `prisma/schema.prisma` + `projects.service.ts` + `RoleResolverService.getOrgRole()`
+  - **Mais seguro:** amarra autorização à org REAL dona do recurso (elimina bug cross-tenant)
+- **b) `VALIDATING` incluído nos estados "concluídos"**
+  - Coerente com nota do plano: `telemetry.doneAt` persiste até VALIDATED (não é resetado)
+  - Evita bug de UX (delayDays inflado a cada dia em VALIDATING)
+- **c) `autorId = req.user.entidadeId` direto (sem `getEntidadeIdFromUserGroup`)**
+  - Verificado contra `jwt.strategy.ts`: JWT V2 já carrega `entidadeId` = DEntidade.chave direto (padrão correto, replicado em TasksController)
+
+**ADRs vinculados:**
+- **ADR-V2-072** (NOVO — Justificativa via DEvento -503 + motivos via DClasse, supersede, RBAC travadas)
+- ADR-V2-001 (zero tabela nova)
+- ADR-V2-008 (DEvento como barramento)
+- ADR-V2-058 (FK só para DEntidade)
+- ADR-V2-003 (RBAC duplo via DVincula + idClasse)
+
+**Próximos passos (Fase 2 — NÃO escopo desta task):**
+- Painel admin: agregação por usuário × projeto × motivo × período (1 query `$queryRaw` via DEvento)
+- GET history endpoint: retorna todas as versões (inclui superseded)
+- Migration: índice parcial jsonb em DEvento (opcional — `$queryRaw` já é rápido)
+- Frontend: tela admin com charts (skill dataviz)
+
+---
+
 ## REFORMA 1 — Transporte Streamable HTTP para MCP (spec 2025-03-26) — ✅ COMPLETA
 
 **Status:** ✅ COMPLETA (5 fases F1–F5 implementadas, testadas, integradas)

@@ -4,7 +4,7 @@
  * Composicao do seed (ADR-V2-019: monolitico):
  *   - 45 classes fixas universais Devari-Core (range -1..-110), via spread de
  *     `templates/classes-base-template.ts`.
- *   - 112 classes especificas Scrumban-V2 (range -150..-527), declaradas
+ *   - 121 classes especificas Scrumban-V2 (range -150..-537), declaradas
  *     neste arquivo, agrupadas por seccao (DEntidade, DVincula, DPedido,
  *     DTabela, DEvento, DTabela secundario, Fases) com comentarios `// === ... ===`.
  *
@@ -20,7 +20,10 @@
  *     OPENAI_API_KEY (-483), AI_PROVIDER_PREF (-484);
  *   ADR-V2-058: +1 PROJECT_REF (-158, DEntidade-espelho de DProject em DVincula);
  *   ADR-V2-061 (proposto): +2 TEMPLATE_LIST (-401), TEMPLATE_SPACE (-402) —
- *     feature Templates de Lista/Espaco via deep-clone do motor cloneTree).
+ *     feature Templates de Lista/Espaco via deep-clone do motor cloneTree;
+ *   ADR-V2-070 (proposto): +1 DELAY_JUSTIFICATION (-503, DEvento de atraso),
+ *     +1 DELAY_REASON (-530, agrupador) e +7 folhas de motivo (-531..-537) —
+ *     feature Justificativa de Atraso de Tarefas via DEvento + DClasse).
  *
  * Validacao automatica:
  *   `validateHierarchy(classes)` e chamado no topo deste modulo. Qualquer
@@ -36,7 +39,7 @@
  * Convencao de chaves negativas (devari-polymorphic-engine.md §3):
  *   - Seeds = chaves NEGATIVAS. Runtime = chaves POSITIVAS.
  *   - Range -1..-110 reservado para fixas universais.
- *   - Range -150..-527 alocado para Scrumban-V2 (este arquivo).
+ *   - Range -150..-537 alocado para Scrumban-V2 (este arquivo).
  *   - Chaves -45/-47/-49/-50 sao do template fintech (Dinpayz) — bloqueadas
  *     pelo validador como sequestro caso sejam usadas aqui.
  *
@@ -55,7 +58,7 @@ import { validateHierarchy } from './validate-hierarchy';
  * Mesmas convencoes do helper `fixa()` do template (todos flags = false,
  * tableFields=null, baseFields=false).
  *
- * @param chave - PK negativa unica (range -150..-527 para Scrumban-V2).
+ * @param chave - PK negativa unica (range -150..-537 para Scrumban-V2).
  * @param codigo - codigo curto UPPER_SNAKE_CASE (ex: 'USER', 'INBOX').
  * @param nome - nome descritivo para UI.
  * @param idPai - chave da DClasse pai (deve existir no array final).
@@ -85,7 +88,7 @@ function esp(
 }
 
 /**
- * Array de classes especificas Scrumban-V2 (112 entradas).
+ * Array de classes especificas Scrumban-V2 (121 entradas).
  *
  * Ordem:
  *   1. DEntidade — 9 (sub-tipos de Pessoa: USER, PLATFORM_SCRUMBAN,
@@ -305,6 +308,14 @@ const classesEspecificas: DClasseSeed[] = [
     'Audit: lifecycle de convite (sent/accepted/expired/revoked via metaDados._meta.action)',
     -3,
   ),
+  // ADR-V2-070 (proposto): Justificativa de atraso de tarefa. Fato datado e
+  // versionavel via DEvento (ADR-V2-008). idEntidade=autorId (DEntidade do
+  // responsavel), identificadorExterno=taskId (SEM FK — taskId NAO cabe na FK
+  // idEntidade→DEntidade, ver ADR-V2-058), metaDados={motivoClasse, texto,
+  // projetoId, autorId, delayDays, delayKind, version, supersededBy}. "1
+  // vigente + historico" via supersede: editar marca a linha anterior
+  // excluido=true e insere nova (vigente = unica excluido=false).
+  esp(-503, 'DELAY_JUSTIFICATION', 'Justificativa de atraso de tarefa', -3),
   // ADR-V2-033 (sub-tarefa 2.1): DEventos de session lifecycle Claude Code.
   // Materializados pelo handler de `POST /agents/:id/execution-result` quando
   // o agente V2 reporta `claudeSessionId` apos uma execucao concluir.
@@ -345,6 +356,21 @@ const classesEspecificas: DClasseSeed[] = [
   esp(-526, 'RISK_LEVEL_MEDIUM', 'Risk: MEDIUM', -52),
   esp(-527, 'RISK_LEVEL_HIGH', 'Risk: HIGH', -52),
 
+  // === DClasse — motivos de atraso (agrupador + 7 folhas — ADR-V2-070) ===
+  // Vocabulario FIXO do radio de justificativa (Pilar 3). O agrupador -530
+  // pende de TABELAS (-51); as folhas pendem de -530. Populado no frontend
+  // via `GET /classes?idPai=-530` (Pilar 2 — endpoint generico, zero
+  // controller novo). Evolucao futura (motivos custom por org) = linhas
+  // POSITIVAS de DTabela sob a familia DELAY_REASON, sem mudanca de schema.
+  esp(-530, 'DELAY_REASON', 'Motivo de atraso (agrupador)', -51, true),
+  esp(-531, 'DELAY_DEPENDENCY', 'Dependencia nao entregue', -530),
+  esp(-532, 'DELAY_EXTERNAL_BLOCK', 'Bloqueio externo / aguardando cliente', -530),
+  esp(-533, 'DELAY_UNDERESTIMATED', 'Subestimei o esforco', -530),
+  esp(-534, 'DELAY_PRIORITY_SHIFT', 'Prioridade mudou no meio', -530),
+  esp(-535, 'DELAY_TECHNICAL', 'Problema tecnico / bug', -530),
+  esp(-536, 'DELAY_OVERLOAD', 'Sobrecarga (tarefas demais)', -530),
+  esp(-537, 'DELAY_OTHER', 'Outro', -530),
+
   // === DTabela — convite por email (5 — ADR-V2-028) ===
   // Filhos de STATUS (-52)
   // -476 INVITE_TOKEN: armazenamento do token (hash SHA-256 em metaDados).
@@ -357,7 +383,7 @@ const classesEspecificas: DClasseSeed[] = [
 ];
 
 /**
- * Array completo do seed (45 fixas + 112 especificas = 157 DClasses).
+ * Array completo do seed (45 fixas + 121 especificas = 166 DClasses).
  * Validado automaticamente em time de import (validateHierarchy abaixo).
  */
 export const classes: DClasseSeed[] = [...classesFixas, ...classesEspecificas];

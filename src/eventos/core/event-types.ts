@@ -31,6 +31,14 @@ export const EVENT_TYPES = {
   TIMER_PAUSED: 'timer.paused',
   TIMER_STOPPED: 'timer.stopped',
 
+  // ============== JUSTIFICATIVA DE ATRASO (ADR-V2-070) ==============
+  // Emitido APÓS persistir a justificativa vigente (DEvento -503) — sinal
+  // para consumidores futuros (notificação in-app, métricas). A fonte de
+  // verdade é o DEvento -503; este evento reusa -489 AUDIT_GENERIC via
+  // TYPE_TO_CLASSE (audit copy, NÃO contabilizado pelo painel que filtra
+  // -503). metaDados carrega taskId, motivoClasse, delayKind, delayDays.
+  DELAY_JUSTIFIED: 'delay.justified',
+
   // ============== PHASES (ADR-V2-047 — Fase 8: webhooks phase.*) ==============
   // Fases são DTask com idClasse=-200 (PHASE) — não tabela própria.
   // `phase.completed` é emitido pelo detector em TasksService.updateStatus
