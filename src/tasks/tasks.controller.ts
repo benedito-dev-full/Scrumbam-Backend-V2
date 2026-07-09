@@ -8,6 +8,7 @@ import {
   HttpCode,
   HttpStatus,
   Logger,
+  NotFoundException,
   Param,
   ParseBoolPipe,
   Post,
@@ -29,6 +30,7 @@ import { ProjectsService } from '../projects/projects.service';
 import { TasksService } from './tasks.service';
 import { PhaseTreeService } from './services/phase-tree.service';
 import { PhaseMetricsService } from './services/phase-metrics.service';
+import { PunctualityMetricsService } from './services/punctuality-metrics.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { UpdateTaskStatusDto } from './dto/update-task-status.dto';
@@ -36,6 +38,7 @@ import { ListTasksQueryDto } from './dto/list-tasks-query.dto';
 import { TaskResponseDto, ListTasksResponseDto } from './dto/task-response.dto';
 import { PhaseTreeResponseDto } from './dto/phase-tree-response.dto';
 import { PhaseMetricsResponseDto } from './dto/phase-metrics-response.dto';
+import { PunctualityMetricsResponseDto } from './dto/punctuality-metrics-response.dto';
 
 interface JwtRequest {
   user: { entidadeId: string; organizationId?: string };
@@ -68,6 +71,7 @@ export class TasksController {
     private readonly projectsService: ProjectsService,
     private readonly phaseTreeService: PhaseTreeService,
     private readonly phaseMetricsService: PhaseMetricsService,
+    private readonly punctualityMetricsService: PunctualityMetricsService,
   ) {}
 
   /**
@@ -277,6 +281,67 @@ export class TasksController {
     await this.tasksService.findOne(id, allowed);
 
     return this.phaseMetricsService.compute(BigInt(id), { recursive: recursive ?? true });
+  }
+
+  /**
+   * Métrica de pontualidade / margem de atraso agregada de um projeto (Task 8).
+   *
+   * Retorna a média (em dias corridos) de `completedAt - dueDate` das tasks
+   * concluídas (DONE/VALIDATED) do projeto que possuem AMBOS `dueDate` e
+   * `doneAt`. Positivo = atraso médio; negativo = adiantamento médio;
+   * `averageDelayDays: null` quando não há amostras. Cálculo 100% server-side
+   * (`AVG` em SQL, sem paginação) — resolve o teto `@Max(100)` do `GET /tasks`.
+   *
+   * Sub-rota do próprio `TasksController` (mesmo padrão de `GET /tasks/:id/metrics`),
+   * Prisma direto sobre DTask (tabela estrutural — sem Engine, sem tabela nova).
+   *
+   * **Ordem de rotas:** declarada ANTES de `@Get(':id')`. O prefixo literal
+   * `projects/` garante 3 segmentos, que não colidem com o wildcard de 1
+   * segmento `:id` — mas a declaração precede `findOne` por segurança.
+   *
+   * Tenant gate: reaproveita `resolveScopedProjectIds(req)` — 404
+   * anti-enumeration idêntico ao de `getMetrics` quando o projeto está fora do
+   * scope do usuário/org.
+   *
+   * @param projectId - ID do projeto (List, chave DProject)
+   * @param req - Request com user.entidadeId / organizationId
+   * @returns `{ averageDelayDays, sampleSize, computedAt }`
+   *
+   * @throws {NotFoundException} Projeto fora do scope (404 anti-enumeration)
+   *
+   * @example
+   * ```bash
+   * curl "http://localhost:3000/api/v1/tasks/projects/5/punctuality" \
+   *   -H "Authorization: Bearer {token}"
+   * ```
+   */
+  @Get('projects/:projectId/punctuality')
+  @ApiOperation({
+    summary: 'Métrica de pontualidade agregada de um projeto (Task 8)',
+    description:
+      'Média de dias entre conclusão (completedAt) e prazo (dueDate) das tasks ' +
+      'concluídas DONE/VALIDATED do projeto com ambos os campos. Positivo=atraso, ' +
+      'negativo=adiantou, null=sem amostras. Agregação SQL server-side (sem paginação).',
+  })
+  @ApiParam({ name: 'projectId', description: 'ID do projeto (List)', example: '5' })
+  @ApiResponse({ status: 200, description: 'Métrica calculada', type: PunctualityMetricsResponseDto })
+  @ApiResponse({ status: 404, description: 'Projeto não encontrado ou fora do scope' })
+  async getProjectPunctuality(
+    @Param('projectId') projectId: string,
+    @Request() req: JwtRequest,
+  ): Promise<PunctualityMetricsResponseDto> {
+    this.logger.log(`GET /tasks/projects/${projectId}/punctuality — user=${req.user.entidadeId}`);
+
+    // Tenant gate: 404 padrão se fora do scope (mensagem idêntica = anti enumeration).
+    const allowed = await this.resolveScopedProjectIds(req);
+    if (!allowed.includes(projectId)) {
+      this.logger.warn(
+        `tenant_mismatch_punctuality projectId=${projectId} fora do scope do user=${req.user.entidadeId}`,
+      );
+      throw new NotFoundException(`Projeto ${projectId} não encontrado`);
+    }
+
+    return this.punctualityMetricsService.computeForProject(BigInt(projectId));
   }
 
   /**

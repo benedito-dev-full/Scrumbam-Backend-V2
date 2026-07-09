@@ -7,6 +7,7 @@ import { TasksIdentifierService } from './tasks-identifier.service';
 import { PhaseHierarchyService } from './services/phase-hierarchy.service';
 import { PhaseTreeService } from './services/phase-tree.service';
 import { PhaseMetricsService } from './services/phase-metrics.service';
+import { PunctualityMetricsService } from './services/punctuality-metrics.service';
 import { TaskTimerService } from './services/task-timer.service';
 
 /**
@@ -45,6 +46,7 @@ import { TaskTimerService } from './services/task-timer.service';
     PhaseHierarchyService,
     PhaseTreeService,
     PhaseMetricsService,
+    PunctualityMetricsService,
     TaskTimerService,
   ],
   exports: [TasksService, PhaseTreeService],
