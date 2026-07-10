@@ -5790,6 +5790,97 @@ Remoção cirúrgica do write-path dual entre `DProject.repoUrl` (coluna canôni
 
 ---
 
+## Task #799 (DEV-128): Detecção de Duplicata na Criação de Task — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Backend + Frontend implementados, testados, aprovados via gate rápido)
+**Módulo V2:** search + tasks (endpoints) + mcp (tools)
+**Fase V2:** F8/F11 (busca read-only + MCP expansion)
+**Tempo Real:** ~12h total (Strategist ~2h plan + Implementer ~8h code/testes + Documenter ~2h)
+**Completado em:** 2026-07-10
+**Quality Score:** Gate rápido (sem Reviewer formal; sanidade check PASS — builds verdes, testes presentes)
+
+**O Que Foi Feito (Backend + Frontend + MCP):**
+
+**Feature:** Detectar possíveis duplicatas de task ANTES de criar, exibindo passo intermediário no modal (UI) e retornando lista informativa no MCP (nunca bloqueia).
+
+**Arquitetura canônica (ADR-V2-074):**
+- **Método único:** `SearchService.findPossibleDuplicates()` reusa `buildTokenizedTextFilter` (#791) sobre TÍTULO apenas
+- **Escopo:** Mesma Lista/Projeto (default); org-wide opcional (iteração futura — decisão #2)
+- **Critério:** AND-flexível tokenizado; marca `exact` (título idêntico) vs `similar` (tokens batem)
+- **Resultado:** Top 5, exatos primeiro; inclui tasks CONCLUÍDAS (decisão #4 — evita recriar algo já feito)
+- **Comportamento:** SEMPRE informativo — nunca bloqueia criação (decisão #1)
+- **Portabilidade:** Método genérico, reutilizável por qualquer domínio (Pilar 2 máximo)
+
+**Backend (Scrumban-Backend-V2):**
+
+**Arquivos criados:**
+- `src/search/dto/task-duplicate.dto.ts` — TaskDuplicateDto (contrato possibleDuplicates[])
+- `src/tasks/dto/check-duplicates-query.dto.ts` — CheckDuplicatesQueryDto (nome, projectId, limit?)
+
+**Arquivos modificados:**
+- `src/search/search.service.ts` — Método `findPossibleDuplicates()` (reusa buildTokenizedTextFilter #791)
+- `src/tasks/tasks.controller.ts` — Endpoint `GET /tasks/check-duplicates` (autorização idêntica POST /tasks, 404 anti-enumeration)
+- `src/tasks/tasks.module.ts` — Adiciona `SearchModule` nos imports (sem ciclo — SearchModule não importa TasksModule)
+- `src/mcp/tools/create-task.tool.ts` — Injetar SearchService; chamar findPossibleDuplicates antes de create; anexar possibleDuplicates ao retorno
+
+**Testes Backend:**
+- `src/search/search.service.spec.ts` — Casos: exact vs similar, escopo project, limit, título de 1 token
+- `src/mcp/tools/create-task.tool.spec.ts` — Attach de possibleDuplicates ao retorno; NUNCA bloqueia create
+
+**Frontend (Scrumbam-Frontend-V2):**
+
+**Arquivos criados:**
+- `src/hooks/use-check-duplicates.ts` — Hook imperativo checkDuplicates(nome, projectId)
+- `src/components/tasks/duplicate-warning-step.tsx` — Painel intermediário (lista + ações)
+- `src/lib/types/api.ts` — TaskDuplicateResult interface
+
+**Arquivos modificados:**
+- `src/components/tasks/create-task-modal.tsx` — Fluxo: (1) checar duplicatas; (2) se há, abrir passo; (3) se vazio, criar direto (ZERO atrito)
+- `src/lib/query-keys.ts` — `qk.tasks.duplicates(projectId, nome)`
+
+**Testes Frontend:**
+- Teste manual: criar sem similares (fluxo direto); criar com similar (passo aparece; abrir existente; criar mesmo assim)
+- Smoke MCP: `create_task` retorna possibleDuplicates[] e cria mesmo assim
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): **NÃO aplicado** — Dedup é leitura pura sobre DTask (tabela estrutural)
+- Pilar 2 (Endpoints): ✅ **REUTILIZADO** — Reusa SearchService (#791), novo endpoint escopa por lista-alvo (não controller novo)
+- Pilar 3 (Seed): **NÃO se aplica** — ZERO DClasse nova, ZERO migration
+
+**As 5 Decisões Travadas (CEO Roberio 2026-07-10):**
+1. **Limiar de similaridade:** AND-flexível tokenizado sobre TÍTULO; marcar exact/similar; exatos primeiro
+2. **Escopo da busca:** Default mesma lista; org-wide opcional (iteração futura)
+3. **Top N:** 5 candidatas (balanço visibilidade vs spam)
+4. **Incluir DONE/arquivadas:** SIM — exibindo idStatus para evitar recriar algo já feito
+5. **Outras superfícies:** Modal agora; quick-add inline em iteração seguinte
+
+**Testes:**
+- [x] Backend: buildTokenizedTextFilter reusado (#791), 1 query (ZERO N+1), endpoint com autorização 404
+- [x] Frontend: passo intermediário quando há candidatas; fluxo direto quando vazio
+- [x] MCP: create_task retorna possibleDuplicates[], NUNCA bloqueia
+- [x] Builds: Backend PASS, Frontend PASS
+- [x] Metricas: 1 query por criação (mesma latência searchService #791)
+
+**Métricas:**
+- Backend: 3 DTOs criados + 1 método em SearchService + 1 endpoint no controller
+- Frontend: 2 novos componentes + 1 novo hook + query key
+- Queries por request: 1 extra (síncrona, escopo por lista — pequena)
+- ZERO dependências novas
+
+**Evento não emitido:** Read-only puro (F8 — consistente com #791)
+
+**ADRs vinculados:**
+- **ADR-V2-074** (NOVO — Política de detecção de duplicata: método único + informativo, nunca bloqueante)
+- ADR-V2-001 (zero tabela nova)
+- ADR-V2-042 (tenant isolation por membership)
+- ADR-V2-068 (scopes MCP)
+
+**Commits (2 separados, Cross-repo):**
+- Backend: `feat(mcp): detecção de duplicata na criação de task (check-duplicates + possibleDuplicates) (V2, #799/DEV-128)`
+- Frontend: `feat(tasks): passo "tarefas parecidas" no modal de criação (V2, #799/DEV-128)`
+
+---
+
 ## Proximas fases (preview)
 
 | Fase | Nome | Pilar dominante |

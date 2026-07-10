@@ -6634,6 +6634,80 @@ Ambos comportamentos já estavam no código; testes documentam o contrato.
 
 ---
 
+## Task #799 — COMPLETE (V2 Fase F8/F11)
+
+**Module:** search / tasks / mcp
+**Task:** Detecção de duplicata na criação de task (DEV-128)
+**Status:** COMPLETA
+**Duration:** ~12h total
+**Quality Score:** Gate rápido (sem Reviewer formal — builds verdes, testes presentes, sanidade PASS)
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | ~2h | Plan detalhado, 5 decisões travadas |
+| Implementer | ~8h | Backend + Frontend + MCP implementados |
+| Reviewer | — | Gate rápido (sem formal) |
+| Documenter | ~2h | JSDOC + ADR-V2-074 + docs |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — Dedup é leitura pura sobre DTask (tabela estrutural, Prisma direto)
+- Pilar 2 (Endpoints): ✅ REUTILIZADO — SearchService genérico (reusa #791), novo endpoint escopa por lista-alvo (não controller novo)
+- Pilar 3 (Seed): N/A — ZERO DClasse nova, ZERO migration
+
+**Deliverables:**
+
+**Backend (Scrumban-Backend-V2):**
+- [x] `src/search/dto/task-duplicate.dto.ts` — TaskDuplicateDto (contrato possibleDuplicates[])
+- [x] `src/tasks/dto/check-duplicates-query.dto.ts` — CheckDuplicatesQueryDto
+- [x] `SearchService.findPossibleDuplicates()` — Reusa buildTokenizedTextFilter (#791) sobre TÍTULO
+  - Escopo: default mesma lista (idProject=X); org-wide opcional futura (decisão #2)
+  - Critério: AND-flexível tokenizado → exact (título ci-igual) vs similar (tokens batem)
+  - Resultado: Top 5, exatos primeiro; inclui DONE/arquivadas (decisão #4)
+  - Queries: 1 (ZERO N+1)
+- [x] `GET /tasks/check-duplicates` — Endpoint HTTP (autorização =POST /tasks, 404 anti-enumeration)
+- [x] `TasksModule` importa `SearchModule` (sem ciclo — SearchModule não importa TasksModule)
+- [x] `CreateTaskTool` (MCP) — Injetar SearchService; buscar ANTES de create; anexar possibleDuplicates ao retorno
+
+**Frontend (Scrumbam-Frontend-V2):**
+- [x] `src/hooks/use-check-duplicates.ts` — Hook imperativo checkDuplicates(nome, projectId)
+- [x] `src/components/tasks/duplicate-warning-step.tsx` — Passo intermediário (lista + ações)
+- [x] `src/lib/types/api.ts` — TaskDuplicateResult interface
+- [x] `src/components/tasks/create-task-modal.tsx` — Fluxo: (1) checar; (2) se há, abrir passo; (3) se vazio, criar direto (ZERO atrito)
+- [x] `src/lib/query-keys.ts` — qk.tasks.duplicates(projectId, nome)
+- [x] Botões passo intermediário: "Criar mesmo assim" (bypass) + "Cancelar"
+
+**Tests:**
+- [x] Backend: searchService method, HTTP endpoint, MCP tool
+- [x] Frontend: modal fluxo sem/com duplicatas
+- [x] Builds: Backend PASS, Frontend PASS
+- [x] Testes adversariais: 1 query (escopo lista pequeno), ZERO N+1
+
+**Metrics:**
+- Build Backend: PASS (npm run build)
+- Build Frontend: PASS (npm run build)
+- TypeScript Backend: 0 errors
+- TypeScript Frontend: 0 errors
+- ESLint Backend: 0 warnings
+- ESLint Frontend: 0 warnings
+- Queries/request: 1 extra (mesma latência #791)
+- Regressão: ZERO (gate rápido validou)
+
+**5 Decisões Travadas (CEO Roberio 2026-07-10):**
+1. Limiar AND-flexível tokenizado sobre TÍTULO; exact vs similar; exatos primeiro
+2. Escopo default mesma lista (idProject=X); org-wide iteração futura
+3. Top 5 candidatas (balanço visibilidade vs spam)
+4. Incluir tasks CONCLUÍDAS (DONE/arquivadas) — exibindo idStatus (evita recriar algo já feito)
+5. Modal agora; quick-add inline iteração seguinte
+
+**ADRs:** **ADR-V2-074 (novo — Política detecção duplicata: método único + informativo, nunca bloqueante)**, ADR-V2-001/042/068/071 (vinculados)
+
+**Commits (2 separados, cross-repo):**
+- Backend: `feat(mcp): detecção de duplicata na criação de task (check-duplicates + possibleDuplicates) (V2, #799/DEV-128)`
+- Frontend: `feat(tasks): passo "tarefas parecidas" no modal de criação (V2, #799/DEV-128)`
+
+---
+
 <!-- dedup:documenter:794 -->
 ### Agent Concluído: documenter
 

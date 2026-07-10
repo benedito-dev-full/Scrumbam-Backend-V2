@@ -24,6 +24,35 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Detecção de Duplicata na Criação de Task (Task #799 / DEV-128, V2 F8/F11, 2026-07-10)**
+  - **Feature:** Detectar possíveis duplicatas ANTES de criar — exibindo passo intermediário no modal (UI) e retornando lista informativa no MCP (nunca bloqueia)
+  - **Método único:** `SearchService.findPossibleDuplicates()` reusa `buildTokenizedTextFilter` (#791) sobre TÍTULO apenas — reutilizável por qualquer domínio
+  - **Critério AND-flexível:** Tokenizado; marca `exact` (título idêntico case-insensitive) vs `similar` (tokens batem em algum campo)
+  - **Resultado:** Top 5 candidatas, exatos primeiro; inclui tasks CONCLUÍDAS (evita recriar algo já feito)
+  - **Comportamento:** SEMPRE informativo — nunca bloqueia criação (decisão #1 do CEO)
+  - **Escopo:** Default mesma Lista (idProject=X); org-wide opcional iteração futura (decisão #2)
+  - **Backend (Scrumban-Backend-V2):**
+    - `src/search/dto/task-duplicate.dto.ts` — TaskDuplicateDto
+    - `src/tasks/dto/check-duplicates-query.dto.ts` — CheckDuplicatesQueryDto
+    - `GET /tasks/check-duplicates` — endpoint com autorização idêntica `POST /tasks`, 404 anti-enumeration
+    - `CreateTaskTool` injetar SearchService; buscar ANTES de create; anexar `possibleDuplicates[]` ao retorno
+  - **Frontend (Scrumbam-Frontend-V2):**
+    - Hook `useCheckDuplicates()` (imperativo: `checkDuplicates(nome, projectId)`)
+    - Componente `<DuplicateWarningStep>` — passo intermediário quando há candidatas
+    - Fluxo modal: (1) checar; (2) se há, abrir passo; (3) se vazio, criar direto (ZERO atrito)
+    - Botões: "Criar mesmo assim" (bypass) + "Cancelar"
+  - **5 decisões travadas CEO (2026-07-10):**
+    1. Limiar AND-flexível tokenizado sobre título; marcar exact/similar; exatos primeiro
+    2. Escopo default mesma lista (idProject=X); org-wide iteração futura
+    3. Top 5 candidatas (balanço visibilidade vs spam)
+    4. Incluir tasks DONE/arquivadas (decisão #4) — exibindo idStatus
+    5. Modal agora (decisão #5); quick-add inline iteração seguinte
+  - **Testes:** Backend (searchService, create-task.tool); Frontend (fluxo modal sem/com duplicatas); MCP (possibleDuplicates[] + nunca bloqueia)
+  - **Performance:** 1 query extra por criação (mesma latência #791 — escopo por lista é pequeno)
+  - **Pilares:** P1 N/A (leitura estrutural); P2 ✅ REUTILIZADO (SearchService genérico, novo endpoint escopa por lista); P3 N/A (zero DClasse nova)
+  - **Portabilidade:** Método genérico — candidato a upstream contribuição para template Devari Core
+  - **ADRs:** **ADR-V2-074 (novo — Política detecção duplicata: método único + informativo, nunca bloqueante)**, ADR-V2-001/042/068/071 (vinculados)
+
 - **Diálogo de Confirmação de Takeover — Guard Colisão Humana (Task #795 / DEV-124, Frontend V2, 2026-07-10)**
   - **Feature:** Guard de cortesia (client-side) contra colisão de trabalho HUMANO — complementa trava MCP da #794 que bloqueia ROBÔ
   - **Componentes frontend criados:** Hook centralizado `useWorkCollisionGuard()` (predicado, estado, callbacks); Componente `<TakeoverConfirmDialog>` (paleta âmbar, padrão shadcn); Utilitário `formatSince()` (unificado badge+dialog)

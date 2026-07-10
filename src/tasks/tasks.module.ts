@@ -1,6 +1,7 @@
 import { forwardRef, Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { ProjectsModule } from '../projects/projects.module';
+import { SearchModule } from '../search/search.module';
 import { TasksController } from './tasks.controller';
 import { TasksService } from './tasks.service';
 import { TasksIdentifierService } from './tasks-identifier.service';
@@ -38,7 +39,7 @@ import { TaskTimerService } from './services/task-timer.service';
  * Exporta TasksService para uso em outros módulos (ex: ProjectsModule, FlowMetrics).
  */
 @Module({
-  imports: [forwardRef(() => AuthModule), forwardRef(() => ProjectsModule)],
+  imports: [forwardRef(() => AuthModule), forwardRef(() => ProjectsModule), SearchModule],
   controllers: [TasksController],
   providers: [
     TasksService,

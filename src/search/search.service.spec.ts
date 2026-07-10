@@ -493,4 +493,144 @@ describe('SearchService', () => {
       }),
     );
   });
+
+  // ─── findPossibleDuplicates (task #799 / DEV-128) ─────────────────────────
+
+  describe('findPossibleDuplicates', () => {
+    /** Row de DTask mockada com o shape que o método seleciona (inclui dados). */
+    function makeDupRow(
+      chave: bigint,
+      nome: string,
+      opts: { identifier?: string; idProject?: bigint; idStatus?: bigint; criadoEm?: Date } = {},
+    ) {
+      return {
+        chave,
+        nome,
+        idProject: opts.idProject ?? BigInt(352),
+        idStatus: opts.idStatus ?? BigInt(-443),
+        criadoEm: opts.criadoEm ?? new Date('2026-07-05T12:00:00.000Z'),
+        dados: opts.identifier ? { identifier: opts.identifier } : null,
+        project: { chave: opts.idProject ?? BigInt(352), nome: 'Backend Core' },
+      };
+    }
+
+    it('marca matchType exact vs similar e ordena exatos primeiro', async () => {
+      // Ordem de retorno do banco: similar antes de exato (criadoEm desc);
+      // o método deve reordenar colocando o exato na frente.
+      prismaMock.dTask.findMany = jest
+        .fn()
+        .mockResolvedValue([
+          makeDupRow(BigInt(2), 'Corrigir login OAuth do gateway', { identifier: 'DEV-88' }),
+          makeDupRow(BigInt(1), 'Corrigir login OAuth', { identifier: 'DEV-87' }),
+        ]);
+
+      const result = await service.findPossibleDuplicates({
+        nome: 'Corrigir login OAuth',
+        projectId: '352',
+      });
+
+      expect(result).toHaveLength(2);
+      expect(result[0].matchType).toBe('exact');
+      expect(result[0].chave).toBe('1');
+      expect(result[0].identifier).toBe('DEV-87');
+      expect(result[1].matchType).toBe('similar');
+      expect(result[1].chave).toBe('2');
+    });
+
+    it('exact é case-insensitive e ignora espaços nas bordas', async () => {
+      prismaMock.dTask.findMany = jest
+        .fn()
+        .mockResolvedValue([makeDupRow(BigInt(1), '  CORRIGIR Login OAuth  ')]);
+
+      const result = await service.findPossibleDuplicates({
+        nome: 'corrigir login oauth',
+        projectId: '352',
+      });
+
+      expect(result[0].matchType).toBe('exact');
+    });
+
+    it('escopa por projeto (idProject fixo) e inclui DONE (sem filtro de status)', async () => {
+      const findMany = jest.fn().mockResolvedValue([]);
+      prismaMock.dTask.findMany = findMany;
+
+      await service.findPossibleDuplicates({ nome: 'qualquer coisa', projectId: '352' });
+
+      const where = findMany.mock.calls[0][0].where;
+      expect(where.idProject).toBe(BigInt(352));
+      expect(where.excluido).toBe(false);
+      // Não há filtro de status → tasks concluídas/arquivadas também entram (decisão #4).
+      expect(where.idStatus).toBeUndefined();
+      // Sem excludeTaskId → sem restrição de chave.
+      expect(where.chave).toBeUndefined();
+    });
+
+    it('aplica excludeTaskId como chave: { not } (fluxo de edição)', async () => {
+      const findMany = jest.fn().mockResolvedValue([]);
+      prismaMock.dTask.findMany = findMany;
+
+      await service.findPossibleDuplicates({
+        nome: 'renomear task',
+        projectId: '352',
+        excludeTaskId: '1234',
+      });
+
+      const where = findMany.mock.calls[0][0].where;
+      expect(where.chave).toEqual({ not: BigInt(1234) });
+    });
+
+    it('respeita o limit (default 5) fazendo slice após reordenar', async () => {
+      const rows = Array.from({ length: 8 }, (_, i) =>
+        makeDupRow(BigInt(i + 1), `Task parecida ${i + 1}`),
+      );
+      const findMany = jest.fn().mockResolvedValue(rows);
+      prismaMock.dTask.findMany = findMany;
+
+      const result = await service.findPossibleDuplicates({
+        nome: 'Task parecida',
+        projectId: '352',
+      });
+
+      // Buffer de +5 no take, slice(limit) no fim.
+      expect(findMany.mock.calls[0][0].take).toBe(10);
+      expect(result).toHaveLength(5);
+    });
+
+    it('mapeia o contrato TaskDuplicateDto (identifier null quando ausente)', async () => {
+      prismaMock.dTask.findMany = jest
+        .fn()
+        .mockResolvedValue([makeDupRow(BigInt(1), 'Corrigir login OAuth')]);
+
+      const [dup] = await service.findPossibleDuplicates({
+        nome: 'Corrigir login OAuth',
+        projectId: '352',
+      });
+
+      expect(dup).toEqual({
+        chave: '1',
+        identifier: null,
+        nome: 'Corrigir login OAuth',
+        idProject: '352',
+        projectNome: 'Backend Core',
+        idStatus: '-443',
+        matchType: 'exact',
+        criadoEm: '2026-07-05T12:00:00.000Z',
+      });
+    });
+
+    it('scope=org com accessibleProjectIds usa idProject IN (...)', async () => {
+      const findMany = jest.fn().mockResolvedValue([]);
+      prismaMock.dTask.findMany = findMany;
+
+      await service.findPossibleDuplicates({
+        nome: 'busca ampla',
+        projectId: '352',
+        scope: 'org',
+        accessibleProjectIds: ['352', '353'],
+      });
+
+      const where = findMany.mock.calls[0][0].where;
+      expect(where.idProject).toEqual({ in: [BigInt(352), BigInt(353)] });
+    });
+  });
 });

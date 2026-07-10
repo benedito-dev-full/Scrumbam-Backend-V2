@@ -13,6 +13,7 @@ import {
   PersonSearchResultDto,
   SearchCursorsDto,
 } from './dto/search-response.dto';
+import { TaskDuplicateDto } from './dto/task-duplicate.dto';
 
 /** idClasse DEntidade USER no V2 (seed F1 — ADR-V2-002). */
 const ID_CLASSE_USER = BigInt(-150);
@@ -505,6 +506,129 @@ export class SearchService {
     }));
 
     return { tasks: taskDtos, total: taskDtos.length, q };
+  }
+
+  /**
+   * Detecta possíveis duplicatas de uma task ANTES de criá-la (task #799 / DEV-128).
+   *
+   * Reusa {@link SearchService.buildTokenizedTextFilter} (#791) sobre o TÍTULO
+   * apenas — duplicata é mesmo título, não mesma descrição. Marca cada candidata
+   * como `exact` (título case-insensitive idêntico) ou `similar` (tokens batem),
+   * ordenando exatos primeiro. Comportamento SEMPRE informativo — o caller decide
+   * o que fazer; este método nunca bloqueia nada.
+   *
+   * Escopo (decisão #2 — só a mesma lista por padrão):
+   * - `scope='project'` (default): busca apenas em `idProject = projectId`.
+   * - `scope='org'`: usa `accessibleProjectIds` (canal MCP) OU `organizationId`
+   *   (canal HTTP) para ampliar o escopo. Reservado para iteração futura.
+   *
+   * Inclui tasks concluídas/arquivadas (`excluido=false`, sem filtro de status —
+   * decisão #4) para evitar recriar algo já feito; a UI exibe o `idStatus`.
+   *
+   * Tenant isolation é responsabilidade do CALLER (validação de `projectId ∈
+   * accessibleProjectIds` no controller/tool) + o `idProject` fixo desta query.
+   *
+   * Queries por chamada: 1 (ZERO N+1, ZERO $queryRaw). Read-only puro (F8).
+   *
+   * @param params.nome - Título proposto (base da busca tokenizada)
+   * @param params.projectId - Lista-alvo (escopo quando `scope='project'`)
+   * @param params.scope - `'project'` (default) ou `'org'`
+   * @param params.organizationId - Org (usado só em `scope='org'` no canal HTTP)
+   * @param params.accessibleProjectIds - Projetos acessíveis (usado só em `scope='org'` no MCP)
+   * @param params.excludeTaskId - Exclui a própria task (fluxo de edição/rename)
+   * @param params.limit - Máximo de candidatas (default 5, cap 20)
+   * @returns Lista de {@link TaskDuplicateDto}, exatos primeiro
+   *
+   * @example
+   * ```typescript
+   * const dups = await searchService.findPossibleDuplicates({
+   *   nome: 'Corrigir login OAuth',
+   *   projectId: '352',
+   *   limit: 5,
+   * });
+   * // dups[0].matchType === 'exact' quando existe título idêntico na lista
+   * ```
+   */
+  async findPossibleDuplicates(params: {
+    nome: string;
+    projectId: string;
+    scope?: 'project' | 'org';
+    organizationId?: string;
+    accessibleProjectIds?: string[];
+    excludeTaskId?: string;
+    limit?: number;
+  }): Promise<TaskDuplicateDto[]> {
+    const {
+      nome,
+      projectId,
+      scope = 'project',
+      organizationId,
+      accessibleProjectIds,
+      excludeTaskId,
+    } = params;
+    const limit = Math.max(1, Math.min(20, params.limit ?? 5));
+
+    // Escopo da busca. Default (decisão #2): apenas a lista-alvo.
+    let scopeWhere: Prisma.DTaskWhereInput;
+    if (scope === 'org' && accessibleProjectIds !== undefined) {
+      scopeWhere = { idProject: { in: accessibleProjectIds.map((id) => BigInt(id)) } };
+    } else if (scope === 'org' && organizationId) {
+      scopeWhere = { project: { idEstab: BigInt(organizationId), excluido: false } };
+    } else {
+      scopeWhere = { idProject: BigInt(projectId) };
+    }
+
+    this.logger.debug(
+      `findPossibleDuplicates nome="${nome}" project=${projectId} scope=${scope} limit=${limit}`,
+    );
+
+    // 1 query. Buffer de +5 para reordenar exatos primeiro sem perder candidatos.
+    const rows = await this.prisma.dTask.findMany({
+      where: {
+        excluido: false,
+        ...scopeWhere,
+        ...(excludeTaskId ? { chave: { not: BigInt(excludeTaskId) } } : {}),
+        // Reuso #791: título apenas (duplicata é mesmo título, não descrição).
+        ...(this.buildTokenizedTextFilter(nome, ['nome']) as unknown as Prisma.DTaskWhereInput),
+      },
+      select: {
+        chave: true,
+        nome: true,
+        idProject: true,
+        idStatus: true,
+        criadoEm: true,
+        dados: true,
+        project: { select: { chave: true, nome: true } },
+      },
+      orderBy: { criadoEm: 'desc' },
+      take: limit + 5,
+    });
+
+    const target = nome.trim().toLowerCase();
+
+    const mapped: TaskDuplicateDto[] = rows.map((t) => {
+      const dados = t.dados as Record<string, unknown> | null;
+      const identifier = dados?.identifier;
+      const isExact = t.nome.trim().toLowerCase() === target;
+      return {
+        chave: t.chave.toString(),
+        identifier: typeof identifier === 'string' ? identifier : null,
+        nome: t.nome,
+        idProject: t.idProject?.toString() ?? null,
+        projectNome: t.project?.nome ?? null,
+        idStatus: t.idStatus?.toString() ?? null,
+        matchType: isExact ? 'exact' : 'similar',
+        criadoEm: t.criadoEm.toISOString(),
+      };
+    });
+
+    // Exatos primeiro (sort estável preserva a ordem criadoEm desc dentro do grupo).
+    mapped.sort((a, b) => {
+      if (a.matchType === b.matchType) return 0;
+      return a.matchType === 'exact' ? -1 : 1;
+    });
+
+    return mapped.slice(0, limit);
   }
 
   /**
