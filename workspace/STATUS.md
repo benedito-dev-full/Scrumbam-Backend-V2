@@ -6448,6 +6448,57 @@ Ambos comportamentos já estavam no código; testes documentam o contrato.
 
 ---
 
+## Task #791 (DEV-120): Busca multi-termo tokenizada (SearchService) — COMPLETE (V2 F8)
+
+**Module:** search (SearchService)
+**Task:** Corrigir `search_tasks` para casamento multi-termo — "login bug" achava "bug do login"
+**Status:** COMPLETA (Backend-only gate rápido sanidade aprovado, tsc/eslint/33 testes verdes)
+**Duration:** ~2h implementação + ~1h docs
+**Quality Score:** Gate rápido (sanidade aprovada; Reviewer formal não executado)
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | — |
+| Implementer | ~2h | — |
+| Reviewer | (gate rápido) | (n/a) |
+| Documenter | ~1h | — |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — leitura pura, sem Engine (Prisma direto)
+- Pilar 2 (Endpoints): ✅ REUTILIZADO — SearchService genérico (nenhum controller novo)
+- Pilar 3 (Seed): N/A — zero DClasse nova
+
+**Deliverables:**
+- [x] Helper `buildTokenizedTextFilter(q, fields)` — tokeniza, descarta <2 chars, AND-flexível
+- [x] Aplicado em `queryTasks`, `queryProjects`, `queryPeople` (HTTP search)
+- [x] Aplicado em `searchForMcp` (MCP tool `search_tasks`)
+- [x] Fallback para substring literal quando 0 tokens (preserva UX busca vazia)
+- [x] JSDoc completo (exemplo de tokenização)
+- [x] Testes: 2 specs novos (tokenização + fallback), baseline PASS
+
+**Metrics:**
+- Build: PASS (npm run build)
+- TypeScript: 0 errors (npm run typecheck)
+- ESLint: 0 warnings (npx eslint src/search)
+- Testes: 33/33 PASS (backend tests — não quebrou baseline)
+- N+1 Queries: ZERO (leitura pura, no change)
+- Regressão: 0
+
+**Bug/Causa-raiz:**
+- Query anterior: `{ nome: { contains: q, mode: 'insensitive' } }` — match literal substring
+- Problema: "login bug" (2 palavras) não achava registros com "bug do login" (ordem diferente)
+- Solução: Tokeniza `q` por whitespace, cada token deve bater em ALGUM campo (nome OU descrição)
+
+**Decisão Arquitetural:**
+- ZERO $queryRaw (sem Full-Text Search Postgres) — aceitável até ~10k tasks/org (TODO F14)
+- ILIKE case-insensitive via `mode: 'insensitive'` (existente)
+- AND-flexível (semântica: "todas as palavras devem aparecer em algum lugar")
+
+**ADRs:** N/A — bug fix, sem decisão arquitetural nova (Full-Text fica para F14)
+
+---
+
 ## Task #794 (DEV-123): Badge "em trabalho por Fulano" + Trava de Concorrência MCP — COMPLETE (V2 F8/F11)
 
 **Module:** mcp (primário) + tasks (guard/badge) + frontend

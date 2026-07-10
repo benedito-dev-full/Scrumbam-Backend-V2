@@ -12,6 +12,16 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Fixed
+
+- **Busca multi-termo tokenizada no SearchService (Task #791 / DEV-120, V2 F8, 2026-07-10)**
+  - **Bug:** `search_tasks` só casava substring exata — "login bug" não achava "bug do login"
+  - **Solução:** Novo helper `buildTokenizedTextFilter(q, fields)` — tokeniza `q`, descarta tokens <2 chars, AND-flexível (cada palavra deve aparecer em algum campo)
+  - **Aplicado em:** `queryTasks`, `queryProjects`, `queryPeople` (HTTP), `searchForMcp` (MCP) — ZERO $queryRaw
+  - **Fallback:** Substring literal quando 0 tokens válidos (preserva UX de busca vazia)
+  - **Testes:** Verificado: tsc/eslint PASS, 33/33 testes backend
+  - **Pilares:** P1 N/A (leitura estrutural, sem Engine); P2 ✅ reutilizado (SearchService genérico); P3 N/A (zero DClasse nova)
+
 ### Added
 
 - **Diálogo de Confirmação de Takeover — Guard Colisão Humana (Task #795 / DEV-124, Frontend V2, 2026-07-10)**
