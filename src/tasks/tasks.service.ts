@@ -9,13 +9,24 @@ import { ProjectRefService } from '../projects/project-ref.service';
 import { TEMPLATE_CLASSES } from '../projects/constants/template-classes.const';
 import { PhaseHierarchyService } from './services/phase-hierarchy.service';
 import { validateTransition, isValidState } from './tasks-state-machine';
-import { TaskStatus, buildInitialTaskDados, ManualTimerSession } from './schemas/task-dados.schema';
+import {
+  TaskStatus,
+  buildInitialTaskDados,
+  ManualTimerSession,
+  WorkSession,
+} from './schemas/task-dados.schema';
 import { PhaseMetricsService } from './services/phase-metrics.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { UpdateTaskStatusDto } from './dto/update-task-status.dto';
 import { ListTasksQueryDto } from './dto/list-tasks-query.dto';
-import { TaskResponseDto, ListTasksResponseDto, ActiveExecutionDto } from './dto/task-response.dto';
+import {
+  TaskResponseDto,
+  ListTasksResponseDto,
+  ActiveExecutionDto,
+  ActiveWorkSessionDto,
+} from './dto/task-response.dto';
+import { resolveActiveWorkSession } from './work-session.util';
 import { TaskTimerStateDto } from './dto/task-timer-response.dto';
 import { TaskTimerService, TimerAction } from './services/task-timer.service';
 import { ColumnDefDto, TableFieldsDto } from './table-fields/column-def.dto';
@@ -881,8 +892,10 @@ export class TasksService {
     // Frente 2 (rollup on-read): 1 query agregada `idPai IN (lote)` descobre as
     // mães do lote e soma o tempo das filhas diretas (ZERO N+1).
     const rollupMap = await this.buildChildrenTimeRollupMap(pageTasks.map((t) => t.chave));
+    // Task #794: badge "em trabalho por Fulano" — 1 query batch de nomes (ZERO N+1).
+    const workSessionMap = await this.buildWorkSessionMap(pageTasks);
     const items = pageTasks.map((t) =>
-      this.buildResponse(t, priorityMap, executionsMap, timerMap, rollupMap),
+      this.buildResponse(t, priorityMap, executionsMap, timerMap, rollupMap, workSessionMap),
     );
     const nextCursor = hasMore ? pageTasks[pageTasks.length - 1].chave.toString() : null;
 
@@ -983,7 +996,16 @@ export class TasksService {
     const timerMap = await this.taskTimerService.buildTimerStateMap([task]);
     // Frente 2 (rollup on-read): 1 query agregada das filhas diretas desta task.
     const rollupMap = await this.buildChildrenTimeRollupMap([task.chave]);
-    return this.buildResponse(task, priorityMap, executionsMap, timerMap, rollupMap);
+    // Task #794: badge "em trabalho por Fulano" — 1 query batch (ZERO N+1).
+    const workSessionMap = await this.buildWorkSessionMap([task]);
+    return this.buildResponse(
+      task,
+      priorityMap,
+      executionsMap,
+      timerMap,
+      rollupMap,
+      workSessionMap,
+    );
   }
 
   /**
@@ -1984,6 +2006,66 @@ export class TasksService {
   }
 
   /**
+   * Constrói um mapa taskChave → {@link ActiveWorkSessionDto} para um lote de
+   * tasks, hidratando o NOME (DEntidade.nome) do dono de cada workSession ativa
+   * em UMA query batch (ZERO N+1). Fonte do badge "em trabalho por Fulano".
+   *
+   * Para cada task, a sessão ativa é resolvida pela fonte ÚNICA
+   * {@link resolveActiveWorkSession} (mesma regra que a trava MCP usa): só entra
+   * no mapa a task `EXECUTING` com workSession aberta e fresca (TTL 2h — sessão
+   * órfã expira, task #794 / DEV-123). Tasks sem sessão ativa ficam AUSENTES do
+   * mapa → `activeWorkSession = null` no response.
+   *
+   * O `status` de cada task deriva de `dados.v3.state` (mesma derivação de
+   * `buildResponse`), garantindo consistência entre badge e status exibido.
+   *
+   * @param tasks - lote com chave + dados (Json) de cada task
+   * @returns Map taskChave(string) → ActiveWorkSessionDto (com agentName hidratado)
+   */
+  private async buildWorkSessionMap(
+    tasks: Array<{ chave: bigint; dados?: unknown }>,
+  ): Promise<Map<string, ActiveWorkSessionDto>> {
+    const result = new Map<string, ActiveWorkSessionDto>();
+    if (tasks.length === 0) return result;
+
+    // Resolve a sessão ativa de cada task e coleta os agentIds para o batch.
+    const perTask = new Map<string, { agentId: string | null; startedAt: string }>();
+    const agentIdSet = new Set<string>();
+
+    for (const t of tasks) {
+      const dados = (t.dados as Record<string, unknown> | null) ?? null;
+      const v3 = (dados?.v3 as { state?: string } | null) ?? null;
+      const telemetry = (dados?.telemetry as { workSessions?: WorkSession[] } | null) ?? null;
+      const active = resolveActiveWorkSession(telemetry, v3?.state ?? 'INBOX');
+      if (!active) continue;
+      perTask.set(t.chave.toString(), active);
+      if (active.agentId) agentIdSet.add(active.agentId);
+    }
+
+    if (perTask.size === 0) return result;
+
+    // Batch de nomes — 1 query para todos os donos do lote (ZERO N+1).
+    const names = new Map<string, string | null>();
+    if (agentIdSet.size > 0) {
+      const owners = await this.prisma.dEntidade.findMany({
+        where: { chave: { in: [...agentIdSet].map((id) => BigInt(id)) }, excluido: false },
+        select: { chave: true, nome: true },
+      });
+      for (const o of owners) names.set(o.chave.toString(), o.nome ?? null);
+    }
+
+    for (const [taskChave, active] of perTask.entries()) {
+      result.set(taskChave, {
+        agentId: active.agentId,
+        agentName: active.agentId ? (names.get(active.agentId) ?? null) : null,
+        startedAt: active.startedAt,
+      });
+    }
+
+    return result;
+  }
+
+  /**
    * Aplica uma ação de timer manual (start/pause/resume/stop) a uma task.
    *
    * Delega a lógica de domínio (tenant gate, regra 1-timer, aritmética
@@ -2074,9 +2156,11 @@ export class TasksService {
     executionsMap?: Map<string, ActiveExecutionDto>,
     timerMap?: Map<string, TaskTimerStateDto>,
     rollupMap?: Map<string, number>,
+    workSessionMap?: Map<string, ActiveWorkSessionDto>,
   ): TaskResponseDto {
     const dados = task.dados as Record<string, unknown> | null;
     const v3 = dados?.v3 as { state?: string } | null;
+    const statusStr = v3?.state ?? 'INBOX';
     const identifier = (dados?.identifier as string | null) ?? '';
     const taskType = (dados?.taskType as string | null) ?? null;
     const assigneeTeamId = (dados?.assigneeTeamId as string | null) ?? null;
@@ -2118,7 +2202,7 @@ export class TasksService {
       projectId: task.idProject?.toString() ?? '',
       idClasse: idClasseStr,
       identifier,
-      status: v3?.state ?? 'INBOX',
+      status: statusStr,
       priority: priorityMap ? this.mapPriorityEnum(task.idPriority, priorityMap) : null,
       taskType,
       assigneeTeamId,
@@ -2128,6 +2212,23 @@ export class TasksService {
       dueDate: task.dueDate ? task.dueDate.toISOString() : null,
       dados,
       activeExecution: executionsMap?.get(taskIdStr) ?? null,
+      // Task #794 (DEV-123): sessão de trabalho ativa (badge "em trabalho por
+      // Fulano"). Fonte ÚNICA compartilhada com a trava MCP (resolveActiveWorkSession).
+      // Quando o workSessionMap é fornecido (leituras findMany/findOne) usa a versão
+      // hidratada (com agentName, batch ZERO N+1). Sem o map (respostas de mutação),
+      // deriva sincronamente do telemetry já em mãos com agentName=null — mesmo
+      // padrão do `timer` acima.
+      activeWorkSession:
+        workSessionMap?.get(taskIdStr) ??
+        (() => {
+          const active = resolveActiveWorkSession(
+            telemetry as { workSessions?: WorkSession[] } | null,
+            statusStr,
+          );
+          return active
+            ? { agentId: active.agentId, agentName: null, startedAt: active.startedAt }
+            : null;
+        })(),
       // ADR-V2-057: timer manual agregado. Quando o timerMap não é fornecido
       // (caller que não hidrata nomes em batch) ou a task nunca teve timer,
       // o campo fica null. Derivação síncrona via buildTimerState como fallback

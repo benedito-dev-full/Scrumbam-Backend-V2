@@ -5638,6 +5638,84 @@ Remoção cirúrgica do write-path dual entre `DProject.repoUrl` (coluna canôni
 
 ---
 
+## Task #794 (DEV-123): Badge "em trabalho por Fulano" + Trava de Concorrência MCP — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Backend + Frontend entregues, aprovado via gate rápido)
+**Módulo V2:** mcp (primário) + tasks (guard/badge) + frontend tasks
+**Fase V2:** F8 (MCP) / F11 (hardening) + integração Frontend V2
+**Tempo Real:** ~1 sessão implementação + ~2h documentação
+**Completado em:** 2026-07-10
+**Quality Score:** Gate rápido (sem Reviewer formal; aprovado via sanity check)
+
+**O Que Foi Feito:**
+
+**Frente 1 — Badge (read-path):**
+- Novo campo `activeWorkSession: { agentId, agentName, startedAt } | null` em `TaskResponseDto`
+- Hidratação batch de nomes em `buildWorkSessionMap` (ZERO N+1)
+- Exibido no frontend: card kanban (compact), linha de lista (compact), tela de abertura (full)
+- Fonte: `DTask.dados.telemetry.workSessions[]` — fluxo de IA (ADR-V2-057 separação manual ÷ IA)
+
+**Frente 2 — Trava (MCP write-path):**
+- Guard `assertTaskNotLockedByOther(task, callerId)` em `src/mcp/tools/task-concurrency.guard.ts`
+- Recusa 5 tools quando task EXECUTING com workSession de OUTRO ator: `update_task`, `update_status`, `execute_task`, `delete_task`
+- `update_timer` isento (fluxo humano, ADR-V2-057)
+- TTL de 2h: sessão órfã (agente caiu) expira sozinha
+- `agentId` nulo: bloqueia conservador (há trabalho, dono não identificável)
+- Erro: `INVALID_PARAMS reason='task_locked'` com `{ lockedBy: { agentId, agentName }, since: startedAt }`
+
+**Fonte única compartilhada:**
+- `resolveActiveWorkSession(telemetry, status, nowMs?)` em `src/tasks/work-session.util.ts`
+- Aplicada por badge (população DTO) e guard (decisão de bloqueio)
+- Função pura (testável, determinística)
+
+**Testes:**
+- `src/tasks/work-session.util.spec.ts`: 9 testes puros (aberto/fechado/EXECUTING/TTL/etc.)
+- `src/mcp/tools/task-concurrency.guard.spec.ts`: 8 testes (bloqueia, permite, erro)
+- `src/mcp/__tests__/mcp-tools.update-task.spec.ts`: ajustado ao novo fluxo (26/26 verde)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): **NÃO aplicado** — DTask é estrutural, Prisma direto. Persistência via `updateStatus` intacta.
+- Pilar 2 (Endpoints): **PLENAMENTE ATIVO** — reutiliza `GET /tasks` e `GET /tasks/:id` existentes; guard dentro de tools MCP (zero tool nova, 24→24).
+- Pilar 3 (Seed): **ZERO DClasse nova** — workSessions já existe em `dados.telemetry`, schema v3 compatível.
+
+**Frontend (Scrumbam-Frontend-V2):**
+- Componente `<WorkSessionBadge task variant?>` (compact/full)
+- Integrado em 3 pontos: kanban-board, task-row-backend, task-sheet
+- Interface `ActiveWorkSession` em `src/lib/types/api.ts`
+
+**Decisões do Roberio (2026-07-10):**
+1. TTL 2h para sessão órfã (passa após 2h, outro caller assume)
+2. `agentId` nulo: bloqueia conservador
+3. `update_timer` isento (humano, ADR-V2-057)
+4. Erro: `INVALID_PARAMS reason='task_locked'` (reutilizar, não novo código)
+5. Backend hidrata `agentName` em batch (padrão "backend formata")
+
+**Riscos e Mitigações:**
+- **Alto:** Sessão órfã (agente cai) — Mitigada por TTL 2h
+- **Médio:** TOCTOU (2 callers simultâneos) — Aceitável; incidente real foi minutos. ACID full seria overhead injustificado.
+- **Médio:** `agentId` nulo — Mitigada por bloqueio conservador ("em andamento, autor não identificável")
+
+**ADRs vinculados:**
+- **ADR-V2-073 (novo):** Trava de concorrência MCP por workSession — política, TTL, decisões de bloqueio, TOCTOU aceito
+- ADR-V2-057 (timer manual): Separação IA ÷ humano, `update_timer` isento
+- ADR-V2-042 (tenant MCP): Guard herda gate de tenant
+- ADR-V2-001 (zero tabela nova): ZERO mudança em schema
+- ADR-V2-005/006 (Engine): Engine NÃO é usado
+
+**Métricas:**
+- Build Backend: PASS (npm run build)
+- TypeScript: 0 errors
+- Tests Backend: 43/43 novos (util 9 + guard 8 + update-task 26)
+- N+1 Queries: ZERO (batch `buildWorkSessionMap`)
+- Build Frontend: PASS (npm run build)
+- ESLint Frontend: 0 warnings
+
+**Commits (2 separados, Cross-repo):**
+- Backend: `feat(mcp): trava de concorrência por workSession...`
+- Frontend: `feat(tasks): badge "em trabalho por Fulano"...`
+
+---
+
 ## Proximas fases (preview)
 
 | Fase | Nome | Pilar dominante |

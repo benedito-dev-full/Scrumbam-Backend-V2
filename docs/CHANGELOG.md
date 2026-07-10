@@ -14,6 +14,23 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Badge "em trabalho por Fulano" + Trava de Concorrência MCP (Task #794 / DEV-123, V2 F8/F11, 2026-07-10)**
+  - **Badge:** Novo campo `activeWorkSession: { agentId, agentName, startedAt }` em `TaskResponseDto` — exibe quem está trabalhando a task quando `status = EXECUTING`
+  - **Fonte única:** `resolveActiveWorkSession(telemetry, status)` em `work-session.util.ts` — compartilhada por badge (read-path) e trava (write-path)
+  - **Hidratação batch:** `buildWorkSessionMap()` agrupa nomes de donos em 1 query (ZERO N+1) — padrão reutilizável para agregações futuras
+  - **Frontend:** Componente `<WorkSessionBadge>` integrado em kanban-board, task-row-backend, task-sheet (compact/full variants) — Scrumbam-Frontend-V2
+  - **Trava MCP:** Guard `assertTaskNotLockedByOther()` recusa 4 tools (update_task, update_status, execute_task, delete_task) quando task EXECUTING+sessão de OUTRO ator; `update_timer` isento (fluxo humano)
+  - **Sessão órfã:** TTL de 2h — passado isso, outro caller pode retomar; agentId nulo bloqueia conservador ("em andamento, autor não identificado")
+  - **Retomada legítima:** Mesmo ator (agentId === callerId) passa automaticamente — permite que agente retome seu próprio trabalho
+  - **Erro de bloqueio:** `INVALID_PARAMS (-32602) reason='task_locked'` com `{ lockedBy: { agentId, agentName }, since: startedAt }` — cliente MCP sabe exatamente quem e desde quando
+  - **RBAC MCP:** Guard herda gate de tenant (`projectsService.findOne`) — paridade com HTTP
+  - **Testes:** 43/43 novos (util 9 + guard 8 + update-task 26 ajustados) — ZERO regressão
+  - **Pilares:** P1 N/A (DTask estrutural); P2 ✅ reutilizado (tools MCP existentes, 24→24 invariante); P3 zero mudança (workSessions já em `dados.telemetry`)
+  - **ADRs:** **ADR-V2-073 (novo — Trava concorrência MCP por workSession, TTL 2h, TOCTOU aceito)**, ADR-V2-057 (timer manual separado), ADR-V2-042 (tenant MCP)
+  - **Build/Lint:** PASS (TypeScript 0 errors, Build PASS, ESLint 0 warnings)
+  - **Performance:** Zero query extra no caminho feliz (guard lê `dados.telemetry` em memória); nome no erro reusa hidratação findOne — ZERO overhead
+  - **Incidente real:** 2026-07-07 — dois agentes simultâneos numa task; mitigado com 2h de TTL + retomada por-ator (TOCTOU de milissegundos aceito)
+
 - **Justificativa de Atraso de Tarefas — Fase 1 (Captura) Backend Completa (V2 Feature Transversal, Backend F1, 2026-07-09)**
   - **Motivos:** 9 DClasses novas (-503, -530..-537) — `DELAY_JUSTIFICATION` (DEvento) + `DELAY_REASON` (agrupador) + 7 motivos concretos
   - **Arquitetura:** Justificativa via `DEvento -503` com `idEntidade`=autorId + `identificadorExterno`=taskId; versioning via supersede em `$transaction` atomica

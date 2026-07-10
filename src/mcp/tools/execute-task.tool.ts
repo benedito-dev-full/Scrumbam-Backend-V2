@@ -6,6 +6,7 @@ import { ProjectsService } from '../../projects/projects.service';
 import { TasksService } from '../../tasks/tasks.service';
 import { MCP_ERROR_CODES, MCP_SCOPES } from '../constants';
 import { McpUserContext } from '../interfaces/mcp.types';
+import { assertTaskNotLockedByOther } from './task-concurrency.guard';
 import { McpTool, McpToolError, McpToolResult } from './tool.interface';
 import {
   assertRecord,
@@ -149,6 +150,10 @@ export class ExecuteTaskTool implements McpTool {
     // que o usuário tem membership no projeto (DVincula sobre a espelho -158).
     const task = await this.tasksService.findOne(taskIdStr);
     await this.projectsService.findOne(task.projectId, ctx.dEntidadeId);
+
+    // 3.1. Trava de concorrência MCP (task #794): recusa disparar execução se a
+    // task já está EXECUTING com workSession aberta de OUTRO ator.
+    assertTaskNotLockedByOther(task, ctx.dEntidadeId);
 
     // 4. Resolve DUserGroup.chave a partir de DEntidade.chave do contexto.
     // ExecutionsService.execute espera `userId` no formato DUserGroup.chave

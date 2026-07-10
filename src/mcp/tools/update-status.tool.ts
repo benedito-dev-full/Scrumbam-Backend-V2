@@ -4,6 +4,7 @@ import { ProjectsService } from '../../projects/projects.service';
 import { TasksService } from '../../tasks/tasks.service';
 import { MCP_ERROR_CODES, MCP_SCOPES } from '../constants';
 import { McpUserContext } from '../interfaces/mcp.types';
+import { assertTaskNotLockedByOther } from './task-concurrency.guard';
 import { McpTool, McpToolError, McpToolResult } from './tool.interface';
 import {
   V3_STATUS_CODES,
@@ -54,6 +55,10 @@ export class UpdateStatusTool implements McpTool {
 
     const task = await this.tasksService.findOne(taskId);
     await this.projectsService.findOne(task.projectId, ctx.dEntidadeId);
+
+    // Trava de concorrência MCP (task #794): recusa se a task está EXECUTING
+    // com workSession aberta de OUTRO ator. update_timer é isento (decisão #3).
+    assertTaskNotLockedByOther(task, ctx.dEntidadeId);
 
     const result = await this.tasksService.updateStatus(taskId, {
       status: statusCode,

@@ -4,6 +4,7 @@ import { ProjectsService } from '../../projects/projects.service';
 import { TasksService } from '../../tasks/tasks.service';
 import { MCP_SCOPES } from '../constants';
 import { McpUserContext } from '../interfaces/mcp.types';
+import { assertTaskNotLockedByOther } from './task-concurrency.guard';
 import { McpTool, McpToolResult } from './tool.interface';
 import {
   assertRecord,
@@ -140,6 +141,10 @@ export class DeleteTaskTool implements McpTool {
     // 3. Tenant isolation + membership (paridade com update_status / update_timer).
     const task = await this.tasksService.findOne(taskId);
     await this.projectsService.findOne(task.projectId, ctx.dEntidadeId);
+
+    // 3.1. Trava de concorrência MCP (task #794): recusa deletar se a task está
+    // EXECUTING com workSession aberta de OUTRO ator.
+    assertTaskNotLockedByOther(task, ctx.dEntidadeId);
 
     // 4. Delega ao service. accessibleProjectIds = [task.projectId] (gate ja
     //    validado acima — nao alargar para qualquer projeto). actorId = caller.

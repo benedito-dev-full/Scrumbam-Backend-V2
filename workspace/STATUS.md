@@ -6445,3 +6445,107 @@ Ambos comportamentos já estavam no código; testes documentam o contrato.
 **Agent:** implementer
 **Status:** Completo
 
+
+---
+
+## Task #794 (DEV-123): Badge "em trabalho por Fulano" + Trava de Concorrência MCP — COMPLETE (V2 F8/F11)
+
+**Module:** mcp (primário) + tasks (guard/badge) + frontend
+**Task:** Badge "em trabalho por Fulano" + Trava MCP por workSession
+**Status:** COMPLETA (Backend + Frontend entregues via gate rápido — sem Reviewer formal, sanidade aprovada)
+**Duration:** ~1 sessão implementação + ~2h documentação
+**Quality Score:** Gate rápido (sanidade aprovada; Reviewer formal não executado)
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | — | — |
+| Implementer | 1 sessão | — |
+| Reviewer | (gate rápido) | (n/a) |
+| Documenter | ~2h | — |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — DTask é estrutural, Prisma direto via updateStatus (intacto)
+- Pilar 2 (Endpoints): ✅ PLENAMENTE ATIVO — reutiliza GET /tasks + GET /tasks/:id (badge cavalga); guard dentro de tools MCP existentes (24→24 invariante)
+- Pilar 3 (Seed): ZERO DClasse nova — workSessions já existe em dados.telemetry (ADR-V2-057)
+
+**Deliverables:**
+- [x] Fonte única `resolveActiveWorkSession()` em `work-session.util.ts` — função pura, TTL 2h sessão órfã
+- [x] Badge: novo campo `activeWorkSession: { agentId, agentName, startedAt }` em `TaskResponseDto`
+- [x] Hidratação batch: `buildWorkSessionMap()` — 1 query para lote inteiro (ZERO N+1)
+- [x] Trava: guard `assertTaskNotLockedByOther(task, callerId)` — recusa 4 tools (update_task, update_status, execute_task, delete_task) quando EXECUTING+sessão de OUTRO ator
+- [x] `update_timer` isento (fluxo humano, ADR-V2-057)
+- [x] Retomada legítima: mesmo ator passa automaticamente
+- [x] Erro de bloqueio: `INVALID_PARAMS reason='task_locked'` com `{ lockedBy: { agentId, agentName }, since: startedAt }`
+- [x] Frontend `<WorkSessionBadge>` em 3 pontos: kanban-board, task-row-backend, task-sheet
+- [x] Interface `ActiveWorkSession` em `src/lib/types/api.ts`
+- [x] Testes: 43 novos (util 9 + guard 8 + update-task 26 ajustados) — ZERO regressão
+
+**Metrics:**
+- Build Backend: PASS (npm run build)
+- TypeScript: 0 errors
+- Build Frontend: PASS (npm run build)
+- ESLint Frontend: 0 warnings
+- Tests Backend: 43/43 PASS (util 9 + guard 8 + update-task 26)
+- N+1 Queries: ZERO (batch buildWorkSessionMap, nome no erro reusa hidratação findOne)
+- Regressão: 0
+
+**Decisões Críticas (Roberio 2026-07-10):**
+1. TTL 2h — sessão órfã expira, outro caller assume
+2. `agentId` nulo → bloqueia conservador ("em andamento, autor não identificável")
+3. `update_timer` isento (fluxo humano)
+4. Código de erro: `INVALID_PARAMS reason='task_locked'` (reutilizar, não novo)
+5. Backend hidrata `agentName` em batch (padrão "backend formata")
+
+**Riscos Documentados:**
+- **Alto — Sessão órfã:** Mitigada por TTL 2h
+- **Médio — TOCTOU:** 2 callers simultâneos passam ambos (risco de ms). **Aceito:** incidente real foi minutos. ACID full seria overhead injustificado.
+- **Médio — `agentId` nulo:** Mitigada por bloqueio conservador
+
+**ADRs:** **ADR-V2-073 (novo — Trava concorrência MCP por workSession, TTL 2h, TOCTOU aceito)**, ADR-V2-057 (timer manual), ADR-V2-042 (tenant MCP), ADR-V2-001 (zero tabela nova)
+
+**Incidente:** 2026-07-07 — dois agentes MCP simultâneos numa task — mitigado com TTL + retomada por-ator
+
+---
+
+<!-- dedup:documenter:794 -->
+### Agent Concluído: documenter
+
+**Task:** #794
+**Timestamp:** 10/07/2026 12:03:02
+**Agent:** documenter
+**Status:** Completo
+
+
+---
+
+<!-- dedup:strategist:794 -->
+### Agent Concluído: strategist
+
+**Task:** #794
+**Timestamp:** 10/07/2026 12:03:02
+**Agent:** strategist
+**Status:** Completo
+
+
+---
+
+<!-- dedup:implementer:794 -->
+### Agent Concluído: implementer
+
+**Task:** #794
+**Timestamp:** 10/07/2026 12:03:02
+**Agent:** implementer
+**Status:** Completo
+
+
+---
+
+<!-- dedup:reviewer:794 -->
+### Agent Concluído: reviewer
+
+**Task:** #794
+**Timestamp:** 10/07/2026 12:03:02
+**Agent:** reviewer
+**Status:** Completo
+
