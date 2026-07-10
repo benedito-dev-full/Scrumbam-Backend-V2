@@ -5716,6 +5716,80 @@ Remoção cirúrgica do write-path dual entre `DProject.repoUrl` (coluna canôni
 
 ---
 
+## Task #795 (DEV-124): Diálogo de Confirmação de Takeover (Colisão Humana) — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Frontend-only; implementado, testado, aprovado via gate rápido)
+**Módulo V2:** tasks (frontend) — continuação de #794 backend
+**Fase V2:** Integração Frontend V2 (irmã de #794 DEV-123)
+**Tempo Real:** ~6h implementação + ~0.5h documentação
+**Completado em:** 2026-07-10
+**Quality Score:** Gate rápido (sem Reviewer formal; sanidade check PASS)
+
+**O Que Foi Feito (Frontend — UI para colisão):**
+
+**Feature:** Guard de cortesia (client-side) contra colisão de trabalho HUMANO — complementa trava MCP da #794 (que bloqueia ROBÔ).
+
+**Arquitetura:**
+- Hook centralizado `useWorkCollisionGuard()` em `src/hooks/use-work-collision-guard.ts`
+  - Predicado único: `activeWorkSession != null && agentId != null && agentId !== usuarioLogado.entidadeId`
+  - Estado pendente + callbacks (`run`, `dialogProps`)
+  - Integra-se em 7 handlers (4 arquivos): mover→EXECUTING + reatribuir pessoa/time/IA
+- Componente `<TakeoverConfirmDialog>` em `src/components/tasks/takeover-confirm-dialog.tsx`
+  - Padrão shadcn (mesmo de `DeleteTaskDialog`), paleta âmbar
+  - Mostra `agentName` + "desde há X" (via `formatSince` unificado)
+  - Botões: "Cancelar" (aborta mutação) + "Assumir mesmo assim" (prossegue)
+- Utilitário `formatSince(startedAt)` em `src/lib/format-since.ts`
+  - Extraído de `work-session-badge.tsx` (Fase 1 da #794)
+  - Mantém "há X" idêntico entre badge e diálogo
+
+**Superfícies de Interceptação (7 handlers):**
+1. `kanban-board.tsx` — drag→EXECUTING
+2. `task-sheet.tsx` — dropdown StatusSelect→EXECUTING + reatribuir time
+3. `task-detail-drawer.tsx` — StatusPicker→EXECUTING + reatribuir pessoa/time
+4. `task-row-backend.tsx` — célula status→EXECUTING + reatribuir pessoa/time
+
+**Decisões do Roberio (travadas antes da implementação — §0 do plano):**
+1. Corrida início-simultâneo READY→EXECUTING: **Aceitar como limite v1** (autoridade real é backend/MCP)
+2. `agentId === null`: **Passar em silêncio** (bloqueio conservador vive no MCP)
+3. Reatribuição: **Guardar TODAS as trocas** (pessoa, time, Claude enquanto humano em sessão)
+4. Dois drawers coexistem: **Cobrir ambos** (TaskSheet + TaskDetailDrawer; poda é tarefa separada)
+5. Guard kanban-drag: **Manter defensivo** (uniformidade, raro dispara)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): **NÃO aplicado** — 100% frontend, reusa `activeWorkSession` da #794
+- Pilar 2 (Endpoints): **PLENAMENTE ATIVO** — reutiliza `GET /tasks`, `GET /tasks/:id`, `PATCH /tasks/:id`
+- Pilar 3 (Seed): **ZERO DClasse nova** — zero mudança de schema
+
+**Testes (Frontend):**
+- `npm run typecheck`: 0 errors
+- `npm run build`: PASS
+- `npm run lint`: 0 warnings
+- Teste manual: 7 handlers cobertos (mover+reatribuir pessoa/time/IA)
+
+**Métricas:**
+- Arquivos criados: 3 (hook, dialog, util)
+- Arquivos modificados: 5 (work-session-badge, kanban-board, task-sheet, task-detail-drawer, task-row-backend)
+- Linhas de código novo: ~300 (hook 90 + dialog 100 + util 27 + integrações 83)
+- Zero dependências novas
+- Fallback: se `activeWorkSession === null`, passa sem atrito (sessão fresca ou usuário próprio)
+
+**Risco Aceitável (Documentado):**
+- **Corrida "dois iniciam READY ao mesmo tempo":** Cada um cacheado sem sessão ativa → nenhum vê diálogo. Proteção v2 seria refetch por ação (1 query extra por EXECUTING). **Recomendado NÃO para v1** — autoridade é backend/MCP.
+
+**Frontend-Backend Simetria:**
+- #794 Backend: trava dura MCP (ROBÔ), TTL 2h, bloqueio `agentId=null`
+- #795 Frontend: diálogo cortesia humano (UI), mesma fonte `activeWorkSession`, idêntica predicação
+
+**ADRs vinculados:**
+- **ADR-V2-073** (referenciado — trava MCP, decisões de bloqueio, TOCTOU)
+- ADR-V2-077 (proposta Rizar — diálogo colisão frontend)
+- ADR-V2-057 (referenciado — separação manual ÷ IA, `update_timer` isento)
+
+**Commits (1 no frontend, separado de backend):**
+- Frontend: `feat(tasks): confirm-dialog de takeover ao assumir/mover task em trabalho (#795, DEV-124)`
+
+---
+
 ## Proximas fases (preview)
 
 | Fase | Nome | Pilar dominante |

@@ -6508,6 +6508,81 @@ Ambos comportamentos já estavam no código; testes documentam o contrato.
 
 ---
 
+## Task #795 (DEV-124): Diálogo de Confirmação de Takeover (Colisão Humana) — COMPLETE (Frontend V2)
+
+**Module:** tasks (frontend) — continuação de #794 backend
+**Task:** Guard de cortesia (client-side) contra colisão de trabalho HUMANO na interface
+**Status:** COMPLETA (Frontend-only; implementado, testado, aprovado via gate rápido)
+**Duration:** ~6h implementação + ~0.5h documentação
+**Quality Score:** Gate rápido (sanidade aprovada; Reviewer formal não executado)
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | (planejamento prévio) | — |
+| Implementer | ~6h | — |
+| Reviewer | (gate rápido) | (n/a) |
+| Documenter | ~0.5h | — |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — 100% frontend, zero Engine
+- Pilar 2 (Endpoints): ✅ PLENAMENTE ATIVO — reutiliza `GET /tasks`, `GET /tasks/:id`, `PATCH /tasks/:id` (zero tool/endpoint novo)
+- Pilar 3 (Seed): ZERO DClasse nova — reutiliza `activeWorkSession` da #794 em `dados.telemetry`
+
+**Deliverables:**
+- [x] Hook centralizado `useWorkCollisionGuard()` em `src/hooks/use-work-collision-guard.ts`
+  - Predicado colisão: `activeWorkSession != null && agentId != null && agentId !== usuarioLogado.entidadeId`
+  - Estado pendente + callbacks (`run`, `dialogProps`)
+- [x] Componente `<TakeoverConfirmDialog>` em `src/components/tasks/takeover-confirm-dialog.tsx`
+  - Padrão shadcn (mesmo `DeleteTaskDialog`), paleta âmbar
+  - Mostra `agentName` + "desde há X" (via `formatSince` unificado)
+  - Botões: "Cancelar" (aborta) + "Assumir mesmo assim" (prossegue)
+- [x] Utilitário `formatSince(startedAt)` em `src/lib/format-since.ts`
+  - Extraído de `work-session-badge.tsx` (badge Fase 1 da #794)
+  - Reuso unificado entre badge e diálogo
+- [x] Integração em 7 handlers (4 arquivos):
+  - `kanban-board.tsx` — drag→EXECUTING
+  - `task-sheet.tsx` — dropdown status→EXECUTING + reatribuir time
+  - `task-detail-drawer.tsx` — status picker→EXECUTING + reatribuir pessoa/time
+  - `task-row-backend.tsx` — célula status→EXECUTING + reatribuir pessoa/time
+- [x] Testes: `npm run typecheck` 0 errors; `npm run build` PASS; `npm run lint` 0 warnings; teste manual 7 handlers
+
+**Superfícies de Interceptação (7 handlers — travadas no plano §0):**
+1. Mover→EXECUTING: 4 pontos (kanban drag, status dropdown sheet, status picker drawer, célula linha)
+2. Reatribuir (pessoa/time/IA): 3 pontos (assignee sheet, picker drawer, linha)
+3. Guard defensivo kanban-drag (quase nunca dispara, mas mantém por uniformidade)
+
+**Decisões Críticas (Roberio 2026-07-10 — travadas ANTES implementação):**
+1. Corrida início-simultâneo READY→EXECUTING: **Aceitar limitação v1** (autoridade real é backend/MCP #794)
+2. `agentId === null`: **Passar em silêncio** (bloqueio conservador vive no MCP; aqui é só UI)
+3. Reatribuição: **Guardar TODAS** (pessoa, time, Claude enquanto humano em sessão)
+4. Dois drawers: **Cobrir ambos** (TaskSheet + TaskDetailDrawer; poda é tarefa separada)
+5. Kanban-guard: **Manter defensivo** (uniformidade, raro dispara)
+
+**Metrics:**
+- Arquivos criados: 3 (hook 90L + dialog 100L + util 27L = 217L)
+- Arquivos modificados: 5 (5 handlers integrando guard = ~83L integrações)
+- Linhas novo código: ~300 total
+- Zero dependências novas
+- Fallback: se `activeWorkSession === null`, passa sem atrito (caminho feliz, sem diálogo)
+
+**Risco Aceitável (Documentado):**
+- **Corrida "dois iniciam READY ao mesmo tempo":** Cache stale (nenhum vê sessão ativa). Proteção v2 seria refetch por ação. **Recomendado NÃO para v1** — autoridade é backend/MCP.
+
+**Simetria Backend-Frontend:**
+- #794 Backend: trava dura MCP (ROBÔ), TTL 2h, bloqueio `agentId=null`
+- #795 Frontend: diálogo cortesia humano (UI), mesma fonte `activeWorkSession`, idêntica predicação
+- Ambas referem **ADR-V2-073** (trava MCP, decisões compartilhadas)
+
+**ADRs:** **ADR-V2-073 (referenciado — Trava concorrência MCP, decisões)**, **ADR-V2-077 (proposta Rizar — diálogo colisão frontend)**
+
+**Repouso (cross-repo):**
+- Backend #794 já mergeado (commit em Scrumban-Backend-V2)
+- Frontend #795 em working tree (Scrumbam-Frontend-V2, não commitado ainda — este job)
+- Commits separados por repo (zero dependência de merge order)
+
+---
+
 <!-- dedup:documenter:794 -->
 ### Agent Concluído: documenter
 

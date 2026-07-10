@@ -14,6 +14,21 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Diálogo de Confirmação de Takeover — Guard Colisão Humana (Task #795 / DEV-124, Frontend V2, 2026-07-10)**
+  - **Feature:** Guard de cortesia (client-side) contra colisão de trabalho HUMANO — complementa trava MCP da #794 que bloqueia ROBÔ
+  - **Componentes frontend criados:** Hook centralizado `useWorkCollisionGuard()` (predicado, estado, callbacks); Componente `<TakeoverConfirmDialog>` (paleta âmbar, padrão shadcn); Utilitário `formatSince()` (unificado badge+dialog)
+  - **Superfícies guardadas:** 7 handlers em 4 arquivos — mover→EXECUTING (drag kanban, dropdown sheet/drawer/linha) + reatribuir pessoa/time/IA em qualquer drawer
+  - **Predicado colisão:** `activeWorkSession != null && agentId != null && agentId !== usuarioLogado.entidadeId` — única fonte de verdade
+  - **Reutilização:** Reusa `activeWorkSession` da #794 (nenhuma mudança de backend ou schema); `formatSince` extraída de badge (mantém "há X" idêntico)
+  - **Retenção:** TaskSheet + TaskDetailDrawer ambos cobertos (uniformidade em 2 UIs coexistentes)
+  - **Decisões travadas Roberio 2026-07-10:** Aceitar corrida início-simultâneo v1 (autoridade real é backend/MCP); passar em silêncio se `agentId=null`; guardar TODAS as trocas (pessoa/time/Claude); manter guard kanban defensivo (uniformidade)
+  - **Pilares:** P1 N/A (100% frontend, zero Engine); P2 ATIVO (reutiliza `GET /tasks`/`PATCH /tasks/:id`); P3 N/A (zero DClasse nova)
+  - **Testes:** `npm run typecheck` 0 errors; `npm run build` PASS; `npm run lint` 0 warnings; teste manual 7 handlers cobertos
+  - **Risco aceito:** Corrida dois-iniciam-READY simultâneos → cada um cacheado sem sessão → nenhum vê dialog (v2 seria refetch extra; recomendado NÃO para v1)
+  - **ADRs:** **ADR-V2-073** (trava MCP, referenciado); **ADR-V2-077** (proposta Rizar, diálogo frontend)
+  - **Simetria Backend-Frontend:** #794 trava dura MCP (ROBÔ); #795 diálogo cortesia humano (UI) — mesma `activeWorkSession`, idêntica predicação
+  - **Frontend-Backend:** Zero dependência entre commits (frontend #795 em `Scrumbam-Frontend-V2`; backend #794 já mergeado)
+
 - **Badge "em trabalho por Fulano" + Trava de Concorrência MCP (Task #794 / DEV-123, V2 F8/F11, 2026-07-10)**
   - **Badge:** Novo campo `activeWorkSession: { agentId, agentName, startedAt }` em `TaskResponseDto` — exibe quem está trabalhando a task quando `status = EXECUTING`
   - **Fonte única:** `resolveActiveWorkSession(telemetry, status)` em `work-session.util.ts` — compartilhada por badge (read-path) e trava (write-path)
