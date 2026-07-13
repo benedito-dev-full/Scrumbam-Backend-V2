@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { RoleResolverService } from '../services/role-resolver.service';
 import { JwtPayload } from '../decorators/current-user.decorator';
+import { AUTH_ERROR_CODES } from '../../common/errors/error-codes';
 
 /**
  * Guard de escopo de projeto.
@@ -55,14 +56,33 @@ export class ProjectScopeGuard implements CanActivate {
       throw new ForbiddenException('Usuário não autenticado');
     }
 
-    const userId = BigInt(user.sub);
+    // F4 (item 4.5) — BUG LATENTE CORRIGIDO.
+    //
+    // Antes: `BigInt(user.sub)` = chave da **DUserGroup** (credencial de login).
+    // Mas `RoleResolverService.getProjectRole` consulta
+    // `DVincula.idEntidade`, que é chave da **DEntidade** (-150 USER) — são
+    // sequências diferentes. Passar `sub` ali negava 403 a usuários legítimos
+    // E envenenava o cache de role com `null` na chave errada.
+    //
+    // Hoje o guard não tem uso fora do módulo auth, então o bug nunca explodiu.
+    // Corrigido antes que a primeira rota o use.
+    if (!user.entidadeId) {
+      throw new ForbiddenException('Usuário sem entidade associada');
+    }
+
+    const userEntidadeId = BigInt(user.entidadeId);
     const projectBigInt = BigInt(projectId);
 
-    const projectRole = await this.roleResolver.getProjectRole(userId, projectBigInt);
+    const projectRole = await this.roleResolver.getProjectRole(userEntidadeId, projectBigInt);
 
     if (!projectRole) {
-      this.logger.debug(`Acesso negado: userId=${userId} sem role no projeto=${projectBigInt}`);
-      throw new ForbiddenException('Acesso negado: sem permissão neste projeto');
+      this.logger.debug(
+        `Acesso negado: entidadeId=${userEntidadeId} sem role no projeto=${projectBigInt}`,
+      );
+      throw new ForbiddenException({
+        code: AUTH_ERROR_CODES.FORBIDDEN_ROLE,
+        message: 'Acesso negado: sem permissão neste projeto',
+      });
     }
 
     return true;

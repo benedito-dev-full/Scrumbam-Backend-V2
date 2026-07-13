@@ -8,6 +8,114 @@
 
 ---
 
+## Task #998 — F4 Cache, Contexto e Semântica (Fase 4) — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Fase 4 implementada, testada, aprovada 8.5/10)
+**Módulo V2:** auth (+ projects, tasks, common) — F4 do incidente de sessão/auth (DEV-174)
+**Fase V2:** F16 (Hardening) — Continuação hotfix emergencial (DEV-174, filha de #993/DEV-169)
+**Tempo Real:** ~5-7 dias (Implementer ~3-4d código/testes + Reviewer ~4h + Documenter ~3h)
+**Completado em:** 2026-07-13
+**Quality Score:** 8.5/10 (APPROVED pelo Reviewer — 37 testes novos PASS, zero regressão, distinção stale-vs-novo validada)
+
+**O Que Foi Feito (Fase 4 — Cache, Contexto e Semântica):**
+
+**Objetivo:** 4.2 `ORG_CONTEXT_STALE` (lista vazia silenciosa → 401), 4.3 semântica 403/404 (VIEWER vs não-membro), 4.5 bug latente `ProjectScopeGuard` (usar `entidadeId`, não `sub`).
+
+**Pilares Aplicados:**
+- Pilar 1: **N/A** — zero Engine (auth é estrutural)
+- Pilar 2: **N/A** — zero endpoint novo
+- Pilar 3: **N/A** — zero DClasse nova
+
+**4.2 ORG_CONTEXT_STALE (o ponto crítico):**
+- **Problema:** lista vazia era indistinguível entre "usuário novo (legítimo)" e "org stale (erro)"
+- **Solução:** `assertOrgContextFresh()` valida `DVincula` ativa (ORG_ROLE_CLASSES -161/-162/-163) quando lista vem vazia
+- **Custo zero caminho feliz:** query só ocorre se `accessibleProjectIds.size === 0`
+- **Distinção:** usuário novo (membership ativa, 200 vazio) vs stale (membership ausente, 401 stale)
+- **Frontend ação:** 401 stale → refresh silencioso + retry (sem logout)
+- **Fail-open:** infra falha → retorna fresh (401 NUNCA por infra lenta — RFC 6750)
+- **Implementação:** `ProjectsService:1068-1107`, `TasksController:resolveScopedProjectIds`, testes `org-context-stale.spec.ts:6/6 PASS`
+
+**4.3 Semântica 403 vs 404:**
+- **Pre-existente:** VIEWER tentando escrever = 404 anti-enumeração (não sabe que recurso existe)
+- **F4 ajuste:** DOC honesto — "Hoje só templates globais retornam 403; VIEWER genérico = follow-up"
+- **Mudança:** `docs/auth-error-codes.md` corrigida para não prometer o que ainda não está
+- **Escopo reduzido:** Reviewer recomendou ajustar doc, não implementar VIEWER check (custo/benefício)
+
+**4.5 Bug Latente — `ProjectScopeGuard:58`:**
+- **Antes:** `BigInt(user.sub)` → chave de **DUserGroup** (credencial login)
+- **Problema:** `RoleResolverService.getProjectRole` espera **DEntidade.chave** (usuário cadastral)
+- **Resultado:** guard nega 403 a usuários legítimos (usa ID errado) + cache envenenado com chave errada
+- **Depois:** `BigInt(user.entidadeId)` → chave de **DEntidade** (correto)
+- **Validação:** guard agora valida `entidadeId` presente; se ausente → 403 sem consultar DB
+
+**Arquivos Modificados:** 8 arquivos F4 core
+- `src/projects/projects.service.ts` (assertOrgContextFresh + testes)
+- `src/tasks/tasks.service.ts` (reutiliza assertOrgContextFresh)
+- `src/tasks/tasks.controller.ts`
+- `src/auth/guards/project-scope.guard.ts` (bug 4.5 + validação entidadeId)
+- `src/auth/decorators/current-user.decorator.ts` (JSDoc)
+- `src/common/errors/error-codes.ts` (catálogo)
+- `src/auth/__tests__/org-context-stale.spec.ts` (novo, 6/6 PASS)
+- `docs/auth-error-codes.md` (corrigida)
+
+**Testes: 37 novos (F4 específico) + 1849 pré-existentes = 1886 total**
+- org-context-stale.spec.ts: 6/6 PASS (guarda-chuva do F4)
+  * (A) Stale (sem membership) → 401 ORG_CONTEXT_STALE
+  * (B) Novo (com membership) → 200 []
+  * (C) Cheio (idClasse preenchido) → 200, sem query membership
+  * (D) Infra fail → 200 fail-open
+  * (E) Órfão (sem claim) → 200
+  * (F) Claim inválido → 401 stale
+- projects.service.spec.ts (F4 describe): 6/6 PASS
+- tasks.service.spec.ts (F4 describe): 7/7 PASS
+- Zero regressão: 37 novos, nenhum quebrado
+
+**Documentação:**
+- JSDoc 100%: assertOrgContextFresh, guarda project-scope
+- ADR-V2-078: Redigido (decisão + design + testes + métricas F0)
+- Contrato: `docs/auth-error-codes.md` atualizado (VIEWER honesto, ADR-V2-078)
+- Métricas: `auth.org_context_stale` (F0), esperado >0 pós-F4
+
+**Pilares Aplicados:**
+- Pilar 1 (Engine): N/A
+- Pilar 2 (Endpoints): N/A (sem endpoint novo)
+- Pilar 3 (Seed): N/A
+
+**ADRs Vinculados:**
+- ADR-V2-078 — Distinção ORG_CONTEXT_STALE vs usuário novo (THIS)
+- ADR-V2-076 (referência — grace window impede loop refresh)
+- ADR-V2-038 (referência — órfão é estado válido)
+- ADR-V2-003 (referência — RBAC via DVincula)
+
+**Crítico: A Decisão Arquitetural — Membership Real, Não Lista**
+
+O diferencial da F4 é **NÃO usar a lista vazia como discriminador**. A lista vazia é legítima para dois cenários:
+1. Usuário novo (membership ativa em org, zero projetos atribuídos)
+2. Org stale (membership ausente, org foi removida ou user foi excluído)
+
+F4 **valida membership real** (DVincula) como discriminador, não a lista. Isso resolve o incidente "sumiram meus projetos" porque agora:
+- Novo → 200 (lista vazia legítima)
+- Stale → 401 (não é legítimo, é erro)
+
+Frontend sabe o que fazer: 200 = aceita, 401 = refresh + retry.
+
+**Crítico: Por Que Sem Tempestade de Refresh**
+
+`executeRefreshV2` (F1/F3) **recalcula org** a partir de membership real CADA VEZ. Logo:
+```
+Refresh em 401 stale → novo token é OR-FIÃO (sem organizationId) OU CORRETO (re-convidado)
+→ ambos não repetem o claim stale
+→ ciclo fecha em 1 volta, não infinito
+```
+
+Se CEO foi removido: token 2 vem órfão → próxima request → 403 NO_WORKSPACE (requer contexto). Sem logout automático.
+
+**Crítico: Custo Zero Caminho Feliz**
+
+Usuário com 10 projetos: query de membership não ocorre (accessibleProjectIds.size > 0). A query **só roda quando lista já vem vazia** — é o único cenário em que ela traz informação.
+
+---
+
 ## Task #997 — Sessões Multi-Device em DTabela (Fase 3) — ✅ COMPLETA
 
 **Status:** ✅ COMPLETA (Backend Fase 3 implementado, testado, aprovado 9.2/10)

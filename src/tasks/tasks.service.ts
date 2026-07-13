@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -8,6 +9,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { MetricsService } from '../common/observability/metrics.service';
+import { AUTH_ERROR_CODES } from '../common/errors/error-codes';
 import { EventProducerService } from '../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../common/services/correlation-id.service';
 import { TimezoneService } from '../common/services/timezone.service';
@@ -687,12 +689,17 @@ export class TasksService {
 
     // ADR-V2-042: sem projetos autorizados → retorna vazio sem hit no banco.
     if (!accessibleProjectIds || accessibleProjectIds.length === 0) {
-      // F0 — nenhum projeto acessível → 200 com lista vazia, silenciosamente.
-      // Aqui o service NÃO tem o `organizationId` (recebe só os ids já
-      // resolvidos pelo controller), então não dá para provar staleness: este
-      // contador é o SINAL FRACO (suspeita). A prova vem do
-      // `auth.org_context_stale` emitido em `projects.findMany`, que roda no
-      // mesmo boot da UI. Retorno inalterado (F4 muda para 401).
+      // Escopo vazio. Este service recebe SÓ os ids já resolvidos — nunca o
+      // claim `organizationId` — logo não tem como distinguir "usuário novo sem
+      // projetos" de "org stale no JWT". Por isso a decisão de 401
+      // `ORG_CONTEXT_STALE` (F4, item 4.2) mora no caller que tem o claim:
+      // `TasksController.resolveScopedProjectIds` chama
+      // `ProjectsService.assertOrgContextFresh` ANTES de chegar aqui.
+      //
+      // Consequência: quando o fluxo HTTP chega neste ponto, o contexto de org
+      // JÁ foi provado fresco (ou o usuário é órfão / vem de MCP-Telegram, que
+      // são cross-org por design). Lista vazia aqui é, portanto, LEGÍTIMA —
+      // 200 + [] é a resposta certa. Mantido como defense-in-depth.
       this.metrics?.increment(
         'auth.org_context_empty_scope',
         { source: 'tasks.findMany' },
@@ -964,6 +971,79 @@ export class TasksService {
   }
 
   /**
+   * Gate de ESCRITA de uma task — decide entre **404** (anti-enumeração) e
+   * **403 `FORBIDDEN_ROLE`** (F4, item 4.3).
+   *
+   * ## A regra (OWASP Authorization Cheat Sheet)
+   *
+   * Esconder a existência do recurso (404) só é segurança quando o usuário
+   * **não pode nem saber que ele existe**. Se ele já consegue LER a task, mentir
+   * "não encontrada" na escrita não protege nada — só despista a investigação
+   * (foi um dos motivos de o incidente de sessão ter demorado a ser diagnosticado).
+   *
+   * | Pode LER? | Pode ESCREVER? | Resposta |
+   * |-----------|----------------|----------|
+   * | não       | não            | **404** `Task {id} não encontrada` (anti-enumeração — inalterado) |
+   * | sim       | não            | **403** `{ code: 'FORBIDDEN_ROLE' }` |
+   * | sim       | sim            | segue o fluxo |
+   *
+   * ## O que hoje é "lê mas não escreve"
+   *
+   * O escopo de leitura de uma task é `accessibleProjectIds` **∪ catálogo de
+   * templates GLOBAIS** (-401/-402 com `idEstab = NULL`) — exatamente o que
+   * `findOne` libera (ADR-V2-061). O catálogo global é **read-only por
+   * definição**: é visível a todas as orgs e ninguém o edita pelas rotas de
+   * task. Logo, escrever numa task de template global é o caso "tenho leitura,
+   * não tenho escrita" → 403 `FORBIDDEN_ROLE`, e não 404.
+   *
+   * Qualquer outro projeto fora do escopo continua **404** — o usuário não tem
+   * leitura nenhuma sobre ele e não deve poder inferir sua existência.
+   *
+   * Custo: a query de `isGlobalTemplate` só roda quando o gate JÁ ia negar.
+   * Fluxo autorizado normal paga **zero** query extra.
+   *
+   * @param id - Chave da task (string, para a mensagem)
+   * @param idProject - `DTask.idProject` da task encontrada
+   * @param accessibleProjectIds - escopo do caller; `undefined` = sem gate (MCP/interno)
+   *
+   * @throws {NotFoundException} Sem leitura (fora do escopo e não é catálogo global)
+   * @throws {ForbiddenException} `{ code: 'FORBIDDEN_ROLE' }` Com leitura, sem escrita
+   *
+   * @see findOne — define o escopo de LEITURA que este gate espelha
+   */
+  private async assertTaskWritable(
+    id: string,
+    idProject: bigint | null,
+    accessibleProjectIds?: string[],
+  ): Promise<void> {
+    if (accessibleProjectIds === undefined) {
+      return; // caller sem gate de tenant (MCP / uso interno) — inalterado.
+    }
+
+    const pid = idProject?.toString() ?? null;
+    if (pid && accessibleProjectIds.includes(pid)) {
+      return; // escrita autorizada.
+    }
+
+    // Fora do escopo de escrita. Tem LEITURA? (só o catálogo global tem)
+    if (idProject && (await this.isGlobalTemplate(idProject))) {
+      this.logger.warn(
+        `write_denied_readonly_template taskId=${id} projectId=${pid} — 403 FORBIDDEN_ROLE`,
+      );
+      throw new ForbiddenException({
+        code: AUTH_ERROR_CODES.FORBIDDEN_ROLE,
+        message: 'Sem permissão para alterar esta task (catálogo de templates é somente leitura).',
+      });
+    }
+
+    // Sem leitura → 404 (anti-enumeração preservada, ADR-V2-042).
+    this.logger.warn(
+      `tenant_mismatch_task_write taskId=${id} projectId=${pid ?? 'null'} fora do scope`,
+    );
+    throw new NotFoundException(`Task ${id} não encontrada`);
+  }
+
+  /**
    * Busca task por ID, opcionalmente validando que pertence a um projeto
    * no escopo autorizado do caller (ADR-V2-042).
    *
@@ -1061,13 +1141,8 @@ export class TasksService {
       throw new NotFoundException(`Task ${id} não encontrada`);
     }
 
-    // ADR-V2-042: tenant check via projectId
-    if (accessibleProjectIds !== undefined) {
-      const pid = existing.idProject?.toString() ?? null;
-      if (!pid || !accessibleProjectIds.includes(pid)) {
-        throw new NotFoundException(`Task ${id} não encontrada`);
-      }
-    }
+    // ADR-V2-042 + F4 item 4.3: 404 se não tem leitura; 403 FORBIDDEN_ROLE se tem.
+    await this.assertTaskWritable(id, existing.idProject, accessibleProjectIds);
 
     // Merge superficial em `dados` quando taskType, assignedToAi ou dados mudar.
     // Preserva identifier, v3, telemetry, capture, automation intactos.
@@ -1288,13 +1363,8 @@ export class TasksService {
       throw new NotFoundException(`Task ${id} não encontrada`);
     }
 
-    // ADR-V2-042: tenant check via projectId
-    if (accessibleProjectIds !== undefined) {
-      const pid = task.idProject?.toString() ?? null;
-      if (!pid || !accessibleProjectIds.includes(pid)) {
-        throw new NotFoundException(`Task ${id} não encontrada`);
-      }
-    }
+    // ADR-V2-042 + F4 item 4.3: 404 se não tem leitura; 403 FORBIDDEN_ROLE se tem.
+    await this.assertTaskWritable(id, task.idProject, accessibleProjectIds);
 
     // ADR-V2-048: Fases (idClasse=-200) NÃO têm status próprio — o status é
     // derivado da agregação de tasks-folha descendentes (percent via
@@ -1587,13 +1657,8 @@ export class TasksService {
       throw new NotFoundException(`Task ${id} não encontrada`);
     }
 
-    // ADR-V2-042: tenant check via projectId
-    if (accessibleProjectIds !== undefined) {
-      const pid = existing.idProject?.toString() ?? null;
-      if (!pid || !accessibleProjectIds.includes(pid)) {
-        throw new NotFoundException(`Task ${id} não encontrada`);
-      }
-    }
+    // ADR-V2-042 + F4 item 4.3: 404 se não tem leitura; 403 FORBIDDEN_ROLE se tem.
+    await this.assertTaskWritable(id, existing.idProject, accessibleProjectIds);
 
     // Decisao de cascade:
     //   options.cascade definido → respeitar valor explicito

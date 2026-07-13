@@ -146,11 +146,15 @@ if (error.status === 401 && error.code === 'ORG_CONTEXT_STALE') {
 #### `FORBIDDEN_ROLE`
 
 **Status:** 403 Forbidden  
-**Quando disparado:** Usuário tem acesso de **leitura** ao recurso, MAS não tem permissão para a ação solicitada (escrita, delete, etc.)  
-**Exemplo:** Usuário é VIEWER de projeto, tenta deletar card (DELETE /tasks/123)  
+**Quando disparado:** Usuário tenta escrever em um recurso onde a escrita é explicitamente bloqueada  
+**Exemplo HOJE implementado:** Usuário tenta deletar ou modificar task em template global (read-only por definição, `idEstab=NULL`)  
+**Exemplo FUTURO (ainda não implementado):** Usuário é VIEWER de projeto, tenta deletar card (DELETE /tasks/123) — esse caso atual ainda retorna 404 (anti-enumeração) por design pre-existente  
+
+**Nota arquitetural:** A validação de role (VIEWER vs MEMBER vs MANAGER) atualmente **não diferencia permissões no gate de escrita**. O endpoint genérico `/tasks` aceita qualquer role que tenha acesso de leitura ao projeto. Futuro follow-up vai adicionar check de `canWrite` por papel.
+
 **Ação esperada do cliente:**
-- Desabilitar botão de ação na UI (evitar que usuário tente ação)
-- Se usuário conseguir contornar e fazer request: mostrar toast "Você não tem permissão para esta ação"
+- Desabilitar botão de ação na UI para VIEWER (evitar request)
+- Se usuário conseguir contornar e fazer request em template global: mostrar toast "Você não tem permissão para esta ação"
 - Não logout
 
 ---

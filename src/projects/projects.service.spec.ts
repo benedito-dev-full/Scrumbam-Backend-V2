@@ -2345,7 +2345,11 @@ describe('ProjectsService', () => {
       const dProjectCreate = jest
         .fn()
         .mockImplementation(
-          ({ data }: { data: { idClasse: bigint; idEstab?: bigint; dados: Record<string, unknown> } }) =>
+          ({
+            data,
+          }: {
+            data: { idClasse: bigint; idEstab?: bigint; dados: Record<string, unknown> };
+          }) =>
             Promise.resolve({
               chave: BigInt(projChaveSeq++),
               idClasse: data.idClasse,
@@ -2406,9 +2410,7 @@ describe('ProjectsService', () => {
       prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(1) }); // MANAGER na origem
       originNode(BigInt(-352));
       const { dProjectCreate, dTaskCreate } = mockPromoteTx({
-        phases: [
-          { chave: BigInt(50), idPai: null, nome: 'Bugs', descricao: null, dados: {} },
-        ],
+        phases: [{ chave: BigInt(50), idPai: null, nome: 'Bugs', descricao: null, dados: {} }],
       });
 
       const result = await service.promoteToTemplate('108', BigInt(100), '50', {
@@ -2512,7 +2514,13 @@ describe('ProjectsService', () => {
       ]);
       const { dProjectCreate, dTaskCreate } = mockPromoteTx({
         phases: [
-          { chave: BigInt(60), idPai: null, nome: 'Ajustes Estruturais', descricao: null, dados: {} },
+          {
+            chave: BigInt(60),
+            idPai: null,
+            nome: 'Ajustes Estruturais',
+            descricao: null,
+            dados: {},
+          },
         ],
       });
 
@@ -2547,7 +2555,9 @@ describe('ProjectsService', () => {
 
       await service.promoteToTemplate('108', BigInt(100), '50', { categoria: '' });
 
-      const createArg = dProjectCreate.mock.calls[0][0] as { data: { dados: Record<string, unknown> } };
+      const createArg = dProjectCreate.mock.calls[0][0] as {
+        data: { dados: Record<string, unknown> };
+      };
       expect(createArg.data.dados.categoria).toBeUndefined();
     });
 
@@ -2767,6 +2777,82 @@ describe('ProjectsService', () => {
       // 1ª chamada de dProject.findMany = Camada A (públicos): notIn templates.
       const publicCall = prisma.dProject.findMany.mock.calls[0][0];
       expect(publicCall.where.idClasse).toEqual({ notIn: [BigInt(-401), BigInt(-402)] });
+    });
+  });
+
+  /**
+   * F4 — item 4.2: `ORG_CONTEXT_STALE`.
+   *
+   * O eixo destes testes é UM SÓ: a lista vazia NÃO decide nada. Quem decide é a
+   * **membership de org** (DVincula -161/-162/-163). Sem essa separação, ou o
+   * bug continua invisível (tudo 200 `[]`) ou todo usuário novo é derrubado em
+   * loop de refresh (tudo 401). Os dois primeiros testes são o par que prova a
+   * distinção — o segundo é o TESTE-GUARDA.
+   */
+  describe('F4 — ORG_CONTEXT_STALE (item 4.2)', () => {
+    /** Sem nenhum projeto acessível → cai no caminho da lista vazia. */
+    const semProjetos = () => {
+      prisma.dVincula.findMany.mockResolvedValue([]); // Camada B: zero vínculos de projeto
+    };
+
+    it('org STALE (JWT aponta para org sem membership) → 401 ORG_CONTEXT_STALE', async () => {
+      semProjetos();
+      // Camada A (membro da org?) → não; e a checagem de contexto → também não.
+      prisma.dVincula.findFirst.mockResolvedValue(null);
+
+      await expect(service.findMany(BigInt(100), { organizationId: '50' })).rejects.toMatchObject({
+        status: 401,
+        response: { code: 'ORG_CONTEXT_STALE' },
+      });
+    });
+
+    it('TESTE-GUARDA: usuário NOVO, org VÁLIDA, zero projetos → 200 com lista vazia', async () => {
+      semProjetos();
+      // Membership de org EXISTE (-162 MEMBER) — o usuário só não tem projeto algum.
+      prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(9), idClasse: BigInt(-162) });
+      prisma.dProject.findMany.mockResolvedValue([]); // Camada A: org sem projetos públicos
+
+      const result = await service.findMany(BigInt(100), { organizationId: '50' });
+
+      expect(result.items).toEqual([]);
+      expect(result.pagination.hasMore).toBe(false);
+    });
+
+    it('usuário órfão (JWT sem organizationId) → 200 com lista vazia (ADR-V2-038)', async () => {
+      semProjetos();
+      prisma.dVincula.findFirst.mockResolvedValue(null);
+
+      const result = await service.findMany(BigInt(100));
+
+      expect(result.items).toEqual([]);
+      // Órfão não dispara sequer a query de membership de contexto.
+      expect(prisma.dVincula.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('organizationId malformado no claim → 401 ORG_CONTEXT_STALE (não mais 200 vazio)', async () => {
+      await expect(service.findMany(BigInt(100), { organizationId: 'lixo' })).rejects.toMatchObject(
+        {
+          status: 401,
+          response: { code: 'ORG_CONTEXT_STALE' },
+        },
+      );
+    });
+
+    it('assertOrgContextFresh: falha de INFRA na query de membership → fail-open (nunca 401)', async () => {
+      // RFC 6750: pool esgotado/banco fora NÃO é `invalid_token`. Um blip de
+      // infra jamais pode deslogar o usuário — este é o teste que trava isso.
+      prisma.dVincula.findFirst.mockRejectedValue(new Error('P2024: pool timeout'));
+
+      await expect(service.assertOrgContextFresh(BigInt(100), '50', 'test')).resolves.toBe('fresh');
+    });
+
+    it('assertOrgContextFresh: sem claim → orphan; com membership → fresh', async () => {
+      await expect(service.assertOrgContextFresh(BigInt(100), undefined, 'test')).resolves.toBe(
+        'orphan',
+      );
+
+      prisma.dVincula.findFirst.mockResolvedValue({ chave: BigInt(9) });
+      await expect(service.assertOrgContextFresh(BigInt(100), '50', 'test')).resolves.toBe('fresh');
     });
   });
 });

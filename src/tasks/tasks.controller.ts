@@ -85,13 +85,35 @@ export class TasksController {
    * call. Se virar gargalo (>50ms / request), considerar AsyncLocalStorage
    * por request ou cache LRU compartilhado com `OrgTenantGuard`.
    *
+   * **F4 (item 4.2) — `ORG_CONTEXT_STALE`:** quando o escopo sai VAZIO, o
+   * service de tasks não consegue distinguir "usuário novo sem projetos" de
+   * "`organizationId` stale no JWT" — ele recebe só a lista de ids, nunca o
+   * claim. Por isso a decisão mora aqui, no único ponto do fluxo HTTP que tem
+   * o claim em mãos: `assertOrgContextFresh` lança 401 `ORG_CONTEXT_STALE`
+   * apenas quando a membership de org **não existe mais**; usuário novo em org
+   * válida segue adiante com `[]` (e o handler devolve 200 + lista vazia).
+   *
+   * A query extra só acontece no caminho já-vazio — fluxo normal, custo zero.
+   *
+   * @throws {UnauthorizedException} `{ code: 'ORG_CONTEXT_STALE' }`
    * @internal
    */
   private async resolveScopedProjectIds(req: JwtRequest): Promise<string[]> {
-    return this.projectsService.findAccessibleProjectIds(
-      BigInt(req.user.entidadeId),
+    const entidadeId = BigInt(req.user.entidadeId);
+    const ids = await this.projectsService.findAccessibleProjectIds(
+      entidadeId,
       req.user.organizationId,
     );
+
+    if (ids.length === 0) {
+      await this.projectsService.assertOrgContextFresh(
+        entidadeId,
+        req.user.organizationId,
+        'tasks.controller',
+      );
+    }
+
+    return ids;
   }
 
   /**

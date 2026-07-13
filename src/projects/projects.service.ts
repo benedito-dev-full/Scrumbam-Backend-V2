@@ -6,10 +6,12 @@ import {
   NotFoundException,
   OnModuleInit,
   Optional,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { MetricsService } from '../common/observability/metrics.service';
+import { AUTH_ERROR_CODES } from '../common/errors/error-codes';
 import { EventProducerService } from '../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../common/services/correlation-id.service';
 import { SeedBootstrapService } from './seed-bootstrap.service';
@@ -637,21 +639,20 @@ export class ProjectsService implements OnModuleInit {
     const take = Math.min(opts.limit ?? 20, 100);
 
     // ADR-V2-042: organizationId vira filtro de tenant via DProject.idEstab.
-    // Convertendo aqui para BigInt — strings invalidas (raras: JWT corrompido)
-    // resultam em lista vazia em vez de quebrar.
+    //
+    // F4 (item 4.2): claim malformado NÃO é mais lista vazia silenciosa — é
+    // 401 ORG_CONTEXT_STALE (o token não serve para escopar nada; o frontend
+    // renova e retenta). `throwOrgContextStale` emite o contador da F0.
     let orgIdBig: bigint | undefined;
     if (organizationId !== undefined) {
       if (!/^-?\d+$/.test(organizationId)) {
-        this.logger.warn(`findMany: organizationId invalido="${organizationId}" — retorna vazio`);
-        // F0 — claim de org malformado no JWT devolve 200 com lista vazia
-        // (indistinguível de "não tenho projetos"). Só CONTAMOS; devolver
-        // 401 ORG_CONTEXT_STALE é a F4 (item 4.2 do plano).
-        this.metrics?.increment(
-          'auth.org_context_stale',
-          { reason: 'invalid_org_claim', userEntidadeId: userEntidadeId.toString() },
-          { level: 'warn' },
+        this.logger.warn(`findMany: organizationId invalido="${organizationId}" — 401 stale`);
+        this.throwOrgContextStale(
+          userEntidadeId,
+          organizationId,
+          'invalid_org_claim',
+          'projects.findMany',
         );
-        return { items: [], pagination: { hasMore: false, nextCursor: null } };
       }
       orgIdBig = BigInt(organizationId);
     }
@@ -819,14 +820,27 @@ export class ProjectsService implements OnModuleInit {
     ]);
 
     if (allIds.size === 0) {
-      // F0 — "os projetos sumiram, mas não deslogou". Lista vazia aqui pode ser
+      // "Os projetos sumiram, mas não deslogou". Lista vazia aqui pode ser
       // (a) usuário legitimamente sem projetos ou (b) `organizationId` STALE no
-      // JWT (org da qual ele não é mais membro). Para não inflar o contador com
-      // o caso (a), confirmamos a membership real ANTES de contar — 1 query
-      // extra, e SÓ neste caminho (que já não tocaria o banco de novo).
-      // Comportamento inalterado: continua 200 + []. O 401 ORG_CONTEXT_STALE
-      // é a F4 (item 4.2).
-      await this.observeOrgContext(userEntidadeId, orgIdBig);
+      // JWT (org da qual ele não é mais membro). São indistinguíveis PELA LISTA
+      // — a membership de org é que separa os dois (ver assertOrgContextFresh).
+      //
+      // F4 (item 4.2): (b) vira 401 ORG_CONTEXT_STALE. (a) — inclusive o
+      // usuário NOVO de uma org NOVA, sem nenhum projeto — continua **200 com
+      // lista vazia**. A query só roda neste caminho (lista já vazia), então o
+      // fluxo normal não paga por ela.
+      const ctx = await this.assertOrgContextFresh(
+        userEntidadeId,
+        orgIdBig?.toString(),
+        'projects.findMany',
+      );
+      if (ctx === 'fresh') {
+        this.metrics?.increment(
+          'auth.org_context_empty_scope',
+          { source: 'projects.findMany' },
+          { silent: true },
+        );
+      }
       return { items: [], pagination: { hasMore: false, nextCursor: null } };
     }
 
@@ -1003,60 +1017,122 @@ export class ProjectsService implements OnModuleInit {
   }
 
   /**
-   * Observa (F0) se uma listagem vazia foi causada por `organizationId` STALE.
+   * Decide se o `organizationId` do JWT ainda corresponde à realidade — e
+   * **lança 401 `ORG_CONTEXT_STALE`** quando não corresponde (F4, item 4.2).
    *
-   * Chamado APENAS no caminho em que a lista já saiu vazia — por isso a query
-   * de membership não pesa no fluxo normal. Emite:
-   * - `auth.org_context_stale` (`reason: membership_missing`) → o JWT aponta
-   *   para uma org da qual o usuário NÃO é mais membro. É o "sumiram os
-   *   projetos mas não deslogou" (sintoma C do plano).
-   * - `auth.org_context_empty_scope` → membership válida, usuário realmente
-   *   sem projetos visíveis. Ruído esperado; serve de linha de base.
+   * ## O problema que isto resolve
    *
-   * NÃO altera o retorno — a mudança para 401 `ORG_CONTEXT_STALE` é a F4.
-   * Nunca lança: qualquer falha aqui é engolida (é telemetria, não regra).
+   * Até a F3, um JWT com `organizationId` de uma org da qual o usuário **não é
+   * mais membro** produzia **200 com lista vazia**, silenciosamente. Do ponto de
+   * vista do usuário: "sumiram todos os meus projetos" — e nada no sistema
+   * acusava. Agora esse caso vira 401 + `code: ORG_CONTEXT_STALE`, e o
+   * frontend faz refresh silencioso (reemite o token com a org correta, ou
+   * órfão conforme ADR-V2-038) e **repete** o request. Zero logout.
+   *
+   * ## Como se distingue "org stale" de "usuário novo sem projetos"
+   *
+   * A distinção **não** é feita pela lista vazia (os dois casos produzem lista
+   * vazia — por isso o bug durou tanto). É feita pela **membership de org**:
+   *
+   * | Situação                                     | `organizationId` | DVincula -161/-162/-163 | Resultado |
+   * |----------------------------------------------|------------------|--------------------------|-----------|
+   * | Usuário órfão (ADR-V2-038)                   | ausente          | —                        | `'orphan'` — 200 `[]` |
+   * | **Usuário novo, org válida, zero projetos**  | presente         | **EXISTE**               | `'fresh'` — **200 `[]`** |
+   * | Removido da org / org apagada / claim podre  | presente         | **NÃO existe**           | **401 ORG_CONTEXT_STALE** |
+   *
+   * O que torna essa inferência **segura** é a origem do claim: o
+   * `organizationId` só é emitido no token a partir de uma DVincula de org
+   * **existente** (`AuthService.login`/`refresh` resolvem a org via
+   * `DVincula in [-161,-162,-163]`). Logo, "claim presente + membership
+   * ausente" só pode significar que a membership foi revogada **depois** da
+   * emissão do token — ou seja, o token está desatualizado. Não há caminho
+   * legítimo em que um usuário ativo de uma org válida fique sem essa DVincula.
+   *
+   * ## Fail-open deliberado
+   *
+   * Se a query de membership falhar (banco lento, pool esgotado), **não**
+   * lançamos: um blip de infra jamais pode virar 401 (é exatamente a lição da
+   * F1/D4 — infra não é `invalid_token`). Nesse caso devolvemos `'fresh'` e o
+   * comportamento anterior (200 `[]`) é preservado.
    *
    * @param userEntidadeId - DEntidade (-150) do usuário
-   * @param orgId - `organizationId` do JWT (ausente = usuário órfão, ADR-V2-038)
+   * @param organizationId - claim `organizationId` do JWT (string BigInt) ou `undefined`
+   * @param source - rótulo do call-site (telemetria)
+   * @returns `'orphan'` (sem claim) ou `'fresh'` (claim confere)
+   *
+   * @throws {UnauthorizedException} `{ code: 'ORG_CONTEXT_STALE' }` — claim
+   *   malformado ou apontando para org sem membership real.
+   *
+   * @see AUTH_ERROR_CODES.ORG_CONTEXT_STALE — ação esperada do cliente
    */
-  private async observeOrgContext(userEntidadeId: bigint, orgId?: bigint): Promise<void> {
-    if (orgId === undefined) {
-      return; // órfão é estado VÁLIDO (ADR-V2-038) — não é contexto stale.
+  async assertOrgContextFresh(
+    userEntidadeId: bigint,
+    organizationId: string | undefined,
+    source: string,
+  ): Promise<'orphan' | 'fresh'> {
+    if (organizationId === undefined || organizationId === '') {
+      // Órfão é estado VÁLIDO (ADR-V2-038) — quem responde é o
+      // RequireWorkspaceGuard (403 NO_WORKSPACE), não este método.
+      return 'orphan';
     }
 
+    if (!/^-?\d+$/.test(organizationId)) {
+      this.throwOrgContextStale(userEntidadeId, organizationId, 'invalid_org_claim', source);
+    }
+
+    let membership: { chave: bigint } | null;
     try {
-      const membership = await this.prisma.dVincula.findFirst({
+      membership = await this.prisma.dVincula.findFirst({
         where: {
           idEntidade: userEntidadeId,
-          idLocEscritu: orgId,
-          idClasse: { in: [BigInt(-161), BigInt(-162), BigInt(-163)] },
+          idLocEscritu: BigInt(organizationId),
+          idClasse: { in: ORG_ROLE_CLASSES },
           excluido: false,
         },
         select: { chave: true },
       });
-
-      if (!membership) {
-        this.metrics?.increment(
-          'auth.org_context_stale',
-          {
-            reason: 'membership_missing',
-            userEntidadeId: userEntidadeId.toString(),
-            organizationId: orgId.toString(),
-            source: 'projects.findMany',
-          },
-          { level: 'warn' },
-        );
-        return;
-      }
-
-      this.metrics?.increment(
-        'auth.org_context_empty_scope',
-        { source: 'projects.findMany' },
-        { silent: true },
-      );
     } catch (err) {
-      this.logger.debug(`observeOrgContext falhou (ignorado): ${(err as Error).message}`);
+      // Fail-open: infraestrutura instável NUNCA vira 401 (RFC 6750).
+      this.logger.warn(
+        `assertOrgContextFresh: falha ao verificar membership (fail-open) — ${(err as Error).message}`,
+      );
+      return 'fresh';
     }
+
+    if (!membership) {
+      this.throwOrgContextStale(userEntidadeId, organizationId, 'membership_missing', source);
+    }
+
+    return 'fresh';
+  }
+
+  /**
+   * Emite o contador `auth.org_context_stale` (instrumentado na F0) e lança o
+   * 401 com o `code` do contrato.
+   *
+   * @throws {UnauthorizedException} sempre
+   */
+  private throwOrgContextStale(
+    userEntidadeId: bigint,
+    organizationId: string,
+    reason: 'invalid_org_claim' | 'membership_missing',
+    source: string,
+  ): never {
+    this.metrics?.increment(
+      'auth.org_context_stale',
+      {
+        reason,
+        userEntidadeId: userEntidadeId.toString(),
+        organizationId,
+        source,
+      },
+      { level: 'warn' },
+    );
+
+    throw new UnauthorizedException({
+      code: AUTH_ERROR_CODES.ORG_CONTEXT_STALE,
+      message: 'Contexto de organização desatualizado. Renove a sessão e tente novamente.',
+    });
   }
 
   /**

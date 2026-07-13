@@ -20,6 +20,7 @@
  * | `SESSION_REUSE_DETECTED`  | 401  | logout (sessão revogada por segurança)       |
  * | `SESSION_REVOKED`         | 401  | logout                                       |
  * | `NO_WORKSPACE`            | 403  | tela de onboarding (`<NoWorkspaces />`)      |
+ * | `ORG_CONTEXT_STALE`       | 401  | refresh silencioso + retry (NÃO deslogar)    |
  * | `FORBIDDEN_ROLE`          | 403  | mostrar "sem permissão" (NÃO deslogar)       |
  * | `AUTH_BACKEND_UNAVAILABLE`| 503  | **backoff + retry — NUNCA deslogar**         |
  * | `INTERNAL_ERROR`          | 500  | mostrar erro genérico                        |
@@ -37,6 +38,19 @@ export const AUTH_ERROR_CODES = {
   SESSION_REVOKED: 'SESSION_REVOKED',
   /** Usuário autenticado, porém sem nenhuma workspace ativa (ADR-V2-038). */
   NO_WORKSPACE: 'NO_WORKSPACE',
+  /**
+   * O `organizationId` do JWT não corresponde mais a uma membership real
+   * (usuário removido da org, org excluída, claim corrompido) — F4, item 4.2.
+   *
+   * **Não é logout.** O cliente deve fazer refresh silencioso (o novo token é
+   * emitido com a org correta, ou órfão conforme ADR-V2-038) e **repetir** o
+   * request. Antes da F4 este caso devolvia **200 com lista vazia** — o
+   * usuário via "sumiram todos os meus projetos" e nada acusava.
+   *
+   * **Nunca** é emitido quando o usuário tem membership válida e simplesmente
+   * não possui projetos (org nova / usuário novo) — esse caso continua 200 `[]`.
+   */
+  ORG_CONTEXT_STALE: 'ORG_CONTEXT_STALE',
   /** Autenticado e com acesso de leitura, mas sem o papel exigido. */
   FORBIDDEN_ROLE: 'FORBIDDEN_ROLE',
   /**

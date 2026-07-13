@@ -1,6 +1,68 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-07-13 (Task #997 — Backend F3 COMPLETA + APPROVED 9.2/10)
+**Ultima atualizacao:** 2026-07-13 (Task #998 — F4 Cache/Contexto COMPLETA + APPROVED 8.5/10)
+
+---
+
+## Task #998 — F4 Cache, Contexto e Semântica (Fase 4) — COMPLETE (V2 Hardening F16 / DEV-174)
+
+**Module:** auth (+ projects, tasks, common)
+**Task:** Distinguir "org stale" de "usuário novo" (ambos lista vazia); corrigir bug ProjectScopeGuard; semântica 403/404
+**Status:** COMPLETA (Fase 4 — 37 testes F4 pass, 1 regressão ZERO, APPROVED 8.5/10)
+**Duration:** ~5-7d (Implementer ~3-4d + Reviewer ~4h + Documenter ~3h)
+**Quality Score:** 8.5/10 (APPROVED pelo Reviewer — distinção stale-vs-novo validada, custo zero caminho feliz, fail-open correto)
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Implementer | ~3-4d | — |
+| Reviewer | ~4h | 8.5/10 |
+| Documenter | ~3h | — |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — zero Engine (auth é estrutural)
+- Pilar 2 (Endpoints): N/A — zero endpoint novo
+- Pilar 3 (Seed): N/A — zero DClasse nova
+
+**Deliverables:**
+- [x] ORG_CONTEXT_STALE (401): Validar DVincula membership quando lista vazia
+- [x] assertOrgContextFresh() implementado (ProjectsService:1068-1107, reutilizado em TasksService)
+- [x] Custo zero caminho feliz: query membership só quando accessibleProjectIds.size === 0
+- [x] Fail-open: infra lenta → retorna fresh (nunca 401 por Postgres timeout)
+- [x] Usuário novo distinguido de stale: membership ativa (200) vs ausente (401)
+- [x] Frontend ação: 401 stale → refresh silencioso + retry (sem logout)
+- [x] Bug ProjectScopeGuard corrigido: user.sub → user.entidadeId (DUserGroup vs DEntidade)
+- [x] Semântica 403/404: docs ajustada para ser honesta (VIEWER genérico = follow-up)
+- [x] ADR-V2-078 redigido: decisão, testes-guarda, métricas F0
+
+**Metrics:**
+- Build: PASS (npm run build)
+- TypeScript: 0 errors novos
+- ESLint: 0 warnings novos
+- Tests: 37 novos (F4) + 1849 pré-existentes = 1886 total PASS
+  - org-context-stale.spec.ts: 6/6 PASS (teste-guarda da F4)
+  - projects.service.spec.ts (F4): 6/6 PASS
+  - tasks.service.spec.ts (F4): 7/7 PASS
+- Regressão: ZERO confirmado (37 novos, nenhum quebrado, linha-a-linha auditado)
+
+**Segurança:**
+- [x] Membership real como discriminador (não lista vazia)
+- [x] Anti-enumeração preservada: sem membership = 401 (não 404)
+- [x] Falha de infra nunca vira 401 (RFC 6750)
+- [x] Usuário novo (legítimo) nunca leva 401
+- [x] Tempestade de refresh não ocorre (executeRefreshV2 recalcula org real)
+
+**Decisões Críticas:**
+- ✅ DVincula membership como discriminador (não lista vazia): valida a raiz do incidente
+- ✅ Custo zero caminho feliz: query só em lista vazia (investimento mínimo para máxima segurança)
+- ✅ Fail-open infra: 401 nunca por Postgres lento (RFC 6750 + aprendizado do incidente)
+- ✅ Semântica 403/404 corrigida em docs: VIEWER genérico é pendência conhecida (honestidade)
+
+**ADRs:** **ADR-V2-078** (ORG_CONTEXT_STALE: decisão + design + testes + métricas)
+
+**Próximos Passos:**
+- F4.1 (1w) — Cache role L1 (5s in-process) + L2 (Redis 300s) + pub/sub invalidate
+- F5 (2-3w) — BFF com cookie httpOnly first-party (alvo arquitetural)
 
 ---
 

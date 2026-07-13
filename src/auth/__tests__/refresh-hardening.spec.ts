@@ -8,6 +8,7 @@ import { AuthService } from '../auth.service';
 import { AuthController } from '../auth.controller';
 import { RefreshTokenService } from '../services/refresh-token.service';
 import { RefreshIdempotencyService } from '../services/refresh-idempotency.service';
+import { SessionService } from '../services/session.service';
 import { OrganizationsService } from '../../organizations/organizations.service';
 import { ApiKeyService } from '../services/api-key.service';
 import { InvitesService } from '../../invites/invites.service';
@@ -38,6 +39,10 @@ describe('Auth — hardening de refresh (F1)', () => {
         JWT_EXPIRES_IN: '900',
         REFRESH_TOKEN_EXPIRY_DAYS: '7',
         AUTH_REFRESH_GRACE_SECONDS: String(GRACE_SECONDS),
+        // F3: esta suíte cobre o caminho F1 (slot único) — que continua vivo
+        // como ROLLBACK (`SESSIONS_V2_ENABLED=false`). O caminho de sessões
+        // tem suíte própria (`session-multidevice.spec.ts`).
+        SESSIONS_V2_ENABLED: 'false',
       };
       return values[key] ?? def;
     },
@@ -54,6 +59,7 @@ describe('Auth — hardening de refresh (F1)', () => {
     const metrics = new MetricsService();
     const refreshTokenService = new RefreshTokenService(prismaService, config, metrics);
     const idempotency = new RefreshIdempotencyService(config, metrics);
+    const sessions = new SessionService(prismaService, config, refreshTokenService, metrics);
 
     authService = new AuthService(
       prismaService,
@@ -61,6 +67,7 @@ describe('Auth — hardening de refresh (F1)', () => {
       config,
       refreshTokenService,
       idempotency,
+      sessions,
       { create: jest.fn() } as unknown as OrganizationsService,
       metrics,
     );

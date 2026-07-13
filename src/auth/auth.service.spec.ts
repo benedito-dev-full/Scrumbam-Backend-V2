@@ -6,6 +6,7 @@ import * as bcrypt from 'bcryptjs';
 import { AuthService } from './auth.service';
 import { RefreshTokenService } from './services/refresh-token.service';
 import { RefreshIdempotencyService } from './services/refresh-idempotency.service';
+import { SessionService } from './services/session.service';
 import { PrismaService } from '../prisma.service';
 import { OrganizationsService } from '../organizations/organizations.service';
 
@@ -91,6 +92,14 @@ describe('AuthService', () => {
           } as unknown as ConfigService),
         },
         { provide: OrganizationsService, useValue: organizationsService },
+        // F3: esta suíte cobre o caminho F1 (slot único), que segue vivo como
+        // ROLLBACK da flag. `isEnabled: false` mantém as asserções originais
+        // válidas; o caminho de sessões tem suíte própria
+        // (`__tests__/session-multidevice.spec.ts`).
+        {
+          provide: SessionService,
+          useValue: { isEnabled: jest.fn().mockReturnValue(false) },
+        },
       ],
     }).compile();
 

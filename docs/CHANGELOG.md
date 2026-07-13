@@ -14,6 +14,31 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **F4 — Cache, Contexto e Semântica (Task #998 / DEV-174, V2 F16, 2026-07-13)**
+  - **Objetivo:** Distinguir "org stale" de "usuário novo sem projetos" (ambos davam lista vazia), corrigir bug latente ProjectScopeGuard
+  - **Backend (Scrumban-Backend-V2):**
+    - `ORG_CONTEXT_STALE` (401): Validar DVincula membership quando lista vazia; usuário novo (membership OK) = 200, stale (sem membership) = 401
+    - Método `assertOrgContextFresh()` implementado em `ProjectsService` e reutilizado em `TasksService`
+    - Custo zero caminho feliz: query membership só ocorre quando `accessibleProjectIds.size === 0`
+    - Fail-open: infra lenta (Prisma timeout) → retorna fresh, nunca 401 por infra (RFC 6750)
+    - Frontend ação: 401 stale → refresh silencioso + retry (sem logout), novo token recalculado (ADR-V2-076 idempotência)
+    - Bug fix: `ProjectScopeGuard:58` corrigido — `BigInt(user.sub)` → `BigInt(user.entidadeId)` (DUserGroup vs DEntidade)
+    - Semântica 403/404: documentação corrigida em `docs/auth-error-codes.md` — VIEWER genérico ainda é TODO, só templates globais cobertos
+  - **Testes: 37 novos (F4 específico) — org-context-stale.spec.ts (6/6 PASS)**
+    - (A) User removido de org → 401 ORG_CONTEXT_STALE ✅
+    - (B) User novo em org → 200 vazio (membership ativo) ✅
+    - (C) User com projetos → 200 lista, sem query membership (custo zero) ✅
+    - (D) Infra falha → 200 fail-open (nunca 401) ✅
+    - (E) Órfão (sem claim) → 200 (válido per ADR-V2-038) ✅
+    - (F) Claim inválido → 401 stale ✅
+  - **Documentação:**
+    - ADR-V2-078 redigido: decisão + raciocínio (por que membership real, não lista vazia) + testes-guarda + métricas F0
+    - `docs/auth-error-codes.md` atualizado: VIEWER honesto, gap pré-existente registrado (follow-up conhecido)
+    - JSDoc em `assertOrgContextFresh()`, guardar `ProjectScopeGuard`
+  - **Pilares:** P1 N/A; P2 N/A; P3 N/A (zero mudança estrutural)
+  - **ADRs:** ADR-V2-078 (ORG_CONTEXT_STALE), referencia ADR-V2-076 (grace window impede loop refresh), ADR-V2-038 (órfão válido)
+  - **Score Review:** 8.5/10 (APPROVED — distinção stale-vs-novo validada adversarialmente, zero regressão, comportamento pre-existente preservado)
+
 - **Sessões Multi-Device em DTabela — Fase 3 (Task #997 / DEV-173, V2 F16, 2026-07-13)**
   - **Objetivo:** Permitir logar em múltiplos dispositivos sem derrubar anteriores; detectar replay corretamente
   - **Backend (Scrumban-Backend-V2):**
