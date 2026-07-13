@@ -2,9 +2,127 @@
 
 **Versao:** 1.0
 **Mantido por:** Documenter Agent V2
-**Atualizado em:** 2026-06-16
+**Atualizado em:** 2026-07-13 (Task #997 F3 COMPLETA — Score 9.2/10)
 
 > Este documento rastreia tasks por Fase (F0..F17). Strategist abre, Implementer entrega, Reviewer valida, Documenter fecha. Cada task tem entrada com Status, Modulo, Fase, Tempo Real, Quality Score, Pilares aplicados e ADRs vinculados.
+
+---
+
+## Task #997 — Sessões Multi-Device em DTabela (Fase 3) — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Backend Fase 3 implementado, testado, aprovado 9.2/10)
+**Módulo V2:** auth (+ tabelas, seeds, eventos, core)
+**Fase V2:** F16 (Hardening) — Hotfix emergencial del incidente de sessão (DEV-173)
+**Tempo Real:** ~2 semanas (Implementer ~1.5w código/testes + Reviewer ~4h + Documenter ~3h)
+**Completado em:** 2026-07-13
+**Quality Score:** 9.2/10 (APPROVED pelo Reviewer — sessões multidevice + RFC 9700 + denylist segurança + zero tabela nova)
+
+**O Que Foi Feito (Fase 3 — Sessões Multi-Device):**
+
+**Objetivo:** Substituir slot único de refresh token por sessões em DTabela (uma linha por sessão), permitindo logar em múltiplos dispositivos sem derrubar anteriores.
+
+**Pilares Aplicados:**
+- Pilar 1: **N/A** — zero Engine (sessão é estrutural, service + Prisma)
+- Pilar 2: **Exceção justificada** — `/auth/sessions` com denylist em `/tabelas?classe=-485` (vazamento de hash)
+- Pilar 3: ✅ DClasse SESSION (-485) + eventos (-504/-509/-523/-524) criados no seed
+
+**3.1 Seed de Classes (bloqueante primeiro):**
+- DClasse -485 SESSION (DTabela, idPai=-52 STATUS)
+- DClasse -504 SESSION_CREATED (DEvento, idPai=-3)
+- DClasse -509 SESSION_REVOKED (DEvento, idPai=-3)
+- DClasse -523 SECURITY_REFRESH_REUSE_DETECTED (DEvento, idPai=-3)
+- DClasse -524 SECURITY_ALL_SESSIONS_REVOKED (DEvento, idPai=-3)
+- 171 classes totais validadas (45 fixas + 126 específicas)
+
+**3.2 Migration de Índices (ZERO tabela/coluna):**
+- `CREATE INDEX (idClasse, codigo)` em DTabela — lookup O(1) de sessão corrente
+- `CREATE INDEX (metaDados->>'prevHash')` em DTabela WHERE idClasse=-485 — grace window O(1)
+- `CREATE INDEX (dados->>'refreshTokenHash')` em DUserGroup (legado, dual-read, 7d)
+- `CREATE INDEX (dados->>'prevHash')` em DUserGroup (legado, dual-read, 7d)
+
+**3.3 SessionService + Dual-Read/Dual-Write:**
+- `SessionService.findByHash()` — busca em DTabela (indexada), fallback legado (indexado)
+- `SessionService.rotate()` — gera novo token, atualiza sessão, espelha legado
+- `SessionService.revokeFamily()` — revoga sessão comprometida (RFC 9700)
+- `SessionService.revokeAllForUser()` — revoga TODAS sessões (reuse escalation)
+- `SessionService.evictOldest()` — cap de 10 sessões, LRU evict
+- `SessionService.purgeExpired()` — job horária (idle 7d, absoluta 30d)
+
+**3.4 Máquina de Estados (por sessão):**
+- `valid` — token atual rotaciona
+- `grace` — token anterior dentro janela (corrida abas) — rotaciona, NÃO revoga
+- `expired` — idle/absoluta venceu → 401
+- `replay` — anterior fora janela → revoga FAMÍLIA
+- `revoked` — logout/evict/motivo benigno → 401
+- `reuse_escalation` — token revogado por replay volta → revoga TODAS
+- `unknown` — não encontrado → 401
+
+**3.5 Endpoints + Denylist:**
+- `GET /auth/sessions` — lista sessões (projeção segura, sem hash/jti)
+- `DELETE /auth/sessions/:id` — revoga sessão individual
+- `DELETE /auth/sessions` — revoga todas EXCETO a atual
+- `TabelaService` denylist: SESSION em list/get/alias/create/update/delete → 404
+
+**3.6 Eventos de Ciclo de Vida:**
+- -504 SESSION_CREATED — login/nova sessão
+- -509 SESSION_REVOKED — logout/evict/revoke
+- -523 SECURITY_REFRESH_REUSE_DETECTED — replay real (fora grace)
+- -524 SECURITY_ALL_SESSIONS_REVOKED — reuse escalation (credencial vazada)
+
+**3.7 Dual-Read/Dual-Write (Janela Migração 5-7 dias):**
+- Novos logins criam em DTabela
+- Usuários legado continuam no slot
+- Primeira renovação migra automaticamente (preguiçosa)
+- Dual-write mantém slot sincronizado (rollback seguro)
+- Rollback (SESSIONS_V2_ENABLED=false): sem logout, volta ao legado
+
+**Arquivos Novos:**
+- `src/auth/services/session.service.ts` (384L, JSDoc 100%)
+- `src/auth/services/session-purge.service.ts` (89L)
+- `src/auth/dto/session-response.dto.ts` (47L)
+- `src/auth/__tests__/session-multidevice.spec.ts` (18/18 PASS)
+- `docs/deploy-runbook-fase3-sessoes.md` (runbook prático de deploy)
+- `prisma/migrations/20260713000000_add_session_lookup_indexes/` (migration + SQL)
+
+**Arquivos Tocados:**
+- `src/auth/auth.service.ts` — refresh() reescrito (familia/jti/revoke-family)
+- `src/auth/services/refresh-token.service.ts` — dual-write + migração legado
+- `src/tabelas/tabelas.service.ts` — denylist de SESSION nas 6 portas
+- `src/auth/auth.controller.ts` — endpoints /sessions
+- `prisma/seeds/classes.seed.ts` — 5 DClasses novas
+- `prisma/schema.prisma` — 4 `@@index` em DTabela/DUserGroup
+- `.env.example` — SESSIONS_V2_ENABLED (feature flag)
+
+**Testes: 18/18 (session-multidevice.spec.ts) PASS + 120/120 (auth+tabelas) PASS:**
+- §4.1-4.4 Dual-read/dual-write/rollback — ✅
+- §6.6 Multi-device (3 devices, revoke individual) — ✅
+- §6.7 Replay real (família revogada) — ✅
+- §6.7 Reuse escalation (todas revogadas) — ✅
+- Vault/SQL injection audit — 100% parametrizado ✅
+- Concorrência CAS — ACID transação ✅
+
+**Documentação:**
+- JSDoc 100% em SessionService, SessionPurgeService, DTOs
+- ADR-V2-077: Decisão, alternativas, implementação validada (score 9.2)
+- Deploy runbook: 45 min, checklist completo, troubleshooting
+- Análise RFC 9700: conformance documentada
+
+**Pilares Aplicados:**
+- Pilar 1 (Engine): N/A (sessão é estrutural)
+- Pilar 2 (Endpoints): Exceção justificada `/auth/sessions` + denylist
+- Pilar 3 (Seed): 5 DClasses novas em seed (bloqueante primeira)
+
+**ADRs Vinculados:**
+- ADR-V2-077 — Sessões multi-device em DTabela (THIS)
+- ADR-V2-001 — Referência (ZERO tabela nova, só índices)
+- ADR-V2-004 — Precedente (credenciais em DTabela)
+- ADR-V2-003 — Referência (RBAC DVincula)
+
+**Próximos Passos (F4 — Fase 4):**
+- Deploy staging: validar por 48-72h
+- Monitorar counters: legacy_slot_hit → 0 (7 dias)
+- F4 (1w) — Cache role L1/L2 + org_context_stale + 100% code em erros
+- F5 (2-3w) — BFF com cookie httpOnly (alvo arquitetural)
 
 ---
 

@@ -460,6 +460,47 @@ export class RefreshTokenService {
     });
   }
 
+  /**
+   * Espelha o hash do token vigente no SLOT LEGADO (**dual-write** — F3, §7).
+   *
+   * A F3 move a verdade da sessão para `DTabela` (uma linha por sessão). Este
+   * método mantém `DUserGroup.dados` populado com a sessão **mais recente** do
+   * usuário para que o rollback (`SESSIONS_V2_ENABLED=false`) seja instantâneo
+   * e **não desloge ninguém**: ao voltar ao caminho F1, o slot está lá.
+   *
+   * Semântica do rollback (honesta): o slot é único, então após desligar a flag
+   * o usuário mantém **a sessão mais recente**; devices mais antigos precisam
+   * refazer login. É a mesma garantia da F1 — nunca pior que o estado anterior.
+   *
+   * Este slot **não** é lido enquanto a F3 está ligada, exceto na migração
+   * preguiçosa ({@link SessionService.inspect}), que só o consulta quando NÃO
+   * existe sessão em `DTabela` para o hash apresentado.
+   *
+   * @param userGroupId - Chave BigInt do DUserGroup
+   * @param plaintext - Refresh token recém-emitido (nunca armazenado em claro)
+   * @param prevHash - Hash do token imediatamente anterior (janela de grace)
+   */
+  async mirrorLegacySlot(userGroupId: bigint, plaintext: string, prevHash?: string): Promise<void> {
+    const dadosAtuais = (await this.readSlot(userGroupId)) ?? {};
+
+    await this.prisma.dUserGroup.update({
+      where: { chave: userGroupId },
+      data: {
+        dados: {
+          ...dadosAtuais,
+          refreshTokenHash: this.hash(plaintext),
+          refreshTokenExpiresAt: this.buildExpiresAt(),
+          ...(prevHash
+            ? {
+                prevHash,
+                prevHashValidUntil: new Date(Date.now() + this.getGraceMs()).toISOString(),
+              }
+            : {}),
+        } as Prisma.InputJsonValue,
+      },
+    });
+  }
+
   /** Carimbo ISO de expiração por idade (now + N dias). */
   private buildExpiresAt(): string {
     return new Date(Date.now() + this.getExpiryDays() * 24 * 60 * 60 * 1000).toISOString();

@@ -4,7 +4,7 @@
  * Composicao do seed (ADR-V2-019: monolitico):
  *   - 45 classes fixas universais Devari-Core (range -1..-110), via spread de
  *     `templates/classes-base-template.ts`.
- *   - 121 classes especificas Scrumban-V2 (range -150..-537), declaradas
+ *   - 126 classes especificas Scrumban-V2 (range -150..-537), declaradas
  *     neste arquivo, agrupadas por seccao (DEntidade, DVincula, DPedido,
  *     DTabela, DEvento, DTabela secundario, Fases) com comentarios `// === ... ===`.
  *
@@ -23,7 +23,11 @@
  *     feature Templates de Lista/Espaco via deep-clone do motor cloneTree;
  *   ADR-V2-070 (proposto): +1 DELAY_JUSTIFICATION (-503, DEvento de atraso),
  *     +1 DELAY_REASON (-530, agrupador) e +7 folhas de motivo (-531..-537) —
- *     feature Justificativa de Atraso de Tarefas via DEvento + DClasse).
+ *     feature Justificativa de Atraso de Tarefas via DEvento + DClasse;
+ *   ADR-V2-077 (proposto): +1 SESSION (-485, DTabela — 1 linha por sessao,
+ *     multi-device) e +4 DEventos de seguranca de sessao: SESSION_CREATED
+ *     (-504), SESSION_REVOKED (-509), SECURITY_REFRESH_REUSE_DETECTED (-523),
+ *     SECURITY_ALL_SESSIONS_REVOKED (-524)).
  *
  * Validacao automatica:
  *   `validateHierarchy(classes)` e chamado no topo deste modulo. Qualquer
@@ -88,7 +92,7 @@ function esp(
 }
 
 /**
- * Array de classes especificas Scrumban-V2 (121 entradas).
+ * Array de classes especificas Scrumban-V2 (126 entradas).
  *
  * Ordem:
  *   1. DEntidade — 9 (sub-tipos de Pessoa: USER, PLATFORM_SCRUMBAN,
@@ -272,6 +276,32 @@ const classesEspecificas: DClasseSeed[] = [
   esp(-482, 'CLAUDE_API_KEY', 'Chave Anthropic Claude (provider IA Nexus)', -52),
   esp(-483, 'OPENAI_API_KEY', 'Chave OpenAI (provider IA Nexus)', -52),
   esp(-484, 'AI_PROVIDER_PREF', 'Preferencia de provider/modelo padrao da org (Nexus)', -52),
+  // ADR-V2-077 (F3 — sessoes multi-device): UMA LINHA DE DTabela POR SESSAO.
+  //
+  // Precedente direto: ADR-V2-004 — API Keys (-471) e MCP Keys (-472) ja sao
+  // credenciais de longa duracao vivendo em DTabela. Sessao segue o MESMO
+  // padrao: ZERO tabela nova (ADR-V2-001).
+  //
+  // Ate a F2, o refresh token vivia num SLOT UNICO em `DUserGroup.dados`. Logar
+  // num 2o device sobrescrevia o slot do 1o — e quando o 1o tentava renovar,
+  // o hash desconhecido era classificado como REUSE ATTACK e a sessao era
+  // revogada. Ou seja: o sistema derrubava o usuario e ainda o acusava de roubo.
+  // Uma linha por sessao mata isso na raiz (e da enumeracao/revoke individual,
+  // requisito de OWASP ASVS Session Management).
+  //
+  // Layout da linha (ver SessionService):
+  //   codigo      = sha256(refreshToken CORRENTE)   ← lookup indexado
+  //   nome        = familyId (uuid)                 ← familia RFC 9700
+  //   descricao   = device label (User-Agent resumido)
+  //   dEntidadeId = DEntidade (-150) do usuario     ← listagem/revoke por user
+  //   metaDados   = { userGroupId, jti, prevHash, prevHashValidUntil, issuedAt,
+  //                   idleExpiresAt, absoluteExpiresAt, lastUsedAt, ip,
+  //                   userAgent, revokedAt, revokedReason }
+  //   excluido    = revogada (logout / replay / eviccao LRU / expiracao)
+  //
+  // SEGURANCA: `codigo` e `metaDados` contem hashes de credencial → esta classe
+  // e DENYLISTED no endpoint generico /tabelas (Pilar 2). Ver TabelaService.
+  esp(-485, 'SESSION', 'Sessao de usuario (refresh token multi-device)', -52),
   // GAP-04: documento rico associado a qualquer entidade (DProject, DTask, Space, etc.).
   // Conteudo rico (Markdown/JSON) armazenado em dados.content (campo Json de DTabela).
   // Uso: DTabela (idClasse=-353, dEntidadeId=entidadeAlvo).
@@ -337,6 +367,32 @@ const classesEspecificas: DClasseSeed[] = [
   // ZERO tabela nova (ADR-V2-001). Ver src/ai/README.md.
   esp(-508, 'AI_CHAT_MESSAGE', 'Mensagem do chat IA Nexus (polimorfica user/assistant)', -3),
 
+  // === DEvento — ciclo de vida de SESSAO e seguranca de auth (4 — ADR-V2-077) ===
+  // F3 do plano `plan-sessao-auth-hardening.md`. Ate aqui TODO evento de auth
+  // era gravado como -501 USER_LOGIN com `descricao` distinguindo o caso — o
+  // que torna impossivel alertar/agregar por tipo (o evento de REPLAY REAL fica
+  // afogado no volume de logins). Estes 4 idClasses dao identidade propria aos
+  // fatos de sessao. idPai=-3 (EVENTOS), como todos os demais DEventos.
+  //
+  // -523 é o sinal que a Fase 1 aprendeu a medir com precisao: depois da grace
+  // window, um SECURITY_REFRESH_REUSE_DETECTED so aparece em replay REAL.
+  // -524 é a ESCALACAO do RFC 9700: replay de token de uma sessao JA revogada
+  // por replay = credencial vazada → derruba TODAS as sessoes do usuario.
+  esp(-504, 'SESSION_CREATED', 'Sessao de usuario criada (login/register/convite)', -3),
+  esp(-509, 'SESSION_REVOKED', 'Sessao de usuario revogada (logout/admin/eviccao/expiracao)', -3),
+  esp(
+    -523,
+    'SECURITY_REFRESH_REUSE_DETECTED',
+    'Replay REAL de refresh token (fora da grace) — familia revogada',
+    -3,
+  ),
+  esp(
+    -524,
+    'SECURITY_ALL_SESSIONS_REVOKED',
+    'Escalacao RFC 9700: replay de sessao ja revogada — TODAS as sessoes do usuario revogadas',
+    -3,
+  ),
+
   // === DTabela — status lookups secundarios (21) ===
   // Filhos de STATUS (-52)
   esp(-510, 'AGENT_STATUS_ONLINE', 'Agent: ONLINE', -52),
@@ -383,7 +439,7 @@ const classesEspecificas: DClasseSeed[] = [
 ];
 
 /**
- * Array completo do seed (45 fixas + 121 especificas = 166 DClasses).
+ * Array completo do seed (45 fixas + 126 especificas = 171 DClasses).
  * Validado automaticamente em time de import (validateHierarchy abaixo).
  */
 export const classes: DClasseSeed[] = [...classesFixas, ...classesEspecificas];

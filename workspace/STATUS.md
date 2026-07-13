@@ -1,6 +1,82 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-07-13 (Task #996 — Frontend F2 COMPLETA + APPROVED 8.0/10)
+**Ultima atualizacao:** 2026-07-13 (Task #997 — Backend F3 COMPLETA + APPROVED 9.2/10)
+
+---
+
+## Task #997 — Sessões Multi-Device em DTabela (Fase 3) — COMPLETE (V2 Hardening F16 / DEV-173)
+
+**Module:** auth (+ tabelas, seeds, eventos, core)
+**Task:** Permitir múltiplos devices logados simultâneamente sem derrubar anteriores; detectar replay corretamente (RFC 9700)
+**Status:** COMPLETA (Backend Fase 3 — 18 testes pass, zero tabela nova, dual-read/write, rollback seguro, APPROVED 9.2/10)
+**Duration:** ~2w total (Implementer ~1.5w + Reviewer ~4h + Documenter ~3h)
+**Quality Score:** 9.2/10 (APPROVED pelo Reviewer — multi-device real, RFC 9700 conformance, zero regressão, denylist segurança)
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Implementer | ~1.5w | — |
+| Reviewer | ~4h | 9.2/10 |
+| Documenter | ~3h | — |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — zero Engine, sessão é estrutural (Service + Prisma direto em transaction)
+- Pilar 2 (Endpoints): Exceção justificada (`/auth/sessions` com denylist em `/tabelas?classe=-485` para evitar vazamento de hash)
+- Pilar 3 (Seed): ✅ DClasse SESSION (-485) + 4 eventos (-504/-509/-523/-524) — 171 classes totais
+
+**Deliverables:**
+- [x] DClasse SESSION (-485) criada em seed (Pilar 3 bloqueante)
+- [x] SessionService: findByHash (dual-read), rotate, revokeFamily, revokeAllForUser, evictOldest, purgeExpired
+- [x] Dual-read/dual-write: usuarios legado migram automaticamente, zero logout, rollback seguro
+- [x] Máquina de estados: valid/grace/expired/replay/revoked/reuse_escalation/unknown (7 estados)
+- [x] Revoke por família (RFC 9700): replay → revoga família; reuse_escalation → revoga todas sessões
+- [x] Cap 10 sessões/usuário (LRU evict), idle 7d, absoluta 30d, job purge horária
+- [x] Endpoints: GET /auth/sessions (lista), DELETE /auth/sessions/:id (revoke), DELETE /auth/sessions (revoke all)
+- [x] Denylist em TabelaService: SESSION (-485) → 404 em list/get/create/update/delete (anti-enumeração)
+- [x] 4 eventos: SESSION_CREATED (-504), SESSION_REVOKED (-509), REUSE_DETECTED (-523), ALL_REVOKED (-524)
+- [x] Migration: 4 índices (idClasse/codigo lookup O(1), prevHash grace O(1), dual-read legado 2 índices)
+- [x] Feature flag SESSIONS_V2_ENABLED (rollback em <1 min, sem logout)
+- [x] JSDoc 100% em SessionService, SessionPurgeService, DTOs
+- [x] ADR-V2-077 (Sessões multi-device em DTabela — decisão, alternativas, implementação validada)
+- [x] Deploy runbook (45 min, checklist, troubleshooting)
+
+**Metrics:**
+- Build: PASS (npm run build)
+- TypeScript: 0 errors novos (41 pré-existentes preservados)
+- ESLint: 0 warnings novos
+- Tests: 18/18 (session-multidevice.spec.ts) PASS + 120/120 (auth+tabelas) PASS
+- Segurança: SQL injection (100% Prisma.sql), concorrência (CAS ACID), vazamento (denylist 404)
+- Regressão: ZERO (dual-read/dual-write validados, rollback testado, nenhum logout em massa)
+
+**Segurança (RFC 9700 + OWASP ASVS Session Management):**
+- [x] Replay real (fora grace): revoga FAMÍLIA, não conta inteira
+- [x] Reuse escalation (token revogado volta): revoga TODAS sessões (credencial vazada)
+- [x] Multi-device enumeração: denylist 404 (não 403), anti-enumeration
+- [x] Sessões enumeráveis: GET /auth/sessions + revoke individual (ASVS compliance)
+- [x] Concorrência: CAS no banco, sem race condition
+- [x] Dual-read/dual-write: migração preguiçosa + rollback (SESSIONS_V2_ENABLED=false) sem logout
+
+**Decisões Críticas (Reviewer-auditadas):**
+- ✅ DTabela vs tabela nova: ADR-V2-001 + ADR-V2-004 precedente (credenciais já em DTabela)
+- ✅ Denylist em TabelaService: vazamento de hash seria crítico → 404 (anti-enumeração válida)
+- ✅ Família/jti (RFC 9700): replay revoga grant, não conta (precisão corrigida vs F1)
+- ✅ Dual-read/dual-write: zero logout no deploy, rollback instantâneo (<1 min)
+- ✅ Cap LRU 10: proteção contra abas zumbi sem limite
+
+**Não-regressão:**
+- [x] Usuários legado (pré-F3) migram automaticamente — zero logout
+- [x] Deploy: dual-read busca DTabela primeiro (indexada), fallback legado
+- [x] Rollback (SESSIONS_V2_ENABLED=false): slot legado está sincronizado → ninguém desloga
+- [x] Usuarios com sessão mais recente = mantêm; devices antigos = refazem login (honest semantics)
+- [x] Nenhum outro teste/endpoint afetado
+
+**ADRs:** **ADR-V2-077** (Sessões multi-device em DTabela, referencia ADR-V2-001/004, base RFC 9700/OWASP)
+
+**Próximos Passos:**
+- Deploy staging: validar por 48-72h, monitorar legacy_slot_hit counter
+- Aguardar 7 dias: 100% da base migra (sliding refresh window)
+- F4 (1w) — Cache role L1(5s) + L2(Redis 300s), org_context_stale → 401, code em 100% erros
+- F5 (2-3w) — BFF com cookie httpOnly first-party (alvo arquitetural)
 
 ---
 
@@ -117,7 +193,7 @@
 - [x] Novo arquivo error-codes.ts: catálogo 9 códigos (TOKEN_INVALID, TOKEN_EXPIRED, SESSION_REVOKED, SESSION_REUSE_DETECTED, ORG_CONTEXT_STALE, NO_WORKSPACE, FORBIDDEN_ROLE, AUTH_BACKEND_UNAVAILABLE, INTERNAL_ERROR)
 - [x] Novo arquivo refresh-idempotency.service.ts: in-process cache (decisão consciente vs Redis do plano)
 - [x] JSDoc 100% em serviços novos + updates nos existentes
-- [x] ADR-V2-062 redigido: base normativa RFC 9700 + desvio conscientemente justificado (Redis → in-process)
+- [x] ADR-V2-076 redigido: base normativa RFC 9700 + desvio conscientemente justificado (Redis → in-process)
 - [x] Testes 95/95 auth PASS + 58 adversariais Risk Gate PASS
 
 **Metrics:**
@@ -149,7 +225,7 @@
 - Tests de concorrência verificam que AMBAS abas recebem MESMO par (comprovado teste 6.1)
 - Test 6.7 (replay real) passa ANTES e DEPOIS — detecção não foi afrouxada
 
-**ADRs:** **ADR-V2-062** (refresh grace + idempotência in-process, redigido nesta task)
+**ADRs:** **ADR-V2-076** (refresh grace + idempotência in-process, redigido nesta task)
 
 **Próximos passos (habilitados pelo hotfix):**
 - F2 (2d) — Hotfix frontend: `localStorage` + bootstrap defensivo + Web Locks + BroadcastChannel

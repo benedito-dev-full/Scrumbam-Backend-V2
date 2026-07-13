@@ -137,4 +137,55 @@ describe('TabelaService', () => {
       );
     });
   });
+  /**
+   * DENYLIST de SESSION (-485) no endpoint genérico — F3 / ADR-V2-077.
+   *
+   * §7 do plano trata "SESSION vazar pelo /tabelas" como risco de SEGURANÇA, e
+   * com razão: a linha de sessão guarda `codigo = sha256(refreshToken)` e
+   * `metaDados.prevHash`. Um `GET /tabelas?idClasse=-485` que respondesse 200
+   * entregaria hashes de refresh token — o Pilar 2 viraria o vetor de
+   * exfiltração. Estes testes são o cadeado.
+   */
+  describe('denylist de SESSION (-485) — ADR-V2-077', () => {
+    it('GET /tabelas?idClasse=-485 → 404 (nunca 200 com hashes)', async () => {
+      await expect(service.listarPorClasse({ idClasse: '-485' })).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(prisma.dTabela.findMany).not.toHaveBeenCalled();
+    });
+
+    it('alias ?classe=SESSION também é barrado (404)', async () => {
+      (prisma.dClasse.findFirst as jest.Mock).mockResolvedValue({ chave: BigInt(-485) });
+
+      await expect(service.listarPorClasse({ classe: 'SESSION' })).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(prisma.dTabela.findMany).not.toHaveBeenCalled();
+    });
+
+    it('GET /tabelas/:id de uma linha de sessão → 404 (não vaza o codigo)', async () => {
+      (prisma.dTabela.findFirst as jest.Mock).mockResolvedValue({
+        ...mockTabela,
+        idClasse: BigInt(-485),
+        codigo: 'a'.repeat(64), // sha256 do refresh token
+      });
+
+      await expect(service.buscarPorId('1042')).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('POST /tabelas com idClasse=-485 → 404 (ninguém forja sessão pelo genérico)', async () => {
+      await expect(
+        service.criar({ idClasse: '-485', nome: 'sessão forjada' }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.dTabela.create).not.toHaveBeenCalled();
+    });
+
+    it('classes legítimas seguem funcionando (a denylist é cirúrgica)', async () => {
+      (prisma.dClasse.findFirst as jest.Mock).mockResolvedValue(mockClasse);
+      (prisma.dTabela.findMany as jest.Mock).mockResolvedValue([mockTabela]);
+
+      const result = await service.listarPorClasse({ idClasse: '-440' });
+      expect(result.items).toHaveLength(1);
+    });
+  });
 });

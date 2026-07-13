@@ -28,6 +28,8 @@ import { McpKeyService } from './services/mcp-key.service';
 import { RefreshTokenService } from './services/refresh-token.service';
 import { RefreshIdempotencyService } from './services/refresh-idempotency.service';
 import { RoleResolverService } from './services/role-resolver.service';
+import { SessionService } from './services/session.service';
+import { SessionPurgeService } from './services/session-purge.service';
 
 /**
  * Módulo de autenticação e autorização.
@@ -78,6 +80,9 @@ import { RoleResolverService } from './services/role-resolver.service';
     McpKeyService,
     RefreshTokenService,
     RefreshIdempotencyService,
+    // F3 (ADR-V2-077): sessões multi-device em DTabela (-485) + cron de purga.
+    SessionService,
+    SessionPurgeService,
     RoleResolverService,
     // Guards
     JwtAuthGuard,
@@ -107,6 +112,7 @@ import { RoleResolverService } from './services/role-resolver.service';
     McpKeyService,
     RoleResolverService,
     RefreshTokenService,
+    SessionService,
     JwtModule,
     PassportModule,
   ],

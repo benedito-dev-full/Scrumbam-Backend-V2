@@ -14,6 +14,35 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Sessões Multi-Device em DTabela — Fase 3 (Task #997 / DEV-173, V2 F16, 2026-07-13)**
+  - **Objetivo:** Permitir logar em múltiplos dispositivos sem derrubar anteriores; detectar replay corretamente
+  - **Backend (Scrumban-Backend-V2):**
+    - `SessionService`: CRUD de sessões em DTabela (idClasse=-485), lookup indexado O(1), cap 10 sessões LRU, idle 7d + absoluta 30d
+    - Dual-read/dual-write: usuários legado (pré-F3) migram automaticamente na primeira renovação (preguiçosa), zero logout
+    - Máquina de estados: valid/grace/expired/replay/revoked/reuse_escalation/unknown (RFC 9700 conformance)
+    - Revoke por FAMÍLIA (não conta): replay → revoga essa sessão/família; reuse_escalation → revoga TODAS sessões
+    - Endpoints: `GET /auth/sessions` (lista), `DELETE /auth/sessions/:id` (revoke), `DELETE /auth/sessions` (revoke all except current)
+    - Denylist em `TabelaService`: SESSION (-485) retorna 404 em list/get/create/update/delete (anti-enumeração, vazamento evitado)
+    - Eventos: -504 SESSION_CREATED, -509 SESSION_REVOKED, -523 SECURITY_REUSE_DETECTED, -524 SECURITY_ALL_SESSIONS_REVOKED
+    - Migration: `CREATE INDEX (idClasse, codigo)` em DTabela (O(1) lookup), + índices de dual-read legado (7d temporários)
+    - Feature flag: `SESSIONS_V2_ENABLED` (rollback instantâneo sem logout)
+  - **Serviços novos:**
+    - `src/auth/services/session.service.ts` — SessionService (384L, JSDoc 100%)
+    - `src/auth/services/session-purge.service.ts` — Purge job (expirações, LRU evict)
+    - `src/auth/dto/session-response.dto.ts` — Projeção segura (sem hash/jti/family)
+  - **Testes: 18/18 session-multidevice.spec.ts PASS + 120/120 auth+tabelas PASS**
+    - Test §4.1-4.4: Dual-read, dual-write, migração legado, rollback ✅
+    - Test §6.6: Multi-device, revoke individual, evict LRU ✅
+    - Test §6.7: Replay real (família revogada), reuse_escalation (todas revogadas) ✅
+    - Auditoria adversarial: SQL injection (Prisma.sql 100%), concorrência (CAS ACID), vazamento (denylist) ✅
+  - **Documentação:**
+    - JSDoc completo em SessionService, SessionPurgeService, DTOs
+    - ADR-V2-077 redigido: decisão, RFC 9700 conformance, dual-read semântica, rollback seguro, Pilar 2 exceção justificada
+    - Deploy runbook: `docs/deploy-runbook-fase3-sessoes.md` (45 min, checklist, rollback, troubleshooting)
+  - **Pilares:** P1 N/A (zero Engine); P2 Exceção justificada (/auth/sessions denylist); P3 ✅ (5 DClasses novas)
+  - **ADRs:** ADR-V2-077 (this phase)
+  - **Score Review:** 9.2/10 (APPROVED — multi-device real, zero slot-único, RFC 9700 conformance, zero tabela nova, Pilar 3 seed-first)
+
 - **Hotfix Auth — Fase 1 (Sessão/Grace/Idempotência — Task #995 / DEV-171, V2 F16, 2026-07-13)**
   - **Objetivo:** Corrigir falso-positivo de reuse attack causado por corrida entre abas + infra lenta deslogando + cache negativo de 5min (sintomas B1, B2, B3 do incidente DEV-169)
   - **Backend (Scrumban-Backend-V2):**
