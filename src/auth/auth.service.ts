@@ -15,7 +15,9 @@ import * as bcrypt from 'bcryptjs';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { MetricsService } from '../common/observability/metrics.service';
+import { AUTH_ERROR_CODES } from '../common/errors/error-codes';
 import { RefreshTokenService } from './services/refresh-token.service';
+import { RefreshIdempotencyService } from './services/refresh-idempotency.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto, AvailableOrgDto, UserProfileDto } from './dto/auth-response.dto';
@@ -69,6 +71,9 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly refreshTokenService: RefreshTokenService,
+    // F1 (item 1.2) — serializa refresh concorrente do MESMO token: duas abas
+    // recebem o MESMO par de tokens em vez de brigar pela rotação.
+    private readonly refreshIdempotency: RefreshIdempotencyService,
     @Inject(forwardRef(() => OrganizationsService))
     private readonly organizationsService: OrganizationsService,
     // F0 — Observabilidade. `@Optional()` de propósito: instrumentação NUNCA
@@ -303,25 +308,53 @@ export class AuthService {
   }
 
   /**
-   * Renova access token via refresh token (rotação estrita).
+   * Renova access token via refresh token (rotação + grace + idempotência).
    *
-   * Rotação estrita (Decisão D3): cada uso gera novo refresh token.
-   * Reuse attack detection: token antigo após rotação → revoga tudo.
+   * **F1 — hotfix do incidente de sessão** (plano `plan-sessao-auth-hardening.md`,
+   * itens 1.1/1.2/1.3). Três defesas, nesta ordem:
    *
-   * **F0 — instrumentado (comportamento INALTERADO).** Emite os contadores
-   * `auth.refresh.attempt` / `.success` / `.reuse_detected` / `.revoke_all` /
+   * 1. **Idempotência** ({@link RefreshIdempotencyService}) — dois requests
+   *    concorrentes com o MESMO token produzem UMA rotação e recebem a MESMA
+   *    resposta. Duas abas → uma única cadeia de tokens.
+   * 2. **Janela de grace** (60 s) — um token que era o corrente até agora há
+   *    pouco (`prevHash` dentro da janela) é **benigno**: rotaciona, NÃO revoga.
+   *    É aqui que o falso positivo morre.
+   * 3. **Detecção de replay preservada (RFC 9700)** — token desconhecido, ou
+   *    `prevHash` FORA da janela, continua sendo replay REAL: revoga a sessão,
+   *    emite `SECURITY_REFRESH_REUSE_DETECTED` (DEvento) e devolve 401. A
+   *    segurança não foi trocada por conveniência — ela ganhou precisão.
+   *
+   * Contadores (F0, reaproveitados): `auth.refresh.attempt` / `.success` /
+   * `.grace_hit` / `.idempotent_hit` / `.reuse_detected` / `.revoke_all` /
    * `.expired` / `.user_not_found`. `auth.refresh.revoke_all` é **o contador do
-   * sangramento**: cada ocorrência é um usuário derrubado (com slot único,
-   * revogar = matar todas as abas/devices). A correção — grace window +
-   * idempotência — é a **F1**; aqui apenas medimos.
+   * sangramento** e deve cair a ~0 depois desta fase.
    *
    * @param refreshTokenPlaintext - Token em texto plano
-   * @param userGroupId - Chave BigInt do DUserGroup (extraída do JWT expirado)
+   * @param userGroupId - Chave BigInt do DUserGroup
    * @param ctx - Contexto do request (ip/userAgent) — usado **só** em telemetria
    * @returns AuthResponseDto com novo par de tokens
-   * @throws {UnauthorizedException} Se token inválido ou reuse detectado
+   * @throws {UnauthorizedException} `TOKEN_EXPIRED` (sessão velha) |
+   *   `SESSION_REUSE_DETECTED` (replay real) | `TOKEN_INVALID` (usuário sumiu)
    */
   async refresh(
+    refreshTokenPlaintext: string,
+    userGroupId: bigint,
+    ctx?: AuthRequestContext,
+  ): Promise<AuthResponseDto> {
+    // Idempotência: a corrida de duas abas é resolvida ANTES de tocar o banco.
+    return this.refreshIdempotency.run(refreshTokenPlaintext, () =>
+      this.executeRefresh(refreshTokenPlaintext, userGroupId, ctx),
+    );
+  }
+
+  /**
+   * Rotação de verdade — executada UMA vez por token (ver {@link refresh}).
+   *
+   * @param refreshTokenPlaintext - Token em texto plano
+   * @param userGroupId - Chave BigInt do DUserGroup
+   * @param ctx - Contexto do request (telemetria)
+   */
+  private async executeRefresh(
     refreshTokenPlaintext: string,
     userGroupId: bigint,
     ctx?: AuthRequestContext,
@@ -334,30 +367,32 @@ export class AuthService {
 
     this.metrics?.increment('auth.refresh.attempt', telemetry);
 
-    const validation = await this.refreshTokenService.validate(refreshTokenPlaintext, userGroupId);
+    const inspection = await this.refreshTokenService.inspect(refreshTokenPlaintext, userGroupId);
 
-    if (validation === 'invalid') {
-      // Hash não bate → reuse detectado! Revogar tudo imediatamente.
-      this.logger.warn(`REUSE ATTACK detectado para userGroupId=${userGroupId}`);
-      this.metrics?.increment('auth.refresh.reuse_detected', telemetry, { level: 'warn' });
-      // CONTADOR DO SANGRAMENTO — cada linha aqui é um usuário derrubado.
-      this.metrics?.increment(
-        'auth.refresh.revoke_all',
-        { ...telemetry, reason: 'reuse_detected' },
-        { level: 'warn' },
-      );
-      await this.refreshTokenService.revoke(userGroupId, 'reuse_detected');
-      throw new UnauthorizedException(
-        'Refresh token inválido ou já utilizado. Faça login novamente.',
-      );
+    if (inspection.state === 'invalid') {
+      // REPLAY REAL: o token não é o corrente NEM o anterior dentro da grace.
+      // RFC 9700: revogar o grant. Aqui (slot único) isso derruba a sessão —
+      // e agora só acontece quando é ataque de verdade, não corrida de abas.
+      await this.handleReuseDetected(userGroupId, telemetry);
     }
 
-    if (validation === 'expired') {
+    if (inspection.state === 'expired') {
       // Expiração benigna por idade (ou registro legado sem carimbo).
-      // NÃO é ataque: não loga como REUSE, apenas pede re-login.
+      // NÃO é ataque: não revoga, apenas pede re-login.
       this.logger.log(`Refresh token expirado (re-login) userGroupId=${userGroupId}`);
       this.metrics?.increment('auth.refresh.expired', telemetry);
-      throw new UnauthorizedException('Sessão expirada. Faça login novamente.');
+      throw new UnauthorizedException({
+        code: AUTH_ERROR_CODES.TOKEN_EXPIRED,
+        message: 'Sessão expirada. Faça login novamente.',
+      });
+    }
+
+    if (inspection.state === 'grace') {
+      // A CORREÇÃO DO INCIDENTE: o token anterior chegou dentro da janela.
+      // Antes: REUSE ATTACK → revoke() → CEO deslogado. Agora: rotaciona.
+      this.logger.log(
+        `Refresh dentro da janela de grace (corrida de abas — benigno) userGroupId=${userGroupId}`,
+      );
     }
 
     const userGroup = await this.prisma.dUserGroup.findUnique({
@@ -376,7 +411,10 @@ export class AuthService {
         { ...telemetry, stage: 'usergroup' },
         { level: 'warn' },
       );
-      throw new UnauthorizedException('Usuário não encontrado');
+      throw new UnauthorizedException({
+        code: AUTH_ERROR_CODES.TOKEN_INVALID,
+        message: 'Usuário não encontrado',
+      });
     }
 
     const entidade = userGroup.entidades[0];
@@ -386,7 +424,10 @@ export class AuthService {
         { ...telemetry, stage: 'entidade' },
         { level: 'warn' },
       );
-      throw new UnauthorizedException('Perfil de usuário não encontrado');
+      throw new UnauthorizedException({
+        code: AUTH_ERROR_CODES.TOKEN_INVALID,
+        message: 'Perfil de usuário não encontrado',
+      });
     }
 
     const orgVinculo = await this.prisma.dVincula.findFirst({
@@ -397,11 +438,9 @@ export class AuthService {
       },
     });
 
-    // ADR-V2-038 (proposto) — Etapa 3: refresh órfão destravado.
-    // Quando o usuário perdeu todos os vínculos entre o último access token
-    // e este refresh (admin removeu membership, por ex.), retornamos um JWT
-    // sem `organizationId` em vez de jogar 401. O frontend trata como
-    // estado órfão e mostra `<NoWorkspaces />`.
+    // ADR-V2-038 — refresh órfão destravado: quando o usuário perdeu todos os
+    // vínculos entre o último access token e este refresh, retornamos JWT sem
+    // `organizationId` em vez de 401. O frontend mostra `<NoWorkspaces />`.
     const orgId = orgVinculo?.idLocEscritu;
     const orgRole = this.mapOrgRole(orgVinculo?.idClasse ?? null);
 
@@ -411,17 +450,19 @@ export class AuthService {
       );
     }
 
+    const newRefreshToken = await this.rotateComRetry(userGroupId, inspection.currentHash);
+
     const accessToken = this.generateAccessToken(
       userGroup.chave,
       entidade.chave,
       orgId,
       userGroup.usuario,
     );
-    const newRefreshToken = await this.refreshTokenService.rotate(userGroupId);
 
     this.metrics?.increment('auth.refresh.success', {
       ...telemetry,
       orphan: orgId === undefined,
+      grace: inspection.state === 'grace',
     });
 
     return this.buildAuthResponse(
@@ -435,6 +476,113 @@ export class AuthService {
       '',
       orgRole,
     );
+  }
+
+  /**
+   * Rotaciona com compare-and-swap, tolerando perda de corrida entre réplicas.
+   *
+   * O CAS falha (`null`) quando OUTRO processo rotacionou entre a inspeção e a
+   * gravação — cenário possível só em multi-réplica (dentro de um processo, a
+   * idempotência já serializou). Nesse caso re-inspecionamos: o hash do banco
+   * mudou, então rotacionamos a partir do NOVO corrente. O cliente recebe um
+   * token válido e **ninguém é revogado**.
+   *
+   * @param userGroupId - Chave BigInt do DUserGroup
+   * @param expectedHash - Hash corrente lido na inspeção
+   * @returns Novo refresh token plaintext
+   */
+  private async rotateComRetry(
+    userGroupId: bigint,
+    expectedHash: string | undefined,
+  ): Promise<string> {
+    let hashEsperado = expectedHash;
+
+    for (let tentativa = 0; tentativa < 3; tentativa += 1) {
+      if (hashEsperado === undefined) {
+        break;
+      }
+
+      const plaintext = await this.refreshTokenService.rotateFrom(userGroupId, hashEsperado);
+      if (plaintext !== null) {
+        return plaintext;
+      }
+
+      this.metrics?.increment('auth.refresh.cas_retry', {
+        userGroupId: userGroupId.toString(),
+        attempt: tentativa + 1,
+      });
+
+      const atual = await this.prisma.dUserGroup.findUnique({
+        where: { chave: userGroupId },
+        select: { dados: true },
+      });
+      const dados = (atual?.dados as Record<string, unknown> | null) ?? {};
+      hashEsperado =
+        typeof dados.refreshTokenHash === 'string' ? dados.refreshTokenHash : undefined;
+    }
+
+    // Sem slot corrente (sessão revogada no meio do caminho) ou 3 perdas
+    // seguidas: rotação incondicional. Disponibilidade acima de otimização —
+    // o pior caso aqui é uma rotação a mais, nunca um usuário deslogado.
+    return this.refreshTokenService.rotate(userGroupId);
+  }
+
+  /**
+   * Trata um replay REAL de refresh token (RFC 9700 §4.14.2).
+   *
+   * Revoga a sessão, contabiliza o sangramento e emite o DEvento de segurança
+   * `SECURITY_REFRESH_REUSE_DETECTED` (idClasse -501, a classe de audit de auth —
+   * ZERO DClasse nova nesta fase, ADR-V2-001).
+   *
+   * @param userGroupId - Chave BigInt do DUserGroup
+   * @param telemetry - Dimensões já montadas (userGroupId/ip/ua)
+   * @throws {UnauthorizedException} Sempre — `code: SESSION_REUSE_DETECTED`
+   */
+  private async handleReuseDetected(
+    userGroupId: bigint,
+    telemetry: Record<string, string | undefined>,
+  ): Promise<never> {
+    this.logger.warn(`REUSE ATTACK (replay real, fora da grace) userGroupId=${userGroupId}`);
+    this.metrics?.increment('auth.refresh.reuse_detected', telemetry, { level: 'warn' });
+    this.metrics?.increment(
+      'auth.refresh.revoke_all',
+      { ...telemetry, reason: 'reuse_detected' },
+      { level: 'warn' },
+    );
+
+    await this.refreshTokenService.revoke(userGroupId, 'reuse_detected');
+
+    // Evento de segurança APÓS a revogação (persistir → emitir).
+    const entidade = await this.prisma.dEntidade.findFirst({
+      where: { dUserGroupId: userGroupId, excluido: false },
+      select: { chave: true },
+    });
+
+    if (entidade) {
+      try {
+        await this.prisma.dEvento.create({
+          data: {
+            idClasse: ID_CLASSE_USER_LOGIN_EVENT,
+            idEntidade: entidade.chave,
+            descricao: 'auth.refresh.reuse_detected',
+            metaDados: {
+              action: 'SECURITY_REFRESH_REUSE_DETECTED',
+              userGroupId: userGroupId.toString(),
+              ip: telemetry.ip ?? null,
+              userAgent: telemetry.ua ?? null,
+            } as Prisma.InputJsonValue,
+          },
+        });
+      } catch (err) {
+        // Auditoria nunca pode mascarar a revogação (que já ocorreu).
+        this.logger.error(`Falha ao registrar evento de reuse: ${(err as Error).message}`);
+      }
+    }
+
+    throw new UnauthorizedException({
+      code: AUTH_ERROR_CODES.SESSION_REUSE_DETECTED,
+      message: 'Refresh token inválido ou já utilizado. Faça login novamente.',
+    });
   }
 
   /**

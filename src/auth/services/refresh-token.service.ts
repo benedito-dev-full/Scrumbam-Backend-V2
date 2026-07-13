@@ -12,34 +12,82 @@ import { MetricsService } from '../../common/observability/metrics.service';
 const DEFAULT_REFRESH_TOKEN_EXPIRY_DAYS = 7;
 
 /**
- * Resultado da validação de um refresh token.
+ * Default da janela de tolerância (grace) do token IMEDIATAMENTE anterior,
+ * em segundos, quando `AUTH_REFRESH_GRACE_SECONDS` está ausente ou inválida.
  *
- * - `'valid'`   — hash bate E o token não expirou por idade.
- * - `'expired'` — hash bate MAS passou de `refreshTokenExpiresAt`
- *                 (ou é registro legado sem carimbo). Caso BENIGNO:
- *                 401 normal pedindo re-login, NÃO é ataque.
- * - `'invalid'` — hash NÃO bate. Caso SUSPEITO: reuse-detection
- *                 (o AuthService revoga todas as sessões).
+ * 60 s é a ordem de grandeza usada pela indústria (Auth0 "refresh token reuse
+ * interval", IdentityServer "one-time use with leeway"): grande o bastante para
+ * cobrir a corrida entre abas / retry de rede, pequeno o bastante para que um
+ * replay real caia FORA dela.
+ */
+const DEFAULT_GRACE_SECONDS = 60;
+
+/**
+ * Resultado da validação de um refresh token (compat — usado por specs legados).
+ *
+ * - `'valid'`   — hash bate com o slot corrente E não expirou por idade.
+ * - `'expired'` — hash bate MAS passou de `refreshTokenExpiresAt` (ou é registro
+ *                 legado sem carimbo). Caso BENIGNO: 401 pedindo re-login.
+ * - `'invalid'` — hash NÃO bate nem com o slot corrente nem com o `prevHash`
+ *                 dentro da grace. Caso SUSPEITO: replay real.
  */
 export type RefreshTokenValidation = 'valid' | 'expired' | 'invalid';
 
 /**
+ * Estado detalhado de um refresh token apresentado (F1 — grace window).
+ *
+ * `'grace'` é o estado NOVO e é o coração do hotfix: o token apresentado é o
+ * IMEDIATAMENTE anterior e chegou DENTRO da janela de tolerância. Isso é a
+ * assinatura de uma **corrida entre abas**, não de um ataque — e hoje é tratado
+ * como REUSE ATTACK, revogando a sessão inteira do usuário (o incidente).
+ */
+export type RefreshTokenState = 'valid' | 'grace' | 'expired' | 'invalid';
+
+/** Inspeção completa do slot de refresh de um DUserGroup. */
+export interface RefreshTokenInspection {
+  /** Estado do token apresentado. */
+  state: RefreshTokenState;
+  /**
+   * Hash do refresh token CORRENTE no banco no momento da leitura.
+   *
+   * É o valor esperado no compare-and-swap de {@link RefreshTokenService.rotateFrom}
+   * — garante que só rotaciona quem leu o estado que ainda vale.
+   */
+  currentHash?: string;
+}
+
+/** Chaves do slot de refresh dentro de `DUserGroup.dados` (Json — ZERO tabela nova). */
+interface RefreshSlot {
+  refreshTokenHash?: string;
+  refreshTokenExpiresAt?: string;
+  /** Hash do token IMEDIATAMENTE anterior (janela de grace). */
+  prevHash?: string;
+  /** ISO — até quando o `prevHash` é aceito como benigno. */
+  prevHashValidUntil?: string;
+}
+
+/**
  * Service para geração, validação e rotação de refresh tokens.
  *
- * Implementa rotação estrita (ADR-V2-003, Decisão D3):
- * - Cada uso gera novo token e invalida o anterior
- * - Reuse detectado (hash não bate) → revogação imediata de todas as sessões
+ * Implementa rotação com **detecção de replay + janela de grace** (F1 do plano
+ * `plan-sessao-auth-hardening.md`; ancoragem: RFC 9700 §4.14.2):
  *
- * Implementa também expiração por TEMPO (idade):
- * - `generate()` carimba `refreshTokenExpiresAt` (now + N dias)
- * - `validate()` distingue 3 estados ('valid' | 'expired' | 'invalid')
- * - N dias vem de `REFRESH_TOKEN_EXPIRY_DAYS` (default 7)
+ * - Cada uso gera novo token; o anterior vira `prevHash` com validade de
+ *   `AUTH_REFRESH_GRACE_SECONDS` (default 60 s).
+ * - Token apresentado == slot corrente → `'valid'` (rotaciona).
+ * - Token apresentado == `prevHash` DENTRO da janela → `'grace'` (rotaciona,
+ *   **NÃO revoga**). É a corrida de duas abas — benigna.
+ * - Token apresentado == `prevHash` FORA da janela, ou desconhecido →
+ *   `'invalid'` = **replay REAL** → o AuthService revoga a sessão e emite
+ *   evento de segurança. **A detecção NÃO foi removida — ela ganhou precisão.**
  *
- * Armazenamento: hash SHA-256 em DUserGroup.dados.refreshTokenHash +
- * timestamp ISO em DUserGroup.dados.refreshTokenExpiresAt.
- * Nunca o plaintext é armazenado no banco.
+ * Também implementa expiração por IDADE (`REFRESH_TOKEN_EXPIRY_DAYS`, default 7).
  *
- * @see AuthService — usa este service no fluxo de login/refresh
+ * Armazenamento: `DUserGroup.dados` (Json) — ZERO tabela nova (ADR-V2-001).
+ * Nunca o plaintext é armazenado.
+ *
+ * @see AuthService.refresh — orquestra validação → rotação → resposta
+ * @see RefreshIdempotencyService — garante UMA rotação por token concorrente
  */
 @Injectable()
 export class RefreshTokenService {
@@ -54,63 +102,84 @@ export class RefreshTokenService {
   ) {}
 
   /**
-   * Lê a validade configurada do refresh token (em dias).
+   * Lê um inteiro positivo da env, com default e warn em valor inválido.
    *
-   * Lê `REFRESH_TOKEN_EXPIRY_DAYS`, valida (inteiro > 0 e finito) e,
-   * se ausente ou inválida, retorna o default ({@link DEFAULT_REFRESH_TOKEN_EXPIRY_DAYS}).
-   * Valor inválido (não-default por ausência) gera um `warn`.
+   * Aceita SOMENTE inteiro positivo puro — `parseInt('7abc')` devolveria 7
+   * silenciosamente (mascarando misconfiguration), por isso o guard de formato.
    *
-   * @returns Número de dias de validade do refresh token
+   * @param key - Nome da variável de ambiente
+   * @param fallback - Valor usado quando ausente ou inválida
+   * @returns Inteiro validado
    */
-  private getExpiryDays(): number {
-    const raw = this.config.get<string>('REFRESH_TOKEN_EXPIRY_DAYS');
+  private getPositiveInt(key: string, fallback: number): number {
+    const raw = this.config.get<string>(key);
 
     if (raw === undefined || raw === null || raw === '') {
-      return DEFAULT_REFRESH_TOKEN_EXPIRY_DAYS;
+      return fallback;
     }
 
-    // Aceita SOMENTE inteiro positivo puro. `parseInt('7abc')` devolveria 7
-    // silenciosamente (mascarando misconfiguration) — por isso validamos o
-    // formato antes de converter.
     const value = String(raw).trim();
     if (!/^\d+$/.test(value)) {
-      this.logger.warn(
-        `REFRESH_TOKEN_EXPIRY_DAYS inválido ("${value}") — usando default ${DEFAULT_REFRESH_TOKEN_EXPIRY_DAYS} dias`,
-      );
-      return DEFAULT_REFRESH_TOKEN_EXPIRY_DAYS;
+      this.logger.warn(`${key} inválido ("${value}") — usando default ${fallback}`);
+      return fallback;
     }
 
     const parsed = parseInt(value, 10);
-
     if (!Number.isFinite(parsed) || parsed <= 0) {
-      this.logger.warn(
-        `REFRESH_TOKEN_EXPIRY_DAYS inválido ("${value}") — usando default ${DEFAULT_REFRESH_TOKEN_EXPIRY_DAYS} dias`,
-      );
-      return DEFAULT_REFRESH_TOKEN_EXPIRY_DAYS;
+      this.logger.warn(`${key} inválido ("${value}") — usando default ${fallback}`);
+      return fallback;
     }
 
     return parsed;
   }
 
+  /** Validade do refresh token, em dias (`REFRESH_TOKEN_EXPIRY_DAYS`, default 7). */
+  private getExpiryDays(): number {
+    return this.getPositiveInt('REFRESH_TOKEN_EXPIRY_DAYS', DEFAULT_REFRESH_TOKEN_EXPIRY_DAYS);
+  }
+
   /**
-   * Gera novo refresh token para um usuário.
+   * Janela de grace, em milissegundos (`AUTH_REFRESH_GRACE_SECONDS`, default 60).
    *
-   * Cria token aleatório (64 bytes hex), salva hash + carimbo de expiração
-   * no banco, retorna plaintext para inclusão no response.
+   * Exposto para o {@link RefreshIdempotencyService} usar o MESMO horizonte no
+   * cache de resultado — as duas defesas cobrem exatamente a mesma janela.
+   */
+  getGraceMs(): number {
+    return this.getPositiveInt('AUTH_REFRESH_GRACE_SECONDS', DEFAULT_GRACE_SECONDS) * 1000;
+  }
+
+  /** SHA-256 hex do plaintext. */
+  private hash(plaintext: string): string {
+    return createHash('sha256').update(plaintext).digest('hex');
+  }
+
+  /** Lê o slot de refresh (Json) de um DUserGroup. */
+  private async readSlot(userGroupId: bigint): Promise<RefreshSlot | null> {
+    const userGroup = await this.prisma.dUserGroup.findUnique({
+      where: { chave: userGroupId },
+      select: { dados: true },
+    });
+
+    if (!userGroup) {
+      return null;
+    }
+
+    return ((userGroup.dados as RefreshSlot | null) ?? {}) as RefreshSlot;
+  }
+
+  /**
+   * Gera novo refresh token para um usuário (sessão NOVA — login/register).
    *
-   * O carimbo `refreshTokenExpiresAt` = now + N dias (N de
-   * `REFRESH_TOKEN_EXPIRY_DAYS`, default 7) é gravado como ISO string.
-   * Demais campos de `dados` são preservados (spread).
+   * Sobrescreve o slot e **limpa** `prevHash`/`prevHashValidUntil`: uma sessão
+   * nova não herda a janela de grace da anterior. Demais campos de `dados`
+   * (ex.: `mcpKeyHash`) são preservados.
    *
    * @param userGroupId - Chave BigInt do DUserGroup
    * @returns Token plaintext (nunca armazenado)
    */
   async generate(userGroupId: bigint): Promise<string> {
     const plaintext = randomBytes(64).toString('hex');
-    const hash = createHash('sha256').update(plaintext).digest('hex');
-
-    const expiryDays = this.getExpiryDays();
-    const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString();
+    const hash = this.hash(plaintext);
 
     const userGroup = await this.prisma.dUserGroup.findUnique({
       where: { chave: userGroupId },
@@ -118,14 +187,21 @@ export class RefreshTokenService {
     });
 
     const dadosAtuais = (userGroup?.dados as Record<string, unknown>) ?? {};
+    const {
+      prevHash: _prevHash,
+      prevHashValidUntil: _prevValidUntil,
+      ...dadosSemGrace
+    } = dadosAtuais;
+    void _prevHash;
+    void _prevValidUntil;
 
     await this.prisma.dUserGroup.update({
       where: { chave: userGroupId },
       data: {
         dados: {
-          ...dadosAtuais,
+          ...dadosSemGrace,
           refreshTokenHash: hash,
-          refreshTokenExpiresAt: expiresAt,
+          refreshTokenExpiresAt: this.buildExpiresAt(),
         } as Prisma.InputJsonValue,
       },
     });
@@ -134,115 +210,227 @@ export class RefreshTokenService {
   }
 
   /**
-   * Valida refresh token em texto plano, distinguindo 3 estados.
+   * Inspeciona o token apresentado contra o slot corrente + janela de grace.
    *
-   * Compara hash SHA-256 com o armazenado em DUserGroup.dados.refreshTokenHash
-   * e verifica a expiração por idade via DUserGroup.dados.refreshTokenExpiresAt.
+   * @param plaintext - Token em texto plano
+   * @param userGroupId - Chave BigInt do DUserGroup
+   * @returns Estado (`valid` | `grace` | `expired` | `invalid`) + hash corrente
    *
-   * Estados retornados:
-   * - `'invalid'` — hash NÃO bate (reuse-detection: caller revoga tudo).
-   * - `'expired'` — hash bate, mas o token passou da validade OU é registro
-   *                 legado sem carimbo (`refreshTokenExpiresAt` ausente).
-   *                 Caminho seguro: força re-login benigno, sem revogar.
-   * - `'valid'`   — hash bate e não expirou.
+   * @example
+   * ```typescript
+   * const { state, currentHash } = await refreshTokenService.inspect(rt, userGroupId);
+   * if (state === 'invalid') { /* replay real → revogar *\/ }
+   * ```
+   */
+  async inspect(plaintext: string, userGroupId: bigint): Promise<RefreshTokenInspection> {
+    const hash = this.hash(plaintext);
+    const dados = await this.readSlot(userGroupId);
+
+    const currentHash =
+      typeof dados?.refreshTokenHash === 'string' ? dados.refreshTokenHash : undefined;
+    const telemetria = { userGroupId: userGroupId.toString() };
+
+    // Caso 1 — bate com o slot corrente.
+    if (currentHash !== undefined && currentHash === hash) {
+      const expirado = this.isExpired(dados?.refreshTokenExpiresAt);
+      if (expirado) {
+        this.metrics?.increment('auth.refresh.validate', {
+          ...telemetria,
+          result: 'expired',
+          reason: expirado,
+        });
+        return { state: 'expired', currentHash };
+      }
+
+      this.metrics?.increment(
+        'auth.refresh.validate',
+        { ...telemetria, result: 'valid' },
+        { silent: true },
+      );
+      return { state: 'valid', currentHash };
+    }
+
+    // Caso 2 — bate com o token IMEDIATAMENTE anterior, dentro da grace.
+    // É a corrida de duas abas. NÃO é ataque. Rotaciona e segue a vida.
+    if (typeof dados?.prevHash === 'string' && dados.prevHash === hash) {
+      const validUntil = Date.parse(dados.prevHashValidUntil ?? '');
+      const dentroDaJanela = Number.isFinite(validUntil) && Date.now() <= validUntil;
+
+      if (dentroDaJanela) {
+        this.metrics?.increment('auth.refresh.grace_hit', telemetria);
+        return { state: 'grace', currentHash };
+      }
+
+      // Fora da janela: o token anterior chegou tarde demais → replay REAL.
+      this.metrics?.increment(
+        'auth.refresh.validate',
+        { ...telemetria, result: 'invalid', reason: 'prev_hash_outside_grace' },
+        { level: 'warn' },
+      );
+      return { state: 'invalid', currentHash };
+    }
+
+    // Caso 3 — desconhecido. Ou é replay real, ou a sessão já foi revogada.
+    const semSlot = currentHash === undefined;
+    this.metrics?.increment(
+      'auth.refresh.validate',
+      {
+        ...telemetria,
+        result: 'invalid',
+        reason: semSlot ? 'no_slot_stored' : 'unknown_hash',
+        slotPresent: !semSlot,
+      },
+      { level: 'warn' },
+    );
+    if (semSlot) {
+      this.metrics?.increment('auth.refresh.not_found', {
+        ...telemetria,
+        reason: 'no_slot_stored',
+      });
+    }
+
+    return { state: 'invalid', currentHash };
+  }
+
+  /**
+   * Valida refresh token (API legada — 3 estados).
+   *
+   * Mantida por compatibilidade. `'grace'` é reportado como `'valid'` porque,
+   * do ponto de vista de quem só quer saber "posso seguir?", ele é válido.
+   * Quem precisa distinguir usa {@link inspect}.
    *
    * @param plaintext - Token em texto plano
    * @param userGroupId - Chave BigInt do DUserGroup
    * @returns `'valid'` | `'expired'` | `'invalid'`
    */
   async validate(plaintext: string, userGroupId: bigint): Promise<RefreshTokenValidation> {
-    const hash = createHash('sha256').update(plaintext).digest('hex');
-
-    const userGroup = await this.prisma.dUserGroup.findUnique({
-      where: { chave: userGroupId },
-      select: { dados: true },
-    });
-
-    const dados = userGroup?.dados as Record<string, unknown> | null;
-
-    if (dados?.refreshTokenHash !== hash) {
-      // F0: distingue "usuário sem slot algum" (já revogado/logout) de
-      // "hash diferente do slot vigente" (o caso que o AuthService trata como
-      // REUSE — e que hoje é majoritariamente falso-positivo de corrida).
-      const hasSlot = typeof dados?.refreshTokenHash === 'string';
-      this.metrics?.increment(
-        'auth.refresh.validate',
-        {
-          result: 'invalid',
-          userGroupId: userGroupId.toString(),
-          slotPresent: hasSlot,
-        },
-        { level: 'warn' },
-      );
-      if (!hasSlot) {
-        this.metrics?.increment('auth.refresh.not_found', {
-          userGroupId: userGroupId.toString(),
-          reason: 'no_slot_stored',
-        });
-      }
-      return 'invalid';
-    }
-
-    const expiresAtRaw = dados?.refreshTokenExpiresAt;
-
-    // Registro legado (pré-feature) sem carimbo → trata como expirado.
-    // Caminho seguro: força re-login, NÃO revoga, NÃO quebra.
-    if (typeof expiresAtRaw !== 'string' || expiresAtRaw === '') {
-      this.metrics?.increment('auth.refresh.validate', {
-        result: 'expired',
-        userGroupId: userGroupId.toString(),
-        reason: 'no_expiry_stamp',
-      });
-      return 'expired';
-    }
-
-    if (new Date(expiresAtRaw).getTime() < Date.now()) {
-      this.metrics?.increment('auth.refresh.validate', {
-        result: 'expired',
-        userGroupId: userGroupId.toString(),
-        reason: 'age',
-      });
-      return 'expired';
-    }
-
-    this.metrics?.increment(
-      'auth.refresh.validate',
-      { result: 'valid', userGroupId: userGroupId.toString() },
-      { silent: true },
-    );
-    return 'valid';
+    const { state } = await this.inspect(plaintext, userGroupId);
+    return state === 'grace' ? 'valid' : state;
   }
 
   /**
-   * Rotaciona refresh token: invalida o anterior e gera novo.
+   * Rotaciona o refresh token com **compare-and-swap** sobre o hash corrente.
    *
-   * Implementa rotação estrita para detecção de reuse attack.
-   * O novo carimbo `refreshTokenExpiresAt` é gravado por `generate()`.
-   * Deve ser chamado dentro de transaction no AuthService.
+   * O UPDATE só se aplica se o slot no banco AINDA for `expectedCurrentHash`.
+   * Sem isso, dois refresh concorrentes fariam read-modify-write cegos e o
+   * último venceria — deixando o token devolvido ao primeiro cliente órfão
+   * (que na volta seria classificado como replay e derrubaria a sessão).
+   *
+   * O hash anterior vira `prevHash`, válido por {@link getGraceMs}.
+   *
+   * @param userGroupId - Chave BigInt do DUserGroup
+   * @param expectedCurrentHash - Hash que DEVE estar no slot para a troca valer
+   * @returns Novo token plaintext, ou `null` se perdeu a corrida (alguém já rotacionou)
+   */
+  async rotateFrom(userGroupId: bigint, expectedCurrentHash: string): Promise<string | null> {
+    const dadosAtuais = await this.readSlot(userGroupId);
+    if (!dadosAtuais || dadosAtuais.refreshTokenHash !== expectedCurrentHash) {
+      // Alguém rotacionou entre a leitura e agora.
+      return null;
+    }
+
+    const plaintext = randomBytes(64).toString('hex');
+    const novoSlot = {
+      ...dadosAtuais,
+      refreshTokenHash: this.hash(plaintext),
+      refreshTokenExpiresAt: this.buildExpiresAt(),
+      prevHash: expectedCurrentHash,
+      prevHashValidUntil: new Date(Date.now() + this.getGraceMs()).toISOString(),
+    };
+
+    // CAS: só grava se o hash corrente ainda for o esperado.
+    const { count } = await this.prisma.dUserGroup.updateMany({
+      where: {
+        chave: userGroupId,
+        dados: { path: ['refreshTokenHash'], equals: expectedCurrentHash },
+      },
+      data: { dados: novoSlot as Prisma.InputJsonValue },
+    });
+
+    if (count === 0) {
+      // Ou perdemos a corrida, ou o filtro Json não é efetivo neste banco.
+      // Distinguimos relendo: se o slot AINDA é o esperado, o filtro falhou —
+      // e nesse caso NÃO podemos deixar o refresh parar de funcionar
+      // (disponibilidade > otimização). Grava incondicionalmente e alerta.
+      const releitura = await this.readSlot(userGroupId);
+      if (releitura?.refreshTokenHash === expectedCurrentHash) {
+        this.logger.warn(
+          'CAS de rotação não teve efeito com o slot inalterado — filtro Json ineficaz. ' +
+            'Gravando incondicionalmente (fail-open).',
+        );
+        this.metrics?.increment(
+          'auth.refresh.cas_fallback',
+          { userGroupId: userGroupId.toString() },
+          { level: 'warn' },
+        );
+
+        await this.prisma.dUserGroup.update({
+          where: { chave: userGroupId },
+          data: { dados: novoSlot as Prisma.InputJsonValue },
+        });
+        return plaintext;
+      }
+
+      this.metrics?.increment('auth.refresh.cas_lost', {
+        userGroupId: userGroupId.toString(),
+      });
+      return null;
+    }
+
+    this.logger.debug(`Refresh token rotacionado userGroupId=${userGroupId}`);
+    return plaintext;
+  }
+
+  /**
+   * Rotaciona o refresh token incondicionalmente (sem CAS).
+   *
+   * Usado em fluxos onde o token corrente não é apresentado pelo cliente
+   * (ex.: `POST /auth/switch-org`, que roda com o access token). O hash anterior
+   * também vira `prevHash` — isso protege o refresh token que o cliente tinha em
+   * mãos no instante do switch-org de virar falso positivo de replay.
    *
    * @param userGroupId - Chave BigInt do DUserGroup
    * @returns Novo token plaintext
    */
   async rotate(userGroupId: bigint): Promise<string> {
-    this.logger.debug(`Rotacionando refresh token userGroupId=${userGroupId}`);
-    // generate já sobrescreve hash + expiresAt anteriores (rotação implícita)
-    return this.generate(userGroupId);
+    const dadosAtuais = (await this.readSlot(userGroupId)) ?? {};
+    const hashAnterior = dadosAtuais.refreshTokenHash;
+
+    const plaintext = randomBytes(64).toString('hex');
+
+    await this.prisma.dUserGroup.update({
+      where: { chave: userGroupId },
+      data: {
+        dados: {
+          ...dadosAtuais,
+          refreshTokenHash: this.hash(plaintext),
+          refreshTokenExpiresAt: this.buildExpiresAt(),
+          ...(hashAnterior
+            ? {
+                prevHash: hashAnterior,
+                prevHashValidUntil: new Date(Date.now() + this.getGraceMs()).toISOString(),
+              }
+            : {}),
+        } as Prisma.InputJsonValue,
+      },
+    });
+
+    return plaintext;
   }
 
   /**
-   * Revoga refresh token (limpa hash e carimbo de expiração do banco).
+   * Revoga o refresh token (limpa slot corrente E janela de grace).
    *
-   * Chamado no logout e na detecção de reuse attack.
-   * Remove tanto `refreshTokenHash` quanto `refreshTokenExpiresAt`,
-   * preservando os demais campos de `dados`.
+   * Chamado no logout, na troca de senha e na detecção de replay REAL.
+   * Preserva os demais campos de `dados` (ex.: `mcpKeyHash`).
    *
-   * **Slot único (hoje):** revogar aqui derruba a sessão do usuário em TODOS
-   * os devices/abas. Por isso o `reason` importa — ele separa a revogação
-   * legítima (`logout`, `password_changed`) da revogação por falso-positivo
-   * de reuse (`reuse_detected`), que é o sangramento medido na F0.
+   * **Slot único (F1):** revogar aqui derruba a sessão do usuário em TODOS os
+   * devices/abas. Por isso o `reason` importa — ele separa a revogação legítima
+   * (`logout`, `password_changed`) da revogação por replay (`reuse_detected`).
+   * Revogação por sessão individual é a F3 (sessões em DTabela).
    *
    * @param userGroupId - Chave BigInt do DUserGroup
-   * @param reason - Rótulo de telemetria (F0). NÃO altera comportamento.
+   * @param reason - Rótulo de telemetria. NÃO altera comportamento.
    */
   async revoke(userGroupId: bigint, reason = 'unspecified'): Promise<void> {
     this.logger.debug(`Revogando refresh token userGroupId=${userGroupId} reason=${reason}`);
@@ -253,25 +441,42 @@ export class RefreshTokenService {
       { level: reason === 'reuse_detected' ? 'warn' : 'log' },
     );
 
-    const userGroup = await this.prisma.dUserGroup.findUnique({
-      where: { chave: userGroupId },
-      select: { dados: true },
-    });
-
-    const dadosAtuais = (userGroup?.dados as Record<string, unknown>) ?? {};
+    const dadosAtuais = (await this.readSlot(userGroupId)) ?? {};
     const {
-      refreshTokenHash: _removedHash,
-      refreshTokenExpiresAt: _removedExpiresAt,
+      refreshTokenHash: _hash,
+      refreshTokenExpiresAt: _expiresAt,
+      prevHash: _prevHash,
+      prevHashValidUntil: _prevValidUntil,
       ...dadosSemToken
     } = dadosAtuais;
-    void _removedHash;
-    void _removedExpiresAt;
+    void _hash;
+    void _expiresAt;
+    void _prevHash;
+    void _prevValidUntil;
 
     await this.prisma.dUserGroup.update({
       where: { chave: userGroupId },
-      data: {
-        dados: dadosSemToken as Prisma.InputJsonValue,
-      },
+      data: { dados: dadosSemToken as Prisma.InputJsonValue },
     });
+  }
+
+  /** Carimbo ISO de expiração por idade (now + N dias). */
+  private buildExpiresAt(): string {
+    return new Date(Date.now() + this.getExpiryDays() * 24 * 60 * 60 * 1000).toISOString();
+  }
+
+  /**
+   * Classifica a expiração por idade do slot.
+   *
+   * @returns `'no_expiry_stamp'` (registro legado), `'age'` (expirou) ou `null`
+   */
+  private isExpired(expiresAtRaw: unknown): 'no_expiry_stamp' | 'age' | null {
+    if (typeof expiresAtRaw !== 'string' || expiresAtRaw === '') {
+      // Registro legado (pré-feature) sem carimbo → trata como expirado.
+      // Caminho seguro: força re-login, NÃO revoga, NÃO quebra.
+      return 'no_expiry_stamp';
+    }
+
+    return new Date(expiresAtRaw).getTime() < Date.now() ? 'age' : null;
   }
 }

@@ -73,8 +73,13 @@ export class LRUCache<K, V> {
    *
    * @param key - Chave
    * @param value - Valor a armazenar
+   * @param ttlMsOverride - TTL específico desta entrada (ms). Quando omitido,
+   *   usa o TTL padrão do cache. Existe para permitir **TTL assimétrico**:
+   *   o `RoleResolverService` cacheia resultado POSITIVO por 300 s e resultado
+   *   NEGATIVO (`null`) por 10 s — cache negativo longo é literalmente "o CEO
+   *   perde a autoridade por 5 minutos" (F1, item 1.6 do plano).
    */
-  set(key: K, value: V): void {
+  set(key: K, value: V, ttlMsOverride?: number): void {
     // Evict se já existia (para reposicionar no final)
     if (this.cache.has(key)) {
       this.cache.delete(key);
@@ -90,7 +95,7 @@ export class LRUCache<K, V> {
 
     this.cache.set(key, {
       value,
-      expiresAt: Date.now() + this.ttlMs,
+      expiresAt: Date.now() + (ttlMsOverride ?? this.ttlMs),
     });
   }
 
@@ -101,6 +106,27 @@ export class LRUCache<K, V> {
    */
   delete(key: K): void {
     this.cache.delete(key);
+  }
+
+  /**
+   * Remove todas as entradas cuja chave satisfaz o predicado.
+   *
+   * Usado na invalidação de role: uma mudança de membership pode afetar
+   * várias entradas do mesmo usuário (org + N projetos, incluindo as herdadas
+   * via ORG_ADMIN → MANAGER), e não há como enumerá-las por chave exata.
+   *
+   * @param predicate - Recebe a chave; `true` remove a entrada
+   * @returns Quantidade de entradas removidas
+   */
+  deleteWhere(predicate: (key: K) => boolean): number {
+    let removed = 0;
+    for (const key of [...this.cache.keys()]) {
+      if (predicate(key)) {
+        this.cache.delete(key);
+        removed += 1;
+      }
+    }
+    return removed;
   }
 
   /**

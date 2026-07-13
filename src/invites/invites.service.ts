@@ -7,6 +7,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomBytes } from 'crypto';
@@ -18,6 +19,7 @@ import { EmailService } from '../email/email.service';
 import { EventProducerService } from '../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../common/services/correlation-id.service';
 import { AuthService } from '../auth/auth.service';
+import { RoleResolverService } from '../auth/services/role-resolver.service';
 
 import { CreateInviteDto } from './dto/create-invite.dto';
 import { AcceptInviteDto } from './dto/accept-invite.dto';
@@ -103,6 +105,10 @@ export class InvitesService {
     private readonly configService: ConfigService,
     @Inject(forwardRef(() => AuthService))
     private readonly authService: AuthService,
+    // F1 (item 1.6) — o aceite de convite CRIA membership. Sem invalidar, um
+    // `null` cacheado (usuário que já tinha tentado acessar antes) seguraria o
+    // acesso do recém-chegado. `@Optional()`: specs com mocks não quebram.
+    @Optional() private readonly roleResolver?: RoleResolverService,
   ) {}
 
   /**
@@ -548,6 +554,10 @@ export class InvitesService {
         flow: txFlow,
       };
     });
+
+    // F1 (1.6): membership nova → cache de role do usuário é invalidado ANTES
+    // de qualquer request dele chegar (a sessão só é emitida abaixo).
+    this.roleResolver?.invalidateUser(result.userEntidadeId, result.orgId);
 
     // Audit APOS commit (fora da tx). Falha aqui NAO compromete o aceite.
     const correlationId = this.correlationIdService.getOrGenerate();

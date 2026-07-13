@@ -1,9 +1,16 @@
-import { ExecutionContext, Injectable, Logger, Optional } from '@nestjs/common';
+import {
+  ExecutionContext,
+  Injectable,
+  Logger,
+  Optional,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { MetricsService } from '../../common/observability/metrics.service';
 import { classifyInfraError } from '../../common/observability/infra-error.util';
+import { AUTH_ERROR_CODES } from '../../common/errors/error-codes';
 
 /**
  * Chave em `req` onde o motivo real da falha de JWT é anotado (F0).
@@ -77,36 +84,53 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
   }
 
   /**
-   * Sobrescreve handleRequest para retornar null em vez de lançar.
+   * Retorna null para credencial inválida — e **lança 503 para falha de infra**.
    *
-   * Guards internos NUNCA lançam — retornam falsy.
-   * AuthCompositeGuard é responsável por lançar UnauthorizedException.
+   * Guards internos NUNCA lançam por credencial: retornam falsy e o
+   * `AuthCompositeGuard` decide o 401 final.
    *
-   * **F0:** antes de devolver, classifica a falha e a registra em
-   * `req[AUTH_FAILURE_REASON_KEY]` + contadores. O retorno é o MESMO de antes.
+   * **F1 (item 1.5 / D4):** a exceção que a strategy lança pode ser de
+   * INFRAESTRUTURA (pool do Postgres esgotado dentro de `JwtStrategy.validate`,
+   * banco inalcançável, timeout). Devolver 401 nesse caso é mentira (RFC 6750:
+   * 401 = `invalid_token`) e é literalmente o que **deslogava o CEO quando o
+   * banco ficava lento**. Agora vira `503 { code: AUTH_BACKEND_UNAVAILABLE }` —
+   * o cliente faz backoff e **retenta**, em vez de matar a sessão.
    *
    * @param err - Erro lançado pela strategy (inclui erro de infra do Prisma)
    * @param user - Usuário validado ou false/null
    * @param info - Info do Passport (TokenExpiredError, JsonWebTokenError, ...)
    * @param context - Contexto de execução (usado só para anotar o request)
-   * @returns user se válido, null se inválido (sem lançar)
+   * @returns user se válido, null se credencial inválida
+   * @throws {ServiceUnavailableException} `{ code: 'AUTH_BACKEND_UNAVAILABLE' }`
+   *   quando a falha é de infraestrutura
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   handleRequest<TUser = any>(err: any, user: any, info?: any, context?: ExecutionContext): TUser {
     if (!user) {
-      this.recordFailure(err, info, context);
+      const reason = this.recordFailure(err, info, context);
+
+      if (reason === 'guard_exception') {
+        throw new ServiceUnavailableException({
+          code: AUTH_ERROR_CODES.AUTH_BACKEND_UNAVAILABLE,
+          message: 'Serviço de autenticação temporariamente indisponível. Tente novamente.',
+        });
+      }
     }
 
-    // Retorna null em vez de lançar — AuthCompositeGuard decide
+    // Credencial inválida: retorna null em vez de lançar — AuthCompositeGuard decide.
     return user as TUser;
   }
 
   /**
-   * Classifica a falha de JWT e emite os contadores (F0).
+   * Classifica a falha de JWT, emite os contadores e devolve o motivo.
    *
-   * Não lança e não altera o fluxo — apenas observa.
+   * @returns Motivo classificado — `'guard_exception'` significa INFRA (F1/D4)
    */
-  private recordFailure(err: unknown, info: unknown, context?: ExecutionContext): void {
+  private recordFailure(
+    err: unknown,
+    info: unknown,
+    context?: ExecutionContext,
+  ): AuthFailureReason {
     let reason: AuthFailureReason;
     let detail: string | undefined;
 
@@ -161,5 +185,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     if (request) {
       request[AUTH_FAILURE_REASON_KEY] = reason;
     }
+
+    return reason;
   }
 }

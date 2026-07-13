@@ -5,11 +5,13 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { EventProducerService } from '../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../common/services/correlation-id.service';
+import { RoleResolverService } from '../auth/services/role-resolver.service';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { AddOrgMemberDto } from './dto/add-org-member.dto';
@@ -80,6 +82,10 @@ export class OrganizationsService {
     private readonly prisma: PrismaService,
     private readonly eventProducer: EventProducerService,
     private readonly correlationIdService: CorrelationIdService,
+    // F1 (item 1.6) — invalidação do cache de role em TODA mutação de
+    // membership. Sem isto, conceder/remover papel só refletia pelo TTL.
+    // `@Optional()`: specs que montam o service com mocks não quebram.
+    @Optional() private readonly roleResolver?: RoleResolverService,
   ) {}
 
   /**
@@ -254,15 +260,12 @@ export class OrganizationsService {
       .map((v) => {
         const org = v.locEscritu!;
         const orgDados = org.dados as Record<string, unknown> | null;
-        return this.buildResponse(
-          org,
-          countMap.get(org.chave.toString()) ?? 0,
-          orgDados,
-        );
+        return this.buildResponse(org, countMap.get(org.chave.toString()) ?? 0, orgDados);
       });
 
-    const nextCursor =
-      hasMore ? pageVinculos[pageVinculos.length - 1].idLocEscritu.toString() : null;
+    const nextCursor = hasMore
+      ? pageVinculos[pageVinculos.length - 1].idLocEscritu.toString()
+      : null;
 
     return { items, pagination: { hasMore, nextCursor } };
   }
@@ -468,6 +471,10 @@ export class OrganizationsService {
       });
     });
 
+    // F1 (1.6): a exclusão faz cascade em TODAS as memberships da org e nos
+    // projetos dela — nenhum papel cacheado dessa org pode sobreviver.
+    this.roleResolver?.invalidateOrg(orgId);
+
     // Audit APÓS commit — tipo org.deleted → idClasse=-500 ORG_LIFECYCLE (ADR-V2-027)
     await this.eventProducer.addInternalEvent(
       'org.deleted',
@@ -553,11 +560,7 @@ export class OrganizationsService {
    * await service.addMember('100', { userId: '200', role: 'MEMBER' }, BigInt(adminId));
    * ```
    */
-  async addMember(
-    orgId: string,
-    dto: AddOrgMemberDto,
-    userEntidadeId: bigint,
-  ): Promise<void> {
+  async addMember(orgId: string, dto: AddOrgMemberDto, userEntidadeId: bigint): Promise<void> {
     const orgIdBigInt = BigInt(orgId);
     await this.requireAdminRole(orgIdBigInt, userEntidadeId);
 
@@ -599,6 +602,9 @@ export class OrganizationsService {
         metaDados: { cargo: dto.role } as Prisma.InputJsonValue,
       },
     });
+
+    // F1 (1.6): o papel recém-concedido precisa valer AGORA, não em 5 min.
+    this.roleResolver?.invalidateUser(targetId, orgIdBigInt);
 
     this.logger.log(`Membro ${targetId} adicionado à org ${orgIdBigInt} com role ${dto.role}`);
   }
@@ -662,6 +668,10 @@ export class OrganizationsService {
       },
     });
 
+    // F1 (1.6): mudança de papel invalida o cache do usuário (org + projetos —
+    // o papel de projeto herda de ORG_ADMIN).
+    this.roleResolver?.invalidateUser(memberIdBigInt, orgIdBigInt);
+
     this.logger.log(
       `Role do membro ${memberIdBigInt} na org ${orgIdBigInt} atualizado para ${dto.role}`,
     );
@@ -684,11 +694,7 @@ export class OrganizationsService {
    * await service.removeMember('100', '200', BigInt(adminId));
    * ```
    */
-  async removeMember(
-    orgId: string,
-    memberId: string,
-    userEntidadeId: bigint,
-  ): Promise<void> {
+  async removeMember(orgId: string, memberId: string, userEntidadeId: bigint): Promise<void> {
     const orgIdBigInt = BigInt(orgId);
     await this.requireAdminRole(orgIdBigInt, userEntidadeId);
 
@@ -726,6 +732,10 @@ export class OrganizationsService {
       where: { chave: vinculo.chave },
       data: { excluido: true },
     });
+
+    // F1 (1.6): remoção também precisa refletir imediatamente (o inverso do
+    // bug — acesso revogado que continuaria valendo pelo TTL positivo de 5 min).
+    this.roleResolver?.invalidateUser(memberIdBigInt, orgIdBigInt);
 
     this.logger.log(`Membro ${memberIdBigInt} removido da org ${orgIdBigInt}`);
   }

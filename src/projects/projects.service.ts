@@ -16,6 +16,7 @@ import { SeedBootstrapService } from './seed-bootstrap.service';
 import { ProjectMembersService } from './project-members.service';
 import { ProjectRefService } from './project-ref.service';
 import { TasksIdentifierService } from '../tasks/tasks-identifier.service';
+import { RoleResolverService } from '../auth/services/role-resolver.service';
 import { parseTaskDados } from '../tasks/schemas/task-dados.schema';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { CreateFromTemplateDto } from './dto/create-from-template.dto';
@@ -379,6 +380,10 @@ export class ProjectsService implements OnModuleInit {
     private readonly identifierService: TasksIdentifierService,
     // F0 — Observabilidade. `@Optional()`: instrumentacao nunca quebra o service.
     @Optional() private readonly metrics?: MetricsService,
+    // F1 (item 1.6) — mudanças no PROJETO (visibilidade, exclusão) alteram o
+    // role herdado (Camada A de espaço público, ADR-V2-051) de TODOS os
+    // usuários: o cache do projeto precisa cair junto.
+    @Optional() private readonly roleResolver?: RoleResolverService,
   ) {}
 
   /**
@@ -1557,6 +1562,13 @@ export class ProjectsService implements OnModuleInit {
       },
     });
 
+    // F1 (1.6): visibilidade é insumo do role herdado de espaço público
+    // (ADR-V2-051 §8). Trocar público↔privado sem invalidar deixaria o acesso
+    // antigo valendo por até 5 min — para conceder E para revogar.
+    if (dto.privado !== undefined) {
+      this.roleResolver?.invalidateProject(projectId);
+    }
+
     // Resolver teamId final para o response (após commit).
     let finalTeamId: string | null;
     if (teamIdProvided) {
@@ -1765,6 +1777,9 @@ export class ProjectsService implements OnModuleInit {
 
       return { tasks: tasksResult.count, members: membersResult.count };
     });
+
+    // F1 (1.6): projeto excluído — nenhum role cacheado dele pode sobreviver.
+    this.roleResolver?.invalidateProject(projectId);
 
     // Audit APÓS commit — tipo project.deleted → idClasse=-499 PROJECT_LIFECYCLE (ADR-V2-027)
     await this.eventProducer.addInternalEvent(

@@ -38,6 +38,23 @@ const MCP_ROLE_VINCULO_CLASSES = [
 /** Tipo de role de projeto. */
 export type ProjectRole = 'MANAGER' | 'MEMBER' | 'VIEWER';
 
+/** TTL do cache POSITIVO (role encontrado): 5 min. */
+const POSITIVE_TTL_MS = 300_000;
+
+/**
+ * TTL do cache NEGATIVO (`null` = sem vínculo): **10 s** (F1, item 1.6).
+ *
+ * Era igual ao positivo (300 s) — e isso é, literalmente, "o CEO perde a
+ * autoridade por 5 minutos": basta um request cair antes da concessão do papel
+ * para o `null` ficar grudado por 5 min (e divergir entre réplicas). 10 s ainda
+ * protege contra hammering, mas a permissão concedida reflete quase de imediato.
+ *
+ * A coerência FORTE vem de {@link RoleResolverService.invalidateUser}, agora
+ * ligado nas mutações de membership — o TTL é a rede de segurança, não o
+ * mecanismo principal.
+ */
+const NEGATIVE_TTL_MS = 10_000;
+
 /**
  * Service para resolução de roles via DVincula (N+1 ZERO + LRU cache).
  *
@@ -58,10 +75,13 @@ export class RoleResolverService {
   private readonly logger = new Logger(RoleResolverService.name);
 
   /** Cache LRU de roles: key = `org:${orgId}:${userId}`, value = OrgRole|null */
-  private readonly orgRoleCache = new LRUCache<string, OrgRole | null>(1000, 300_000);
+  private readonly orgRoleCache = new LRUCache<string, OrgRole | null>(1000, POSITIVE_TTL_MS);
 
   /** Cache LRU de project roles: key = `proj:${projId}:${userId}`, value = ProjectRole|null */
-  private readonly projectRoleCache = new LRUCache<string, ProjectRole | null>(1000, 300_000);
+  private readonly projectRoleCache = new LRUCache<string, ProjectRole | null>(
+    1000,
+    POSITIVE_TTL_MS,
+  );
 
   constructor(
     private readonly prisma: PrismaService,
@@ -136,7 +156,8 @@ export class RoleResolverService {
       else if (vinculo.idClasse === ORG_ROLE_CLASSES.VIEWER) role = 'VIEWER';
     }
 
-    this.orgRoleCache.set(cacheKey, role);
+    // TTL assimétrico (F1, item 1.6): positivo 300 s, negativo 10 s.
+    this.orgRoleCache.set(cacheKey, role, role === null ? NEGATIVE_TTL_MS : POSITIVE_TTL_MS);
     return role;
   }
 
@@ -202,7 +223,8 @@ export class RoleResolverService {
       role = await this.resolveOrgAdminRole(userId, projectId);
     }
 
-    this.projectRoleCache.set(cacheKey, role);
+    // TTL assimétrico (F1, item 1.6): positivo 300 s, negativo 10 s.
+    this.projectRoleCache.set(cacheKey, role, role === null ? NEGATIVE_TTL_MS : POSITIVE_TTL_MS);
     return role;
   }
 
@@ -355,30 +377,81 @@ export class RoleResolverService {
   }
 
   /**
-   * Invalida entradas de cache relacionadas a um usuário.
+   * Invalida TODAS as entradas de cache de um usuário (org + projetos).
    *
-   * Chamado ao criar ou remover DVincula (role change).
-   * Força nova consulta ao banco na próxima request.
+   * **F1 (item 1.6) — este método tinha ZERO callers.** Sem ele, o único
+   * mecanismo de coerência era o TTL — e é isso que produzia "concedi o papel e
+   * o usuário continuou sem acesso" (até 5 min) e "403 numa réplica, 200 na
+   * outra". Agora é chamado em toda mutação de membership: aceite de convite,
+   * add/remove/change de role em org e projeto.
+   *
+   * **Por que purgar TUDO do usuário e não só a chave exata:** um papel de ORG
+   * influencia papéis de PROJETO por herança (ORG_ADMIN → MANAGER, e a Camada A
+   * de espaço público exige membership de org). Invalidar só `org:${orgId}:${userId}`
+   * deixaria entradas `proj:*:${userId}` derivadas dele **stale** — exatamente o
+   * bug que estamos consertando. Purgar por usuário é O(n) sobre um cache de
+   * 1000 entradas e roda apenas em mutação de membership (evento raro).
    *
    * @param userId - Chave BigInt da DEntidade (-150 USER)
-   * @param orgId - Chave BigInt da org (opcional — se ausente, limpa só project)
-   * @param projectId - Chave BigInt do projeto (opcional)
+   * @param orgId - Org afetada (opcional — só rotula a telemetria)
+   * @param projectId - Projeto afetado (opcional — só rotula a telemetria)
    */
   invalidateUser(userId: bigint, orgId?: bigint, projectId?: bigint): void {
-    // F0: este método hoje tem ZERO callers (plano §D5). O contador prova isso
-    // no baseline — se ele ficar em 0 por 48 h, a única coerência de cache é o
-    // TTL, o que explica "403 numa réplica, 200 na outra". Ligar as chamadas
-    // nas mutações de membership é a F1.6.
+    const sufixo = `:${userId}`;
+    const removidos =
+      this.orgRoleCache.deleteWhere((key) => key.endsWith(sufixo)) +
+      this.projectRoleCache.deleteWhere((key) => key.endsWith(sufixo));
+
     this.metrics?.increment('auth.role_cache.invalidate', {
-      scope: orgId ? 'org' : projectId ? 'project' : 'none',
+      scope: orgId ? 'org' : projectId ? 'project' : 'user',
+      removed: removidos,
     });
 
-    if (orgId) {
-      this.orgRoleCache.delete(`org:${orgId}:${userId}`);
-    }
-    if (projectId) {
-      this.projectRoleCache.delete(`proj:${projectId}:${userId}`);
-    }
-    this.logger.debug(`Cache invalidado para userId=${userId}`);
+    this.logger.debug(`Cache de role invalidado userId=${userId} (${removidos} entrada(s))`);
+  }
+
+  /**
+   * Invalida o cache de role de um PROJETO inteiro (todos os usuários).
+   *
+   * Usado quando a mudança não é de um membro específico, mas do projeto:
+   * troca de visibilidade (público ↔ privado muda o role herdado pela Camada A
+   * do ADR-V2-051) e soft-delete do projeto.
+   *
+   * @param projectId - Chave BigInt do DProject
+   */
+  invalidateProject(projectId: bigint): void {
+    const prefixo = `proj:${projectId}:`;
+    const removidos = this.projectRoleCache.deleteWhere((key) => key.startsWith(prefixo));
+
+    this.metrics?.increment('auth.role_cache.invalidate', {
+      scope: 'project_all',
+      removed: removidos,
+    });
+
+    this.logger.debug(`Cache de role invalidado projectId=${projectId} (${removidos} entrada(s))`);
+  }
+
+  /**
+   * Invalida o cache de role de uma ORGANIZAÇÃO inteira (todos os usuários).
+   *
+   * Usado no soft-delete da org, que faz cascade em memberships e projetos.
+   * Como a cascade atinge projetos cujas chaves não estão em mãos aqui, o cache
+   * de projeto é purgado por inteiro — operação rara e o cache se reconstrói na
+   * primeira request (a alternativa, deixar entradas stale de uma org excluída,
+   * é pior).
+   *
+   * @param orgId - Chave BigInt da DEntidade (-152 ORGANIZATION)
+   */
+  invalidateOrg(orgId: bigint): void {
+    const prefixo = `org:${orgId}:`;
+    const removidos = this.orgRoleCache.deleteWhere((key) => key.startsWith(prefixo));
+    this.projectRoleCache.clear();
+
+    this.metrics?.increment('auth.role_cache.invalidate', {
+      scope: 'org_all',
+      removed: removidos,
+    });
+
+    this.logger.debug(`Cache de role invalidado orgId=${orgId} (${removidos} entrada(s) de org)`);
   }
 }

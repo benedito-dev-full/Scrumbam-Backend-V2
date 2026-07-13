@@ -8,6 +8,99 @@
 
 ---
 
+## Task #995 — Hotfix Auth — Fase 1 (Grace/Idempotência) — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Backend Fase 1 implementado, testado, aprovado 9.2/10)
+**Módulo V2:** auth (+ common, invites, organizations, projects) — hotfix crítico do incidente DEV-169
+**Fase V2:** F16 (Hardening) — Hotfix emergencial autorizado por incidente em produção (DEV-171)
+**Tempo Real:** ~2 dias (Implementer ~1.5d código/testes + Reviewer ~4h + Documenter ~2h)
+**Completado em:** 2026-07-13
+**Quality Score:** 9.2/10 (APPROVED pelo Reviewer — 95 testes pass, zero regressão, RFC 9700 conformance)
+
+**O Que Foi Feito (Fase 1 — Hotfix Backend):**
+
+**Objetivo:** Eliminar falso-positivo de reuse attack (corrida entre 2 abas), infra lenta deslogando usuário, cache negativo de 5min — SEM afrouxar detecção de replay real (RFC 9700).
+
+**Pilares Aplicados:**
+- Pilar 1: **N/A** — zero Engine, zero DPedido (auth é estrutural, Prisma direto)
+- Pilar 2: **N/A** — zero endpoint novo
+- Pilar 3: **N/A** — zero DClasse nova
+
+**1.1 Grace Window de 60s (mata falso-positivo de corrida):**
+- Armazenar `prevHash + prevHashValidUntil` em `DUserGroup.dados` (Json, campo já existente)
+- Refresh com `prevHash` **dentro da janela**: rotaciona, **não revoga**
+- Refresh com `prevHash` **fora da janela**: **revoga sessão + evento** SECURITY_REFRESH_REUSE_DETECTED
+- RFC 9700 conformance: detecção de replay REAL continua 100% ativa; grace elimina falso-positivo
+- Configurável via `AUTH_REFRESH_GRACE_SECONDS=60` (.env)
+
+**1.2 Idempotência via RefreshIdempotencyService (defesa primária):**
+- **Decisão conscientemente diferente do plano:** In-process (Map na memória), não Redis
+- Dois requests com **mesmo token** (mesmo processo): recebem **mesma promise e mesma response**
+- Cache: `Map<sha256(token), Entry<Promise>>`, TTL = grace (60s)
+- Multi-réplica: fallback para grace window (suficiente)
+- Trade-off: SPOF por infra não existe (zero dependência de Redis)
+- Novo arquivo: `src/auth/services/refresh-idempotency.service.ts` (165 linhas JSDoc completo)
+- ADR-V2-062 justifica desvio: Elimina SPOF por arquitetura (não por tratamento), grace covers multi-replica
+
+**1.3 Classificação de exceção → 503 vs 401 (mata B3: infra lenta deslogando):**
+- `AuthCompositeGuard`: novo helper `isInfraFailure(err)` classifica exceção
+- Credencial inválida (JWT parsing, signature mismatch): continua cadeia MCP→API→JWT
+- Infra failure (Prisma P2024/P1008, timeout, Redis down): lança `ServiceUnavailableException` (503)
+- Ancoragem RFC 6750: "invalid_token" = 401; falha de servidor ≠ token inválido
+- Antes: DB timeout → 401 "Autenticação necessária" → logout; Depois: 503 "Tente novamente"
+
+**1.4 HttpExceptionFilter universal + preserve `code` (mata C: mensagens genéricas):**
+- `@Catch()` sem argumento: captura qualquer exceção (não só HttpException)
+- Exceção crua → 500 com `code: INTERNAL_ERROR`, **nunca vaza stack** para cliente
+- Preserve `code` field (RFC 9457 Problem Details): frontend consegue distinguir TOKEN_EXPIRED vs ORG_CONTEXT_STALE
+- Antes: filter @Catch(HttpException) descartava `code` → frontend via só mensagem genérica; Depois: `code` propagado
+- Novo arquivo: `src/common/errors/error-codes.ts` (catálogo 9 códigos + descrição)
+
+**1.5 Cache negativo TTL: 300s → 10s (mata B2: permissão demorada 5min):**
+- `RoleResolverService`: `NEGATIVE_TTL_MS = 10_000` (antes: 300_000)
+- `invalidateUser()` **ligado** em: `organizations.addMember/updateMemberRole/removeMember`, `project-members.addMember/updateMember/removeMember`, `invites.acceptInvite`, `projects.updateVisibility/delete`, `organizations.delete`
+- Antes: zero callers de `invalidateUser()` → cache negativo longo → permissão demorada 5min; Depois: ligado → reflete ≤10s
+
+**1.6 Config morta do `.env` removida:**
+- JWT_ACCESS_EXPIRATION, JWT_REFRESH_EXPIRATION, JWT_ALGORITHM nunca foram lidos por código
+- Removidos com comentário histórico (explicar por que não são usados)
+- `JWT_EXPIRES_IN` adicionado (verdadeiro, lido em auth.module.ts)
+- `REFRESH_TOKEN_EXPIRY_DAYS` adicionado (verdadeiro, lido em RefreshTokenService)
+
+**Arquivos Tocados:** 14 arquivos core + 4 novos
+- Novos: `refresh-idempotency.service.ts`, `error-codes.ts`, `__tests__/`, `src/common/errors/`
+- Modificados: `auth.service.ts`, `auth.controller.ts`, `auth.module.ts`, `refresh-token.service.ts`, `role-resolver.service.ts`, `auth-composite.guard.ts`, `jwt-auth.guard.ts`, `http-exception.filter.ts`, `organizations.service.ts`, `project-members.service.ts`, `invites.service.ts`, `projects.service.ts`, `.env.example`
+
+**Testes: 95/95 backend auth PASS, 58 testes adversariais Risk Gate PASS (não regressão):**
+- Test 6.1 (refresh concurrency): ambas abas recebem MESMO par de tokens ✅
+- Test 6.2 (unknown token): 401 TOKEN_INVALID (não 500 erro cru) ✅
+- Test 6.3 (infra failure): 503 AUTH_BACKEND_UNAVAILABLE (não 401 logout) ✅
+- Test 6.4 (cache negativo): TTL 10s (permissão reflete rápido) ✅
+- Test 6.7 (replay real detectado): fora da grace → revoga + evento SECURITY_REFRESH_REUSE_DETECTED ✅
+- Suíte completa: 1849 PASS / 119 FAIL (pré-existentes, confirmados com stash) — ZERO regressão
+
+**Documentação:**
+- JSDoc 100% em: `refresh-idempotency.service.ts`, `error-codes.ts`, updates `refresh-token.service.ts`, `auth.service.ts`
+- ADR-V2-062: Redigido com dois pontos obrigatórios (RFC 9700 conformance + desvio consciente Redis→in-process)
+- Código de erro API: documentado em `src/common/errors/error-codes.ts` (9 códigos, ações esperadas)
+- `.env.example`: comentários explicam cada variável de auth (inclusive quais são "config morta")
+
+**Pilares Aplicados:**
+- Pilar 1 (Engine): N/A — auth é estrutural (Prisma direto, Service pattern)
+- Pilar 2 (Endpoints): N/A — zero endpoint novo (mudanças em /auth/refresh já existente)
+- Pilar 3 (Seed): N/A — zero DClasse nova
+
+**ADRs Vinculados:**
+- ADR-V2-062 — Refresh rotation com grace + idempotência (THIS PHASE)
+- ADR-V2-064 — Semântica de erro (F4, complementa este ADR)
+
+**Próximos Passos (F2/F3/F4):**
+- F2 (2d) — Hotfix frontend: `localStorage`, bootstrap defensivo, Web Locks, BroadcastChannel
+- F3 (1.5–2w) — Sessões multi-device em DTabela (-476), dual-read/write, feature flag, revoke por sessão
+- F4 (1w) — Cache role L1(5s) + L2(Redis 300s), org_context_stale → 401, `code` em 100% erros
+
+---
+
 ## Task #994 — Observabilidade de Sessão/Auth — Fase 0 (Baseline) — ✅ COMPLETA
 
 **Status:** ✅ COMPLETA (Backend + Frontend observabilidade implementada, testado, aprovado 9.0/10)

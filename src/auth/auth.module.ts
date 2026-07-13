@@ -26,6 +26,7 @@ import { TeamRolesGuard } from './guards/team-roles.guard';
 import { ApiKeyService } from './services/api-key.service';
 import { McpKeyService } from './services/mcp-key.service';
 import { RefreshTokenService } from './services/refresh-token.service';
+import { RefreshIdempotencyService } from './services/refresh-idempotency.service';
 import { RoleResolverService } from './services/role-resolver.service';
 
 /**
@@ -76,6 +77,7 @@ import { RoleResolverService } from './services/role-resolver.service';
     ApiKeyService,
     McpKeyService,
     RefreshTokenService,
+    RefreshIdempotencyService,
     RoleResolverService,
     // Guards
     JwtAuthGuard,

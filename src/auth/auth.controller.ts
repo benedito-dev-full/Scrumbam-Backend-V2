@@ -14,11 +14,13 @@ import {
   Patch,
   Post,
   Req,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiHeader, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { MetricsService } from '../common/observability/metrics.service';
+import { AUTH_ERROR_CODES } from '../common/errors/error-codes';
 import { AuthService, AuthRequestContext } from './auth.service';
 import { ApiKeyService } from './services/api-key.service';
 import { AuthCompositeGuard } from './guards/auth-composite.guard';
@@ -150,11 +152,10 @@ export class AuthController {
         : await this.findUserGroupByRefreshToken(dto.refreshToken);
       return await this.authService.refresh(dto.refreshToken, userGroupId, ctx);
     } catch (err) {
-      // F0 — `http.5xx` em /auth/refresh. Hoje `findUserGroupByRefreshToken`
-      // lança `new Error` CRU: o HttpExceptionFilter é `@Catch(HttpException)`
-      // e não o pega → vira 500 (deveria ser 401). Aqui só CONTAMOS: o erro é
-      // re-lançado INTACTO, status e corpo permanecem idênticos. Corrigir para
-      // 401 é a F1 (item 1.4 do plano).
+      // `http.5xx` em /auth/refresh. Depois da F1 (item 1.4) este contador deve
+      // ficar em ZERO: token desconhecido virou 401 `TOKEN_INVALID` e o filter
+      // é `@Catch()` universal. Se ele subir, há exceção não-HTTP nova no
+      // caminho de refresh — é bug, não comportamento esperado.
       if (!(err instanceof HttpException)) {
         this.metrics?.increment(
           'http.5xx',
@@ -452,38 +453,64 @@ export class AuthController {
   /**
    * Busca DUserGroup a partir do hash do refresh token.
    *
-   * Usado em POST /auth/refresh quando JWT está expirado.
-   * Limitação F3: percorre todos os DUserGroup com refreshTokenHash (volume baixo).
-   * F14 avaliará índice ou campo dedicado.
+   * Usado em `POST /auth/refresh` quando o JWT já expirou (não há `sub`).
+   *
+   * **F1 (item 1.1):** o casamento também considera o `prevHash` DENTRO da
+   * janela de grace. Sem isso, a aba atrasada — que tipicamente tem o access
+   * token expirado, justamente por isso está refrescando — não seria nem
+   * encontrada, e levaria 401 antes de a janela de grace ter chance de agir.
+   *
+   * **F1 (item 1.4):** o `new Error` cru virava **500** (o filter era
+   * `@Catch(HttpException)`). Agora é `401 { code: TOKEN_INVALID }` — o
+   * frontend consegue distinguir "seu token não existe" de "o servidor caiu".
+   *
+   * Limitação conhecida (full scan `take: 1000`): morre na **F3**, quando as
+   * sessões passam a ser linhas indexadas em `DTabela`.
+   *
+   * @param plaintext - Refresh token apresentado
+   * @returns Chave BigInt do DUserGroup dono do token
+   * @throws {UnauthorizedException} `{ code: 'TOKEN_INVALID' }` se nenhum slot casa
    */
   private async findUserGroupByRefreshToken(plaintext: string): Promise<bigint> {
     const { createHash } = await import('crypto');
     const hash = createHash('sha256').update(plaintext).digest('hex');
+    const agora = Date.now();
 
     const userGroups = await this.authService['prisma'].dUserGroup.findMany({
       where: { excluido: false, ativo: true },
       select: { chave: true, dados: true },
-      take: 1000, // limite razoável para F3
+      take: 1000, // limite razoável até a F3
     });
 
     const match = userGroups.find((ug) => {
-      const dados = ug.dados as Record<string, unknown> | null;
-      return dados?.refreshTokenHash === hash;
+      const dados = (ug.dados as Record<string, unknown> | null) ?? {};
+
+      if (dados.refreshTokenHash === hash) {
+        return true;
+      }
+
+      // Token imediatamente anterior, ainda dentro da grace (corrida de abas).
+      if (dados.prevHash !== hash) {
+        return false;
+      }
+      const validUntil = Date.parse(String(dados.prevHashValidUntil ?? ''));
+      return Number.isFinite(validUntil) && agora <= validUntil;
     });
 
     if (!match) {
-      // F0: o refresh não bateu com NENHUM slot na varredura. Duas causas
-      // possíveis — token realmente desconhecido OU o dono caiu fora do
-      // `take: 1000` (bomba-relógio documentada no plano §D3). O campo
-      // `scanned` permite distinguir: se ele estiver colado em 1000, a
-      // varredura está truncando. Comportamento intacto (o `new Error` cru
-      // continua virando 500 até a F1).
+      // Não bateu com NENHUM slot. Duas causas: token realmente desconhecido
+      // (inclusive replay real fora da grace, de sessão já revogada) OU o dono
+      // caiu fora do `take: 1000` (bomba-relógio documentada no plano §D3 —
+      // `scanned` colado em 1000 denuncia truncamento).
       this.metrics?.increment(
         'auth.refresh.not_found',
         { reason: 'no_hash_match', scanned: userGroups.length },
         { level: 'warn' },
       );
-      throw new Error('Refresh token não encontrado');
+      throw new UnauthorizedException({
+        code: AUTH_ERROR_CODES.TOKEN_INVALID,
+        message: 'Refresh token inválido. Faça login novamente.',
+      });
     }
 
     return match.chave;

@@ -14,6 +14,34 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Hotfix Auth — Fase 1 (Sessão/Grace/Idempotência — Task #995 / DEV-171, V2 F16, 2026-07-13)**
+  - **Objetivo:** Corrigir falso-positivo de reuse attack causado por corrida entre abas + infra lenta deslogando + cache negativo de 5min (sintomas B1, B2, B3 do incidente DEV-169)
+  - **Backend (Scrumban-Backend-V2):**
+    - Grace Window de 60s: armazena `prevHash + prevHashValidUntil` em `DUserGroup.dados` (Json); refresh com `prevHash` dentro da janela rotaciona (não revoga)
+    - Idempotência via `RefreshIdempotencyService` (in-process, decisão consciente vs Redis): cache `Map<sha256(token), Promise>` por 60s; dois requests concorrentes recebem a **mesma promise e mesma resposta**
+    - Classificação de exceção em guards: `isInfraFailure()` diferencia credencial inválida (continua cadeia MCP/API/JWT) de infra timeout (retorna 503, não 401)
+    - Filter `@Catch()` universal: exceção crua (bug, erro não-tratado) vira 500 com `correlationId`, nunca vaza stack
+    - Preserve `code` field (RFC 9457): filter agora propaga `code` de exceções HTTP para frontend diferenciar motivos
+    - Cache negativo TTL reduzido: 300s → 10s (permissão concedida reflete em ≤10s, não em 5min)
+    - Config morta removida: `.env` tinha JWT_ACCESS_EXPIRATION, JWT_REFRESH_EXPIRATION, JWT_ALGORITHM ignorados por código → removidos com comentário
+    - Endpoints: `POST /auth/refresh` (idempotente, grace, 503 em infra), status codes + `code` field em todas respostas
+  - **Serviços novos:**
+    - `src/auth/services/refresh-idempotency.service.ts` — Cache in-process com TTL = grace, nunca redis-dependent
+    - `src/common/errors/error-codes.ts` — Catálogo de `code` (TOKEN_INVALID, TOKEN_EXPIRED, SESSION_REVOKED, SESSION_REUSE_DETECTED, ORG_CONTEXT_STALE, NO_WORKSPACE, FORBIDDEN_ROLE, AUTH_BACKEND_UNAVAILABLE, INTERNAL_ERROR)
+  - **Testes: 95 backend auth tests PASS (100%), 58 testes adversariais Risk Gate pass (não regressão)**
+    - Test 6.1: Corrida de refresh — ambas abas recebem mesmo token (não revogam) ✅
+    - Test 6.2: Refresh token desconhecido → 401 TOKEN_INVALID (não 500) ✅
+    - Test 6.3: Infra lenta → 503 AUTH_BACKEND_UNAVAILABLE (não 401 logout) ✅
+    - Test 6.4: Cache negativo TTL 10s (permissão reflete em tempo) ✅
+    - Test 6.7: Replay real (fora da grace) → revoga + evento SECURITY_REFRESH_REUSE_DETECTED ✅
+  - **Documentação:**
+    - JSDoc completo nos serviços novos (refresh-idempotency.service.ts, error-codes.ts, updates em auth.service.ts)
+    - ADR-V2-062 redigido: base normativa RFC 9700 + desvio consciente (Redis → in-process)
+    - Código de erro API documentado (novo arquivo src/common/errors/error-codes.ts)
+  - **Pilares:** P1 N/A (zero Engine); P2 N/A (zero endpoint novo); P3 N/A (zero DClasse nova)
+  - **ADRs:** ADR-V2-062 (refresh grace + idempotência in-process), ADR-V2-064 (semântica erro em F4)
+  - **Score Review:** 9.2/10 (APPROVED — mata falso-positivo sem afrouxar RFC 9700, zero regressão, desvio de plano bem justificado)
+
 - **Observabilidade de Sessão/Auth — Fase 0 (Baseline — Task #994 / DEV-170, V2 F16, 2026-07-13)**
   - **Objetivo:** Instrumentar sistema para MEDIR incidente de sessão antes de corrigir (F0 — zero mudança de comportamento)
   - **Contadores (7 requeridos):** `auth.refresh.attempt/success/reuse_detected/expired/not_found`, `auth.refresh.revoke_all` (sangramento B1), `auth.401` por motivo (guard_exception = infra lento), `auth.guard.infra_error` (prova B3), `auth.role_cache.hit/miss/negative_hit` (prova B2), `auth.org_context_stale`, `http.5xx` em refresh
