@@ -36,10 +36,10 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
     - Test 6.7: Replay real (fora da grace) → revoga + evento SECURITY_REFRESH_REUSE_DETECTED ✅
   - **Documentação:**
     - JSDoc completo nos serviços novos (refresh-idempotency.service.ts, error-codes.ts, updates em auth.service.ts)
-    - ADR-V2-062 redigido: base normativa RFC 9700 + desvio consciente (Redis → in-process)
+    - ADR-V2-076 redigido: base normativa RFC 9700 + desvio consciente (Redis → in-process)
     - Código de erro API documentado (novo arquivo src/common/errors/error-codes.ts)
   - **Pilares:** P1 N/A (zero Engine); P2 N/A (zero endpoint novo); P3 N/A (zero DClasse nova)
-  - **ADRs:** ADR-V2-062 (refresh grace + idempotência in-process), ADR-V2-064 (semântica erro em F4)
+  - **ADRs:** ADR-V2-076 (refresh grace + idempotência in-process), ADR-V2-064 (semântica erro em F4)
   - **Score Review:** 9.2/10 (APPROVED — mata falso-positivo sem afrouxar RFC 9700, zero regressão, desvio de plano bem justificado)
 
 - **Observabilidade de Sessão/Auth — Fase 0 (Baseline — Task #994 / DEV-170, V2 F16, 2026-07-13)**

@@ -40,7 +40,7 @@
 - Multi-réplica: fallback para grace window (suficiente)
 - Trade-off: SPOF por infra não existe (zero dependência de Redis)
 - Novo arquivo: `src/auth/services/refresh-idempotency.service.ts` (165 linhas JSDoc completo)
-- ADR-V2-062 justifica desvio: Elimina SPOF por arquitetura (não por tratamento), grace covers multi-replica
+- ADR-V2-076 justifica desvio: Elimina SPOF por arquitetura (não por tratamento), grace covers multi-replica
 
 **1.3 Classificação de exceção → 503 vs 401 (mata B3: infra lenta deslogando):**
 - `AuthCompositeGuard`: novo helper `isInfraFailure(err)` classifica exceção
@@ -81,7 +81,7 @@
 
 **Documentação:**
 - JSDoc 100% em: `refresh-idempotency.service.ts`, `error-codes.ts`, updates `refresh-token.service.ts`, `auth.service.ts`
-- ADR-V2-062: Redigido com dois pontos obrigatórios (RFC 9700 conformance + desvio consciente Redis→in-process)
+- ADR-V2-076: Redigido com dois pontos obrigatórios (RFC 9700 conformance + desvio consciente Redis→in-process)
 - Código de erro API: documentado em `src/common/errors/error-codes.ts` (9 códigos, ações esperadas)
 - `.env.example`: comentários explicam cada variável de auth (inclusive quais são "config morta")
 
@@ -91,7 +91,7 @@
 - Pilar 3 (Seed): N/A — zero DClasse nova
 
 **ADRs Vinculados:**
-- ADR-V2-062 — Refresh rotation com grace + idempotência (THIS PHASE)
+- ADR-V2-076 — Refresh rotation com grace + idempotência (THIS PHASE)
 - ADR-V2-064 — Semântica de erro (F4, complementa este ADR)
 
 **Próximos Passos (F2/F3/F4):**
@@ -172,7 +172,7 @@
 
 **ADRs a redigir junto com Fases 1–4:**
 - ADR-V2-061 — Sessões multi-device em DTabela (F3)
-- ADR-V2-062 — Rotação com grace + idempotência Redis (F1)
+- ADR-V2-076 — Rotação com grace + idempotência Redis (F1)
 - ADR-V2-063 — Armazenamento de sessão no browser (localStorage vs BFF cookie) (F2/F5)
 - ADR-V2-064 — Semântica de erro: 401/403/404/503 com campo `code` (F4)
 

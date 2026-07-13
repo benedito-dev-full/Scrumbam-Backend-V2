@@ -235,7 +235,7 @@ E2E_EMAIL=... E2E_PASSWORD=... npx playwright test e2e/auth-new-tab.spec.ts
 
 ### Relacionados
 
-- **ADR-V2-062** — Rotação com grace + idempotência (backend, Fase 1). Não aumenta exposição XSS; apenas reduz falso-positivo de reuse.
+- **ADR-V2-076** — Rotação com grace + idempotência (backend, Fase 1). Não aumenta exposição XSS; apenas reduz falso-positivo de reuse.
 - **ADR-V2-061** — Sessões multi-device em DTabela (backend, Fase 3). Complemento necessário para revoke por sessão.
 - **ADR-V2-064** — Semântica de erro com `code` (backend, Fase 1–4). Frontend consome `code` para distinção: `TOKEN_EXPIRED` → retry, `SESSION_REVOKED` → logout, `ORG_CONTEXT_STALE` → refresh+retry, `AUTH_BACKEND_UNAVAILABLE` → backoff+retry.
 - **auth-pattern-v2** (memory) — V2 usa Bearer (tokens no body do login), não cookie. Fase 5 **não muda** o contrato do backend; BFF é um proxy que injeta o header.

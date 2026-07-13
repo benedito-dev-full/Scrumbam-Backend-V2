@@ -1,4 +1,4 @@
-# ADR-V2-062: Rotação de Refresh Token com Grace Period e Idempotência
+# ADR-V2-076: Rotação de Refresh Token com Grace Period e Idempotência
 
 **Status:** Aceito (APPROVED score 9.2/10)
 **Data:** 2026-07-13
@@ -318,9 +318,9 @@ AUTH_REFRESH_GRACE_SECONDS=60
 
 ### Ressalvas
 
-1. **Hashing de refresh tokens:** Hoje stored em plaintext em `DUserGroup.dados`. ADR futuro deve enderecar criptografia at-rest (considerar AES-256-GCM com chave derivada de master key).
+1. **Hashing de refresh tokens:** ja implementado — o token e persistido como **SHA-256** (`refresh-token.service.ts:153`), nunca em plaintext; o mesmo vale para o `prevHash` da grace window. Como o token e um segredo aleatorio de alta entropia (`randomBytes`), SHA-256 e adequado (nao e senha, nao precisa de KDF lento). Criptografia at-rest do campo `dados` permanece como hardening opcional futuro.
 
-2. **Familia de tokens (multi-device):** ADR-V2-062 (Fase 1) usa slot único ainda. Fase 3 (ADR-V2-061) estenderá para familia (jti, revoke-family). Este ADR é compatível com essa evolução.
+2. **Familia de tokens (multi-device):** ADR-V2-076 (Fase 1) usa slot único ainda. Fase 3 (ADR-V2-061) estenderá para familia (jti, revoke-family). Este ADR é compatível com essa evolução.
 
 3. **Sender-constrained tokens:** RFC 9449 (DPoP). Out-of-scope. Considerar após BFF (Fase 5).
 
