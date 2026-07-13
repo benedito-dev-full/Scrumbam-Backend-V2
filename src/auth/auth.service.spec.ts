@@ -294,7 +294,8 @@ describe('AuthService', () => {
         UnauthorizedException,
       );
 
-      expect(refreshTokenService.revoke).toHaveBeenCalledWith(BigInt(1));
+      // F0: `revoke` recebe um `reason` de telemetria (não altera comportamento).
+      expect(refreshTokenService.revoke).toHaveBeenCalledWith(BigInt(1), 'reuse_detected');
     });
 
     it("deve lançar 401 benigno para token 'expired' SEM revogar como ataque", async () => {
@@ -344,7 +345,7 @@ describe('AuthService', () => {
 
       await service.logout(BigInt(1));
 
-      expect(refreshTokenService.revoke).toHaveBeenCalledWith(BigInt(1));
+      expect(refreshTokenService.revoke).toHaveBeenCalledWith(BigInt(1), 'logout');
     });
   });
 

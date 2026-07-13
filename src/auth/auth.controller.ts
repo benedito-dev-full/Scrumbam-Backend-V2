@@ -6,15 +6,20 @@ import {
   Get,
   GoneException,
   HttpCode,
+  HttpException,
   HttpStatus,
   Inject,
   Logger,
+  Optional,
   Patch,
   Post,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiHeader, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { AuthService } from './auth.service';
+import type { Request } from 'express';
+import { MetricsService } from '../common/observability/metrics.service';
+import { AuthService, AuthRequestContext } from './auth.service';
 import { ApiKeyService } from './services/api-key.service';
 import { AuthCompositeGuard } from './guards/auth-composite.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -57,6 +62,8 @@ export class AuthController {
     // para auto-login pós-aceite) — sem forwardRef, NestJS quebra na boot.
     @Inject(forwardRef(() => InvitesService))
     private readonly invitesService: InvitesService,
+    // F0 — Observabilidade (opcional: nunca quebra o controller nem specs).
+    @Optional() private readonly metrics?: MetricsService,
   ) {}
 
   /**
@@ -121,6 +128,7 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Refresh token inválido ou já utilizado' })
   async refresh(
     @Body() dto: RefreshDto,
+    @Req() req: Request,
     @CurrentUser() _user?: JwtPayload,
   ): Promise<AuthResponseDto> {
     // Para refresh, o JWT pode estar expirado — usa o sub do body ou extrai do payload
@@ -130,11 +138,36 @@ export class AuthController {
     // Implementação: AuthService.refresh valida sem exigir userGroupId no body
     // O refresh token contém info suficiente para identificar o user via hash
 
-    // Workaround F3: usar _user se disponível (JWT ainda válido), ou buscar por hash
-    const userGroupId = _user
-      ? BigInt(_user.sub)
-      : await this.findUserGroupByRefreshToken(dto.refreshToken);
-    return this.authService.refresh(dto.refreshToken, userGroupId);
+    const ctx: AuthRequestContext = {
+      ip: this.clientIp(req),
+      userAgent: (req.headers['user-agent'] ?? 'unknown').slice(0, 120),
+    };
+
+    try {
+      // Workaround F3: usar _user se disponível (JWT ainda válido), ou buscar por hash
+      const userGroupId = _user
+        ? BigInt(_user.sub)
+        : await this.findUserGroupByRefreshToken(dto.refreshToken);
+      return await this.authService.refresh(dto.refreshToken, userGroupId, ctx);
+    } catch (err) {
+      // F0 — `http.5xx` em /auth/refresh. Hoje `findUserGroupByRefreshToken`
+      // lança `new Error` CRU: o HttpExceptionFilter é `@Catch(HttpException)`
+      // e não o pega → vira 500 (deveria ser 401). Aqui só CONTAMOS: o erro é
+      // re-lançado INTACTO, status e corpo permanecem idênticos. Corrigir para
+      // 401 é a F1 (item 1.4 do plano).
+      if (!(err instanceof HttpException)) {
+        this.metrics?.increment(
+          'http.5xx',
+          {
+            route: 'POST /auth/refresh',
+            errorName: err instanceof Error ? err.name : 'unknown',
+            ip: ctx.ip,
+          },
+          { level: 'error' },
+        );
+      }
+      throw err;
+    }
   }
 
   /**
@@ -439,9 +472,28 @@ export class AuthController {
     });
 
     if (!match) {
+      // F0: o refresh não bateu com NENHUM slot na varredura. Duas causas
+      // possíveis — token realmente desconhecido OU o dono caiu fora do
+      // `take: 1000` (bomba-relógio documentada no plano §D3). O campo
+      // `scanned` permite distinguir: se ele estiver colado em 1000, a
+      // varredura está truncando. Comportamento intacto (o `new Error` cru
+      // continua virando 500 até a F1).
+      this.metrics?.increment(
+        'auth.refresh.not_found',
+        { reason: 'no_hash_match', scanned: userGroups.length },
+        { level: 'warn' },
+      );
       throw new Error('Refresh token não encontrado');
     }
 
     return match.chave;
+  }
+
+  /** IP do cliente (respeita proxy reverso). Usado apenas em telemetria (F0). */
+  private clientIp(req: Request): string {
+    const forwarded = req.headers['x-forwarded-for'];
+    const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+    const first = raw?.split(',')[0]?.trim();
+    return first || req.ip || 'unknown';
   }
 }

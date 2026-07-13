@@ -5,9 +5,11 @@ import {
   Logger,
   NotFoundException,
   OnModuleInit,
+  Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
+import { MetricsService } from '../common/observability/metrics.service';
 import { EventProducerService } from '../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../common/services/correlation-id.service';
 import { SeedBootstrapService } from './seed-bootstrap.service';
@@ -375,6 +377,8 @@ export class ProjectsService implements OnModuleInit {
     private readonly correlationIdService: CorrelationIdService,
     private readonly projectRef: ProjectRefService,
     private readonly identifierService: TasksIdentifierService,
+    // F0 — Observabilidade. `@Optional()`: instrumentacao nunca quebra o service.
+    @Optional() private readonly metrics?: MetricsService,
   ) {}
 
   /**
@@ -634,6 +638,14 @@ export class ProjectsService implements OnModuleInit {
     if (organizationId !== undefined) {
       if (!/^-?\d+$/.test(organizationId)) {
         this.logger.warn(`findMany: organizationId invalido="${organizationId}" — retorna vazio`);
+        // F0 — claim de org malformado no JWT devolve 200 com lista vazia
+        // (indistinguível de "não tenho projetos"). Só CONTAMOS; devolver
+        // 401 ORG_CONTEXT_STALE é a F4 (item 4.2 do plano).
+        this.metrics?.increment(
+          'auth.org_context_stale',
+          { reason: 'invalid_org_claim', userEntidadeId: userEntidadeId.toString() },
+          { level: 'warn' },
+        );
         return { items: [], pagination: { hasMore: false, nextCursor: null } };
       }
       orgIdBig = BigInt(organizationId);
@@ -802,6 +814,14 @@ export class ProjectsService implements OnModuleInit {
     ]);
 
     if (allIds.size === 0) {
+      // F0 — "os projetos sumiram, mas não deslogou". Lista vazia aqui pode ser
+      // (a) usuário legitimamente sem projetos ou (b) `organizationId` STALE no
+      // JWT (org da qual ele não é mais membro). Para não inflar o contador com
+      // o caso (a), confirmamos a membership real ANTES de contar — 1 query
+      // extra, e SÓ neste caminho (que já não tocaria o banco de novo).
+      // Comportamento inalterado: continua 200 + []. O 401 ORG_CONTEXT_STALE
+      // é a F4 (item 4.2).
+      await this.observeOrgContext(userEntidadeId, orgIdBig);
       return { items: [], pagination: { hasMore: false, nextCursor: null } };
     }
 
@@ -975,6 +995,63 @@ export class ProjectsService implements OnModuleInit {
     const nextCursor = hasMore ? projectIds[projectIds.length - 1].toString() : null;
 
     return { items, pagination: { hasMore, nextCursor } };
+  }
+
+  /**
+   * Observa (F0) se uma listagem vazia foi causada por `organizationId` STALE.
+   *
+   * Chamado APENAS no caminho em que a lista já saiu vazia — por isso a query
+   * de membership não pesa no fluxo normal. Emite:
+   * - `auth.org_context_stale` (`reason: membership_missing`) → o JWT aponta
+   *   para uma org da qual o usuário NÃO é mais membro. É o "sumiram os
+   *   projetos mas não deslogou" (sintoma C do plano).
+   * - `auth.org_context_empty_scope` → membership válida, usuário realmente
+   *   sem projetos visíveis. Ruído esperado; serve de linha de base.
+   *
+   * NÃO altera o retorno — a mudança para 401 `ORG_CONTEXT_STALE` é a F4.
+   * Nunca lança: qualquer falha aqui é engolida (é telemetria, não regra).
+   *
+   * @param userEntidadeId - DEntidade (-150) do usuário
+   * @param orgId - `organizationId` do JWT (ausente = usuário órfão, ADR-V2-038)
+   */
+  private async observeOrgContext(userEntidadeId: bigint, orgId?: bigint): Promise<void> {
+    if (orgId === undefined) {
+      return; // órfão é estado VÁLIDO (ADR-V2-038) — não é contexto stale.
+    }
+
+    try {
+      const membership = await this.prisma.dVincula.findFirst({
+        where: {
+          idEntidade: userEntidadeId,
+          idLocEscritu: orgId,
+          idClasse: { in: [BigInt(-161), BigInt(-162), BigInt(-163)] },
+          excluido: false,
+        },
+        select: { chave: true },
+      });
+
+      if (!membership) {
+        this.metrics?.increment(
+          'auth.org_context_stale',
+          {
+            reason: 'membership_missing',
+            userEntidadeId: userEntidadeId.toString(),
+            organizationId: orgId.toString(),
+            source: 'projects.findMany',
+          },
+          { level: 'warn' },
+        );
+        return;
+      }
+
+      this.metrics?.increment(
+        'auth.org_context_empty_scope',
+        { source: 'projects.findMany' },
+        { silent: true },
+      );
+    } catch (err) {
+      this.logger.debug(`observeOrgContext falhou (ignorado): ${(err as Error).message}`);
+    }
   }
 
   /**

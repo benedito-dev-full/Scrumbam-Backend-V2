@@ -1,8 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomBytes } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
+import { MetricsService } from '../../common/observability/metrics.service';
 
 /**
  * Default de validade do refresh token (em dias) quando
@@ -47,6 +48,9 @@ export class RefreshTokenService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    // F0 — Observabilidade. `@Optional()`: instrumentação nunca quebra o
+    // service (nem em specs que montam o provider com mocks explícitos).
+    @Optional() private readonly metrics?: MetricsService,
   ) {}
 
   /**
@@ -106,9 +110,7 @@ export class RefreshTokenService {
     const hash = createHash('sha256').update(plaintext).digest('hex');
 
     const expiryDays = this.getExpiryDays();
-    const expiresAt = new Date(
-      Date.now() + expiryDays * 24 * 60 * 60 * 1000,
-    ).toISOString();
+    const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString();
 
     const userGroup = await this.prisma.dUserGroup.findUnique({
       where: { chave: userGroupId },
@@ -148,10 +150,7 @@ export class RefreshTokenService {
    * @param userGroupId - Chave BigInt do DUserGroup
    * @returns `'valid'` | `'expired'` | `'invalid'`
    */
-  async validate(
-    plaintext: string,
-    userGroupId: bigint,
-  ): Promise<RefreshTokenValidation> {
+  async validate(plaintext: string, userGroupId: bigint): Promise<RefreshTokenValidation> {
     const hash = createHash('sha256').update(plaintext).digest('hex');
 
     const userGroup = await this.prisma.dUserGroup.findUnique({
@@ -162,6 +161,25 @@ export class RefreshTokenService {
     const dados = userGroup?.dados as Record<string, unknown> | null;
 
     if (dados?.refreshTokenHash !== hash) {
+      // F0: distingue "usuário sem slot algum" (já revogado/logout) de
+      // "hash diferente do slot vigente" (o caso que o AuthService trata como
+      // REUSE — e que hoje é majoritariamente falso-positivo de corrida).
+      const hasSlot = typeof dados?.refreshTokenHash === 'string';
+      this.metrics?.increment(
+        'auth.refresh.validate',
+        {
+          result: 'invalid',
+          userGroupId: userGroupId.toString(),
+          slotPresent: hasSlot,
+        },
+        { level: 'warn' },
+      );
+      if (!hasSlot) {
+        this.metrics?.increment('auth.refresh.not_found', {
+          userGroupId: userGroupId.toString(),
+          reason: 'no_slot_stored',
+        });
+      }
       return 'invalid';
     }
 
@@ -170,13 +188,28 @@ export class RefreshTokenService {
     // Registro legado (pré-feature) sem carimbo → trata como expirado.
     // Caminho seguro: força re-login, NÃO revoga, NÃO quebra.
     if (typeof expiresAtRaw !== 'string' || expiresAtRaw === '') {
+      this.metrics?.increment('auth.refresh.validate', {
+        result: 'expired',
+        userGroupId: userGroupId.toString(),
+        reason: 'no_expiry_stamp',
+      });
       return 'expired';
     }
 
     if (new Date(expiresAtRaw).getTime() < Date.now()) {
+      this.metrics?.increment('auth.refresh.validate', {
+        result: 'expired',
+        userGroupId: userGroupId.toString(),
+        reason: 'age',
+      });
       return 'expired';
     }
 
+    this.metrics?.increment(
+      'auth.refresh.validate',
+      { result: 'valid', userGroupId: userGroupId.toString() },
+      { silent: true },
+    );
     return 'valid';
   }
 
@@ -203,10 +236,22 @@ export class RefreshTokenService {
    * Remove tanto `refreshTokenHash` quanto `refreshTokenExpiresAt`,
    * preservando os demais campos de `dados`.
    *
+   * **Slot único (hoje):** revogar aqui derruba a sessão do usuário em TODOS
+   * os devices/abas. Por isso o `reason` importa — ele separa a revogação
+   * legítima (`logout`, `password_changed`) da revogação por falso-positivo
+   * de reuse (`reuse_detected`), que é o sangramento medido na F0.
+   *
    * @param userGroupId - Chave BigInt do DUserGroup
+   * @param reason - Rótulo de telemetria (F0). NÃO altera comportamento.
    */
-  async revoke(userGroupId: bigint): Promise<void> {
-    this.logger.debug(`Revogando refresh token userGroupId=${userGroupId}`);
+  async revoke(userGroupId: bigint, reason = 'unspecified'): Promise<void> {
+    this.logger.debug(`Revogando refresh token userGroupId=${userGroupId} reason=${reason}`);
+
+    this.metrics?.increment(
+      'auth.refresh.revoke',
+      { userGroupId: userGroupId.toString(), reason },
+      { level: reason === 'reuse_detected' ? 'warn' : 'log' },
+    );
 
     const userGroup = await this.prisma.dUserGroup.findUnique({
       where: { chave: userGroupId },

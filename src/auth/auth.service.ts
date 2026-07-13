@@ -6,6 +6,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -13,6 +14,7 @@ import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
+import { MetricsService } from '../common/observability/metrics.service';
 import { RefreshTokenService } from './services/refresh-token.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -24,6 +26,17 @@ import { OrganizationsService } from '../organizations/organizations.service';
 
 /** Bcrypt rounds — NUNCA abaixo de 12 (ADR-V2-003). */
 const BCRYPT_ROUNDS = 12;
+
+/**
+ * Contexto de request propagado apenas para **telemetria** (F0).
+ *
+ * NUNCA carrega credencial — só as dimensões permitidas em log (`ip`, `ua`).
+ * Opcional em toda assinatura: sem ele, o fluxo é idêntico (só perde a label).
+ */
+export interface AuthRequestContext {
+  ip?: string;
+  userAgent?: string;
+}
 
 /** idClasses usados no register. */
 const ID_CLASSE_USER_GROUP = BigInt(-46);
@@ -58,6 +71,10 @@ export class AuthService {
     private readonly refreshTokenService: RefreshTokenService,
     @Inject(forwardRef(() => OrganizationsService))
     private readonly organizationsService: OrganizationsService,
+    // F0 — Observabilidade. `@Optional()` de propósito: instrumentação NUNCA
+    // pode quebrar a construção do service (nem em testes unitários que montam
+    // o provider com mocks explícitos). Todo uso é `this.metrics?.increment`.
+    @Optional() private readonly metrics?: MetricsService,
   ) {}
 
   /**
@@ -291,21 +308,45 @@ export class AuthService {
    * Rotação estrita (Decisão D3): cada uso gera novo refresh token.
    * Reuse attack detection: token antigo após rotação → revoga tudo.
    *
+   * **F0 — instrumentado (comportamento INALTERADO).** Emite os contadores
+   * `auth.refresh.attempt` / `.success` / `.reuse_detected` / `.revoke_all` /
+   * `.expired` / `.user_not_found`. `auth.refresh.revoke_all` é **o contador do
+   * sangramento**: cada ocorrência é um usuário derrubado (com slot único,
+   * revogar = matar todas as abas/devices). A correção — grace window +
+   * idempotência — é a **F1**; aqui apenas medimos.
+   *
    * @param refreshTokenPlaintext - Token em texto plano
    * @param userGroupId - Chave BigInt do DUserGroup (extraída do JWT expirado)
+   * @param ctx - Contexto do request (ip/userAgent) — usado **só** em telemetria
    * @returns AuthResponseDto com novo par de tokens
    * @throws {UnauthorizedException} Se token inválido ou reuse detectado
    */
-  async refresh(refreshTokenPlaintext: string, userGroupId: bigint): Promise<AuthResponseDto> {
-    const validation = await this.refreshTokenService.validate(
-      refreshTokenPlaintext,
-      userGroupId,
-    );
+  async refresh(
+    refreshTokenPlaintext: string,
+    userGroupId: bigint,
+    ctx?: AuthRequestContext,
+  ): Promise<AuthResponseDto> {
+    const telemetry = {
+      userGroupId: userGroupId.toString(),
+      ip: ctx?.ip,
+      ua: ctx?.userAgent,
+    };
+
+    this.metrics?.increment('auth.refresh.attempt', telemetry);
+
+    const validation = await this.refreshTokenService.validate(refreshTokenPlaintext, userGroupId);
 
     if (validation === 'invalid') {
       // Hash não bate → reuse detectado! Revogar tudo imediatamente.
       this.logger.warn(`REUSE ATTACK detectado para userGroupId=${userGroupId}`);
-      await this.refreshTokenService.revoke(userGroupId);
+      this.metrics?.increment('auth.refresh.reuse_detected', telemetry, { level: 'warn' });
+      // CONTADOR DO SANGRAMENTO — cada linha aqui é um usuário derrubado.
+      this.metrics?.increment(
+        'auth.refresh.revoke_all',
+        { ...telemetry, reason: 'reuse_detected' },
+        { level: 'warn' },
+      );
+      await this.refreshTokenService.revoke(userGroupId, 'reuse_detected');
       throw new UnauthorizedException(
         'Refresh token inválido ou já utilizado. Faça login novamente.',
       );
@@ -315,6 +356,7 @@ export class AuthService {
       // Expiração benigna por idade (ou registro legado sem carimbo).
       // NÃO é ataque: não loga como REUSE, apenas pede re-login.
       this.logger.log(`Refresh token expirado (re-login) userGroupId=${userGroupId}`);
+      this.metrics?.increment('auth.refresh.expired', telemetry);
       throw new UnauthorizedException('Sessão expirada. Faça login novamente.');
     }
 
@@ -329,11 +371,21 @@ export class AuthService {
     });
 
     if (!userGroup) {
+      this.metrics?.increment(
+        'auth.refresh.user_not_found',
+        { ...telemetry, stage: 'usergroup' },
+        { level: 'warn' },
+      );
       throw new UnauthorizedException('Usuário não encontrado');
     }
 
     const entidade = userGroup.entidades[0];
     if (!entidade) {
+      this.metrics?.increment(
+        'auth.refresh.user_not_found',
+        { ...telemetry, stage: 'entidade' },
+        { level: 'warn' },
+      );
       throw new UnauthorizedException('Perfil de usuário não encontrado');
     }
 
@@ -367,6 +419,11 @@ export class AuthService {
     );
     const newRefreshToken = await this.refreshTokenService.rotate(userGroupId);
 
+    this.metrics?.increment('auth.refresh.success', {
+      ...telemetry,
+      orphan: orgId === undefined,
+    });
+
     return this.buildAuthResponse(
       accessToken,
       newRefreshToken,
@@ -387,7 +444,9 @@ export class AuthService {
    */
   async logout(userGroupId: bigint): Promise<void> {
     this.logger.log(`Logout userGroupId=${userGroupId}`);
-    await this.refreshTokenService.revoke(userGroupId);
+    // `reason` só rotula a telemetria (F0) — logout é revogação LEGÍTIMA e
+    // precisa ser separável do `revoke_all` por falso-positivo de reuse.
+    await this.refreshTokenService.revoke(userGroupId, 'logout');
 
     const entidade = await this.prisma.dEntidade.findFirst({
       where: { dUserGroupId: userGroupId, excluido: false },
@@ -586,7 +645,7 @@ export class AuthService {
     // antigas, forçando re-login (segurança). Fora da transaction porque
     // revoke() faz sua própria leitura/escrita do DUserGroup.dados.
     if (novaSenhaHash) {
-      await this.refreshTokenService.revoke(userGroupId);
+      await this.refreshTokenService.revoke(userGroupId, 'password_changed');
       this.logger.log(`Senha alterada e refresh token revogado userGroupId=${userGroupId}`);
     }
 

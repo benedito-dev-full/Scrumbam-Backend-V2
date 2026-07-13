@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { LRUCache } from '../../common/helpers/lru-cache';
+import { MetricsService } from '../../common/observability/metrics.service';
 import { OrgRole } from '../decorators/roles.decorator';
 import { isProjectPubliclyVisible } from '../../projects/utils/public-space.util';
 import { ProjectRefService } from '../../projects/project-ref.service';
@@ -65,7 +66,36 @@ export class RoleResolverService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly projectRef: ProjectRefService,
+    // F0 — Observabilidade. `@Optional()`: sem MetricsService o service opera igual.
+    @Optional() private readonly metrics?: MetricsService,
   ) {}
+
+  /**
+   * Registra hit/miss/negative_hit do cache de roles (F0).
+   *
+   * `silent: true` — este caminho roda em TODA request autenticada; emitir uma
+   * linha por consulta afogaria o log. Os contadores aparecem agregados na
+   * linha `metric: "metrics.snapshot"` (a cada 60 s) e em `GET /telemetry/metrics`.
+   *
+   * `negative_hit` alto = usuários sendo NEGADOS por cache negativo de 5 min —
+   * é a prova do sintoma B2 ("o CEO perde a autoridade"). Correção: F1.6/F4.1.
+   *
+   * @param cache - Qual cache (`org` | `project`)
+   * @param cached - Valor retornado pelo LRU (`undefined` = miss; `null` = negativo)
+   */
+  private recordCacheLookup(cache: 'org' | 'project', cached: unknown): void {
+    if (cached === undefined) {
+      this.metrics?.increment('auth.role_cache.miss', { cache }, { silent: true });
+      return;
+    }
+
+    this.metrics?.increment('auth.role_cache.hit', { cache }, { silent: true });
+
+    if (cached === null) {
+      // Hit de um NULL cacheado: permissão negada por cache, não pelo banco.
+      this.metrics?.increment('auth.role_cache.negative_hit', { cache }, { silent: true });
+    }
+  }
 
   /**
    * Retorna o role do usuário na organização.
@@ -80,6 +110,7 @@ export class RoleResolverService {
   async getOrgRole(userId: bigint, orgId: bigint): Promise<OrgRole | null> {
     const cacheKey = `org:${orgId}:${userId}`;
     const cached = this.orgRoleCache.get(cacheKey);
+    this.recordCacheLookup('org', cached); // F0 — só conta
     if (cached !== undefined) {
       return cached;
     }
@@ -119,6 +150,7 @@ export class RoleResolverService {
   async getProjectRole(userId: bigint, projectId: bigint): Promise<ProjectRole | null> {
     const cacheKey = `proj:${projectId}:${userId}`;
     const cached = this.projectRoleCache.get(cacheKey);
+    this.recordCacheLookup('project', cached); // F0 — só conta
     if (cached !== undefined) {
       return cached;
     }
@@ -333,6 +365,14 @@ export class RoleResolverService {
    * @param projectId - Chave BigInt do projeto (opcional)
    */
   invalidateUser(userId: bigint, orgId?: bigint, projectId?: bigint): void {
+    // F0: este método hoje tem ZERO callers (plano §D5). O contador prova isso
+    // no baseline — se ele ficar em 0 por 48 h, a única coerência de cache é o
+    // TTL, o que explica "403 numa réplica, 200 na outra". Ligar as chamadas
+    // nas mutações de membership é a F1.6.
+    this.metrics?.increment('auth.role_cache.invalidate', {
+      scope: orgId ? 'org' : projectId ? 'project' : 'none',
+    });
+
     if (orgId) {
       this.orgRoleCache.delete(`org:${orgId}:${userId}`);
     }

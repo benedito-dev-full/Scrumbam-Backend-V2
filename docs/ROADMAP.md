@@ -8,6 +8,89 @@
 
 ---
 
+## Task #994 — Observabilidade de Sessão/Auth — Fase 0 (Baseline) — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Backend + Frontend observabilidade implementada, testado, aprovado 9.0/10)
+**Módulo V2:** common/observability + auth (cross-repo: Scrumban-Backend-V2 + Scrumbam-Frontend-V2)
+**Fase V2:** F16 (Hardening) — Hotfix emergencial fora de fase, autorizado por incidente em produção (DEV-170)
+**Tempo Real:** ~1.5 dias (Implementer ~1d code/testes + Reviewer ~3h + Documenter ~3h)
+**Completado em:** 2026-07-13
+**Quality Score:** 9.0/10 (APPROVED pelo Reviewer — 7 contadores comprovados, zero comportamento alterado, observabilidade pura)
+
+**O Que Foi Feito (Fase 0 — Observabilidade):**
+
+**Objetivo:** Instrumentar sistema para MEDIR os 3 sintomas de incidente (A=aba zumbi, B=revogação falso-positivo, C=contexto stale) ANTES de implementar correções (F1/F2/F3). Zero mudança de comportamento — F0 é puramente observação.
+
+**Backend (Scrumban-Backend-V2):**
+- **MetricsService** — log estruturado JSON, contadores por evento (ativo) ou silencioso (agregado 60s snapshot)
+  - Nunca lança (try/catch interno), call-sites usam `metrics?.increment()` (@Optional)
+  - Sanitization defesa-em-profundidade (remove tokens, hashes, passwords)
+  - Snapshot periódico com uptime e mapa de contadores
+- **InfraErrorUtil** — classificação de erro (isInfra: Prisma codes P2024/P1008, network timeout, Redis)
+- **TelemetryController** — endpoints públicos `/telemetry/auth-zombie` (beacon frontend) + JWT-protegido `/telemetry/metrics` (snapshot)
+- **7 Contadores integrados** nos fluxos críticos:
+  1. `auth.refresh.attempt/success/reuse_detected/expired/not_found` — tentativas de refresh e outcomes
+  2. `auth.refresh.revoke_all` — sangramento (B1): revogação de sessão inteira por falso-positivo
+  3. `auth.401` por motivo (token_expired/invalid/no_cred/guard_exception) — guard_exception prova B3
+  4. `auth.guard.infra_error` — falhas de infra (pool esgotado, DB timeout) — prova B3
+  5. `auth.role_cache.hit/miss/negative_hit` — eficiência de cache de roles — prova B2
+  6. `auth.org_context_stale` — tokens com org inválida — prova C
+  7. `http.5xx` em `/auth/refresh` — erros não-tratados no refresh
+
+**Frontend (Scrumbam-Frontend-V2):**
+- **telemetry.ts** — beacon de estado zumbi (sintoma A)
+  - `hasAuthCookie()` — verifica cookie de sessão (escopo navegador)
+  - `reportAuthZombie(hadRefreshToken)` — envia beacon ao endpoint público APÓS detectar zumbi no boot
+  - Fire-and-forget com keepalive (sobrevive navegação), nunca falha (try/catch)
+  - Dedupe por sessionStorage para evitar duplicatas no StrictMode
+
+**Documentação prática (CRÍTICO):**
+- `docs/observabilidade-auth.md` — Guia de **extração prática do baseline de 48h** para operações
+  - 7 contadores com significado, esperado, alerta
+  - Campos de cada contador
+  - Comandos grep/jq prontos para copiar-e-colar
+  - Script bash completo de extração (`extract-baseline.sh`)
+  - Troubleshooting por sintoma (reuse_detected alto? revoke_all > 5/h? guard_exception > 0?)
+  - Dashboard esperado (F0 baseline → F1 hotfix → F2 completo)
+
+**Zero mudança de comportamento — verificado linha a linha:**
+- Guards continuam a cadeia original (MCP → APIKey → JWT) intacta quando credencial inválida
+- `refresh` endpoint classifica erro em 401/503 MAS relança error intacto (sem alterar resposta)
+- `projects/tasks` observam contexto APÓS decidir retorno (não alteram corpo)
+- Role cache TTL mantém 300s positivo (não reduz em F0 — F4 reduz negativo para 10s)
+
+**Testes:**
+- Backend: 26/26 tests PASS (metrics.service.spec 14 + infra-error.util.spec 12)
+- Build: PASS (`npm run build`)
+- TypeScript: 0 errors novos (41 baseline pré-existentes confirmados com `git stash`)
+- ESLint: 0 warnings
+- Frontend: `npm run build` PASS (tsc 0 errors, ESLint 0 warnings, providers.tsx + telemetry.ts)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): **NÃO aplicável** — zero transação financeira, zero DPedido
+- Pilar 2 (Endpoints): ✅ **REUTILIZADO** — `/telemetry/` é controller genérico (não há `/auth/metrics`, `/tasks/metrics`, duplicação)
+- Pilar 3 (Seed): **NÃO aplicável** — zero DClasse nova
+
+**Integração em código existente:**
+- `src/app.module.ts` — adiciona `ObservabilityModule` ao provider
+- `src/common/common.module.ts` — exporta `MetricsService` como @Injectable
+- `src/auth/` (guards + auth.service.ts) — incrementa contadores em pontos críticos
+- `src/projects/projects.service.ts` + `src/tasks/tasks.service.ts` — observam contexto org stale
+
+**ADRs a redigir junto com Fases 1–4:**
+- ADR-V2-061 — Sessões multi-device em DTabela (F3)
+- ADR-V2-062 — Rotação com grace + idempotência Redis (F1)
+- ADR-V2-063 — Armazenamento de sessão no browser (localStorage vs BFF cookie) (F2/F5)
+- ADR-V2-064 — Semântica de erro: 401/403/404/503 com campo `code` (F4)
+
+**Próximos passos (já habilitados pelo baseline):**
+- F1 (2d) — Hotfix backend: grace window, idempotência Redis, 503 em infra
+- F2 (2d) — Hotfix frontend: localStorage + bootstrap defensivo
+- F3 (1.5–2w) — Sessões multi-device em DTabela
+- F4 (1w) — Cache role L1/L2, org_context_stale → 401, semântica erro
+
+---
+
 ## Task 1 — Justificativa de Atraso de Tarefas — Fase 1 (Captura) — ✅ COMPLETA
 
 **Status:** ✅ COMPLETA (Backend Fase 1 implementado, testado, aprovado 9.0/10)

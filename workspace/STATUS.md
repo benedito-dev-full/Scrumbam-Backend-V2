@@ -1,6 +1,86 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-07-09 (Task 1 — Justificativa de Atraso Fase 1 COMPLETA + APPROVED 9.0/10)
+**Ultima atualizacao:** 2026-07-13 (Task #994 — Observabilidade F0 COMPLETA + APPROVED 9.0/10)
+
+---
+
+## Task #994 — Observabilidade de Sessão/Auth — Fase 0 (Baseline) — COMPLETE (V2 Hardening F16 / DEV-170)
+
+**Module:** common/observability + auth (cross-repo: Scrumban-Backend-V2 + Scrumbam-Frontend-V2)
+**Task:** Instrumentar sistema para MEDIR incidente de sessão ANTES de corrigir (zero mudança de comportamento)
+**Status:** COMPLETA (Backend + Frontend observabilidade instrumentada, 26/26 tests PASS, zero regressão)
+**Duration:** ~1.5d total (Implementer ~1d code/testes + Reviewer ~3h + Documenter ~3h)
+**Quality Score:** 9.0/10 (APPROVED pelo Reviewer — 7 contadores comprovados, zero comportamento alterado)
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Implementer | ~1d | — |
+| Reviewer | ~3h | 9.0/10 |
+| Documenter | ~3h | — |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — zero transação financeira, zero DPedido, zero Engine
+- Pilar 2 (Endpoints): ✅ REUTILIZADO — `/telemetry/` é controller genérico (não duplicação)
+- Pilar 3 (Seed): N/A — zero DClasse nova
+
+**Deliverables:**
+- [x] Backend `src/common/observability/metrics.service.ts` — log estruturado JSON, contadores, nunca falha
+- [x] Backend `src/common/observability/infra-error.util.ts` — classificação de exceção (Prisma, network, timeout)
+- [x] Backend `src/common/observability/telemetry.controller.ts` — `POST /auth-zombie` (público, rate limit), `GET /metrics` (JWT-protected)
+- [x] Backend `src/common/observability/dto/auth-zombie.dto.ts` — payload `{ hadRefreshToken: boolean }` APENAS
+- [x] Frontend `src/lib/telemetry.ts` — beacon de estado zumbi (cookie sim + token não = sintoma A)
+- [x] **Documentação prática:** `docs/observabilidade-auth.md` — guia extração baseline 48h com 7 contadores, comandos grep/jq, troubleshooting
+- [x] Integração nos guards + auth.service.ts + projects/tasks.service.ts para incrementar contadores corretos
+- [x] 7 Contadores plantados:
+  - `auth.refresh.attempt/success/reuse_detected/expired/not_found` — tentativas + outcomes
+  - `auth.refresh.revoke_all` — sangramento (B1): revogação sessão por falso-positivo
+  - `auth.401` por motivo (guard_exception = infra lento) — prova B3
+  - `auth.guard.infra_error` — falhas infra (pool esgotado, DB timeout) — prova B3
+  - `auth.role_cache.hit/miss/negative_hit` — eficiência cache roles — prova B2
+  - `auth.org_context_stale` — tokens com org inválida — prova C
+  - `http.5xx` em `/auth/refresh` — erros não-tratados
+
+**Metrics:**
+- Build: PASS (npm run build — backend + frontend)
+- TypeScript: 0 errors novos (41 baseline pré-existentes confirmados)
+- ESLint: 0 warnings novos
+- Testes backend: 26/26 PASS (metrics.service.spec 14 + infra-error.util.spec 12)
+- Testes frontend: `npm run build` PASS
+- Regressão: 0 (pré-existentes confirmados com `git stash`)
+- N+1 queries: ZERO (verificado — incrementos de contador são O(1) em-memória)
+
+**Zero mudança de comportamento — auditado linha a linha:**
+- [x] Guards: continuam cadeia original (MCP → APIKey → JWT) intacta
+- [x] Refresh endpoint: classifica erro MAS relança intacto (sem alterar resposta)
+- [x] Projects/tasks: observam contexto APÓS decidir retorno (não alteram corpo)
+- [x] Cache role: TTL mantém 300s positivo (F0 não reduz; F4 reduz negativo para 10s)
+
+**Decisões Críticas:**
+- ✅ Observabilidade pura (zero comportamento muda) — F0 é apenas medição
+- ✅ Contadores estruturados: nome canônico + fields rasos + optional silence (alta-frequência)
+- ✅ Beacon frontend público @Public() por necessidade (usuário zumbi não tem token)
+- ✅ Rate limit beacon 20/min/IP (prevent flood), teto 5000 IPs (protect memoria)
+- ✅ Sanitization defesa-em-profundidade (nenhum token/hash/password em campo nenhum)
+- ✅ Calls `metrics?.increment()` NUNCA falham (try/catch interno, @Optional injection)
+
+**Validações Críticas (auditadas pelo Reviewer):**
+- **Comportamento:** 4 pontos críticos verificados linha a linha — sem regressão
+- **Segurança:** Grep completo — nenhuma PII/secret em call-sites de incremento
+- **Performance:** Incrementos são O(1) em-memória; snapshot é agregado 60s (não online)
+
+**ADRs:** **ADR-V2-061/062/063/064** (ADRs a redigir junto com Fases 1–4)
+
+**Próximos passos (habilitados pelo baseline):**
+- F1 (2d) — Hotfix backend: grace window 60s, idempotência Redis, 503 em infra
+- F2 (2d) — Hotfix frontend: localStorage + bootstrap defensivo (recupera zumbi)
+- F3 (1.5–2w) — Sessões multi-device em DTabela (-476), dual-read, feature flag
+- F4 (1w) — Cache role L1 5s + L2 Redis 300s, org_context_stale → 401, `code` em erros
+
+**Para extração do baseline (operações):**
+- Usar `docs/observabilidade-auth.md` — 7 contadores com comandos prontos
+- Script `extract-baseline.sh` — gera relatório resumido em 48h
+- Comparar F0 baseline → F1 hotfix → F2 completo (deve ver revoke_all → 0, zombie → 0)
 
 ---
 

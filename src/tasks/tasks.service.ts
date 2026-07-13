@@ -1,6 +1,13 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
+import { MetricsService } from '../common/observability/metrics.service';
 import { EventProducerService } from '../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../common/services/correlation-id.service';
 import { TimezoneService } from '../common/services/timezone.service';
@@ -222,6 +229,8 @@ export class TasksService {
     private readonly timezoneService: TimezoneService,
     private readonly taskTimerService: TaskTimerService,
     private readonly projectRef: ProjectRefService,
+    // F0 — Observabilidade. `@Optional()`: instrumentacao nunca quebra o service.
+    @Optional() private readonly metrics?: MetricsService,
   ) {}
 
   /**
@@ -678,6 +687,17 @@ export class TasksService {
 
     // ADR-V2-042: sem projetos autorizados → retorna vazio sem hit no banco.
     if (!accessibleProjectIds || accessibleProjectIds.length === 0) {
+      // F0 — nenhum projeto acessível → 200 com lista vazia, silenciosamente.
+      // Aqui o service NÃO tem o `organizationId` (recebe só os ids já
+      // resolvidos pelo controller), então não dá para provar staleness: este
+      // contador é o SINAL FRACO (suspeita). A prova vem do
+      // `auth.org_context_stale` emitido em `projects.findMany`, que roda no
+      // mesmo boot da UI. Retorno inalterado (F4 muda para 401).
+      this.metrics?.increment(
+        'auth.org_context_empty_scope',
+        { source: 'tasks.findMany' },
+        { silent: true },
+      );
       return { items: [], pagination: { hasMore: false, nextCursor: null } };
     }
 

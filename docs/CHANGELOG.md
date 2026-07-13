@@ -12,6 +12,35 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Added
+
+- **Observabilidade de Sessão/Auth — Fase 0 (Baseline — Task #994 / DEV-170, V2 F16, 2026-07-13)**
+  - **Objetivo:** Instrumentar sistema para MEDIR incidente de sessão antes de corrigir (F0 — zero mudança de comportamento)
+  - **Contadores (7 requeridos):** `auth.refresh.attempt/success/reuse_detected/expired/not_found`, `auth.refresh.revoke_all` (sangramento B1), `auth.401` por motivo (guard_exception = infra lento), `auth.guard.infra_error` (prova B3), `auth.role_cache.hit/miss/negative_hit` (prova B2), `auth.org_context_stale`, `http.5xx` em refresh
+  - **Backend (MetricsService + TelemetryController):**
+    - `src/common/observability/metrics.service.ts` — Service de métricas por log estruturado; incrementa contador, emite linha JSON ou silencioso; nunca falha (`@Optional()` + try/catch)
+    - `src/common/observability/infra-error.util.ts` — Classificação de exceção (isInfra via Prisma codes, rede, timeout)
+    - `src/common/observability/telemetry.controller.ts` — `POST /telemetry/auth-zombie` (beacon público do frontend, rate limit 20/min/IP, payload mínimo), `GET /telemetry/metrics` (snapshot por processo)
+    - `src/common/observability/dto/auth-zombie.dto.ts` — Payload: `{ hadRefreshToken: boolean }` apenas
+    - Integração em guards + auth service para incrementar contadores corretos
+  - **Frontend (telemetry.ts):**
+    - `src/lib/telemetry.ts` — `hasAuthCookie()` + `reportAuthZombie(hadRefreshToken)` — mede sintoma A (aba zumbi: cookie sim, token não)
+    - Beacon fire-and-forget, keepalive, nunca quebra o boot
+  - **Documentação prática (CRÍTICO):**
+    - `docs/observabilidade-auth.md` — **Guia para extrair baseline em 48h** com 7 contadores, campos, comandos grep/jq prontos para copiar-e-colar, troubleshooting por sintoma
+  - **Testes:**
+    - Backend: `metrics.service.spec.ts` (14 tests — sanitize, increment, snapshot), `infra-error.util.spec.ts` (12 tests — Prisma codes, network patterns)
+    - 26/26 tests PASS; Build PASS; TypeScript 0 errors; ESLint 0 warnings
+  - **Zero mudança de comportamento verificada (linha a linha):**
+    - Calls aos `metrics?.increment()` são DENTRO de try/catch ou APÓS `return` — não alteram fluxo
+    - Guards classificam erro mas continuam a cadeia original (MCP → API Key → JWT) intacta
+    - refresh endpoint adiciona `@Catch()` universal mas relança erro intacto
+    - projects/tasks observam contexto APÓS decidir retorno (não alteramo o corpo)
+  - **Pilares:** P1 N/A (zero Engine); P2 REUTILIZADO (endpoints genéricos `/telemetry`); P3 N/A (zero DClasse nova)
+  - **ADRs vinculados:** ADR-V2-061/062/063/064 (ADRs a redigir junto com F1/F2/F3/F4)
+  - **Score Review:** 9.0/10 (APPROVED — observabilidade pura, sem regressão, contadores comprovados)
+  - **Próximo:** F1 (hotfix backend com grace/idempotência/503 vs 401); contadores plantados agora medem antes/depois
+
 ### Fixed
 
 - **Busca multi-termo tokenizada no SearchService (Task #791 / DEV-120, V2 F8, 2026-07-10)**
