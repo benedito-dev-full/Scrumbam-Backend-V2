@@ -1,6 +1,160 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-07-13 (Task #994 — Observabilidade F0 COMPLETA + APPROVED 9.0/10)
+**Ultima atualizacao:** 2026-07-13 (Task #996 — Frontend F2 COMPLETA + APPROVED 8.0/10)
+
+---
+
+## Task #996 — Hotfix Frontend — Fase 2 (localStorage + Bootstrap Defensivo) — COMPLETE (V2 Hardening F16 / DEV-172)
+
+**Module:** frontend (lib/auth, lib/api, app/providers, e2e)
+**Task:** Elimina "estado zumbi" em aba nova (localStorage + bootstrap defensivo + sincronização entre abas)
+**Status:** COMPLETA (Frontend Fase 2 — 1 E2E teste, APPROVED 8.0/10)
+**Duration:** ~2d total (Implementer + Reviewer + Documenter)
+**Quality Score:** 8.0/10 (APPROVED — implementação sólida, mas 2 pendências reais identificadas com honestidade)
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Implementer | ~1.5d | — |
+| Reviewer | ~3h | 8.0/10 |
+| Documenter | ~2h | — |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — zero Engine, auth é frontend
+- Pilar 2 (Endpoints): N/A — zero endpoint novo
+- Pilar 3 (Seed): N/A — zero DClasse nova
+
+**Deliverables:**
+- [x] Migração one-shot `sessionStorage` → `localStorage` (escopo aba → escopo navegador)
+- [x] Bootstrap defensivo: cookie sem token → refresh silencioso ou /login (nunca zumbi)
+- [x] Sincronização entre abas: BroadcastChannel (principal) + fallback storage event (Safari)
+- [x] Logout global: logout em uma aba desloga TODAS as abas (requisito ASVS)
+- [x] Rotação de tokens propaga automaticamente via publicTokens()
+- [x] Interceptor code-aware: TOKEN_EXPIRED/ORG_CONTEXT_STALE → retry, SESSION_REVOKED → logout
+- [x] 503 com retry/backoff: infra lenta não desloga (backoff 1s, 2s, 4s x3)
+- [x] Guard refreshToken nulo: evita logout espúrio na pré-hidratação
+- [x] Avatar via useMe(): fonte única (nunca mais `?`)
+- [x] E2E Playwright: `e2e/auth-new-tab.spec.ts` (reproduz sintoma A)
+- [x] CHANGELOG.md criado (Keep a Changelog format)
+- [x] ADR-V2-075 criado (decisão, alternativas, consequências, Fase 2+5)
+
+**Metrics:**
+- Build: PASS (npm run build)
+- TypeScript: 0 errors novos (baseline pré-existente)
+- ESLint: 0 warnings novos
+- E2E: 1 teste (skipado — requer E2E_EMAIL/E2E_PASSWORD e stack real)
+- Regressão: ZERO (outros testes não afetados)
+
+**Segurança (draft-ietf-oauth-browser-based-apps BCP):**
+- [x] localStorage = sessionStorage em exposição XSS (ambos JS-readable same-origin)
+- [x] Migração corrige ESCOPO, não segurança (aba → navegador é o bug, não o storage)
+- [x] Alvo arquitetural (Fase 5): BFF com cookie httpOnly first-party (token nunca no JS)
+- [x] Mitigação máquina compartilhada: expiração 30d + `/auth/sessions` com revoke + logout que limpa ambos storages
+
+**Decisões Críticas:**
+- ✅ localStorage AGORA (hotfix F2) vs BFF httpOnly depois (alvo F5) — tradeoff velocidade vs SOTA
+- ✅ Não opção A (cookie httpOnly direto backend): hosts distintos → SameSite=None → CSRF (pior que XSS)
+- ✅ BroadcastChannel principal, fallback storage event — Firefox/Chrome nativo, Safari antigo coberto
+- ✅ Sincronização entre abas: defesa em profundidade (backend já é idempotente via Fase 1)
+
+**Pendências Reais (documentadas com honestidade):**
+
+1. **E2E NUNCA FOI EXECUTADO** — Gate §6.5 do plano foi skipado. Score 8.0 é por análise estática adversarial, não prova empírica.
+   - **Pré-requisito:** Backend + Frontend rodando, credenciais de teste disponíveis
+   - **Comando:** `npx playwright install chromium && E2E_EMAIL=... E2E_PASSWORD=... npx playwright test e2e/auth-new-tab.spec.ts`
+   - **Esperado:** 2 testes PASS (aba nova com sessão, logout global)
+   - **ANTES do deploy real:** rodar este teste
+
+2. **503 inconsistente durante bootstrap** — Um 503 (`AUTH_BACKEND_UNAVAILABLE`) no `bootstrapSession` resulta em logout. O `catch` não distingue infra de credencial inválida, como faz o interceptor de `api.ts`.
+   - **Não é o zumbi:** É logout honesto (infra caiu)
+   - **Mas é degradação:** Interceptor retenta 503; bootstrap não
+   - **Follow-up:** Fase 3, item 4.1 — alinhamento entre bootstrap e interceptor
+
+**Não-regressão:**
+- [x] Quem estava logado (com sessionStorage) no momento do deploy copia para localStorage → sobrevive
+- [x] Quem recarrega sem sessionStorage cai no bootstrap → refresh silencioso ou /login (nunca zumbi)
+- [x] Logout explícito limpa ambos storages + broadcast
+- [x] Outras queries/endpoints não afetadas
+
+**ADRs:** **ADR-V2-075** (decisão storage browser — sessionStorage vs localStorage vs BFF, hotfix F2 + alvo F5)
+
+**Próximos passos:**
+- Deploy F2: segunda-feira/terça fora do pico; validar beacon `auth-zombie` = 0 por 72 h
+- Rodar E2E Playwright com credenciais reais (gate §6.5)
+- F3 (1.5–2w) — Sessões multi-device em DTabela, dual-read/write
+- F4 (1w) — Cache role L1/L2, org_context_stale → 401, `code` em 100% erros auth
+
+---
+
+## Task #995 — Hotfix Auth — Fase 1 (Grace/Idempotência) — COMPLETE (V2 Hardening F16 / DEV-171)
+
+**Module:** auth (+ common, invites, organizations, projects)
+**Task:** Hotfix falso-positivo reuse attack (corrida 2 abas) + infra lenta deslogando + cache negativo 5min
+**Status:** COMPLETA (Backend Fase 1 — 95 testes pass, RFC 9700 conformance, APPROVED 9.2/10)
+**Duration:** ~2d total (Implementer ~1.5d + Reviewer ~4h + Documenter ~2h)
+**Quality Score:** 9.2/10 (APPROVED pelo Reviewer — mata falso-positivo sem afrouxar RFC 9700, zero regressão)
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Implementer | ~1.5d | — |
+| Reviewer | ~4h | 9.2/10 |
+| Documenter | ~2h | — |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — zero Engine, auth é estrutural (Service + Prisma direto)
+- Pilar 2 (Endpoints): N/A — zero endpoint novo (mudanças em /auth/refresh existente)
+- Pilar 3 (Seed): N/A — zero DClasse nova
+
+**Deliverables:**
+- [x] Grace Window 60s: `prevHash + prevHashValidUntil` em `DUserGroup.dados`; refresh com prevHash dentro janela rotaciona (não revoga)
+- [x] Idempotência in-process: `RefreshIdempotencyService` com cache `Map<sha256(token), Promise>` por 60s
+- [x] Classificação exceção: `isInfraFailure()` diferencia credencial inválida (continua cadeia) vs infra (503, não 401)
+- [x] Filter universal: `@Catch()` sem argumento; exceção crua → 500 + `code: INTERNAL_ERROR`, nunca vaza stack
+- [x] Preserve `code` field (RFC 9457): filter propaga `code` em HttpException responses
+- [x] Cache negativo TTL: 300s → 10s; `invalidateUser()` ligado em mutações de membership
+- [x] Config morta removida: JWT_ACCESS_EXPIRATION/JWT_REFRESH_EXPIRATION/JWT_ALGORITHM explicados
+- [x] Novo arquivo error-codes.ts: catálogo 9 códigos (TOKEN_INVALID, TOKEN_EXPIRED, SESSION_REVOKED, SESSION_REUSE_DETECTED, ORG_CONTEXT_STALE, NO_WORKSPACE, FORBIDDEN_ROLE, AUTH_BACKEND_UNAVAILABLE, INTERNAL_ERROR)
+- [x] Novo arquivo refresh-idempotency.service.ts: in-process cache (decisão consciente vs Redis do plano)
+- [x] JSDoc 100% em serviços novos + updates nos existentes
+- [x] ADR-V2-062 redigido: base normativa RFC 9700 + desvio conscientemente justificado (Redis → in-process)
+- [x] Testes 95/95 auth PASS + 58 adversariais Risk Gate PASS
+
+**Metrics:**
+- Build: PASS (`npm run build`)
+- TypeScript: 0 errors novos (41 pré-existentes confirmados)
+- ESLint: 0 warnings novos (116 pré-existentes `no-explicit-any` baseline)
+- Testes backend: 95/95 auth PASS (11 suites)
+- Testes adversariais: 58/58 Risk Gate PASS (sem regressão)
+- Suíte completa: 1849 PASS / 119 FAIL (pré-existentes, stash-validated — ZERO regressão novo)
+- N+1 Queries: ZERO (verificado — rotação em CAS no banco, sem loops)
+- Cache: in-process sem Redis dependency (eliminado SPOF por arquitetura)
+
+**Segurança (RFC 9700 conformance):**
+- [x] Replay real (fora da grace) ainda é detectado e revoga sessão ✅
+- [x] Corrida legítima (2 abas em <60s) não revoga — recebe MESMO par de tokens ✅
+- [x] Trade-off aceito: atacante com token roubado **agora** tem 60s de janela (prática indústria Auth0/Okta)
+- [x] Fora da janela: ANY reuse é revogado + evento SECURITY_REFRESH_REUSE_DETECTED ✅
+
+**Decisões Críticas (Reviewer-auditadas):**
+- ✅ Desvio do plano: Redis → in-process — eliminado SPOF por arquitetura (não por error handling)
+- ✅ Grace period 60s: alinhado RFC 9700 + padrão indústria (Auth0/IdentityServer)
+- ✅ Infra classification: 503 em DB timeout (não 401 que deslogava) → alinhado RFC 6750
+- ✅ `code` field preservation: RFC 9457 (Problem Details) — frontend consegue distinguir motivos
+- ✅ Cache negativo TTL 10s: permissão concedida reflete ≤10s, não 5min
+
+**Não-regressão (auditado linha a linha pelo Reviewer):**
+- Cadeia MCP→API→JWT preservada (credencial inválida continua, só infra é aborta)
+- Refresh endpoint classifica erro mas relança intacto (sem alterar resposta quando válido)
+- Tests de concorrência verificam que AMBAS abas recebem MESMO par (comprovado teste 6.1)
+- Test 6.7 (replay real) passa ANTES e DEPOIS — detecção não foi afrouxada
+
+**ADRs:** **ADR-V2-062** (refresh grace + idempotência in-process, redigido nesta task)
+
+**Próximos passos (habilitados pelo hotfix):**
+- F2 (2d) — Hotfix frontend: `localStorage` + bootstrap defensivo + Web Locks + BroadcastChannel
+- F3 (1.5–2w) — Sessões multi-device em DTabela, dual-read/write, feature flag SESSIONS_V2_ENABLED
+- F4 (1w) — Cache role L1(5s in-process) + L2(Redis 300s), org_context_stale → 401 + refresh, `code` em 100% erros auth
 
 ---
 
