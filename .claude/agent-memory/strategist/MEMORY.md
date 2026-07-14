@@ -22,6 +22,7 @@
 - [worksession-badge-lock-facts.md](worksession-badge-lock-facts.md) — Task #794: badge "em trabalho" + trava MCP via workSessions; agentId=movedBy vs ctx.dEntidadeId; guard MCP-only nos 5 tools de escrita.
 - [worksession-collision-ui-795-facts.md](worksession-collision-ui-795-facts.md) — Task #795: confirm-dialog humano (frontend-only, zero backend); 4 superfícies move→EXECUTING + 3 reatribuir; guard de reatribuir é o que realmente dispara.
 - [dedup-detection-799-facts.md](dedup-detection-799-facts.md) — Task #799: detecção de duplicata; método único SearchService.findPossibleDuplicates (reusa #791); GET /tasks/check-duplicates (UI) + possibleDuplicates[] no MCP create_task (não bloqueia).
+- [remocao-validating-validated-facts.md](remocao-validating-validated-facts.md) — Remove VALIDATING/VALIDATED (9→7 estados V3); sem coluna/migration, só seed+strings; sem ADR prévio (novo ADR-V2-080); precedente ADR-V2-060; CANCELLED/DISCARDED mapeado à parte, NÃO implementar.
 
 ## Instruções de uso
 - Consultar `referencia-v2-nucleo.md` / `v2-canonical-knowledge.md` ANTES de criar qualquer plan (contexto estrutural: 3 Pilares, 17 tabelas, fases, ADRs, seed).
