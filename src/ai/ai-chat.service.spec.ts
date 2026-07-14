@@ -147,4 +147,41 @@ describe('AiChatService — roteamento de provider (Fase 4)', () => {
 
     expect(providerPref.getDefaultForOrg).not.toHaveBeenCalled();
   });
+
+  it('lista de tools dinamica: systemPrompt contem "- **name** — description" de cada tool', async () => {
+    // ADR-V2-079: o prompt reflete literalmente o payload `tools` de buildAll.
+    toolRegistry.buildAll.mockReturnValue([
+      {
+        name: 'search_tasks',
+        description: 'Busca tasks por texto livre.',
+        parameters: {},
+        execute: jest.fn(),
+      },
+      {
+        name: 'update_status',
+        description: 'Move uma task entre estados V3.',
+        parameters: {},
+        execute: jest.fn(),
+      },
+    ] as never);
+
+    await service.sendMessage(dto(), USER);
+
+    const opts = (geminiProvider.chat as jest.Mock).mock.calls[0][0];
+    expect(typeof opts.systemPrompt).toBe('string');
+    expect(opts.systemPrompt).toContain('- **search_tasks** — Busca tasks por texto livre.');
+    expect(opts.systemPrompt).toContain('- **update_status** — Move uma task entre estados V3.');
+    // Bloco de contexto ('ctx') continua concatenado ao fim do prompt.
+    expect(opts.systemPrompt).toContain('ctx');
+  });
+
+  it('sem tools disponiveis: systemPrompt continua string nao-vazia (sem bullets)', async () => {
+    // buildAll → [] (default do beforeEach): prompt valido mesmo sem tools.
+    await service.sendMessage(dto(), USER);
+
+    const opts = (geminiProvider.chat as jest.Mock).mock.calls[0][0];
+    expect(typeof opts.systemPrompt).toBe('string');
+    expect(opts.systemPrompt.length).toBeGreaterThan(0);
+    expect(opts.systemPrompt).not.toContain('- **');
+  });
 });

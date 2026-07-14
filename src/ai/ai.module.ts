@@ -44,8 +44,8 @@ import { ToolRegistry } from './tools/tool-registry';
  * **Dependencias (todas via forwardRef — evita ciclos):**
  *  - `AuthModule` — `AuthCompositeGuard`.
  *  - `CommentsModule` — `CommentsService`.
- *  - `TasksModule` — `TasksService`.
- *  - `ProjectsModule` — `ProjectsService`.
+ *  - `TasksModule` — `TasksService` (usado por tools + `ContextBuilderService`).
+ *  - `ProjectsModule` — `ProjectsService` (usado por tools + `ContextBuilderService`).
  *
  * `CommonModule` (PrismaService, CorrelationIdService) e `EventosModule`
  * (EventProducerService) sao `@Global()` — nao precisam de import.

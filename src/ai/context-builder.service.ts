@@ -1,12 +1,24 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { TimezoneService } from '../common/services/timezone.service';
+import { ProjectsService } from '../projects/projects.service';
+import { TasksService } from '../tasks/tasks.service';
 
 /** TTL do cache em memoria (ms). */
 const CACHE_TTL_MS = 60_000;
 
 /** Maximo de projetos recentes a listar no bloco. */
 const MAX_RECENT_PROJECTS = 3;
+
+/** Maximo de tasks ativas (EXECUTING/READY) a listar na secao volatil. */
+const MAX_ACTIVE_TASKS = 5;
+
+/**
+ * Status V3 considerados "trabalho ativo" do usuario, buscados em UMA query
+ * (`statuses[]` — tasks.service.ts). EXECUTING = em andamento agora, READY =
+ * proximo na fila. Ordem deliberada (EXECUTING antes de READY).
+ */
+const ACTIVE_TASK_STATUSES = ['EXECUTING', 'READY'];
 
 /** DEvento idClasse NOTIFICATION. Seed F1 -490. */
 const NOTIFICATION_CLASSE = BigInt(-490);
@@ -43,16 +55,17 @@ interface CacheEntry {
  * Objetivo: permitir que a IA responda com mais precisao SEM gastar tool
  * calls descobrindo contexto basico (nome do user, org, data, projetos
  * recentes, notificacoes nao lidas). O bloco e
- * concatenado ao `SYSTEM_PROMPT_NEXUS` em cada request, ANTES da chamada
+ * concatenado ao prompt de `buildSystemPrompt(toolsBlock)` em cada request, ANTES da chamada
  * ao Gemini, dentro de `AiChatService.sendMessage`.
  *
  * Performance:
  *  - Cache em memoria com TTL de 60s por `${userId}:${orgId ?? '-'}`.
- *  - Cache miss: ATE 3 queries em paralelo via `Promise.allSettled`
- *    (entidades user+org, top 3 projetos, unread count).
+ *  - Cache miss: ATE 4 entradas em paralelo via `Promise.allSettled`
+ *    (entidades user+org, top 3 projetos, unread count, tasks ativas
+ *    EXECUTING/READY do user).
  *  - Cache hit: zero queries.
- *  - Defensive: falha de unread NAO derruba o bloco — apenas
- *    omite a secao volatil correspondente.
+ *  - Defensive: falha de unread OU de tasks ativas NAO derruba o bloco —
+ *    apenas omite a secao volatil correspondente.
  *
  * Granularidade da data: `terca-feira, 28 de maio de 2026, tarde` —
  * deliberadamente AMPLA (manha/tarde/noite) para preservar prompt cache
@@ -61,7 +74,7 @@ interface CacheEntry {
  * Estrutura do bloco (B6 — divisao estavel/volatil):
  *  - Secao "Contexto do usuario" (ESTAVEL): user, org, projetos. Muda
  *    raramente. Vem PRIMEIRO para maximizar cache do prompt no Gemini.
- *  - Secao "Estado atual" (VOLATIL): data, notificacoes. Pode
+ *  - Secao "Estado atual" (VOLATIL): data, notificacoes, tasks ativas. Pode
  *    mudar a qualquer momento — fica no fim, fora do beneficio de cache.
  *
  * Invalidacao:
@@ -81,6 +94,8 @@ export class ContextBuilderService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly timezoneService: TimezoneService,
+    private readonly tasksService: TasksService,
+    private readonly projectsService: ProjectsService,
   ) {}
 
   /**
@@ -91,11 +106,12 @@ export class ContextBuilderService {
    *  - Nome do user + nome da org (1 query — `IN`)
    *  - Top 3 projetos mais recentes da organizacao (`atualizadoEm DESC`)
    *  - Contagem de notificacoes nao lidas do user
+   *  - Tasks ativas do user (EXECUTING/READY, top 5, escopadas — ADR-V2-042)
    *
    * Entradas de cache STALE (expiradas por TTL) sao removidas
    * automaticamente antes de recomputar (B4 — cleanup oportunista).
    *
-   * Defensive: se a query B2 (unread) falhar, o
+   * Defensive: se a query de unread OU a de tasks ativas falhar, o
    * bloco NAO quebra — apenas a secao correspondente e omitida. Logs
    * registram o erro para diagnostico.
    *
@@ -106,7 +122,7 @@ export class ContextBuilderService {
    * @example
    * ```typescript
    * const block = await contextBuilder.build(BigInt(123), '456');
-   * const finalPrompt = `${SYSTEM_PROMPT_NEXUS}\n\n${block}`;
+   * const finalPrompt = `${buildSystemPrompt(toolsBlock)}\n\n${block}`;
    * ```
    */
   async build(userEntidadeId: bigint, organizationId?: string): Promise<string> {
@@ -185,11 +201,12 @@ export class ContextBuilderService {
       }
     }
 
-    // 3 queries em paralelo (Promise.allSettled — defensive):
+    // 4 entradas em paralelo (Promise.allSettled — defensive):
     //  1. entidades user+org (1 query, IN)
     //  2. top 3 projetos da org filtrando SPACE/FOLDER/LIST (B3)
     //  3. unread count do user (B2)
-    const [entidadesRes, projetosRes, unreadRes] = await Promise.allSettled([
+    //  4. tasks ativas EXECUTING/READY do user (top 5, escopadas — ADR-V2-042)
+    const [entidadesRes, projetosRes, unreadRes, activeTasksRes] = await Promise.allSettled([
       this.prisma.dEntidade.findMany({
         where: { chave: { in: ids }, excluido: false },
         select: { chave: true, nome: true },
@@ -207,6 +224,7 @@ export class ContextBuilderService {
           })
         : Promise.resolve([] as Array<{ chave: bigint; nome: string; idClasse: bigint }>),
       this.getUnreadCount(userEntidadeId),
+      this.getActiveTasks(userEntidadeId),
     ]);
 
     // Entidades — fallback minimo se a unica query estavel falhar.
@@ -231,6 +249,11 @@ export class ContextBuilderService {
       this.logger.warn(`context_unread_failed: ${this.errMsg(unreadRes.reason)}`);
     }
 
+    const activeTasks = activeTasksRes.status === 'fulfilled' ? activeTasksRes.value : [];
+    if (activeTasksRes.status === 'rejected') {
+      this.logger.warn(`context_active_tasks_failed: ${this.errMsg(activeTasksRes.reason)}`);
+    }
+
     // B6 — divisao estavel/volatil. Estavel vem primeiro para maximizar
     // prompt cache do Gemini.
     const lines: string[] = ['# CONTEXTO ATUAL', '', '## Contexto do usuario'];
@@ -253,7 +276,57 @@ export class ContextBuilderService {
       lines.push(`- **Notificacoes nao lidas:** ${unreadCount}`);
     }
 
+    if (activeTasks.length > 0) {
+      lines.push('- **Suas tasks ativas (EXECUTING/READY):**');
+      for (const t of activeTasks) {
+        const label = t.identifier && t.identifier.trim() !== '' ? t.identifier : `#${t.id}`;
+        lines.push(`  * ${label} ${t.nome} — ${t.status}`);
+      }
+    }
+
     return lines.join('\n');
+  }
+
+  /**
+   * Busca as tasks ativas (EXECUTING + READY) atribuidas ao user, em UMA
+   * query, escopadas aos projetos acessiveis.
+   *
+   * Reusa `ProjectsService.findAccessibleProjectIds` + `TasksService.findMany`
+   * (Pilar 2 — mesma disciplina de `ListMyTasksCapability`). NADA de logica de
+   * negocio nova. EXECUTING + READY saem juntos via `statuses[]` (1 query, sem
+   * N+1). `assigneeId` e SEMPRE derivado do user do JWT (ADR-V2-042) — nunca de
+   * input externo.
+   *
+   * Curto-circuito para `[]` quando o user nao tem projetos acessiveis
+   * (evita hit desnecessario; `findMany` tambem trata escopo vazio).
+   *
+   * @param userEntidadeId - `DEntidade.chave` do user logado.
+   * @returns Lista das ate 5 tasks ativas (id, nome, identifier, status).
+   */
+  private async getActiveTasks(
+    userEntidadeId: bigint,
+  ): Promise<Array<{ id: string; nome: string; identifier: string; status: string }>> {
+    const scopedProjectIds = await this.projectsService.findAccessibleProjectIds(userEntidadeId);
+    if (scopedProjectIds.length === 0) {
+      return [];
+    }
+
+    const result = await this.tasksService.findMany(
+      {
+        assigneeId: userEntidadeId.toString(), // ADR-V2-042: sempre do JWT
+        projectIds: scopedProjectIds,
+        statuses: ACTIVE_TASK_STATUSES, // EXECUTING + READY em 1 query
+        limit: MAX_ACTIVE_TASKS,
+      },
+      scopedProjectIds,
+    );
+
+    return result.items.map((t) => ({
+      id: t.id,
+      nome: t.nome,
+      identifier: t.identifier,
+      status: t.status,
+    }));
   }
 
   /**

@@ -9,7 +9,7 @@ import { ChatMessageResponseDto, ChatToolCallDto } from './dto/chat-message-resp
 import { AiProviderRegistry } from './providers/ai-provider.registry';
 import { AiProviderPrefService } from './ai-provider-pref.service';
 import { AiProviderMessage } from './providers/ai-provider.interface';
-import { SYSTEM_PROMPT_NEXUS } from './system-prompt';
+import { buildSystemPrompt } from './system-prompt';
 import { ToolRegistry } from './tools/tool-registry';
 
 /** Janela conservadora de historico enviada ao provider a cada request. */
@@ -104,10 +104,17 @@ export class AiChatService {
       ...(organizationId ? { organizationId } : {}),
     });
 
+    // 3.4. Derivar o bloco de tools do proprio payload `tools` (ADR-V2-079):
+    //      uma linha por tool disponivel. Como `tools` ja passou pelo RBAC do
+    //      user (ADR-V2-068), o prompt anuncia EXATAMENTE o que o modelo pode
+    //      chamar — sem lista estatica que diverge do registry. ZERO query nova.
+    const toolsBlock = tools.map((t) => `- **${t.name}** — ${t.description}`).join('\n');
+
     // 3.5. Montar bloco de contexto runtime (Etapa A — nome, org, data,
-    //      projetos recentes). Cache 60s em memoria — ver ContextBuilderService.
+    //      projetos recentes, tasks ativas). Cache 60s em memoria — ver
+    //      ContextBuilderService.
     const contextBlock = await this.contextBuilder.build(userEntidadeId, organizationId);
-    const finalSystemPrompt = `${SYSTEM_PROMPT_NEXUS}\n\n${contextBlock}`;
+    const finalSystemPrompt = `${buildSystemPrompt(toolsBlock)}\n\n${contextBlock}`;
 
     // 4. Resolver o provider efetivo na cascata de roteamento (ADR-V2-064):
     //      providerName = dto.provider ?? prefDaOrg?.provider ?? registry.defaultName
