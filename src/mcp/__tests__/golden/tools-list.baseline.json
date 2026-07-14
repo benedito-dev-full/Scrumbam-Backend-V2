@@ -1,0 +1,838 @@
+{
+  "tools": [
+    {
+      "name": "list_tasks",
+      "description": "Lista tasks do usuario com filtros opcionais de projeto, status, assignee, idClasse (ex: -200=Bloco, -154=SCRUMBAN_TASK) e idPai (subtarefas / ADR-V2-047).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "ID do projeto (opcional)"
+          },
+          "status": {
+            "type": "string",
+            "description": "Codigo do status V3 (ex: INBOX, EXECUTING)"
+          },
+          "assigneeId": {
+            "type": "string",
+            "description": "ID do assignee (opcional)"
+          },
+          "idClasse": {
+            "type": "string",
+            "description": "Filtra por idClasse polimorfica da DTask (string numerica negativa). Ex: -200=Bloco, -154=SCRUMBAN_TASK."
+          },
+          "idPai": {
+            "type": "string",
+            "description": "Lista subtarefas: chave numerica da task pai (filhas diretas). Use o literal \"null\" para listar tasks raiz (sem pai). Opcional."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 20
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Cursor de paginacao"
+          }
+        }
+      }
+    },
+    {
+      "name": "create_task",
+      "description": "Cria uma task no projeto informado. Campos opcionais: priority (LOW/MEDIUM/HIGH/URGENT), dueDate (ISO 8601), idPai (subtarefa), assigneeTeamId (time), idBloco (vincula a um Bloco via dados.idBloco) e fields (valores das colunas customizaveis da Lista, empacotados em dados.fields).",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "projectId",
+          "titulo"
+        ],
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "titulo": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "descricao": {
+            "type": "string",
+            "maxLength": 5000
+          },
+          "assigneeId": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "LOW",
+              "MEDIUM",
+              "HIGH",
+              "URGENT"
+            ],
+            "description": "Prioridade (LOW/MEDIUM/HIGH/URGENT)"
+          },
+          "dueDate": {
+            "type": "string",
+            "description": "Data limite no formato ISO 8601 (ex: 2026-06-30)"
+          },
+          "idPai": {
+            "type": "string",
+            "description": "ID da task pai (subtarefa, ADR-V2-047)"
+          },
+          "assigneeTeamId": {
+            "type": "string",
+            "description": "ID do time responsavel (DEntidade -155)"
+          },
+          "idBloco": {
+            "type": "string",
+            "description": "ID do Bloco (DTask -200) a vincular via dados.idBloco"
+          },
+          "fields": {
+            "type": "object",
+            "additionalProperties": {
+              "type": [
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            },
+            "description": "Valores das colunas customizaveis da Lista, chaveados por ColumnDef.key (ex: f_a1b2). Valores: string|number|boolean|null (null limpa o valor). Validados server-side contra o schema da Lista (DProject.tableFields)."
+          }
+        }
+      }
+    },
+    {
+      "name": "update_status",
+      "description": "Atualiza o status V3 de uma task.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "taskId",
+          "statusCode"
+        ],
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "statusCode": {
+            "type": "string",
+            "description": "Codigo V3: INBOX|READY|EXECUTING|DONE|FAILED|CANCELLED|DISCARDED|VALIDATING|VALIDATED"
+          }
+        }
+      }
+    },
+    {
+      "name": "list_projects",
+      "description": "Lista projetos acessiveis ao usuario.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 20
+          },
+          "cursor": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_task",
+      "description": "Busca uma task por ID, escopada aos projetos acessiveis ao usuario MCP.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "taskId"
+        ],
+        "properties": {
+          "taskId": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "update_task",
+      "description": "Atualiza qualquer combinacao de campos de uma task (name, description, priority, assigneeId, status, dueDate, idPai, idBloco, fields). Para dueDate/idPai/idBloco: ausente=nao toca, null=remove, string=define. fields (valores das colunas customizaveis da Lista): presente=merge, ausente=nao toca, null DENTRO de fields limpa a coluna. Use update_status se for atualizar APENAS o status.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "taskId"
+        ],
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 10000
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "LOW",
+              "MEDIUM",
+              "HIGH",
+              "URGENT"
+            ],
+            "description": "Prioridade (LOW/MEDIUM/HIGH/URGENT)"
+          },
+          "assigneeId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ID do assignee (DEntidade) ou null para remover"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "INBOX",
+              "READY",
+              "EXECUTING",
+              "DONE",
+              "FAILED",
+              "CANCELLED",
+              "DISCARDED",
+              "VALIDATING",
+              "VALIDATED"
+            ],
+            "description": "Codigo V3: INBOX|READY|EXECUTING|DONE|FAILED|CANCELLED|DISCARDED|VALIDATING|VALIDATED"
+          },
+          "dueDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Data limite ISO 8601; null remove; ausente nao toca"
+          },
+          "idPai": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "string=novo pai (subtarefa, ADR-V2-047); null=move para raiz; ausente=nao toca"
+          },
+          "idBloco": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "string=vincula ao Bloco (DTask -200); null=desvincula; ausente=nao toca (via dados.idBloco)"
+          },
+          "fields": {
+            "type": "object",
+            "additionalProperties": {
+              "type": [
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            },
+            "description": "Valores das colunas customizaveis da Lista, chaveados por ColumnDef.key (ex: f_a1b2). Valores: string|number|boolean|null (null limpa o valor). Validados server-side contra o schema da Lista (DProject.tableFields)."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_members",
+      "description": "Lista os membros de um projeto (com seus roles), escopada aos projetos acessiveis ao usuario MCP.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "projectId"
+        ],
+        "properties": {
+          "projectId": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_project",
+      "description": "Busca dados de um projeto por ID. Retorna o projeto base (incluindo tableFields — schema das colunas customizáveis da Lista, null para não-Lista). Suporta include opcional (members, stats) para reduzir round-trips do LLM.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "projectId"
+        ],
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "include": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "members",
+                "stats"
+              ]
+            },
+            "uniqueItems": true,
+            "description": "Campos opcionais a incluir no payload de resposta. Valores: members | stats."
+          }
+        }
+      }
+    },
+    {
+      "name": "update_project",
+      "description": "Atualiza propriedades de um projeto. Requer role MANAGER no projeto. Use get_project para consultar antes de editar.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "projectId"
+        ],
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "nome": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "automationEnabled": {
+            "type": "boolean"
+          },
+          "repoUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "teamId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "list_notifications",
+      "description": "Lista notificações do usuário autenticado. Use unreadOnly para filtrar apenas não-lidas.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 20
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "unreadOnly": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "update_notification",
+      "description": "Marca notificação como lida, marca todas como lidas, ou deleta uma notificação. Para mark_read e delete, notificationId é obrigatório.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "mark_read",
+              "mark_all_read",
+              "delete"
+            ]
+          },
+          "notificationId": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_unread_count",
+      "description": "Retorna a contagem de notificações não-lidas do usuário autenticado.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "search_tasks",
+      "description": "Busca tasks por texto livre em projetos acessíveis ao usuário. Escopo automático por tenant — retorna apenas tasks de projetos dos quais o usuário é membro.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "q"
+        ],
+        "properties": {
+          "q": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 200
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 20
+          }
+        }
+      }
+    },
+    {
+      "name": "list_blocks",
+      "description": "Lista blocos (DTask idClasse=-200) de um projeto acessivel ao usuario. Para as tasks e metricas de um bloco use list_block_tasks.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "projectId"
+        ],
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "ID do projeto (obrigatorio)"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 20
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Cursor de paginacao"
+          }
+        }
+      }
+    },
+    {
+      "name": "execute_task",
+      "description": "Dispara uma execução Claude Code (IA) para a task informada. Async fire-and-poll: retorna {executionId, status=QUEUED|AWAITING_APPROVAL, riskLevel}. Use get_task(taskId) para acompanhar (EXECUTING → DONE/FAILED). Risk MED/HIGH retorna awaiting_approval (não é erro). Requer scope MCP \"executions:create\".",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "taskId"
+        ],
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "description": "ID da DTask a executar (chave da DTask, BigInt-parseável)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_block_tasks",
+      "description": "Lista as tasks de um Bloco (via dados.idBloco) como lista plana, com paginacao e metricas opcionais (total/done/failed/inProgress/percent da pagina). Escopo automatico por tenant.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "blockId"
+        ],
+        "properties": {
+          "blockId": {
+            "type": "string",
+            "description": "ID do Bloco (chave DTask idClasse=-200)"
+          },
+          "includeMetrics": {
+            "type": "boolean",
+            "default": false,
+            "description": "Quando true, anexa metricas de progresso (total/done/failed/inProgress/percent) calculadas sobre a pagina retornada. ZERO query extra."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 20
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Cursor de paginacao"
+          }
+        }
+      }
+    },
+    {
+      "name": "update_timer",
+      "description": "Controla o timer manual de tempo de uma task (start/pause/resume/stop). actorId = caller MCP (anti-fraude — nunca do body). 409 mapeado para INVALID_PARAMS reason=timer_conflict: start/resume → 409 se já há timer aberto; pause/stop → 409 se não há sessão aberta do caller. Requer scope MCP \"tasks:write\".",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "taskId",
+          "action"
+        ],
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "description": "ID da DTask a controlar (chave BigInt-parseável)"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "start",
+              "pause",
+              "resume",
+              "stop"
+            ],
+            "description": "start/resume: abre sessão de timer. pause/stop: fecha sessão aberta do caller."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "delete_task",
+      "description": "Deleta (soft-delete) uma task; cascateia para subtarefas por padrao.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "taskId"
+        ],
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "cascade": {
+            "type": "boolean",
+            "description": "Cascateia soft-delete para subtarefas (default true). false = desvincular filhas."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_task_tree",
+      "description": "Retorna a arvore hierarquica (fase->task->subtask) abaixo de uma task/fase raiz, com metricas opcionais por fase. Retorna { root, totalNodes, maxDepthReached }. Escopo automatico por tenant.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "taskId"
+        ],
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "description": "ID da task/fase raiz (chave DTask)"
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "description": "Profundidade maxima (1-20). Default 20."
+          },
+          "includeMetrics": {
+            "type": "boolean",
+            "default": false,
+            "description": "Quando true, anexa metricas (total/done/failed/inProgress/percent) nos nos-fase (idClasse=-200)."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_project_metrics",
+      "description": "Retorna flow metrics de um projeto (cycleTime, leadTime, throughput, wipAge, cfd) e, opcionalmente, forecast Monte Carlo (p50/p75/p85/p95 em dias). Se historico insuficiente, forecast vem null. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "projectId"
+        ],
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "ID do projeto (chave DProject)"
+          },
+          "period": {
+            "type": "string",
+            "enum": [
+              "today",
+              "week",
+              "month"
+            ],
+            "description": "Periodo pre-definido (opcional, mutuamente exclusivo com periodFrom/periodTo)."
+          },
+          "periodFrom": {
+            "type": "string",
+            "description": "Data inicial YYYY-MM-DD (opcional, par com periodTo)."
+          },
+          "periodTo": {
+            "type": "string",
+            "description": "Data final YYYY-MM-DD (opcional, par com periodFrom)."
+          },
+          "includeForecast": {
+            "type": "boolean",
+            "default": true,
+            "description": "Quando true, tenta anexar forecast Monte Carlo. Se historico insuficiente, forecast=null + forecastError; NUNCA falha a tool."
+          },
+          "historicalPeriods": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12,
+            "description": "Forecast: numero de periodos historicos (1-12, default 4). Ignorado se includeForecast=false."
+          },
+          "iterations": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 50000,
+            "description": "Forecast: iteracoes Monte Carlo (100-50000, default 10000). Ignorado se includeForecast=false."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_my_tasks",
+      "description": "Lista as tasks atribuidas ao usuario MCP caller (visao \"meu trabalho\"), em todos os projetos acessiveis, com filtros opcionais de status/projeto. Retorna { items, pagination }. O assignee e SEMPRE o caller.",
+      "inputSchema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "INBOX",
+              "READY",
+              "EXECUTING",
+              "DONE",
+              "FAILED",
+              "CANCELLED",
+              "DISCARDED",
+              "VALIDATING",
+              "VALIDATED"
+            ],
+            "description": "Filtra por status V3 (opcional)."
+          },
+          "projectId": {
+            "type": "string",
+            "description": "Restringe a um projeto acessivel (opcional)."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 20
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Cursor de paginacao (chave da ultima task)."
+          }
+        }
+      }
+    },
+    {
+      "name": "create_block",
+      "description": "Cria um Bloco/Fase (DTask idClasse=-200) no projeto informado. Use idPai (outra fase) para criar uma sub-fase (ADR-V2-050). Vincule tasks ao bloco depois via create_task(idBloco).",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "projectId",
+          "titulo"
+        ],
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "ID do projeto (DProject.chave)"
+          },
+          "titulo": {
+            "type": "string",
+            "maxLength": 512,
+            "description": "Nome do bloco/fase"
+          },
+          "descricao": {
+            "type": "string",
+            "maxLength": 10000,
+            "description": "Descricao opcional"
+          },
+          "idPai": {
+            "type": "string",
+            "description": "ID de outra FASE (-200) para criar sub-fase (ADR-V2-050). Opcional."
+          }
+        }
+      }
+    },
+    {
+      "name": "create_project",
+      "description": "Cria um projeto na hierarquia Space/Folder/List: -350 SPACE (raiz numa org), -351 FOLDER (dentro de um SPACE), -352 LIST (dentro de FOLDER ou SPACE; recebe os 9 statuses V3). Para SPACE a org e resolvida automaticamente quando o usuario pertence a uma unica org; informe orgId quando pertence a varias. FOLDER/LIST herdam a org do pai (idPai obrigatorio). Depois use create_block e create_task.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "nome",
+          "idClasse"
+        ],
+        "properties": {
+          "nome": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 255,
+            "description": "Nome do projeto/espaco/lista"
+          },
+          "idClasse": {
+            "type": "string",
+            "enum": [
+              "-350",
+              "-351",
+              "-352"
+            ],
+            "description": "Tipo: -350 SPACE (raiz, sem idPai), -351 FOLDER (idPai=SPACE), -352 LIST (idPai=FOLDER ou SPACE; recebe seed de statuses V3)"
+          },
+          "idPai": {
+            "type": "string",
+            "description": "ID do projeto pai. OBRIGATORIO p/ FOLDER/LIST; PROIBIDO p/ SPACE."
+          },
+          "orgId": {
+            "type": "string",
+            "description": "ID da org (DEntidade -152). So para SPACE quando o usuario pertence a mais de uma org. Ignorado p/ FOLDER/LIST (herdam a org do pai)."
+          },
+          "descricao": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "Descricao opcional"
+          },
+          "prefix": {
+            "type": "string",
+            "maxLength": 8,
+            "description": "Prefixo das tasks (LIST): DEV -> DEV-1. Default DEV."
+          },
+          "privado": {
+            "type": "boolean",
+            "description": "SPACE privado (visivel so a membros explicitos). Default false."
+          },
+          "color": {
+            "type": "string",
+            "description": "Cor hex #RRGGBB"
+          },
+          "icon": {
+            "type": "string",
+            "maxLength": 50,
+            "description": "Emoji ou slug do icone"
+          }
+        }
+      }
+    },
+    {
+      "name": "create_from_template",
+      "description": "Materializa um template (idClasse -401 TEMPLATE_LIST / -402 TEMPLATE_SPACE) numa arvore real (List/Space com blocos e tasks molde-limpo). Para template de LISTA informe idPai (SPACE/FOLDER destino — herda a org do destino). Para template de ESPACO omita idPai (nasce como raiz — a org e resolvida automaticamente quando o usuario pertence a uma unica org; informe orgId quando pertence a varias). Templates GLOBAIS sao visiveis a todas as orgs; templates de outra org retornam nao-encontrado.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "templateId"
+        ],
+        "properties": {
+          "templateId": {
+            "type": "string",
+            "description": "ID do template (-401 TEMPLATE_LIST / -402 TEMPLATE_SPACE) a materializar."
+          },
+          "idPai": {
+            "type": "string",
+            "description": "Destino p/ template de LISTA (-401): SPACE/FOLDER onde a Lista nasce. OMITIR p/ template de ESPACO (-402), que nasce como raiz."
+          },
+          "orgId": {
+            "type": "string",
+            "description": "Desambiguacao de org p/ template de ESPACO quando o usuario pertence a varias orgs. Ignorado quando idPai e informado (herda a org do destino)."
+          },
+          "novoNome": {
+            "type": "string",
+            "maxLength": 255,
+            "description": "Sobrescreve o nome do no raiz materializado. Opcional."
+          },
+          "novoIcone": {
+            "type": "string",
+            "maxLength": 50,
+            "description": "Sobrescreve o icone (dados.icon) do no raiz. Opcional."
+          },
+          "includeTasks": {
+            "type": "boolean",
+            "description": "Copiar as tasks do template (molde-limpo: INBOX, sem assignee/prazo). Default true."
+          }
+        }
+      }
+    },
+    {
+      "name": "create_comment",
+      "description": "Cria um comentario em uma task, project, folder ou list. Use quando o usuario pedir para comentar/registrar algo.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "targetType": {
+            "type": "string",
+            "enum": [
+              "task",
+              "project",
+              "folder",
+              "list"
+            ],
+            "description": "Tipo do alvo do comentario"
+          },
+          "targetId": {
+            "type": "string",
+            "description": "ID do alvo (chave numerica como string)"
+          },
+          "texto": {
+            "type": "string",
+            "description": "Conteudo do comentario (1-10000 chars, markdown aceito)"
+          }
+        },
+        "required": [
+          "targetType",
+          "targetId",
+          "texto"
+        ]
+      }
+    },
+    {
+      "name": "list_comments",
+      "description": "Lista os comentarios mais recentes de uma task, project, folder ou list. Use quando o usuario quiser saber o que foi comentado.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "targetType": {
+            "type": "string",
+            "enum": [
+              "task",
+              "project",
+              "folder",
+              "list"
+            ],
+            "description": "Tipo do alvo"
+          },
+          "targetId": {
+            "type": "string",
+            "description": "ID do alvo"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Quantidade maxima de comentarios (1-50, default 20)"
+          }
+        },
+        "required": [
+          "targetType",
+          "targetId"
+        ]
+      }
+    }
+  ]
+}
