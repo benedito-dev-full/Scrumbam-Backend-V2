@@ -10,6 +10,7 @@ import {
   Part,
 } from '@google/generative-ai';
 import { AiKeyResolverService } from '../ai-key-resolver.service';
+import { toGeminiSchema } from './gemini-schema.util';
 import {
   AiProvider,
   AiProviderChatOptions,
@@ -288,11 +289,25 @@ export class GeminiProvider implements AiProvider {
     return null;
   }
 
+  /**
+   * Converte uma tool para o formato de `functionDeclaration` do Gemini.
+   *
+   * O `parameters` NÃO pode ser passado adiante como está: as tools vêm da camada
+   * única de Capabilities (compartilhada com o MCP) e usam JSON Schema completo
+   * — `type: ['string','null']`, `additionalProperties`, `uniqueItems`. O Gemini
+   * valida contra um Protobuf derivado do OpenAPI e devolve **400** para qualquer
+   * uma dessas palavras. Claude e OpenAI aceitam; o Gemini não.
+   *
+   * Aqui existia um `as unknown as FunctionDeclarationSchema` — um cast que calava
+   * o compilador sem converter nada, e o erro só aparecia em produção.
+   *
+   * @see toGeminiSchema — a tradução JSON Schema → subconjunto do Gemini.
+   */
   private toGeminiDeclaration(tool: AiToolDefinition): FunctionDeclaration {
     return {
       name: tool.name,
       description: tool.description,
-      parameters: tool.parameters as unknown as FunctionDeclarationSchema,
+      parameters: toGeminiSchema(tool.parameters) as unknown as FunctionDeclarationSchema,
     };
   }
 
