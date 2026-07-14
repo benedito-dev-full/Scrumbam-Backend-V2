@@ -49,6 +49,33 @@ const PROJECT_SCOPED_TABELA_CLASSES: ReadonlySet<bigint> = new Set<bigint>([
 ]);
 
 /**
+ * DClasses de DTabela **PROIBIDAS** no endpoint genérico `/tabelas` (F3 —
+ * ADR-V2-077).
+ *
+ * ## Por que existe uma denylist no Pilar 2
+ *
+ * O Pilar 2 (endpoints genéricos) é uma virtude — até o dia em que uma linha de
+ * `DTabela` passa a guardar **credencial**. É o caso de `SESSION` (-485), onde:
+ *
+ * - `codigo`    = `sha256(refresh token CORRENTE)`
+ * - `metaDados` = `{ prevHash, jti, familyId, ... }`
+ *
+ * Sem esta denylist, um `GET /tabelas?idClasse=-485` autenticado devolveria
+ * **os hashes de refresh token de todos os usuários** — e o `formatTabelaResponse`
+ * serializa `codigo` e `metaDados` crus. Isso não é vazamento hipotético: é o
+ * endpoint genérico virando o vetor de exfiltração de sessão.
+ *
+ * A leitura de sessão tem UM caminho autorizado, com projeção obrigatória:
+ * `GET /auth/sessions` (ver `SessionResponseDto`, que nunca carrega hash).
+ *
+ * Resposta escolhida: **404** (e não 403). O usuário não deve nem saber que a
+ * classe existe aqui — anti-enumeração (OWASP Authorization Cheat Sheet).
+ */
+const CLASSES_PROIBIDAS_NO_GENERICO: ReadonlySet<bigint> = new Set<bigint>([
+  BigInt(-485), // SESSION — codigo = hash do refresh token
+]);
+
+/**
  * Service canônico para DTabela (Pilar 2 — Endpoints Genéricos).
  *
  * Serve todos os lookups, configs e catálogos:
@@ -71,12 +98,32 @@ export class TabelaService {
   ) {}
 
   /**
+   * Barra classes de credencial no endpoint genérico (F3 — ADR-V2-077).
+   *
+   * Chamado em TODA porta de entrada do service (list, get, create, update,
+   * delete). 404 — nunca 403 — para não confirmar a existência da classe.
+   *
+   * @param idClasse - Classe resolvida da requisição
+   * @throws {NotFoundException} Se a classe for denylisted (ex.: SESSION -485)
+   */
+  private assertClasseNaoProibida(idClasse: bigint): void {
+    if (!CLASSES_PROIBIDAS_NO_GENERICO.has(idClasse)) return;
+
+    this.logger.warn(
+      `[SEGURANÇA] Tentativa de acesso a DClasse denylisted via /tabelas: ${idClasse}. ` +
+        `Sessões só podem ser lidas via GET /auth/sessions (projeção segura).`,
+    );
+    throw new NotFoundException(`DClasse ${idClasse} não encontrada`);
+  }
+
+  /**
    * Resolve idClasse a partir do query (canônico ou alias deprecated).
    *
    * @param query - Query DTO
    * @param res - Response Express para headers de deprecation
    * @returns bigint resolvida
    * @throws {BadRequestException} Se ambos ou nenhum presente
+   * @throws {NotFoundException} Se a classe for denylisted (SESSION — ADR-V2-077)
    */
   async resolveIdClasse(query: ListTabelaQueryDto, res?: Response): Promise<bigint> {
     const hasIdClasse = !!query.idClasse;
@@ -95,13 +142,17 @@ export class TabelaService {
     }
 
     if (hasIdClasse) {
-      return BigInt(query.idClasse!);
+      const idClasse = BigInt(query.idClasse!);
+      this.assertClasseNaoProibida(idClasse);
+      return idClasse;
     }
 
     const codigoNorm = query.classe!.toUpperCase();
     const cached = classeAliasCacheTabela.get(codigoNorm);
 
     if (cached !== undefined) {
+      // Alias `?classe=SESSION` resolve para -485 — barra aqui também.
+      this.assertClasseNaoProibida(cached);
       this.logger.warn(
         `[DEPRECATED ADR-V2-015] /tabelas?classe=${query.classe} — migre para ?idClasse=${cached}`,
       );
@@ -120,6 +171,8 @@ export class TabelaService {
     if (!classe) {
       throw new NotFoundException(`DClasse com codigo "${query.classe}" não encontrada`);
     }
+
+    this.assertClasseNaoProibida(classe.chave);
 
     classeAliasCacheTabela.set(codigoNorm, classe.chave);
 
@@ -151,10 +204,7 @@ export class TabelaService {
    * // 9 statuses V3 do seed
    * ```
    */
-  async listarPorClasse(
-    query: ListTabelaQueryDto,
-    res?: Response,
-  ): Promise<ListTabelaResponseDto> {
+  async listarPorClasse(query: ListTabelaQueryDto, res?: Response): Promise<ListTabelaResponseDto> {
     const idClasse = await this.resolveIdClasse(query, res);
     await validarClasse(this.prisma, idClasse);
 
@@ -215,6 +265,10 @@ export class TabelaService {
       throw new NotFoundException(`Tabela ${id} não encontrada`);
     }
 
+    // Denylist por CHAVE: sem isto, `GET /tabelas/1042` (id de uma sessão)
+    // devolveria a linha inteira — com o hash do refresh token no `codigo`.
+    this.assertClasseNaoProibida(tabela.idClasse);
+
     return formatTabelaResponse(tabela);
   }
 
@@ -233,6 +287,7 @@ export class TabelaService {
    */
   async criar(dto: CreateTabelaDto): Promise<TabelaResponseDto> {
     const idClasse = BigInt(dto.idClasse);
+    this.assertClasseNaoProibida(idClasse);
     await validarClasse(this.prisma, idClasse);
 
     this.logger.log(`criar tabela idClasse=${idClasse} nome="${dto.nome}"`);

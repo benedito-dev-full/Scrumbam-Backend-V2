@@ -4,6 +4,7 @@ import { ProjectsService } from '../../projects/projects.service';
 import { TasksService } from '../../tasks/tasks.service';
 import { MCP_ERROR_CODES, MCP_SCOPES } from '../constants';
 import { McpUserContext } from '../interfaces/mcp.types';
+import { assertTaskNotLockedByOther } from './task-concurrency.guard';
 import { McpTool, McpToolError, McpToolResult } from './tool.interface';
 import {
   V3_STATUS_CODES,
@@ -218,6 +219,13 @@ export class UpdateTaskTool implements McpTool {
     const accessibleProjectIds = await this.projectsService.findAccessibleProjectIds(
       ctx.dEntidadeId,
     );
+
+    // Trava de concorrência MCP (task #794): carrega o estado ATUAL da task
+    // (também serve de tenant gate — findOne valida o scope) e recusa se ela
+    // está EXECUTING com workSession aberta de OUTRO ator, ANTES de qualquer
+    // mutação. update_timer é isento (decisão #3).
+    const currentTask = await this.tasksService.findOne(taskId, accessibleProjectIds);
+    assertTaskNotLockedByOther(currentTask, ctx.dEntidadeId);
 
     if (hasBasicUpdate) {
       this.logger.debug(`update_task ${taskId} — basicos`);

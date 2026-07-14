@@ -1,6 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 
 import { ProjectsService } from '../../projects/projects.service';
+import { SearchService } from '../../search/search.service';
+import { TaskDuplicateDto } from '../../search/dto/task-duplicate.dto';
 import { TasksService } from '../../tasks/tasks.service';
 import { MCP_SCOPES } from '../constants';
 import { McpUserContext } from '../interfaces/mcp.types';
@@ -46,9 +48,11 @@ const PRIORITY_VALUES = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] as const;
  */
 @Injectable()
 export class CreateTaskTool implements McpTool {
+  private readonly logger = new Logger(CreateTaskTool.name);
+
   readonly name = 'create_task';
   readonly description =
-    'Cria uma task no projeto informado. Campos opcionais: priority (LOW/MEDIUM/HIGH/URGENT), dueDate (ISO 8601), idPai (subtarefa), assigneeTeamId (time), idBloco (vincula a um Bloco via dados.idBloco) e fields (valores das colunas customizaveis da Lista, empacotados em dados.fields).';
+    'Cria uma task no projeto informado. Campos opcionais: priority (LOW/MEDIUM/HIGH/URGENT), dueDate (ISO 8601), idPai (subtarefa), assigneeTeamId (time), idBloco (vincula a um Bloco via dados.idBloco) e fields (valores das colunas customizaveis da Lista, empacotados em dados.fields). O retorno inclui possibleDuplicates[]: tasks com titulo parecido na mesma Lista (informativo — a task e SEMPRE criada, nunca bloqueia).';
   readonly inputSchema = {
     type: 'object',
     required: ['projectId', 'titulo'],
@@ -90,6 +94,7 @@ export class CreateTaskTool implements McpTool {
   constructor(
     private readonly tasksService: TasksService,
     private readonly projectsService: ProjectsService,
+    private readonly searchService?: SearchService,
   ) {}
 
   /**
@@ -152,6 +157,10 @@ export class CreateTaskTool implements McpTool {
 
     await this.projectsService.findOne(projectId, ctx.dEntidadeId);
 
+    // Detecção de duplicata (task #799) — buscar ANTES do create evita auto-match
+    // (a task recém-criada ainda não existe). SEMPRE informativo: nunca bloqueia.
+    const possibleDuplicates = await this.findPossibleDuplicates(titulo, projectId);
+
     const dados: Record<string, unknown> = {
       ...(idBloco ? { idBloco } : {}),
       ...(fields ? { fields } : {}),
@@ -173,7 +182,46 @@ export class CreateTaskTool implements McpTool {
       ctx.dEntidadeId,
     );
 
-    return textResult(result);
+    // Anexa possibleDuplicates ao envelope só quando o SearchService está
+    // disponível (produção). Sem ele (testes que não o injetam) o retorno
+    // permanece byte-idêntico ao legado — back-compat preservada.
+    return textResult(this.searchService ? { ...(result as object), possibleDuplicates } : result);
+  }
+
+  /**
+   * Busca possíveis duplicatas do título na mesma Lista (task #799 / DEV-128).
+   *
+   * Wrapper defensivo sobre {@link SearchService.findPossibleDuplicates}: qualquer
+   * falha da busca é engolida (log warn) e retorna `[]` — a detecção é uma
+   * cortesia informativa e NUNCA pode impedir a criação da task. Retorna `[]`
+   * também quando o `SearchService` não foi injetado.
+   *
+   * @param titulo - Título proposto da task
+   * @param projectId - Lista-alvo (escopo da checagem)
+   * @returns Lista de candidatas (vazia em erro/ausência de service)
+   */
+  private async findPossibleDuplicates(
+    titulo: string,
+    projectId: string,
+  ): Promise<TaskDuplicateDto[]> {
+    if (!this.searchService) {
+      return [];
+    }
+    try {
+      return await this.searchService.findPossibleDuplicates({
+        nome: titulo,
+        projectId,
+        scope: 'project',
+        limit: 5,
+      });
+    } catch (err) {
+      this.logger.warn(
+        `create_task dedup check falhou project=${projectId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return [];
+    }
   }
 
   private extractPriority(input: Record<string, unknown>): string | undefined {

@@ -12,6 +12,7 @@ import { PermissoesModule } from './permissoes/permissoes.module';
 import { CommonModule } from './common/common.module';
 import { EmailModule } from './email/email.module';
 import { HealthModule } from './common/health/health.module';
+import { ObservabilityModule } from './common/observability/observability.module';
 import { CorrelationIdMiddleware } from './common/middlewares/correlation-id.middleware';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
@@ -23,6 +24,7 @@ import { WorkflowStatusesModule } from './workflow-statuses/workflow-statuses.mo
 import { ProjectsModule } from './projects/projects.module';
 import { TasksModule } from './tasks/tasks.module';
 import { CommentsModule } from './comments/comments.module';
+import { DelayJustificationsModule } from './delay-justifications/delay-justifications.module';
 
 // F6 — Engine + Executions (OperacaoExecucaoClaude + ApprovalFlow + Sweeper)
 import { ExecutionsModule } from './executions/executions.module';
@@ -101,6 +103,8 @@ import { RealtimeModule } from './realtime/realtime.module';
     // F4 — Email + Common Services
     EmailModule,
     HealthModule,
+    // F0 (hardening de sessao) — telemetria: beacon do frontend + snapshot de contadores
+    ObservabilityModule,
     // F5 — Domínio Estrutural Scrumban (Blocos A, B, C, D, E implementados)
     OrganizationsModule,
     TeamsModule,
@@ -108,6 +112,8 @@ import { RealtimeModule } from './realtime/realtime.module';
     ProjectsModule,
     TasksModule,
     CommentsModule,
+    // Justificativa de Atraso de Tarefas (Fase 1 — Captura, ADR-V2-070)
+    DelayJustificationsModule,
     // F6 — Automation Claude Code (Engine + Executions + ApprovalFlow)
     ExecutionsModule.forRoot(),
     // F7 — Eventos Canônicos (EventProducerService global + /events/health)

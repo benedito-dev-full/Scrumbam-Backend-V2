@@ -24,6 +24,15 @@ export interface JwtPayload {
   organizationId?: string;
   /** Email do usuário. */
   email: string;
+  /**
+   * Chave BigInt da SESSÃO que emitiu este access token (F3 — ADR-V2-077).
+   *
+   * **OPCIONAL** — tokens emitidos antes da F3 não têm `sid`. Quem o consome
+   * degrada de forma segura: `GET /auth/sessions` perde o rótulo `current`, e o
+   * `logout` cai no fail-safe "revoga todas" em vez de revogar só este device.
+   * Depois do primeiro refresh, todo token passa a carregar `sid`.
+   */
+  sid?: string;
   /** Tempo de expiração (Unix timestamp). */
   exp?: number;
   /** Tempo de emissão (Unix timestamp). */

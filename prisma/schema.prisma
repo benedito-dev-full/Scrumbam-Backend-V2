@@ -192,6 +192,12 @@ model DTabela {
   @@index([dEntidadeId])
   @@index([idLocEscrituracao])
   @@index([excluido, idClasse])
+  // ADR-V2-077 (F3 — sessões multi-device): lookup de sessão por
+  // `codigo = sha256(refreshToken)` dentro de `idClasse = -485 SESSION`.
+  // É o índice que mata o full scan `take: 1000` do refresh
+  // (`auth.controller.findUserGroupByRefreshToken`), que quebrava acima de
+  // 1000 DUserGroup ativos. ÍNDICE, não tabela — ADR-V2-001 preservado.
+  @@index([idClasse, codigo])
 }
 
 // =====================================================================

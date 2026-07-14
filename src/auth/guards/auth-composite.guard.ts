@@ -1,17 +1,23 @@
 import {
   CanActivate,
   ExecutionContext,
+  HttpException,
   Injectable,
   Logger,
+  Optional,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { McpKeyGuard } from './mcp-key.guard';
 import { ApiKeyGuard } from './api-key.guard';
-import { JwtAuthGuard } from './jwt-auth.guard';
+import { AUTH_FAILURE_REASON_KEY, AuthFailureReason, JwtAuthGuard } from './jwt-auth.guard';
 import { RequireWorkspaceGuard } from './require-workspace.guard';
 import { OrgTenantGuard } from './org-tenant.guard';
+import { MetricsService } from '../../common/observability/metrics.service';
+import { classifyInfraError } from '../../common/observability/infra-error.util';
+import { AUTH_ERROR_CODES } from '../../common/errors/error-codes';
 
 /**
  * Guard de composição OR: tenta 3 mecanismos de autenticação em ordem.
@@ -53,6 +59,8 @@ export class AuthCompositeGuard implements CanActivate {
     private readonly jwtAuthGuard: JwtAuthGuard,
     private readonly requireWorkspaceGuard: RequireWorkspaceGuard,
     private readonly orgTenantGuard: OrgTenantGuard,
+    // F0 — Observabilidade. `@Optional()`: sem MetricsService o guard opera igual.
+    @Optional() private readonly metrics?: MetricsService,
   ) {}
 
   /**
@@ -96,8 +104,9 @@ export class AuthCompositeGuard implements CanActivate {
         this.logger.debug('Autenticado via MCP Key');
         authenticated = true;
       }
-    } catch {
-      // Guard interno falhou — tentar próximo
+    } catch (err) {
+      // Credencial inválida → segue a cadeia. INFRA → 503 (F1/D4).
+      this.handleGuardFailure('McpKeyGuard', err, context);
     }
 
     // Tentar API Key (2º — contexto de automação/integração)
@@ -108,8 +117,9 @@ export class AuthCompositeGuard implements CanActivate {
           this.logger.debug('Autenticado via API Key');
           authenticated = true;
         }
-      } catch {
-        // Guard interno falhou — tentar próximo
+      } catch (err) {
+        // Credencial inválida → segue a cadeia. INFRA → 503 (F1/D4).
+        this.handleGuardFailure('ApiKeyGuard', err, context);
       }
     }
 
@@ -126,17 +136,46 @@ export class AuthCompositeGuard implements CanActivate {
           request['authMethod'] = 'jwt';
           authenticated = true;
         }
-      } catch {
-        // JWT inválido — cai para o throw abaixo
+      } catch (err) {
+        // Token inválido → cai no 401 abaixo. Falha de INFRA (inclusive o 503
+        // que o próprio JwtAuthGuard lança em `handleRequest`) → propaga 503.
+        this.handleGuardFailure('JwtAuthGuard', err, context);
       }
     }
 
     if (!authenticated) {
       // Todos os mecanismos falharam — AuthCompositeGuard é o ÚNICO que lança 401
       this.logger.debug('Todos os mecanismos de auth falharam — 401');
-      throw new UnauthorizedException(
-        'Autenticação necessária: forneça JWT Bearer, X-API-Key ou X-MCP-Key',
+
+      // F0 — CONTADOR `auth.401` POR MOTIVO. O motivo real vem do
+      // JwtAuthGuard (que enxerga err/info do Passport) via
+      // `req[AUTH_FAILURE_REASON_KEY]`; na ausência dele, assume-se
+      // `no_credential` (nenhum header de auth foi apresentado).
+      // `reason=guard_exception` > 0 é a PROVA de que infra está deslogando
+      // usuário — e o gatilho da F1 (D4: 503 em vez de 401).
+      const request = context.switchToHttp().getRequest<Record<string, unknown>>();
+      const reason = (request[AUTH_FAILURE_REASON_KEY] as AuthFailureReason) ?? 'no_credential';
+
+      this.metrics?.increment(
+        'auth.401',
+        {
+          reason,
+          method: String(request['method'] ?? ''),
+          path: String(request['url'] ?? '').split('?')[0],
+        },
+        { level: reason === 'guard_exception' ? 'warn' : 'log' },
       );
+
+      // F1 (item 1.4) — o 401 passa a carregar `code` (RFC 9457). O frontend
+      // distingue "expirou, faça refresh" de "não serve, deslogue" sem heurística
+      // sobre a string da mensagem.
+      throw new UnauthorizedException({
+        code:
+          reason === 'token_expired'
+            ? AUTH_ERROR_CODES.TOKEN_EXPIRED
+            : AUTH_ERROR_CODES.TOKEN_INVALID,
+        message: 'Autenticação necessária: forneça JWT Bearer, X-API-Key ou X-MCP-Key',
+      });
     }
 
     // ADR-V2-038: bloquear rotas tenant-scoped quando JWT está órfão.
@@ -151,5 +190,67 @@ export class AuthCompositeGuard implements CanActivate {
     // ADR-V2-042: defesa #2 — isolamento multi-tenant em rotas com path
     // param de projeto/org. Lança ForbiddenException se cross-tenant.
     return this.orgTenantGuard.canActivate(context);
+  }
+
+  /**
+   * Classifica a exceção de um guard interno e decide: **seguir a cadeia OR** ou
+   * **abortar com 503**.
+   *
+   * **F1 (item 1.5 / D4) — o `catch {}` catch-all deixou de existir.** Antes,
+   * qualquer exceção (JWT malformado, pool do Postgres esgotado, DB fora, bug)
+   * era engolida e caía no `401` final. Ou seja: **lentidão de banco deslogava
+   * usuário.** Agora:
+   *
+   * - **Credencial ausente/inválida** → continua a cadeia (MCP → API Key → JWT).
+   *   É o caso ESPERADO (um request sem `X-MCP-Key` sempre "falha" no McpKeyGuard).
+   * - **Falha de INFRA** (`P2024` pool timeout, `P1001` DB inalcançável, Redis
+   *   fora, timeout) → aborta com `503 { code: AUTH_BACKEND_UNAVAILABLE }`.
+   *   Ancoragem RFC 6750: 401 significa `invalid_token`; um pool esgotado **não
+   *   é** token inválido. 503 faz o cliente **retentar**, não deslogar.
+   * - **HttpException já lançada** por um guard interno (ex.: o 503 do
+   *   `JwtAuthGuard`) → propaga intacta.
+   *
+   * @param guard - Nome do guard que falhou (dimensão do contador)
+   * @param err - Exceção capturada
+   * @param context - Contexto (usado para anotar o motivo no request)
+   * @throws {ServiceUnavailableException} `{ code: 'AUTH_BACKEND_UNAVAILABLE' }`
+   *   quando a falha é de infraestrutura
+   */
+  private handleGuardFailure(guard: string, err: unknown, context: ExecutionContext): void {
+    // Um guard interno que já decidiu o status (ex.: 503 do JwtAuthGuard) tem
+    // a palavra final — não reclassificamos nem engolimos.
+    if (err instanceof HttpException) {
+      throw err;
+    }
+
+    const classified = classifyInfraError(err);
+
+    if (!classified.isInfra) {
+      // Credencial ausente/inválida: caso ESPERADO na cadeia OR. Não polui o log.
+      return;
+    }
+
+    this.metrics?.increment(
+      'auth.guard.infra_error',
+      {
+        guard,
+        kind: classified.kind,
+        code: classified.code,
+        errorName: classified.name,
+      },
+      { level: 'error' },
+    );
+
+    const request = context.switchToHttp().getRequest<Record<string, unknown>>();
+    request[AUTH_FAILURE_REASON_KEY] = 'guard_exception' satisfies AuthFailureReason;
+
+    this.logger.error(
+      `Falha de INFRA em ${guard} (${classified.kind}${classified.code ? ` ${classified.code}` : ''}) — 503, não 401`,
+    );
+
+    throw new ServiceUnavailableException({
+      code: AUTH_ERROR_CODES.AUTH_BACKEND_UNAVAILABLE,
+      message: 'Serviço de autenticação temporariamente indisponível. Tente novamente.',
+    });
   }
 }

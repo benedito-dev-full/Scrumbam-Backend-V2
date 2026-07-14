@@ -218,9 +218,88 @@ describe('MCP create_task tool', () => {
     const result = await router.dispatch('tools/list', undefined, userCtx);
 
     expect(result.result).toEqual({
-      tools: expect.arrayContaining([
-        expect.objectContaining({ name: 'create_task' }),
-      ]),
+      tools: expect.arrayContaining([expect.objectContaining({ name: 'create_task' })]),
+    });
+  });
+
+  // ─── Detecção de duplicata (task #799 / DEV-128) ───────────────────────────
+
+  describe('possibleDuplicates (task #799)', () => {
+    const dup = {
+      chave: '999',
+      identifier: 'DEV-42',
+      nome: 'Nova task',
+      idProject: projectId,
+      projectNome: 'Backend Core',
+      idStatus: '-443',
+      matchType: 'exact' as const,
+      criadoEm: '2026-07-05T12:00:00.000Z',
+    };
+
+    function buildRouter(searchService: { findPossibleDuplicates: jest.Mock }) {
+      return new McpRouterService(
+        undefined,
+        new CreateTaskTool(tasksService as never, projectsService as never, searchService as never),
+      );
+    }
+
+    it('anexa possibleDuplicates ao retorno e cria mesmo assim (nunca bloqueia)', async () => {
+      const searchService = {
+        findPossibleDuplicates: jest.fn().mockResolvedValue([dup]),
+      };
+      const localRouter = buildRouter(searchService);
+
+      const response = await localRouter.dispatch(
+        'tools/call',
+        { name: 'create_task', arguments: { projectId, titulo: 'Nova task' } },
+        userCtx,
+      );
+
+      // Busca ANTES do create (evita auto-match), escopo = a própria lista.
+      expect(searchService.findPossibleDuplicates).toHaveBeenCalledWith({
+        nome: 'Nova task',
+        projectId,
+        scope: 'project',
+        limit: 5,
+      });
+      // Task criada normalmente (nunca bloqueia).
+      expect(tasksService.create).toHaveBeenCalledTimes(1);
+
+      const text = (response.result as { content: { text: string }[] }).content[0].text;
+      expect(JSON.parse(text)).toEqual({ ...created, possibleDuplicates: [dup] });
+    });
+
+    it('anexa possibleDuplicates vazio quando não há candidatas', async () => {
+      const searchService = {
+        findPossibleDuplicates: jest.fn().mockResolvedValue([]),
+      };
+      const localRouter = buildRouter(searchService);
+
+      const response = await localRouter.dispatch(
+        'tools/call',
+        { name: 'create_task', arguments: { projectId, titulo: 'Nova task' } },
+        userCtx,
+      );
+
+      const text = (response.result as { content: { text: string }[] }).content[0].text;
+      expect(JSON.parse(text)).toEqual({ ...created, possibleDuplicates: [] });
+    });
+
+    it('falha da busca de duplicatas NÃO impede a criação (dedup é best-effort)', async () => {
+      const searchService = {
+        findPossibleDuplicates: jest.fn().mockRejectedValue(new Error('db down')),
+      };
+      const localRouter = buildRouter(searchService);
+
+      const response = await localRouter.dispatch(
+        'tools/call',
+        { name: 'create_task', arguments: { projectId, titulo: 'Nova task' } },
+        userCtx,
+      );
+
+      expect(tasksService.create).toHaveBeenCalledTimes(1);
+      const text = (response.result as { content: { text: string }[] }).content[0].text;
+      expect(JSON.parse(text)).toEqual({ ...created, possibleDuplicates: [] });
     });
   });
 });

@@ -4,10 +4,12 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { ProjectRefService } from './project-ref.service';
+import { RoleResolverService } from '../auth/services/role-resolver.service';
 import { AddProjectMemberDto, UpdateProjectMemberDto } from './dto/add-project-member.dto';
 import { ListProjectMembersResponseDto, ProjectMemberDto } from './dto/project-response.dto';
 
@@ -56,6 +58,9 @@ export class ProjectMembersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly projectRef: ProjectRefService,
+    // F1 (item 1.6) — invalidação do cache de role em toda mutação de
+    // membership de projeto. `@Optional()`: specs com mocks não quebram.
+    @Optional() private readonly roleResolver?: RoleResolverService,
   ) {}
 
   /**
@@ -214,6 +219,9 @@ export class ProjectMembersService {
       },
     });
 
+    // F1 (1.6): o papel recém-concedido vale AGORA.
+    this.roleResolver?.invalidateUser(targetId, undefined, projectIdBigInt);
+
     this.logger.log(
       `addMember: user=${targetId} adicionado ao projeto=${projectIdBigInt} como ${dto.role}`,
     );
@@ -278,6 +286,9 @@ export class ProjectMembersService {
         } as Prisma.InputJsonValue,
       },
     });
+
+    // F1 (1.6): mudança de papel reflete imediatamente.
+    this.roleResolver?.invalidateUser(userIdBigInt, undefined, projectIdBigInt);
 
     this.logger.log(
       `updateMember: user=${userIdBigInt} no projeto=${projectIdBigInt} → role=${dto.role}`,
@@ -345,6 +356,9 @@ export class ProjectMembersService {
       where: { chave: vinculo.chave },
       data: { excluido: true },
     });
+
+    // F1 (1.6): acesso revogado reflete imediatamente (não pelo TTL de 5 min).
+    this.roleResolver?.invalidateUser(userIdBigInt, undefined, projectIdBigInt);
 
     this.logger.log(`removeMember: user=${userIdBigInt} removido do projeto=${projectIdBigInt}`);
   }

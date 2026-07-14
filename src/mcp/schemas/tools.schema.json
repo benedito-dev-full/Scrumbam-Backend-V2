@@ -41,7 +41,7 @@
     },
     {
       "name": "create_task",
-      "description": "Cria uma task no projeto informado. Campos opcionais: priority (LOW/MEDIUM/HIGH/URGENT), dueDate (ISO 8601), idPai (subtarefa), assigneeTeamId (time), idBloco (vincula a um Bloco via dados.idBloco) e fields (valores das colunas customizaveis da Lista, empacotados em dados.fields).",
+      "description": "Cria uma task no projeto informado. Campos opcionais: priority (LOW/MEDIUM/HIGH/URGENT), dueDate (ISO 8601), idPai (subtarefa), assigneeTeamId (time), idBloco (vincula a um Bloco via dados.idBloco) e fields (valores das colunas customizaveis da Lista, empacotados em dados.fields). O retorno inclui possibleDuplicates[]: tasks com titulo parecido na mesma Lista (informativo — a task e SEMPRE criada, nunca bloqueia).",
       "inputSchema": {
         "type": "object",
         "required": ["projectId", "titulo"],

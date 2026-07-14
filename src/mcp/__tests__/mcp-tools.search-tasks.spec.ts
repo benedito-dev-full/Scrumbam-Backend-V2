@@ -119,6 +119,23 @@ describe('MCP search_tasks tool', () => {
     expect(response.error).toBeUndefined();
   });
 
+  it('(b2) query multi-termo é repassada íntegra para searchForMcp (tokenização no service)', async () => {
+    await router.dispatch(
+      'tools/call',
+      { name: 'search_tasks', arguments: { q: 'login bug' } },
+      userCtx,
+    );
+
+    // A tool não tokeniza — apenas repassa `q`; a quebra em termos ocorre no
+    // SearchService.searchForMcp (bug #791 / DEV-120).
+    expect(searchService.searchForMcp).toHaveBeenCalledWith(
+      'login bug',
+      userCtx.dEntidadeId,
+      ['200', '300'],
+      { projectId: undefined, limit: 20 },
+    );
+  });
+
   it('(c) accessibleIds vazio → resultado vazio sem chamar searchService', async () => {
     projectsService.findAccessibleProjectIds.mockResolvedValueOnce([]);
 

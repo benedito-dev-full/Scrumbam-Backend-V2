@@ -53,6 +53,50 @@ export class ActiveExecutionDto {
 }
 
 /**
+ * Sessão de trabalho ATIVA de uma task (workSession aberta em EXECUTING).
+ *
+ * Presente em `TaskResponseDto.activeWorkSession` quando a task está `EXECUTING`
+ * com uma workSession aberta e FRESCA (dentro do TTL de 2h — sessão órfã expira).
+ * É a fonte do badge "em trabalho por Fulano desde X" no frontend (card, linha
+ * de lista e tela de abertura) e a mesma fonte que a trava de concorrência MCP
+ * usa para recusar escrita de OUTRO ator (task #794 / DEV-123).
+ *
+ * Deriva de `DTask.dados.telemetry.workSessions[]` (fluxo de IA, ADR-V2-057) —
+ * NÃO confundir com `timer` (fluxo humano, `manualTimers[]`).
+ *
+ * @see WorkSession — modelo cru em `task-dados.schema.ts`
+ * @see resolveActiveWorkSession — fonte única de extração (badge + trava)
+ */
+export class ActiveWorkSessionDto {
+  @ApiProperty({
+    description:
+      'DEntidade.chave (string) de quem abriu a sessão de trabalho (moveu a ' +
+      'task para EXECUTING). `null` quando a sessão foi aberta sem dono ' +
+      'identificável (movedBy nulo).',
+    nullable: true,
+    example: '7',
+  })
+  agentId!: string | null;
+
+  @ApiProperty({
+    description:
+      'Nome (DEntidade.nome) do dono da sessão, hidratado server-side em batch ' +
+      '(ZERO N+1) nas respostas de leitura (GET /tasks, GET /tasks/:id). Em ' +
+      'respostas de mutação fica `null` (o frontend casa o agentId com a lista ' +
+      'de membros já carregada). `null` também quando o agentId é nulo.',
+    nullable: true,
+    example: 'Ana Souza',
+  })
+  agentName!: string | null;
+
+  @ApiProperty({
+    description: 'Data ISO 8601 de início da sessão de trabalho (entrada em EXECUTING).',
+    example: '2026-07-10T13:00:00.000Z',
+  })
+  startedAt!: string;
+}
+
+/**
  * DTO de resposta de task.
  *
  * Retornado em create, findOne, update e updateStatus.
@@ -167,6 +211,19 @@ export class TaskResponseDto {
     nullable: true,
   })
   activeExecution!: ActiveExecutionDto | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Sessão de trabalho ATIVA (IA) associada a esta task — fonte do badge ' +
+      '"em trabalho por Fulano desde X". Presente somente quando a task está ' +
+      'EXECUTING com uma workSession aberta e fresca (TTL 2h — sessão órfã ' +
+      'expira). `null` caso contrário. Deriva de dados.telemetry.workSessions[] ' +
+      '(ADR-V2-057) — distinto de `timer` (fluxo humano). O `agentName` é ' +
+      'hidratado em batch nas leituras (ZERO N+1); em mutações fica null.',
+    type: () => ActiveWorkSessionDto,
+    nullable: true,
+  })
+  activeWorkSession!: ActiveWorkSessionDto | null;
 
   @ApiPropertyOptional({
     description:

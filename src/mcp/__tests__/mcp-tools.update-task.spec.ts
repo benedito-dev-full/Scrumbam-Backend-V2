@@ -124,7 +124,9 @@ describe('MCP update_task tool', () => {
       userCtx.dEntidadeId,
       [projectId],
     );
-    expect(tasksService.findOne).toHaveBeenCalledTimes(1);
+    // Task #794: findOne é chamado 2x — 1x no início (gate de tenant + trava de
+    // concorrência, carrega o estado atual) e 1x no fim (snapshot pós-mutação).
+    expect(tasksService.findOne).toHaveBeenCalledTimes(2);
   });
 
   it('(e) sucesso combinando 3+ campos (name + description + priority + assignee + status)', async () => {
@@ -155,7 +157,9 @@ describe('MCP update_task tool', () => {
       userCtx.dEntidadeId,
       [projectId],
     );
-    expect(tasksService.findOne).toHaveBeenCalledTimes(1);
+    // Task #794: findOne é chamado 2x — 1x no início (gate de tenant + trava de
+    // concorrência, carrega o estado atual) e 1x no fim (snapshot pós-mutação).
+    expect(tasksService.findOne).toHaveBeenCalledTimes(2);
   });
 
   // ── Casos de erro INVALID_PARAMS ──────────────────────────────────────
@@ -234,10 +238,13 @@ describe('MCP update_task tool', () => {
 
   // ── Tenant isolation e propagacao de exceptions ───────────────────────
 
-  it('(j) tenant isolation — NotFoundException do service propagada (task de outro tenant)', async () => {
+  it('(j) tenant isolation — NotFoundException do findOne (task de outro tenant) propaga', async () => {
     const otherProjectId = '9007199254740001';
     projectsService.findAccessibleProjectIds.mockResolvedValueOnce([otherProjectId]);
-    tasksService.update.mockRejectedValueOnce(
+    // Task #794: update_task carrega a task ANTES de mutar (gate de tenant +
+    // trava de concorrência). Com scope alheio, o findOne inicial lança NotFound
+    // — a mutação nunca é alcançada.
+    tasksService.findOne.mockRejectedValueOnce(
       new NotFoundException(`Task ${taskId} não encontrada`),
     );
 
@@ -249,8 +256,8 @@ describe('MCP update_task tool', () => {
       ),
     ).rejects.toThrow(NotFoundException);
 
-    expect(tasksService.update).toHaveBeenCalledWith(taskId, { nome: 'X' }, [otherProjectId]);
-    expect(tasksService.findOne).not.toHaveBeenCalled();
+    expect(tasksService.findOne).toHaveBeenCalledWith(taskId, [otherProjectId]);
+    expect(tasksService.update).not.toHaveBeenCalled();
   });
 
   it('(k) propaga ctx.dEntidadeId (bigint) para findAccessibleProjectIds', async () => {
@@ -265,7 +272,7 @@ describe('MCP update_task tool', () => {
     expect(callArg).toBe(userCtx.dEntidadeId);
   });
 
-  it('(l) ordem de chamada: update → updateStatus → findOne', async () => {
+  it('(l) ordem de chamada: findOne(gate) → update → updateStatus → findOne(snapshot)', async () => {
     const callOrder: string[] = [];
     tasksService.update.mockImplementationOnce(async () => {
       callOrder.push('update');
@@ -275,7 +282,9 @@ describe('MCP update_task tool', () => {
       callOrder.push('updateStatus');
       return { id: taskId };
     });
-    tasksService.findOne.mockImplementationOnce(async () => {
+    // Task #794: findOne agora é chamado 2x (gate/trava no início + snapshot no
+    // fim). Empurra em TODA chamada para verificar a ordem completa.
+    tasksService.findOne.mockImplementation(async () => {
       callOrder.push('findOne');
       return finalTask;
     });
@@ -289,7 +298,7 @@ describe('MCP update_task tool', () => {
       userCtx,
     );
 
-    expect(callOrder).toEqual(['update', 'updateStatus', 'findOne']);
+    expect(callOrder).toEqual(['findOne', 'update', 'updateStatus', 'findOne']);
   });
 
   // ── Casos extras de qualidade ─────────────────────────────────────────
@@ -354,11 +363,9 @@ describe('MCP update_task tool', () => {
       userCtx,
     );
 
-    expect(tasksService.update).toHaveBeenCalledWith(
-      taskId,
-      { dueDate: '2026-06-30' },
-      [projectId],
-    );
+    expect(tasksService.update).toHaveBeenCalledWith(taskId, { dueDate: '2026-06-30' }, [
+      projectId,
+    ]);
   });
 
   it('(s) dueDate null → update recebe { dueDate: null } (remove)', async () => {
@@ -398,11 +405,9 @@ describe('MCP update_task tool', () => {
       userCtx,
     );
 
-    expect(tasksService.update).toHaveBeenCalledWith(
-      taskId,
-      { dados: { idBloco: '77' } },
-      [projectId],
-    );
+    expect(tasksService.update).toHaveBeenCalledWith(taskId, { dados: { idBloco: '77' } }, [
+      projectId,
+    ]);
   });
 
   it('(w) idBloco null → update recebe { dados: { idBloco: null } } (desvincula)', async () => {
@@ -412,11 +417,9 @@ describe('MCP update_task tool', () => {
       userCtx,
     );
 
-    expect(tasksService.update).toHaveBeenCalledWith(
-      taskId,
-      { dados: { idBloco: null } },
-      [projectId],
-    );
+    expect(tasksService.update).toHaveBeenCalledWith(taskId, { dados: { idBloco: null } }, [
+      projectId,
+    ]);
   });
 
   it('(x) combinacao idPai + idBloco + dueDate → 1 chamada a update, sem updateStatus', async () => {
@@ -470,8 +473,10 @@ describe('MCP update_task tool', () => {
     expect(tasksService.update).not.toHaveBeenCalled();
   });
 
-  it('(aa) tenant: idBloco nao burla scope — NotFound do service propaga', async () => {
-    tasksService.update.mockRejectedValueOnce(
+  it('(aa) tenant: idBloco nao burla scope — NotFound do findOne(gate) propaga', async () => {
+    // Task #794: o gate de tenant é o findOne inicial; scope alheio → NotFound
+    // antes de qualquer mutação (idBloco não alcança o service).
+    tasksService.findOne.mockRejectedValueOnce(
       new NotFoundException(`Task ${taskId} não encontrada`),
     );
 
@@ -483,7 +488,7 @@ describe('MCP update_task tool', () => {
       ),
     ).rejects.toThrow(NotFoundException);
 
-    expect(tasksService.findOne).not.toHaveBeenCalled();
+    expect(tasksService.update).not.toHaveBeenCalled();
   });
 
   it('(q) expoe update_task em tools/list', async () => {

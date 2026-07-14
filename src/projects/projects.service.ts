@@ -5,15 +5,20 @@ import {
   Logger,
   NotFoundException,
   OnModuleInit,
+  Optional,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
+import { MetricsService } from '../common/observability/metrics.service';
+import { AUTH_ERROR_CODES } from '../common/errors/error-codes';
 import { EventProducerService } from '../eventos/core/event-producer.service';
 import { CorrelationIdService } from '../common/services/correlation-id.service';
 import { SeedBootstrapService } from './seed-bootstrap.service';
 import { ProjectMembersService } from './project-members.service';
 import { ProjectRefService } from './project-ref.service';
 import { TasksIdentifierService } from '../tasks/tasks-identifier.service';
+import { RoleResolverService } from '../auth/services/role-resolver.service';
 import { parseTaskDados } from '../tasks/schemas/task-dados.schema';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { CreateFromTemplateDto } from './dto/create-from-template.dto';
@@ -375,6 +380,12 @@ export class ProjectsService implements OnModuleInit {
     private readonly correlationIdService: CorrelationIdService,
     private readonly projectRef: ProjectRefService,
     private readonly identifierService: TasksIdentifierService,
+    // F0 — Observabilidade. `@Optional()`: instrumentacao nunca quebra o service.
+    @Optional() private readonly metrics?: MetricsService,
+    // F1 (item 1.6) — mudanças no PROJETO (visibilidade, exclusão) alteram o
+    // role herdado (Camada A de espaço público, ADR-V2-051) de TODOS os
+    // usuários: o cache do projeto precisa cair junto.
+    @Optional() private readonly roleResolver?: RoleResolverService,
   ) {}
 
   /**
@@ -628,13 +639,20 @@ export class ProjectsService implements OnModuleInit {
     const take = Math.min(opts.limit ?? 20, 100);
 
     // ADR-V2-042: organizationId vira filtro de tenant via DProject.idEstab.
-    // Convertendo aqui para BigInt — strings invalidas (raras: JWT corrompido)
-    // resultam em lista vazia em vez de quebrar.
+    //
+    // F4 (item 4.2): claim malformado NÃO é mais lista vazia silenciosa — é
+    // 401 ORG_CONTEXT_STALE (o token não serve para escopar nada; o frontend
+    // renova e retenta). `throwOrgContextStale` emite o contador da F0.
     let orgIdBig: bigint | undefined;
     if (organizationId !== undefined) {
       if (!/^-?\d+$/.test(organizationId)) {
-        this.logger.warn(`findMany: organizationId invalido="${organizationId}" — retorna vazio`);
-        return { items: [], pagination: { hasMore: false, nextCursor: null } };
+        this.logger.warn(`findMany: organizationId invalido="${organizationId}" — 401 stale`);
+        this.throwOrgContextStale(
+          userEntidadeId,
+          organizationId,
+          'invalid_org_claim',
+          'projects.findMany',
+        );
       }
       orgIdBig = BigInt(organizationId);
     }
@@ -802,6 +820,27 @@ export class ProjectsService implements OnModuleInit {
     ]);
 
     if (allIds.size === 0) {
+      // "Os projetos sumiram, mas não deslogou". Lista vazia aqui pode ser
+      // (a) usuário legitimamente sem projetos ou (b) `organizationId` STALE no
+      // JWT (org da qual ele não é mais membro). São indistinguíveis PELA LISTA
+      // — a membership de org é que separa os dois (ver assertOrgContextFresh).
+      //
+      // F4 (item 4.2): (b) vira 401 ORG_CONTEXT_STALE. (a) — inclusive o
+      // usuário NOVO de uma org NOVA, sem nenhum projeto — continua **200 com
+      // lista vazia**. A query só roda neste caminho (lista já vazia), então o
+      // fluxo normal não paga por ela.
+      const ctx = await this.assertOrgContextFresh(
+        userEntidadeId,
+        orgIdBig?.toString(),
+        'projects.findMany',
+      );
+      if (ctx === 'fresh') {
+        this.metrics?.increment(
+          'auth.org_context_empty_scope',
+          { source: 'projects.findMany' },
+          { silent: true },
+        );
+      }
       return { items: [], pagination: { hasMore: false, nextCursor: null } };
     }
 
@@ -975,6 +1014,125 @@ export class ProjectsService implements OnModuleInit {
     const nextCursor = hasMore ? projectIds[projectIds.length - 1].toString() : null;
 
     return { items, pagination: { hasMore, nextCursor } };
+  }
+
+  /**
+   * Decide se o `organizationId` do JWT ainda corresponde à realidade — e
+   * **lança 401 `ORG_CONTEXT_STALE`** quando não corresponde (F4, item 4.2).
+   *
+   * ## O problema que isto resolve
+   *
+   * Até a F3, um JWT com `organizationId` de uma org da qual o usuário **não é
+   * mais membro** produzia **200 com lista vazia**, silenciosamente. Do ponto de
+   * vista do usuário: "sumiram todos os meus projetos" — e nada no sistema
+   * acusava. Agora esse caso vira 401 + `code: ORG_CONTEXT_STALE`, e o
+   * frontend faz refresh silencioso (reemite o token com a org correta, ou
+   * órfão conforme ADR-V2-038) e **repete** o request. Zero logout.
+   *
+   * ## Como se distingue "org stale" de "usuário novo sem projetos"
+   *
+   * A distinção **não** é feita pela lista vazia (os dois casos produzem lista
+   * vazia — por isso o bug durou tanto). É feita pela **membership de org**:
+   *
+   * | Situação                                     | `organizationId` | DVincula -161/-162/-163 | Resultado |
+   * |----------------------------------------------|------------------|--------------------------|-----------|
+   * | Usuário órfão (ADR-V2-038)                   | ausente          | —                        | `'orphan'` — 200 `[]` |
+   * | **Usuário novo, org válida, zero projetos**  | presente         | **EXISTE**               | `'fresh'` — **200 `[]`** |
+   * | Removido da org / org apagada / claim podre  | presente         | **NÃO existe**           | **401 ORG_CONTEXT_STALE** |
+   *
+   * O que torna essa inferência **segura** é a origem do claim: o
+   * `organizationId` só é emitido no token a partir de uma DVincula de org
+   * **existente** (`AuthService.login`/`refresh` resolvem a org via
+   * `DVincula in [-161,-162,-163]`). Logo, "claim presente + membership
+   * ausente" só pode significar que a membership foi revogada **depois** da
+   * emissão do token — ou seja, o token está desatualizado. Não há caminho
+   * legítimo em que um usuário ativo de uma org válida fique sem essa DVincula.
+   *
+   * ## Fail-open deliberado
+   *
+   * Se a query de membership falhar (banco lento, pool esgotado), **não**
+   * lançamos: um blip de infra jamais pode virar 401 (é exatamente a lição da
+   * F1/D4 — infra não é `invalid_token`). Nesse caso devolvemos `'fresh'` e o
+   * comportamento anterior (200 `[]`) é preservado.
+   *
+   * @param userEntidadeId - DEntidade (-150) do usuário
+   * @param organizationId - claim `organizationId` do JWT (string BigInt) ou `undefined`
+   * @param source - rótulo do call-site (telemetria)
+   * @returns `'orphan'` (sem claim) ou `'fresh'` (claim confere)
+   *
+   * @throws {UnauthorizedException} `{ code: 'ORG_CONTEXT_STALE' }` — claim
+   *   malformado ou apontando para org sem membership real.
+   *
+   * @see AUTH_ERROR_CODES.ORG_CONTEXT_STALE — ação esperada do cliente
+   */
+  async assertOrgContextFresh(
+    userEntidadeId: bigint,
+    organizationId: string | undefined,
+    source: string,
+  ): Promise<'orphan' | 'fresh'> {
+    if (organizationId === undefined || organizationId === '') {
+      // Órfão é estado VÁLIDO (ADR-V2-038) — quem responde é o
+      // RequireWorkspaceGuard (403 NO_WORKSPACE), não este método.
+      return 'orphan';
+    }
+
+    if (!/^-?\d+$/.test(organizationId)) {
+      this.throwOrgContextStale(userEntidadeId, organizationId, 'invalid_org_claim', source);
+    }
+
+    let membership: { chave: bigint } | null;
+    try {
+      membership = await this.prisma.dVincula.findFirst({
+        where: {
+          idEntidade: userEntidadeId,
+          idLocEscritu: BigInt(organizationId),
+          idClasse: { in: ORG_ROLE_CLASSES },
+          excluido: false,
+        },
+        select: { chave: true },
+      });
+    } catch (err) {
+      // Fail-open: infraestrutura instável NUNCA vira 401 (RFC 6750).
+      this.logger.warn(
+        `assertOrgContextFresh: falha ao verificar membership (fail-open) — ${(err as Error).message}`,
+      );
+      return 'fresh';
+    }
+
+    if (!membership) {
+      this.throwOrgContextStale(userEntidadeId, organizationId, 'membership_missing', source);
+    }
+
+    return 'fresh';
+  }
+
+  /**
+   * Emite o contador `auth.org_context_stale` (instrumentado na F0) e lança o
+   * 401 com o `code` do contrato.
+   *
+   * @throws {UnauthorizedException} sempre
+   */
+  private throwOrgContextStale(
+    userEntidadeId: bigint,
+    organizationId: string,
+    reason: 'invalid_org_claim' | 'membership_missing',
+    source: string,
+  ): never {
+    this.metrics?.increment(
+      'auth.org_context_stale',
+      {
+        reason,
+        userEntidadeId: userEntidadeId.toString(),
+        organizationId,
+        source,
+      },
+      { level: 'warn' },
+    );
+
+    throw new UnauthorizedException({
+      code: AUTH_ERROR_CODES.ORG_CONTEXT_STALE,
+      message: 'Contexto de organização desatualizado. Renove a sessão e tente novamente.',
+    });
   }
 
   /**
@@ -1480,6 +1638,13 @@ export class ProjectsService implements OnModuleInit {
       },
     });
 
+    // F1 (1.6): visibilidade é insumo do role herdado de espaço público
+    // (ADR-V2-051 §8). Trocar público↔privado sem invalidar deixaria o acesso
+    // antigo valendo por até 5 min — para conceder E para revogar.
+    if (dto.privado !== undefined) {
+      this.roleResolver?.invalidateProject(projectId);
+    }
+
     // Resolver teamId final para o response (após commit).
     let finalTeamId: string | null;
     if (teamIdProvided) {
@@ -1688,6 +1853,9 @@ export class ProjectsService implements OnModuleInit {
 
       return { tasks: tasksResult.count, members: membersResult.count };
     });
+
+    // F1 (1.6): projeto excluído — nenhum role cacheado dele pode sobreviver.
+    this.roleResolver?.invalidateProject(projectId);
 
     // Audit APÓS commit — tipo project.deleted → idClasse=-499 PROJECT_LIFECYCLE (ADR-V2-027)
     await this.eventProducer.addInternalEvent(

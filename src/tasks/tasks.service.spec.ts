@@ -1212,9 +1212,7 @@ describe('TasksService', () => {
         expect(emitted).not.toContain('phase.updated');
         expect(emitted).toContain('task.updated');
 
-        const call = eventProducer.addInternalEvent.mock.calls.find(
-          (c) => c[0] === 'task.updated',
-        );
+        const call = eventProducer.addInternalEvent.mock.calls.find((c) => c[0] === 'task.updated');
         expect(call?.[1]).toMatchObject({
           taskId: '7',
           projectId: '1',
@@ -1245,9 +1243,7 @@ describe('TasksService', () => {
 
         await service.update('7', { nome: 'Task X' });
 
-        const call = eventProducer.addInternalEvent.mock.calls.find(
-          (c) => c[0] === 'task.updated',
-        );
+        const call = eventProducer.addInternalEvent.mock.calls.find((c) => c[0] === 'task.updated');
         expect(call?.[1]).toMatchObject({ taskId: '7', actorId: null });
       });
     });
@@ -1622,6 +1618,89 @@ describe('TasksService', () => {
 
         expect(prisma.dProject.findFirst).not.toHaveBeenCalled();
       });
+    });
+  });
+
+  /**
+   * F4 — item 4.3: semântica de erro honesta na ESCRITA.
+   *
+   * 404 continua sendo a resposta quando o usuário NÃO tem leitura
+   * (anti-enumeração, OWASP). 403 `FORBIDDEN_ROLE` passa a ser a resposta quando
+   * ele TEM leitura e não tem escrita — hoje o único caso assim é o catálogo de
+   * templates GLOBAIS (-401/-402, `idEstab = NULL`), legível por qualquer org
+   * (ADR-V2-061) e read-only por definição.
+   */
+  describe('F4 — 403 FORBIDDEN_ROLE vs 404 na escrita (item 4.3)', () => {
+    /** Simula "o projeto da task É um template global" (tem leitura, não tem escrita). */
+    const templateGlobal = () =>
+      prisma.dProject.findFirst.mockResolvedValue({ chave: BigInt(401) });
+    /** Simula "projeto comum fora do scope" (não tem nem leitura). */
+    const foraDoScope = () => prisma.dProject.findFirst.mockResolvedValue(null);
+
+    beforeEach(() => {
+      prisma.dTask.findFirst.mockResolvedValue(
+        makeTask({ chave: BigInt(30), idProject: BigInt(401) }),
+      );
+    });
+
+    it('update() em task de template GLOBAL (tem leitura) → 403 FORBIDDEN_ROLE', async () => {
+      templateGlobal();
+
+      await expect(service.update('30', { nome: 'x' }, ['1'])).rejects.toMatchObject({
+        status: 403,
+        response: { code: 'FORBIDDEN_ROLE' },
+      });
+    });
+
+    it('update() em projeto fora do scope (sem leitura) → 404 (anti-enumeração preservada)', async () => {
+      foraDoScope();
+
+      await expect(service.update('30', { nome: 'x' }, ['1'])).rejects.toThrow(NotFoundException);
+    });
+
+    it('updateStatus() em task de template GLOBAL → 403 FORBIDDEN_ROLE', async () => {
+      templateGlobal();
+
+      await expect(
+        service.updateStatus('30', { status: 'READY' }, undefined, ['1']),
+      ).rejects.toMatchObject({
+        status: 403,
+        response: { code: 'FORBIDDEN_ROLE' },
+      });
+    });
+
+    it('updateStatus() em projeto fora do scope → 404', async () => {
+      foraDoScope();
+
+      await expect(
+        service.updateStatus('30', { status: 'READY' }, undefined, ['1']),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('delete() em task de template GLOBAL → 403 FORBIDDEN_ROLE', async () => {
+      templateGlobal();
+
+      await expect(service.delete('30', ['1'])).rejects.toMatchObject({
+        status: 403,
+        response: { code: 'FORBIDDEN_ROLE' },
+      });
+    });
+
+    it('delete() em projeto fora do scope → 404', async () => {
+      foraDoScope();
+
+      await expect(service.delete('30', ['1'])).rejects.toThrow(NotFoundException);
+    });
+
+    it('escrita DENTRO do scope não consulta dProject (custo zero no fluxo normal)', async () => {
+      prisma.dTask.findFirst.mockResolvedValue(
+        makeTask({ chave: BigInt(30), idProject: BigInt(1) }),
+      );
+      prisma.dTask.update.mockResolvedValue(makeTask({ chave: BigInt(30), idProject: BigInt(1) }));
+
+      await service.update('30', { nome: 'ok' }, ['1']);
+
+      expect(prisma.dProject.findFirst).not.toHaveBeenCalled();
     });
   });
 });

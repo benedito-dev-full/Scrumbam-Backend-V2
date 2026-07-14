@@ -37,6 +37,12 @@ const TYPE_TO_CLASSE: Readonly<Record<string, bigint>> = Object.freeze({
   'timer.paused': BigInt(-489),
   'timer.stopped': BigInt(-489),
 
+  // Justificativa de atraso (ADR-V2-070). O evento delay.justified é apenas um
+  // SINAL pós-persistência; a fonte de verdade (e o que o painel conta) é o
+  // DEvento -503 gravado diretamente pelo DelayJustificationsService. Aqui
+  // reusa -489 AUDIT_GENERIC — NUNCA -503 (evitaria double-count no painel).
+  'delay.justified': BigInt(-489),
+
   // Phases (ADR-V2-047 — Fase 8). Reusa -489 AUDIT_GENERIC (padrão ADR-V2-027 —
   // sem DClasse semântica dedicada). Distinção via metaDados._meta.action.
   'phase.created': BigInt(-489),

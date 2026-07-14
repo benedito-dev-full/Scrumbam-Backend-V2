@@ -172,12 +172,8 @@ describe('SearchService', () => {
 
     await service.search(params);
 
-    expect(prismaMock.dTask.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ take: 10 }),
-    );
-    expect(prismaMock.dProject.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ take: 6 }),
-    );
+    expect(prismaMock.dTask.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 10 }));
+    expect(prismaMock.dProject.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 6 }));
     // people: take=4 aplicado em dEntidade (se houver membros)
     // Verificamos dVincula chamado — people só busca dEntidade se há membros
     expect(prismaMock.dVincula.findMany).toHaveBeenCalled();
@@ -255,7 +251,9 @@ describe('SearchService', () => {
 
   it('11: trunca descricao em 150 chars com sufixo "..."', async () => {
     const longDesc = 'x'.repeat(300); // 300 chars
-    prismaMock.dTask.findMany = jest.fn().mockResolvedValue([makeTask(BigInt(1), 'Tarefa', longDesc)]);
+    prismaMock.dTask.findMany = jest
+      .fn()
+      .mockResolvedValue([makeTask(BigInt(1), 'Tarefa', longDesc)]);
 
     const result = await service.search(BASE_PARAMS);
 
@@ -287,9 +285,9 @@ describe('SearchService', () => {
   // ─── Spec 13: ForbiddenException quando organizationId ausente ───────────
 
   it('13: lança ForbiddenException quando organizationId ausente', async () => {
-    await expect(
-      service.search({ ...BASE_PARAMS, organizationId: '' }),
-    ).rejects.toThrow(ForbiddenException);
+    await expect(service.search({ ...BASE_PARAMS, organizationId: '' })).rejects.toThrow(
+      ForbiddenException,
+    );
   });
 
   // ─── Spec 14: retorna [] de people quando não há membros na org ──────────
@@ -316,5 +314,323 @@ describe('SearchService', () => {
 
     expect(result.cursors.project).toBeNull();
     expect(result.cursors.person).toBeNull();
+  });
+
+  // ─── Tokenização (bug #791 / DEV-120) ─────────────────────────────────────
+
+  // ─── Spec 16: multi-termo gera AND-flexível (cada token em nome OU descricao)
+  it('16: query multi-termo gera AND com OR por token em DTask (nome/descricao)', async () => {
+    prismaMock.dTask.findMany = jest.fn().mockResolvedValue([]);
+
+    await service.search({ ...BASE_PARAMS, q: 'login bug' });
+
+    expect(prismaMock.dTask.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          AND: [
+            {
+              OR: [
+                { nome: { contains: 'login', mode: 'insensitive' } },
+                { descricao: { contains: 'login', mode: 'insensitive' } },
+              ],
+            },
+            {
+              OR: [
+                { nome: { contains: 'bug', mode: 'insensitive' } },
+                { descricao: { contains: 'bug', mode: 'insensitive' } },
+              ],
+            },
+          ],
+        }),
+      }),
+    );
+  });
+
+  // ─── Spec 17: ordem dos termos é irrelevante — mesma estrutura AND ─────────
+  it('17: ordem trocada dos termos produz os mesmos tokens (order-independent)', async () => {
+    prismaMock.dTask.findMany = jest.fn().mockResolvedValue([]);
+
+    // "bug login" deve tokenizar em ['bug', 'login'] — cada um casa em algum campo.
+    await service.search({ ...BASE_PARAMS, q: 'bug login' });
+
+    const where = prismaMock.dTask.findMany.mock.calls[0][0].where;
+    // Extrai os tokens usados nos OR de nome
+    const tokens = where.AND.map(
+      (clause: { OR: { nome?: { contains: string } }[] }) => clause.OR[0].nome?.contains,
+    );
+    expect(tokens).toEqual(['bug', 'login']);
+    // AND-flexível: 2 cláusulas, uma por token
+    expect(where.AND).toHaveLength(2);
+  });
+
+  // ─── Spec 18: termo único mantém AND com 1 cláusula ───────────────────────
+  it('18: query de termo único gera AND com uma cláusula OR', async () => {
+    prismaMock.dTask.findMany = jest.fn().mockResolvedValue([]);
+
+    await service.search({ ...BASE_PARAMS, q: 'login' });
+
+    const where = prismaMock.dTask.findMany.mock.calls[0][0].where;
+    expect(where.AND).toEqual([
+      {
+        OR: [
+          { nome: { contains: 'login', mode: 'insensitive' } },
+          { descricao: { contains: 'login', mode: 'insensitive' } },
+        ],
+      },
+    ]);
+  });
+
+  // ─── Spec 19: tokens < 2 chars descartados; duplicatas removidas ──────────
+  it('19: descarta tokens curtos (<2 chars) e deduplica', async () => {
+    prismaMock.dTask.findMany = jest.fn().mockResolvedValue([]);
+
+    // "a bug bug o login" → tokens válidos únicos = ['bug', 'login']
+    await service.search({ ...BASE_PARAMS, q: 'a bug bug o login' });
+
+    const where = prismaMock.dTask.findMany.mock.calls[0][0].where;
+    const tokens = where.AND.map(
+      (clause: { OR: { nome?: { contains: string } }[] }) => clause.OR[0].nome?.contains,
+    );
+    expect(tokens).toEqual(['bug', 'login']);
+  });
+
+  // ─── Spec 20: fallback substring quando q só tem espaços/ruído ─────────────
+  it('20: fallback para OR contains:q quando nenhum token válido (só espaços)', async () => {
+    prismaMock.dTask.findMany = jest.fn().mockResolvedValue([]);
+
+    await service.search({ ...BASE_PARAMS, q: '   ' });
+
+    const where = prismaMock.dTask.findMany.mock.calls[0][0].where;
+    expect(where.AND).toBeUndefined();
+    expect(where.OR).toEqual([
+      { nome: { contains: '   ', mode: 'insensitive' } },
+      { descricao: { contains: '   ', mode: 'insensitive' } },
+    ]);
+  });
+
+  // ─── Spec 21: tokenização aplicada em DProject (nome + descricao) ──────────
+  it('21: aplica tokenização em DProject sobre nome + descricao', async () => {
+    prismaMock.dProject.findMany = jest.fn().mockResolvedValue([]);
+
+    await service.search({ ...BASE_PARAMS, q: 'api backend' });
+
+    expect(prismaMock.dProject.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          AND: [
+            {
+              OR: [
+                { nome: { contains: 'api', mode: 'insensitive' } },
+                { descricao: { contains: 'api', mode: 'insensitive' } },
+              ],
+            },
+            {
+              OR: [
+                { nome: { contains: 'backend', mode: 'insensitive' } },
+                { descricao: { contains: 'backend', mode: 'insensitive' } },
+              ],
+            },
+          ],
+        }),
+      }),
+    );
+  });
+
+  // ─── Spec 22: tokenização aplicada em DEntidade people (nome + email) ──────
+  it('22: aplica tokenização em people (DEntidade) sobre nome + email', async () => {
+    prismaMock.dVincula.findMany = jest.fn().mockResolvedValue([makeVinculo(BigInt(15))]);
+    prismaMock.dEntidade.findMany = jest.fn().mockResolvedValue([]);
+
+    await service.search({ ...BASE_PARAMS, q: 'joao silva' });
+
+    expect(prismaMock.dEntidade.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          AND: [
+            {
+              OR: [
+                { nome: { contains: 'joao', mode: 'insensitive' } },
+                { email: { contains: 'joao', mode: 'insensitive' } },
+              ],
+            },
+            {
+              OR: [
+                { nome: { contains: 'silva', mode: 'insensitive' } },
+                { email: { contains: 'silva', mode: 'insensitive' } },
+              ],
+            },
+          ],
+        }),
+      }),
+    );
+  });
+
+  // ─── Spec 23: searchForMcp tokeniza sobre nome + descricao ────────────────
+  it('23: searchForMcp aplica tokenização (AND-flexível) em nome + descricao', async () => {
+    prismaMock.dTask.findMany = jest.fn().mockResolvedValue([]);
+
+    await service.searchForMcp('login bug', BigInt(9), ['200', '300'], { limit: 10 });
+
+    expect(prismaMock.dTask.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          idProject: { in: [BigInt('200'), BigInt('300')] },
+          AND: [
+            {
+              OR: [
+                { nome: { contains: 'login', mode: 'insensitive' } },
+                { descricao: { contains: 'login', mode: 'insensitive' } },
+              ],
+            },
+            {
+              OR: [
+                { nome: { contains: 'bug', mode: 'insensitive' } },
+                { descricao: { contains: 'bug', mode: 'insensitive' } },
+              ],
+            },
+          ],
+        }),
+      }),
+    );
+  });
+
+  // ─── findPossibleDuplicates (task #799 / DEV-128) ─────────────────────────
+
+  describe('findPossibleDuplicates', () => {
+    /** Row de DTask mockada com o shape que o método seleciona (inclui dados). */
+    function makeDupRow(
+      chave: bigint,
+      nome: string,
+      opts: { identifier?: string; idProject?: bigint; idStatus?: bigint; criadoEm?: Date } = {},
+    ) {
+      return {
+        chave,
+        nome,
+        idProject: opts.idProject ?? BigInt(352),
+        idStatus: opts.idStatus ?? BigInt(-443),
+        criadoEm: opts.criadoEm ?? new Date('2026-07-05T12:00:00.000Z'),
+        dados: opts.identifier ? { identifier: opts.identifier } : null,
+        project: { chave: opts.idProject ?? BigInt(352), nome: 'Backend Core' },
+      };
+    }
+
+    it('marca matchType exact vs similar e ordena exatos primeiro', async () => {
+      // Ordem de retorno do banco: similar antes de exato (criadoEm desc);
+      // o método deve reordenar colocando o exato na frente.
+      prismaMock.dTask.findMany = jest
+        .fn()
+        .mockResolvedValue([
+          makeDupRow(BigInt(2), 'Corrigir login OAuth do gateway', { identifier: 'DEV-88' }),
+          makeDupRow(BigInt(1), 'Corrigir login OAuth', { identifier: 'DEV-87' }),
+        ]);
+
+      const result = await service.findPossibleDuplicates({
+        nome: 'Corrigir login OAuth',
+        projectId: '352',
+      });
+
+      expect(result).toHaveLength(2);
+      expect(result[0].matchType).toBe('exact');
+      expect(result[0].chave).toBe('1');
+      expect(result[0].identifier).toBe('DEV-87');
+      expect(result[1].matchType).toBe('similar');
+      expect(result[1].chave).toBe('2');
+    });
+
+    it('exact é case-insensitive e ignora espaços nas bordas', async () => {
+      prismaMock.dTask.findMany = jest
+        .fn()
+        .mockResolvedValue([makeDupRow(BigInt(1), '  CORRIGIR Login OAuth  ')]);
+
+      const result = await service.findPossibleDuplicates({
+        nome: 'corrigir login oauth',
+        projectId: '352',
+      });
+
+      expect(result[0].matchType).toBe('exact');
+    });
+
+    it('escopa por projeto (idProject fixo) e inclui DONE (sem filtro de status)', async () => {
+      const findMany = jest.fn().mockResolvedValue([]);
+      prismaMock.dTask.findMany = findMany;
+
+      await service.findPossibleDuplicates({ nome: 'qualquer coisa', projectId: '352' });
+
+      const where = findMany.mock.calls[0][0].where;
+      expect(where.idProject).toBe(BigInt(352));
+      expect(where.excluido).toBe(false);
+      // Não há filtro de status → tasks concluídas/arquivadas também entram (decisão #4).
+      expect(where.idStatus).toBeUndefined();
+      // Sem excludeTaskId → sem restrição de chave.
+      expect(where.chave).toBeUndefined();
+    });
+
+    it('aplica excludeTaskId como chave: { not } (fluxo de edição)', async () => {
+      const findMany = jest.fn().mockResolvedValue([]);
+      prismaMock.dTask.findMany = findMany;
+
+      await service.findPossibleDuplicates({
+        nome: 'renomear task',
+        projectId: '352',
+        excludeTaskId: '1234',
+      });
+
+      const where = findMany.mock.calls[0][0].where;
+      expect(where.chave).toEqual({ not: BigInt(1234) });
+    });
+
+    it('respeita o limit (default 5) fazendo slice após reordenar', async () => {
+      const rows = Array.from({ length: 8 }, (_, i) =>
+        makeDupRow(BigInt(i + 1), `Task parecida ${i + 1}`),
+      );
+      const findMany = jest.fn().mockResolvedValue(rows);
+      prismaMock.dTask.findMany = findMany;
+
+      const result = await service.findPossibleDuplicates({
+        nome: 'Task parecida',
+        projectId: '352',
+      });
+
+      // Buffer de +5 no take, slice(limit) no fim.
+      expect(findMany.mock.calls[0][0].take).toBe(10);
+      expect(result).toHaveLength(5);
+    });
+
+    it('mapeia o contrato TaskDuplicateDto (identifier null quando ausente)', async () => {
+      prismaMock.dTask.findMany = jest
+        .fn()
+        .mockResolvedValue([makeDupRow(BigInt(1), 'Corrigir login OAuth')]);
+
+      const [dup] = await service.findPossibleDuplicates({
+        nome: 'Corrigir login OAuth',
+        projectId: '352',
+      });
+
+      expect(dup).toEqual({
+        chave: '1',
+        identifier: null,
+        nome: 'Corrigir login OAuth',
+        idProject: '352',
+        projectNome: 'Backend Core',
+        idStatus: '-443',
+        matchType: 'exact',
+        criadoEm: '2026-07-05T12:00:00.000Z',
+      });
+    });
+
+    it('scope=org com accessibleProjectIds usa idProject IN (...)', async () => {
+      const findMany = jest.fn().mockResolvedValue([]);
+      prismaMock.dTask.findMany = findMany;
+
+      await service.findPossibleDuplicates({
+        nome: 'busca ampla',
+        projectId: '352',
+        scope: 'org',
+        accessibleProjectIds: ['352', '353'],
+      });
+
+      const where = findMany.mock.calls[0][0].where;
+      expect(where.idProject).toEqual({ in: [BigInt(352), BigInt(353)] });
+    });
   });
 });

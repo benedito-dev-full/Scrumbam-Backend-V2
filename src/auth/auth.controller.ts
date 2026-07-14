@@ -6,15 +6,21 @@ import {
   Get,
   GoneException,
   HttpCode,
+  HttpException,
   HttpStatus,
   Inject,
   Logger,
+  Optional,
+  Param,
   Patch,
   Post,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiHeader, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { AuthService } from './auth.service';
+import type { Request } from 'express';
+import { MetricsService } from '../common/observability/metrics.service';
+import { AuthService, AuthRequestContext } from './auth.service';
 import { ApiKeyService } from './services/api-key.service';
 import { AuthCompositeGuard } from './guards/auth-composite.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -29,6 +35,7 @@ import { AuthResponseDto, UserProfileDto } from './dto/auth-response.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { SwitchOrgDto } from './dto/switch-org.dto';
 import { ApiKeyResponseDto } from './dto/api-key-response.dto';
+import { SessionResponseDto } from './dto/session-response.dto';
 import { PendingInviteForMeDto } from './dto/pending-invite-for-me.dto';
 import { InvitesService } from '../invites/invites.service';
 
@@ -57,6 +64,8 @@ export class AuthController {
     // para auto-login pós-aceite) — sem forwardRef, NestJS quebra na boot.
     @Inject(forwardRef(() => InvitesService))
     private readonly invitesService: InvitesService,
+    // F0 — Observabilidade (opcional: nunca quebra o controller nem specs).
+    @Optional() private readonly metrics?: MetricsService,
   ) {}
 
   /**
@@ -98,8 +107,12 @@ export class AuthController {
   @ApiOperation({ summary: 'Login com email + senha' })
   @ApiResponse({ status: 200, description: 'Autenticado', type: AuthResponseDto })
   @ApiResponse({ status: 401, description: 'Credenciais inválidas' })
-  async login(@Body() dto: LoginDto): Promise<AuthResponseDto> {
-    return this.authService.login(dto);
+  async login(@Body() dto: LoginDto, @Req() req: Request): Promise<AuthResponseDto> {
+    // F3: ip/UA viram o rótulo do device na sessão ("Dispositivos conectados").
+    return this.authService.login(dto, {
+      ip: this.clientIp(req),
+      userAgent: (req.headers['user-agent'] ?? 'unknown').slice(0, 120),
+    });
   }
 
   /**
@@ -121,20 +134,43 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Refresh token inválido ou já utilizado' })
   async refresh(
     @Body() dto: RefreshDto,
+    @Req() req: Request,
     @CurrentUser() _user?: JwtPayload,
   ): Promise<AuthResponseDto> {
-    // Para refresh, o JWT pode estar expirado — usa o sub do body ou extrai do payload
-    // Neste endpoint @Public(), user pode ser null
-    // O frontend deve enviar o userGroupId no body ou como header
-    // Decisão simplificada F3: buscar userGroup pelo hash do refresh token
-    // Implementação: AuthService.refresh valida sem exigir userGroupId no body
-    // O refresh token contém info suficiente para identificar o user via hash
+    // F3: o refresh token IDENTIFICA a sessão (lookup indexado em DTabela) — o
+    // controller não precisa mais descobrir o dono. O full scan `take: 1000`
+    // que morava aqui (e quebrava acima de 1000 usuários ativos) foi REMOVIDO;
+    // o caminho de rollback resolve o dono por índice dentro do AuthService.
+    // `_user?.sub` segue como HINT quando o JWT ainda é válido.
+    const ctx: AuthRequestContext = {
+      ip: this.clientIp(req),
+      userAgent: (req.headers['user-agent'] ?? 'unknown').slice(0, 120),
+    };
 
-    // Workaround F3: usar _user se disponível (JWT ainda válido), ou buscar por hash
-    const userGroupId = _user
-      ? BigInt(_user.sub)
-      : await this.findUserGroupByRefreshToken(dto.refreshToken);
-    return this.authService.refresh(dto.refreshToken, userGroupId);
+    try {
+      return await this.authService.refresh(
+        dto.refreshToken,
+        _user ? BigInt(_user.sub) : undefined,
+        ctx,
+      );
+    } catch (err) {
+      // `http.5xx` em /auth/refresh. Depois da F1 (item 1.4) este contador deve
+      // ficar em ZERO: token desconhecido virou 401 `TOKEN_INVALID` e o filter
+      // é `@Catch()` universal. Se ele subir, há exceção não-HTTP nova no
+      // caminho de refresh — é bug, não comportamento esperado.
+      if (!(err instanceof HttpException)) {
+        this.metrics?.increment(
+          'http.5xx',
+          {
+            route: 'POST /auth/refresh',
+            errorName: err instanceof Error ? err.name : 'unknown',
+            ip: ctx.ip,
+          },
+          { level: 'error' },
+        );
+      }
+      throw err;
+    }
   }
 
   /**
@@ -186,21 +222,132 @@ export class AuthController {
     @CurrentUser() user: JwtPayload,
     @Body() dto: SwitchOrgDto,
   ): Promise<AuthResponseDto> {
-    return this.authService.switchOrg(BigInt(user.sub), BigInt(dto.organizationId));
+    // F3: rotaciona o refresh DESTA sessão (claim `sid`) — trocar de workspace
+    // num device não invalida mais os outros devices do usuário.
+    return this.authService.switchOrg(
+      BigInt(user.sub),
+      BigInt(dto.organizationId),
+      this.sessionIdOf(user),
+    );
   }
 
   /**
-   * Realiza logout e revoga refresh token.
+   * Realiza logout — revoga a sessão DESTE dispositivo (F3).
+   *
+   * Os demais devices do usuário continuam logados (antes, o slot único fazia
+   * o logout do celular derrubar o notebook). Para sair de tudo:
+   * `DELETE /auth/sessions`.
    */
   @Post('logout')
   @UseGuards(AuthCompositeGuard)
   @AllowOrphan()
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Logout — revoga refresh token' })
+  @ApiOperation({ summary: 'Logout — revoga a sessão deste dispositivo' })
   @ApiResponse({ status: 204, description: 'Logout realizado' })
   async logout(@CurrentUser() user: JwtPayload): Promise<void> {
-    return this.authService.logout(BigInt(user.sub));
+    return this.authService.logout(BigInt(user.sub), this.sessionIdOf(user));
+  }
+
+  // ─── Sessões / Dispositivos conectados (F3 — ADR-V2-077) ──────────────────
+
+  /**
+   * Lista os dispositivos conectados do usuário.
+   *
+   * Requisito de OWASP ASVS (Session Management): sessões devem ser
+   * **enumeráveis** e **termináveis individualmente**. É o que dá ao usuário o
+   * botão "derrubar aquele device que não reconheço".
+   *
+   * **Nunca** devolve hash de token — projeção segura via `SessionResponseDto`.
+   * A DClasse SESSION (-485) é DENYLISTED no `/tabelas` genérico exatamente para
+   * que este seja o **único** caminho de leitura de sessão (Pilar 2, exceção
+   * justificada por projeção de segurança).
+   *
+   * @param user - JWT do usuário
+   * @returns Sessões ativas, mais recente primeiro; `current: true` na deste request
+   *
+   * @example
+   * ```bash
+   * curl -H "Authorization: Bearer $JWT" \
+   *   http://localhost:3000/api/v1/auth/sessions
+   * ```
+   *
+   * @example
+   * ```json
+   * [
+   *   { "id": "1042", "device": "Mozilla/5.0 (Macintosh…)", "ip": "189.4.10.2",
+   *     "createdAt": "2026-07-10T14:02:11.000Z", "lastUsedAt": "2026-07-13T09:31:44.000Z",
+   *     "expiresAt": "2026-07-20T09:31:44.000Z",
+   *     "absoluteExpiresAt": "2026-08-09T14:02:11.000Z", "current": true }
+   * ]
+   * ```
+   */
+  @Get('sessions')
+  @UseGuards(JwtAuthGuard)
+  @AllowOrphan()
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Lista dispositivos conectados (sessões ativas)',
+    description: 'Projeção segura — nunca expõe hash de refresh token.',
+  })
+  @ApiResponse({ status: 200, description: 'Sessões ativas', type: [SessionResponseDto] })
+  @ApiResponse({ status: 401, description: 'Não autenticado' })
+  async listSessions(@CurrentUser() user: JwtPayload): Promise<SessionResponseDto[]> {
+    return this.authService.listSessions(BigInt(user.sub), this.sessionIdOf(user));
+  }
+
+  /**
+   * Revoga UMA sessão do usuário ("desconectar este dispositivo").
+   *
+   * Só revoga sessões do próprio usuário; a de outro responde **404**
+   * (anti-enumeração — o usuário não deve nem saber que ela existe).
+   *
+   * @param user - JWT do usuário
+   * @param id - Chave da sessão (de `GET /auth/sessions`)
+   *
+   * @throws {NotFoundException} Sessão inexistente ou de outro usuário
+   *
+   * @example
+   * ```bash
+   * curl -X DELETE -H "Authorization: Bearer $JWT" \
+   *   http://localhost:3000/api/v1/auth/sessions/1042
+   * ```
+   */
+  @Delete('sessions/:id')
+  @UseGuards(JwtAuthGuard)
+  @AllowOrphan()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Revoga uma sessão (desconectar dispositivo)' })
+  @ApiResponse({ status: 204, description: 'Sessão revogada' })
+  @ApiResponse({ status: 404, description: 'Sessão não encontrada' })
+  async revokeSession(@CurrentUser() user: JwtPayload, @Param('id') id: string): Promise<void> {
+    return this.authService.revokeSession(BigInt(user.sub), BigInt(id));
+  }
+
+  /**
+   * "Sair de todos os outros dispositivos".
+   *
+   * Revoga todas as sessões do usuário EXCETO a atual (claim `sid`). É o botão
+   * de pânico para credencial suspeita de vazamento.
+   *
+   * @param user - JWT do usuário
+   *
+   * @example
+   * ```bash
+   * curl -X DELETE -H "Authorization: Bearer $JWT" \
+   *   http://localhost:3000/api/v1/auth/sessions
+   * ```
+   */
+  @Delete('sessions')
+  @UseGuards(JwtAuthGuard)
+  @AllowOrphan()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Revoga todas as sessões exceto a atual' })
+  @ApiResponse({ status: 204, description: 'Sessões revogadas' })
+  async revokeOtherSessions(@CurrentUser() user: JwtPayload): Promise<void> {
+    await this.authService.revokeOtherSessions(BigInt(user.sub), this.sessionIdOf(user));
   }
 
   /**
@@ -417,31 +564,25 @@ export class AuthController {
   // ─── Helper privado ─────────────────────────────────────────────────────
 
   /**
-   * Busca DUserGroup a partir do hash do refresh token.
+   * Sessão do request, a partir do claim `sid` do JWT (F3).
    *
-   * Usado em POST /auth/refresh quando JWT está expirado.
-   * Limitação F3: percorre todos os DUserGroup com refreshTokenHash (volume baixo).
-   * F14 avaliará índice ou campo dedicado.
+   * `undefined` em tokens emitidos antes da F3 — os métodos que a consomem
+   * degradam de forma segura (ver `AuthService.logout` / `revokeOtherSessions`).
    */
-  private async findUserGroupByRefreshToken(plaintext: string): Promise<bigint> {
-    const { createHash } = await import('crypto');
-    const hash = createHash('sha256').update(plaintext).digest('hex');
-
-    const userGroups = await this.authService['prisma'].dUserGroup.findMany({
-      where: { excluido: false, ativo: true },
-      select: { chave: true, dados: true },
-      take: 1000, // limite razoável para F3
-    });
-
-    const match = userGroups.find((ug) => {
-      const dados = ug.dados as Record<string, unknown> | null;
-      return dados?.refreshTokenHash === hash;
-    });
-
-    if (!match) {
-      throw new Error('Refresh token não encontrado');
+  private sessionIdOf(user?: JwtPayload): bigint | undefined {
+    if (!user?.sid) return undefined;
+    try {
+      return BigInt(user.sid);
+    } catch {
+      return undefined;
     }
+  }
 
-    return match.chave;
+  /** IP do cliente (respeita proxy reverso). Usado apenas em telemetria (F0). */
+  private clientIp(req: Request): string {
+    const forwarded = req.headers['x-forwarded-for'];
+    const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+    const first = raw?.split(',')[0]?.trim();
+    return first || req.ip || 'unknown';
   }
 }

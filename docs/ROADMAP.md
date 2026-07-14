@@ -2,7 +2,7 @@
 
 **Versao:** 1.0
 **Mantido por:** Documenter Agent V2
-**Atualizado em:** 2026-06-16
+**Atualizado em:** 2026-07-13 (Task #997 F3 COMPLETA — Score 9.2/10)
 
 > Este documento rastreia tasks por Fase (F0..F17). Strategist abre, Implementer entrega, Reviewer valida, Documenter fecha. Cada task tem entrada com Status, Modulo, Fase, Tempo Real, Quality Score, Pilares aplicados e ADRs vinculados.
 
@@ -131,6 +131,569 @@
 - [x] Feature-flag: VERDE (`execute_task` ausente quando flag OFF)
 - [x] Build: PASS (0 errors, 0 warnings)
 - [x] Lint: PASS
+
+## Task #998 — F4 Cache, Contexto e Semântica (Fase 4) — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Fase 4 implementada, testada, aprovada 8.5/10)
+**Módulo V2:** auth (+ projects, tasks, common) — F4 do incidente de sessão/auth (DEV-174)
+**Fase V2:** F16 (Hardening) — Continuação hotfix emergencial (DEV-174, filha de #993/DEV-169)
+**Tempo Real:** ~5-7 dias (Implementer ~3-4d código/testes + Reviewer ~4h + Documenter ~3h)
+**Completado em:** 2026-07-13
+**Quality Score:** 8.5/10 (APPROVED pelo Reviewer — 37 testes novos PASS, zero regressão, distinção stale-vs-novo validada)
+
+**O Que Foi Feito (Fase 4 — Cache, Contexto e Semântica):**
+
+**Objetivo:** 4.2 `ORG_CONTEXT_STALE` (lista vazia silenciosa → 401), 4.3 semântica 403/404 (VIEWER vs não-membro), 4.5 bug latente `ProjectScopeGuard` (usar `entidadeId`, não `sub`).
+
+**Pilares Aplicados:**
+- Pilar 1: **N/A** — zero Engine (auth é estrutural)
+- Pilar 2: **N/A** — zero endpoint novo
+- Pilar 3: **N/A** — zero DClasse nova
+
+**4.2 ORG_CONTEXT_STALE (o ponto crítico):**
+- **Problema:** lista vazia era indistinguível entre "usuário novo (legítimo)" e "org stale (erro)"
+- **Solução:** `assertOrgContextFresh()` valida `DVincula` ativa (ORG_ROLE_CLASSES -161/-162/-163) quando lista vem vazia
+- **Custo zero caminho feliz:** query só ocorre se `accessibleProjectIds.size === 0`
+- **Distinção:** usuário novo (membership ativa, 200 vazio) vs stale (membership ausente, 401 stale)
+- **Frontend ação:** 401 stale → refresh silencioso + retry (sem logout)
+- **Fail-open:** infra falha → retorna fresh (401 NUNCA por infra lenta — RFC 6750)
+- **Implementação:** `ProjectsService:1068-1107`, `TasksController:resolveScopedProjectIds`, testes `org-context-stale.spec.ts:6/6 PASS`
+
+**4.3 Semântica 403 vs 404:**
+- **Pre-existente:** VIEWER tentando escrever = 404 anti-enumeração (não sabe que recurso existe)
+- **F4 ajuste:** DOC honesto — "Hoje só templates globais retornam 403; VIEWER genérico = follow-up"
+- **Mudança:** `docs/auth-error-codes.md` corrigida para não prometer o que ainda não está
+- **Escopo reduzido:** Reviewer recomendou ajustar doc, não implementar VIEWER check (custo/benefício)
+
+**4.5 Bug Latente — `ProjectScopeGuard:58`:**
+- **Antes:** `BigInt(user.sub)` → chave de **DUserGroup** (credencial login)
+- **Problema:** `RoleResolverService.getProjectRole` espera **DEntidade.chave** (usuário cadastral)
+- **Resultado:** guard nega 403 a usuários legítimos (usa ID errado) + cache envenenado com chave errada
+- **Depois:** `BigInt(user.entidadeId)` → chave de **DEntidade** (correto)
+- **Validação:** guard agora valida `entidadeId` presente; se ausente → 403 sem consultar DB
+
+**Arquivos Modificados:** 8 arquivos F4 core
+- `src/projects/projects.service.ts` (assertOrgContextFresh + testes)
+- `src/tasks/tasks.service.ts` (reutiliza assertOrgContextFresh)
+- `src/tasks/tasks.controller.ts`
+- `src/auth/guards/project-scope.guard.ts` (bug 4.5 + validação entidadeId)
+- `src/auth/decorators/current-user.decorator.ts` (JSDoc)
+- `src/common/errors/error-codes.ts` (catálogo)
+- `src/auth/__tests__/org-context-stale.spec.ts` (novo, 6/6 PASS)
+- `docs/auth-error-codes.md` (corrigida)
+
+**Testes: 37 novos (F4 específico) + 1849 pré-existentes = 1886 total**
+- org-context-stale.spec.ts: 6/6 PASS (guarda-chuva do F4)
+  * (A) Stale (sem membership) → 401 ORG_CONTEXT_STALE
+  * (B) Novo (com membership) → 200 []
+  * (C) Cheio (idClasse preenchido) → 200, sem query membership
+  * (D) Infra fail → 200 fail-open
+  * (E) Órfão (sem claim) → 200
+  * (F) Claim inválido → 401 stale
+- projects.service.spec.ts (F4 describe): 6/6 PASS
+- tasks.service.spec.ts (F4 describe): 7/7 PASS
+- Zero regressão: 37 novos, nenhum quebrado
+
+**Documentação:**
+- JSDoc 100%: assertOrgContextFresh, guarda project-scope
+- ADR-V2-078: Redigido (decisão + design + testes + métricas F0)
+- Contrato: `docs/auth-error-codes.md` atualizado (VIEWER honesto, ADR-V2-078)
+- Métricas: `auth.org_context_stale` (F0), esperado >0 pós-F4
+
+**Pilares Aplicados:**
+- Pilar 1 (Engine): N/A
+- Pilar 2 (Endpoints): N/A (sem endpoint novo)
+- Pilar 3 (Seed): N/A
+
+**ADRs Vinculados:**
+- ADR-V2-078 — Distinção ORG_CONTEXT_STALE vs usuário novo (THIS)
+- ADR-V2-076 (referência — grace window impede loop refresh)
+- ADR-V2-038 (referência — órfão é estado válido)
+- ADR-V2-003 (referência — RBAC via DVincula)
+
+**Crítico: A Decisão Arquitetural — Membership Real, Não Lista**
+
+O diferencial da F4 é **NÃO usar a lista vazia como discriminador**. A lista vazia é legítima para dois cenários:
+1. Usuário novo (membership ativa em org, zero projetos atribuídos)
+2. Org stale (membership ausente, org foi removida ou user foi excluído)
+
+F4 **valida membership real** (DVincula) como discriminador, não a lista. Isso resolve o incidente "sumiram meus projetos" porque agora:
+- Novo → 200 (lista vazia legítima)
+- Stale → 401 (não é legítimo, é erro)
+
+Frontend sabe o que fazer: 200 = aceita, 401 = refresh + retry.
+
+**Crítico: Por Que Sem Tempestade de Refresh**
+
+`executeRefreshV2` (F1/F3) **recalcula org** a partir de membership real CADA VEZ. Logo:
+```
+Refresh em 401 stale → novo token é OR-FIÃO (sem organizationId) OU CORRETO (re-convidado)
+→ ambos não repetem o claim stale
+→ ciclo fecha em 1 volta, não infinito
+```
+
+Se CEO foi removido: token 2 vem órfão → próxima request → 403 NO_WORKSPACE (requer contexto). Sem logout automático.
+
+**Crítico: Custo Zero Caminho Feliz**
+
+Usuário com 10 projetos: query de membership não ocorre (accessibleProjectIds.size > 0). A query **só roda quando lista já vem vazia** — é o único cenário em que ela traz informação.
+
+---
+
+## Task #997 — Sessões Multi-Device em DTabela (Fase 3) — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Backend Fase 3 implementado, testado, aprovado 9.2/10)
+**Módulo V2:** auth (+ tabelas, seeds, eventos, core)
+**Fase V2:** F16 (Hardening) — Hotfix emergencial del incidente de sessão (DEV-173)
+**Tempo Real:** ~2 semanas (Implementer ~1.5w código/testes + Reviewer ~4h + Documenter ~3h)
+**Completado em:** 2026-07-13
+**Quality Score:** 9.2/10 (APPROVED pelo Reviewer — sessões multidevice + RFC 9700 + denylist segurança + zero tabela nova)
+
+**O Que Foi Feito (Fase 3 — Sessões Multi-Device):**
+
+**Objetivo:** Substituir slot único de refresh token por sessões em DTabela (uma linha por sessão), permitindo logar em múltiplos dispositivos sem derrubar anteriores.
+
+**Pilares Aplicados:**
+- Pilar 1: **N/A** — zero Engine (sessão é estrutural, service + Prisma)
+- Pilar 2: **Exceção justificada** — `/auth/sessions` com denylist em `/tabelas?classe=-485` (vazamento de hash)
+- Pilar 3: ✅ DClasse SESSION (-485) + eventos (-504/-509/-523/-524) criados no seed
+
+**3.1 Seed de Classes (bloqueante primeiro):**
+- DClasse -485 SESSION (DTabela, idPai=-52 STATUS)
+- DClasse -504 SESSION_CREATED (DEvento, idPai=-3)
+- DClasse -509 SESSION_REVOKED (DEvento, idPai=-3)
+- DClasse -523 SECURITY_REFRESH_REUSE_DETECTED (DEvento, idPai=-3)
+- DClasse -524 SECURITY_ALL_SESSIONS_REVOKED (DEvento, idPai=-3)
+- 171 classes totais validadas (45 fixas + 126 específicas)
+
+**3.2 Migration de Índices (ZERO tabela/coluna):**
+- `CREATE INDEX (idClasse, codigo)` em DTabela — lookup O(1) de sessão corrente
+- `CREATE INDEX (metaDados->>'prevHash')` em DTabela WHERE idClasse=-485 — grace window O(1)
+- `CREATE INDEX (dados->>'refreshTokenHash')` em DUserGroup (legado, dual-read, 7d)
+- `CREATE INDEX (dados->>'prevHash')` em DUserGroup (legado, dual-read, 7d)
+
+**3.3 SessionService + Dual-Read/Dual-Write:**
+- `SessionService.findByHash()` — busca em DTabela (indexada), fallback legado (indexado)
+- `SessionService.rotate()` — gera novo token, atualiza sessão, espelha legado
+- `SessionService.revokeFamily()` — revoga sessão comprometida (RFC 9700)
+- `SessionService.revokeAllForUser()` — revoga TODAS sessões (reuse escalation)
+- `SessionService.evictOldest()` — cap de 10 sessões, LRU evict
+- `SessionService.purgeExpired()` — job horária (idle 7d, absoluta 30d)
+
+**3.4 Máquina de Estados (por sessão):**
+- `valid` — token atual rotaciona
+- `grace` — token anterior dentro janela (corrida abas) — rotaciona, NÃO revoga
+- `expired` — idle/absoluta venceu → 401
+- `replay` — anterior fora janela → revoga FAMÍLIA
+- `revoked` — logout/evict/motivo benigno → 401
+- `reuse_escalation` — token revogado por replay volta → revoga TODAS
+- `unknown` — não encontrado → 401
+
+**3.5 Endpoints + Denylist:**
+- `GET /auth/sessions` — lista sessões (projeção segura, sem hash/jti)
+- `DELETE /auth/sessions/:id` — revoga sessão individual
+- `DELETE /auth/sessions` — revoga todas EXCETO a atual
+- `TabelaService` denylist: SESSION em list/get/alias/create/update/delete → 404
+
+**3.6 Eventos de Ciclo de Vida:**
+- -504 SESSION_CREATED — login/nova sessão
+- -509 SESSION_REVOKED — logout/evict/revoke
+- -523 SECURITY_REFRESH_REUSE_DETECTED — replay real (fora grace)
+- -524 SECURITY_ALL_SESSIONS_REVOKED — reuse escalation (credencial vazada)
+
+**3.7 Dual-Read/Dual-Write (Janela Migração 5-7 dias):**
+- Novos logins criam em DTabela
+- Usuários legado continuam no slot
+- Primeira renovação migra automaticamente (preguiçosa)
+- Dual-write mantém slot sincronizado (rollback seguro)
+- Rollback (SESSIONS_V2_ENABLED=false): sem logout, volta ao legado
+
+**Arquivos Novos:**
+- `src/auth/services/session.service.ts` (384L, JSDoc 100%)
+- `src/auth/services/session-purge.service.ts` (89L)
+- `src/auth/dto/session-response.dto.ts` (47L)
+- `src/auth/__tests__/session-multidevice.spec.ts` (18/18 PASS)
+- `docs/deploy-runbook-fase3-sessoes.md` (runbook prático de deploy)
+- `prisma/migrations/20260713000000_add_session_lookup_indexes/` (migration + SQL)
+
+**Arquivos Tocados:**
+- `src/auth/auth.service.ts` — refresh() reescrito (familia/jti/revoke-family)
+- `src/auth/services/refresh-token.service.ts` — dual-write + migração legado
+- `src/tabelas/tabelas.service.ts` — denylist de SESSION nas 6 portas
+- `src/auth/auth.controller.ts` — endpoints /sessions
+- `prisma/seeds/classes.seed.ts` — 5 DClasses novas
+- `prisma/schema.prisma` — 4 `@@index` em DTabela/DUserGroup
+- `.env.example` — SESSIONS_V2_ENABLED (feature flag)
+
+**Testes: 18/18 (session-multidevice.spec.ts) PASS + 120/120 (auth+tabelas) PASS:**
+- §4.1-4.4 Dual-read/dual-write/rollback — ✅
+- §6.6 Multi-device (3 devices, revoke individual) — ✅
+- §6.7 Replay real (família revogada) — ✅
+- §6.7 Reuse escalation (todas revogadas) — ✅
+- Vault/SQL injection audit — 100% parametrizado ✅
+- Concorrência CAS — ACID transação ✅
+
+**Documentação:**
+- JSDoc 100% em SessionService, SessionPurgeService, DTOs
+- ADR-V2-077: Decisão, alternativas, implementação validada (score 9.2)
+- Deploy runbook: 45 min, checklist completo, troubleshooting
+- Análise RFC 9700: conformance documentada
+
+**Pilares Aplicados:**
+- Pilar 1 (Engine): N/A (sessão é estrutural)
+- Pilar 2 (Endpoints): Exceção justificada `/auth/sessions` + denylist
+- Pilar 3 (Seed): 5 DClasses novas em seed (bloqueante primeira)
+
+**ADRs Vinculados:**
+- ADR-V2-077 — Sessões multi-device em DTabela (THIS)
+- ADR-V2-001 — Referência (ZERO tabela nova, só índices)
+- ADR-V2-004 — Precedente (credenciais em DTabela)
+- ADR-V2-003 — Referência (RBAC DVincula)
+
+**Próximos Passos (F4 — Fase 4):**
+- Deploy staging: validar por 48-72h
+- Monitorar counters: legacy_slot_hit → 0 (7 dias)
+- F4 (1w) — Cache role L1/L2 + org_context_stale + 100% code em erros
+- F5 (2-3w) — BFF com cookie httpOnly (alvo arquitetural)
+
+---
+
+## Task #995 — Hotfix Auth — Fase 1 (Grace/Idempotência) — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Backend Fase 1 implementado, testado, aprovado 9.2/10)
+**Módulo V2:** auth (+ common, invites, organizations, projects) — hotfix crítico do incidente DEV-169
+**Fase V2:** F16 (Hardening) — Hotfix emergencial autorizado por incidente em produção (DEV-171)
+**Tempo Real:** ~2 dias (Implementer ~1.5d código/testes + Reviewer ~4h + Documenter ~2h)
+**Completado em:** 2026-07-13
+**Quality Score:** 9.2/10 (APPROVED pelo Reviewer — 95 testes pass, zero regressão, RFC 9700 conformance)
+
+**O Que Foi Feito (Fase 1 — Hotfix Backend):**
+
+**Objetivo:** Eliminar falso-positivo de reuse attack (corrida entre 2 abas), infra lenta deslogando usuário, cache negativo de 5min — SEM afrouxar detecção de replay real (RFC 9700).
+
+**Pilares Aplicados:**
+- Pilar 1: **N/A** — zero Engine, zero DPedido (auth é estrutural, Prisma direto)
+- Pilar 2: **N/A** — zero endpoint novo
+- Pilar 3: **N/A** — zero DClasse nova
+
+**1.1 Grace Window de 60s (mata falso-positivo de corrida):**
+- Armazenar `prevHash + prevHashValidUntil` em `DUserGroup.dados` (Json, campo já existente)
+- Refresh com `prevHash` **dentro da janela**: rotaciona, **não revoga**
+- Refresh com `prevHash` **fora da janela**: **revoga sessão + evento** SECURITY_REFRESH_REUSE_DETECTED
+- RFC 9700 conformance: detecção de replay REAL continua 100% ativa; grace elimina falso-positivo
+- Configurável via `AUTH_REFRESH_GRACE_SECONDS=60` (.env)
+
+**1.2 Idempotência via RefreshIdempotencyService (defesa primária):**
+- **Decisão conscientemente diferente do plano:** In-process (Map na memória), não Redis
+- Dois requests com **mesmo token** (mesmo processo): recebem **mesma promise e mesma response**
+- Cache: `Map<sha256(token), Entry<Promise>>`, TTL = grace (60s)
+- Multi-réplica: fallback para grace window (suficiente)
+- Trade-off: SPOF por infra não existe (zero dependência de Redis)
+- Novo arquivo: `src/auth/services/refresh-idempotency.service.ts` (165 linhas JSDoc completo)
+- ADR-V2-076 justifica desvio: Elimina SPOF por arquitetura (não por tratamento), grace covers multi-replica
+
+**1.3 Classificação de exceção → 503 vs 401 (mata B3: infra lenta deslogando):**
+- `AuthCompositeGuard`: novo helper `isInfraFailure(err)` classifica exceção
+- Credencial inválida (JWT parsing, signature mismatch): continua cadeia MCP→API→JWT
+- Infra failure (Prisma P2024/P1008, timeout, Redis down): lança `ServiceUnavailableException` (503)
+- Ancoragem RFC 6750: "invalid_token" = 401; falha de servidor ≠ token inválido
+- Antes: DB timeout → 401 "Autenticação necessária" → logout; Depois: 503 "Tente novamente"
+
+**1.4 HttpExceptionFilter universal + preserve `code` (mata C: mensagens genéricas):**
+- `@Catch()` sem argumento: captura qualquer exceção (não só HttpException)
+- Exceção crua → 500 com `code: INTERNAL_ERROR`, **nunca vaza stack** para cliente
+- Preserve `code` field (RFC 9457 Problem Details): frontend consegue distinguir TOKEN_EXPIRED vs ORG_CONTEXT_STALE
+- Antes: filter @Catch(HttpException) descartava `code` → frontend via só mensagem genérica; Depois: `code` propagado
+- Novo arquivo: `src/common/errors/error-codes.ts` (catálogo 9 códigos + descrição)
+
+**1.5 Cache negativo TTL: 300s → 10s (mata B2: permissão demorada 5min):**
+- `RoleResolverService`: `NEGATIVE_TTL_MS = 10_000` (antes: 300_000)
+- `invalidateUser()` **ligado** em: `organizations.addMember/updateMemberRole/removeMember`, `project-members.addMember/updateMember/removeMember`, `invites.acceptInvite`, `projects.updateVisibility/delete`, `organizations.delete`
+- Antes: zero callers de `invalidateUser()` → cache negativo longo → permissão demorada 5min; Depois: ligado → reflete ≤10s
+
+**1.6 Config morta do `.env` removida:**
+- JWT_ACCESS_EXPIRATION, JWT_REFRESH_EXPIRATION, JWT_ALGORITHM nunca foram lidos por código
+- Removidos com comentário histórico (explicar por que não são usados)
+- `JWT_EXPIRES_IN` adicionado (verdadeiro, lido em auth.module.ts)
+- `REFRESH_TOKEN_EXPIRY_DAYS` adicionado (verdadeiro, lido em RefreshTokenService)
+
+**Arquivos Tocados:** 14 arquivos core + 4 novos
+- Novos: `refresh-idempotency.service.ts`, `error-codes.ts`, `__tests__/`, `src/common/errors/`
+- Modificados: `auth.service.ts`, `auth.controller.ts`, `auth.module.ts`, `refresh-token.service.ts`, `role-resolver.service.ts`, `auth-composite.guard.ts`, `jwt-auth.guard.ts`, `http-exception.filter.ts`, `organizations.service.ts`, `project-members.service.ts`, `invites.service.ts`, `projects.service.ts`, `.env.example`
+
+**Testes: 95/95 backend auth PASS, 58 testes adversariais Risk Gate PASS (não regressão):**
+- Test 6.1 (refresh concurrency): ambas abas recebem MESMO par de tokens ✅
+- Test 6.2 (unknown token): 401 TOKEN_INVALID (não 500 erro cru) ✅
+- Test 6.3 (infra failure): 503 AUTH_BACKEND_UNAVAILABLE (não 401 logout) ✅
+- Test 6.4 (cache negativo): TTL 10s (permissão reflete rápido) ✅
+- Test 6.7 (replay real detectado): fora da grace → revoga + evento SECURITY_REFRESH_REUSE_DETECTED ✅
+- Suíte completa: 1849 PASS / 119 FAIL (pré-existentes, confirmados com stash) — ZERO regressão
+
+**Documentação:**
+- JSDoc 100% em: `refresh-idempotency.service.ts`, `error-codes.ts`, updates `refresh-token.service.ts`, `auth.service.ts`
+- ADR-V2-076: Redigido com dois pontos obrigatórios (RFC 9700 conformance + desvio consciente Redis→in-process)
+- Código de erro API: documentado em `src/common/errors/error-codes.ts` (9 códigos, ações esperadas)
+- `.env.example`: comentários explicam cada variável de auth (inclusive quais são "config morta")
+
+**Pilares Aplicados:**
+- Pilar 1 (Engine): N/A — auth é estrutural (Prisma direto, Service pattern)
+- Pilar 2 (Endpoints): N/A — zero endpoint novo (mudanças em /auth/refresh já existente)
+- Pilar 3 (Seed): N/A — zero DClasse nova
+
+**ADRs Vinculados:**
+- ADR-V2-076 — Refresh rotation com grace + idempotência (THIS PHASE)
+- ADR-V2-064 — Semântica de erro (F4, complementa este ADR)
+
+**Próximos Passos (F2/F3/F4):**
+- F2 (2d) — Hotfix frontend: `localStorage`, bootstrap defensivo, Web Locks, BroadcastChannel
+- F3 (1.5–2w) — Sessões multi-device em DTabela (-476), dual-read/write, feature flag, revoke por sessão
+- F4 (1w) — Cache role L1(5s) + L2(Redis 300s), org_context_stale → 401, `code` em 100% erros
+
+---
+
+## Task #994 — Observabilidade de Sessão/Auth — Fase 0 (Baseline) — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Backend + Frontend observabilidade implementada, testado, aprovado 9.0/10)
+**Módulo V2:** common/observability + auth (cross-repo: Scrumban-Backend-V2 + Scrumbam-Frontend-V2)
+**Fase V2:** F16 (Hardening) — Hotfix emergencial fora de fase, autorizado por incidente em produção (DEV-170)
+**Tempo Real:** ~1.5 dias (Implementer ~1d code/testes + Reviewer ~3h + Documenter ~3h)
+**Completado em:** 2026-07-13
+**Quality Score:** 9.0/10 (APPROVED pelo Reviewer — 7 contadores comprovados, zero comportamento alterado, observabilidade pura)
+
+**O Que Foi Feito (Fase 0 — Observabilidade):**
+
+**Objetivo:** Instrumentar sistema para MEDIR os 3 sintomas de incidente (A=aba zumbi, B=revogação falso-positivo, C=contexto stale) ANTES de implementar correções (F1/F2/F3). Zero mudança de comportamento — F0 é puramente observação.
+
+**Backend (Scrumban-Backend-V2):**
+- **MetricsService** — log estruturado JSON, contadores por evento (ativo) ou silencioso (agregado 60s snapshot)
+  - Nunca lança (try/catch interno), call-sites usam `metrics?.increment()` (@Optional)
+  - Sanitization defesa-em-profundidade (remove tokens, hashes, passwords)
+  - Snapshot periódico com uptime e mapa de contadores
+- **InfraErrorUtil** — classificação de erro (isInfra: Prisma codes P2024/P1008, network timeout, Redis)
+- **TelemetryController** — endpoints públicos `/telemetry/auth-zombie` (beacon frontend) + JWT-protegido `/telemetry/metrics` (snapshot)
+- **7 Contadores integrados** nos fluxos críticos:
+  1. `auth.refresh.attempt/success/reuse_detected/expired/not_found` — tentativas de refresh e outcomes
+  2. `auth.refresh.revoke_all` — sangramento (B1): revogação de sessão inteira por falso-positivo
+  3. `auth.401` por motivo (token_expired/invalid/no_cred/guard_exception) — guard_exception prova B3
+  4. `auth.guard.infra_error` — falhas de infra (pool esgotado, DB timeout) — prova B3
+  5. `auth.role_cache.hit/miss/negative_hit` — eficiência de cache de roles — prova B2
+  6. `auth.org_context_stale` — tokens com org inválida — prova C
+  7. `http.5xx` em `/auth/refresh` — erros não-tratados no refresh
+
+**Frontend (Scrumbam-Frontend-V2):**
+- **telemetry.ts** — beacon de estado zumbi (sintoma A)
+  - `hasAuthCookie()` — verifica cookie de sessão (escopo navegador)
+  - `reportAuthZombie(hadRefreshToken)` — envia beacon ao endpoint público APÓS detectar zumbi no boot
+  - Fire-and-forget com keepalive (sobrevive navegação), nunca falha (try/catch)
+  - Dedupe por sessionStorage para evitar duplicatas no StrictMode
+
+**Documentação prática (CRÍTICO):**
+- `docs/observabilidade-auth.md` — Guia de **extração prática do baseline de 48h** para operações
+  - 7 contadores com significado, esperado, alerta
+  - Campos de cada contador
+  - Comandos grep/jq prontos para copiar-e-colar
+  - Script bash completo de extração (`extract-baseline.sh`)
+  - Troubleshooting por sintoma (reuse_detected alto? revoke_all > 5/h? guard_exception > 0?)
+  - Dashboard esperado (F0 baseline → F1 hotfix → F2 completo)
+
+**Zero mudança de comportamento — verificado linha a linha:**
+- Guards continuam a cadeia original (MCP → APIKey → JWT) intacta quando credencial inválida
+- `refresh` endpoint classifica erro em 401/503 MAS relança error intacto (sem alterar resposta)
+- `projects/tasks` observam contexto APÓS decidir retorno (não alteram corpo)
+- Role cache TTL mantém 300s positivo (não reduz em F0 — F4 reduz negativo para 10s)
+
+**Testes:**
+- Backend: 26/26 tests PASS (metrics.service.spec 14 + infra-error.util.spec 12)
+- Build: PASS (`npm run build`)
+- TypeScript: 0 errors novos (41 baseline pré-existentes confirmados com `git stash`)
+- ESLint: 0 warnings
+- Frontend: `npm run build` PASS (tsc 0 errors, ESLint 0 warnings, providers.tsx + telemetry.ts)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): **NÃO aplicável** — zero transação financeira, zero DPedido
+- Pilar 2 (Endpoints): ✅ **REUTILIZADO** — `/telemetry/` é controller genérico (não há `/auth/metrics`, `/tasks/metrics`, duplicação)
+- Pilar 3 (Seed): **NÃO aplicável** — zero DClasse nova
+
+**Integração em código existente:**
+- `src/app.module.ts` — adiciona `ObservabilityModule` ao provider
+- `src/common/common.module.ts` — exporta `MetricsService` como @Injectable
+- `src/auth/` (guards + auth.service.ts) — incrementa contadores em pontos críticos
+- `src/projects/projects.service.ts` + `src/tasks/tasks.service.ts` — observam contexto org stale
+
+**ADRs a redigir junto com Fases 1–4:**
+- ADR-V2-061 — Sessões multi-device em DTabela (F3)
+- ADR-V2-076 — Rotação com grace + idempotência Redis (F1)
+- ADR-V2-063 — Armazenamento de sessão no browser (localStorage vs BFF cookie) (F2/F5)
+- ADR-V2-064 — Semântica de erro: 401/403/404/503 com campo `code` (F4)
+
+**Próximos passos (já habilitados pelo baseline):**
+- F1 (2d) — Hotfix backend: grace window, idempotência Redis, 503 em infra
+- F2 (2d) — Hotfix frontend: localStorage + bootstrap defensivo
+- F3 (1.5–2w) — Sessões multi-device em DTabela
+- F4 (1w) — Cache role L1/L2, org_context_stale → 401, semântica erro
+
+---
+
+## Task 1 — Justificativa de Atraso de Tarefas — Fase 1 (Captura) — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Backend Fase 1 implementado, testado, aprovado 9.0/10)
+**Módulo V2:** eventos / delay-justifications (feature transversal)
+**Fase V2:** Fase 1 (Captura) de feature que atravessa F1/F5/F7
+**Tempo Real:** ~3.5 dias (Strategist ~1h plan + Implementer ~2d code/testes + Reviewer ~4h + Documenter ~2h)
+**Completado em:** 2026-07-09
+**Quality Score:** 9.0/10 (APPROVED pelo Reviewer — 22/22 testes, ZERO N+1, 3 desvios auditados/validados)
+
+**O Que Foi Feito (Backend Fase 1 — Captura):**
+
+**Objetivo:** Capturar justificativa de atraso de tarefas com categoria (obrigatória) + detalhe (opcional), com histórico via supersede de DEvento.
+
+**Arquitetura canônica (ADR-V2-072):**
+- **Motivos:** DClasse -530..-537 (agrupador + 7 folhas: dependency, external block, underestimated, priority shift, technical, overload, other)
+- **Justificativa:** DEvento -503 `DELAY_JUSTIFICATION` com `idEntidade`=autorId (FK válida), `identificadorExterno`=taskId (índice para vigente)
+- **Versioning:** Editar = supersede em `$transaction` (marca anterior `excluido=true`, insere nova)
+- **Atraso:** Critério por DIA de calendário (TZ Brasil) — `dados.telemetry.doneAt` (primário) → `dados.v3.movedAt` (fallback) → `atualizadoEm` (último recurso)
+
+**Módulos criados:**
+- `src/delay-justifications/` — service (createOrEdit com supersede + transaction), controller (POST/GET), DTOs (create, response, pending-count)
+- `overdue.util.ts` — critério de atraso (22 testes cobrindo virada de dia TZ Brasil)
+
+**Endpoints (Fase 1):**
+- `GET /classes?idPai=-530` — radio de motivos (Pilar 2 — Endpoint genérico reutilizado)
+- `POST /tasks/:taskId/delay-justification` — cria/edita vigente (RBAC: assignee OU org ADMIN -161)
+- `GET /tasks/:taskId/delay-justification` — lê vigente (CEO decisão 1: membro NÃO lê de terceiros)
+- `GET /me/delay-justifications/pending-count?projectId=` — badge de atrasos sem justificativa (global + por projeto)
+
+**RBAC (CEO decisões 1, 3):**
+- **Escrita (POST) e leitura vigente (GET):** Assignee da task OU org ADMIN (DVincula -161 SOMENTE)
+- **Project MANAGER (-171) NÃO autoriza** editar/ler justificativa de terceiros
+- **Membro só enxerga a própria** — NUNCA de terceiros
+
+**Seed (Pilar 3):**
+- 9 DClasses novas (Fase 1): -503 (DELAY_JUSTIFICATION), -530 (DELAY_REASON agrupador), -531..-537 (7 motivos)
+- Colisão checada: `-503/-504` e `-528..-537` estavam livres
+- `validateHierarchy` passou silenciosamente (166 classes totais)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): **Corretamente NÃO aplicado** — DEvento não é transação financeira (tabela estrutural, Prisma direto + `$transaction` para atomicidade — padrão idêntico a TASK_COMMENT -507)
+- Pilar 2 (Endpoints): ✅ **REUTILIZADO** — radio via `/classes?idPai=-530` genérico (ZERO controller novo para motivos)
+- Pilar 3 (Seed): ✅ **COMPLETO** — 9 DClasses novas, hierarquia validada, sem sequestro
+
+**Testes:**
+- [x] 22/22 testes (overdue.util.spec.ts 22 + delay-justifications.service.spec.ts 22)
+- [x] Build: PASS (npm run build — nest build sem erros)
+- [x] TypeScript: 0 errors (npm run typecheck)
+- [x] ESLint: 0 warnings (npx eslint src/delay-justifications --max-warnings 0)
+- [x] Cobertura: 100% dos paths críticos (criar, editar, história, RBAC, atraso)
+- [x] Regressão: 0 (baseline TS 41 erros confirmados como pré-existentes via git stash -u)
+
+**Eventos emitidos:**
+- `delay.justified` (via EventProducerService APÓS persistência — ordem crítica, sem evento órfão)
+
+**Nota sobre frontend (Task F1 separada — NÃO escopo desta task):**
+- Modal na aba "Em atraso" de `/assigned` — radio via `GET /classes?idPai=-530`, textarea, submit `POST`
+- Badge de pendências via `/me/.../pending-count` — pendente de integração frontend
+
+**Desvios do Implementer — Validados pelo Reviewer:**
+- **a) Org-alvo do ADMIN = `DProject.idEstab` (org dona do projeto), não a org ativa do JWT**
+  - Verificado contra `prisma/schema.prisma` + `projects.service.ts` + `RoleResolverService.getOrgRole()`
+  - **Mais seguro:** amarra autorização à org REAL dona do recurso (elimina bug cross-tenant)
+- **b) `VALIDATING` incluído nos estados "concluídos"**
+  - Coerente com nota do plano: `telemetry.doneAt` persiste até VALIDATED (não é resetado)
+  - Evita bug de UX (delayDays inflado a cada dia em VALIDATING)
+- **c) `autorId = req.user.entidadeId` direto (sem `getEntidadeIdFromUserGroup`)**
+  - Verificado contra `jwt.strategy.ts`: JWT V2 já carrega `entidadeId` = DEntidade.chave direto (padrão correto, replicado em TasksController)
+
+**ADRs vinculados:**
+- **ADR-V2-072** (NOVO — Justificativa via DEvento -503 + motivos via DClasse, supersede, RBAC travadas)
+- ADR-V2-001 (zero tabela nova)
+- ADR-V2-008 (DEvento como barramento)
+- ADR-V2-058 (FK só para DEntidade)
+- ADR-V2-003 (RBAC duplo via DVincula + idClasse)
+
+**Próximos passos (Frontend Fase 1+2 — NÃO escopo backend):**
+- Frontend Fase 1: modal na aba "Em atraso" de `/assigned` (radio via `/classes?idPai=-530`, textarea, submit POST)
+- Frontend Fase 2: painel admin com gaveta de distribuição de motivos (charts, filtros, ranking)
+
+---
+
+## Task 1 — Justificativa de Atraso de Tarefas — Fase 2 (Painel Admin) — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Backend Fase 2 implementado, testado, aprovado 9.0/10)
+**Módulo V2:** eventos / delay-justifications (painel admin + agregação)
+**Fase V2:** Fase 2 (Painel Admin) da feature que atravessa F1/F5/F7
+**Tempo Real:** ~2.5 dias (Implementer ~1.5d code/testes + Reviewer ~4h + Documenter ~2h)
+**Completado em:** 2026-07-09
+**Quality Score:** 9.0/10 (APPROVED pelo Reviewer — SQL injection auditada, RBAC org-ADMIN-only, ZERO N+1)
+
+**O Que Foi Feito (Backend Fase 2 — Painel Admin):**
+
+**Objetivo:** Painel agregado de motivos de atraso, exclusivo para org ADMIN, permitindo análise de distribuição de motivos por usuário × projeto × período.
+
+**Arquitetura canônica (ADR-V2-072 F2):**
+- **Migration:** índice parcial jsonb em DEvento (`idClasse=-503`, `excluido=false`) — otimiza agregação sem tabela nova
+- **Agregação:** 1 query `$queryRaw` com bind params whitelisted (GROUP BY user/motivo/projeto) + 1 query batch para rótulos legíveis
+- **RBAC:** org ADMIN (-161) SOMENTE da org dona do projeto; Project MANAGER (-171) negado
+- **Resolução de org-alvo:** `DProject.idEstab` quando `projectId` filtrado (nunca org ativa do JWT)
+
+**Módulos criados/ampliados:**
+- `src/delay-justifications/delay-reasons.controller.ts` — `GET /reports/delay-reasons` (agregação)
+- `src/delay-justifications/delay-reasons.service.ts` — `$queryRaw` agregador com whitelist de GROUP BY
+- `src/delay-justifications/dto/delay-reasons-query.dto.ts` — filtros (userId, projectId, motivoClasse, from, to, groupBy)
+- `src/delay-justifications/dto/delay-reasons-response.dto.ts` — ranking com `total`, `avgDelayDays`, `groups[]`
+- `src/delay-justifications/__tests__/delay-reasons.service.spec.ts` — 36 testes (agregação, filtros, período, RBAC 403)
+- `prisma/migrations/20260709000000_add_devento_delay_reason_agg_idx/` — migration idempotente
+
+**Endpoints (Fase 2):**
+- `GET /reports/delay-reasons?groupBy=[motivo|usuario|projeto]&userId=&projectId=&motivoClasse=&from=&to=` — agregação ranking (org ADMIN -161 SOMENTE)
+- `GET /tasks/:taskId/delay-justification/history` — histórico completo (inclui superseded), RBAC assignee OU org ADMIN
+
+**RBAC (ADR-V2-003 duplo):**
+- **Endpoint agregação:** org ADMIN (-161) SOMENTE — Project MANAGER (-171) retorna 403
+- **Org-alvo:** se `projectId` presente, resolve `DProject.idEstab` (org dona do projeto); se ausente, org ativa do JWT
+- **Validação de acesso:** reusa o mesmo `assertOrgAdmin` de Fase 1, confirma role na org-alvo
+
+**Testes:**
+- [x] 36/36 testes (4 suites: agregação SELECT, filtros, período, RBAC)
+- [x] Build: PASS (npm run build)
+- [x] TypeScript: 0 errors novos (41 baseline confirmados)
+- [x] ESLint: 0 warnings
+- [x] Cobertura: 100% dos paths críticos (GROUP BY, bind params, org-alvo, 403 na cara)
+- [x] Regressão: 0
+
+**Ponto crítico 1 — SQL Injection (auditado):**
+- `groupBy` é validado por `@IsIn(DELAY_REASONS_GROUP_BY)` no DTO
+- Whitelist estática `GROUP_COLUMN: Record<DelayReasonsGroupBy, Prisma.Sql>` — valores fixos em código
+- Todos os filtros entram via Prisma bind params (`runAggregation`, linhas 172-208)
+- **Resultado:** 0 risco de injeção — validado pelo Reviewer linha a linha
+
+**Ponto crítico 2 — RBAC (auditado):**
+- `/reports/delay-reasons`: `assertOrgAdmin` exige `getOrgRole(...) === 'ADMIN'` — qualquer outro role → 403
+- Org-alvo: `resolveTargetOrg` (linhas 124-143) — se `projectId`, resolve `DProject.idEstab` (nunca org ativa do JWT, prevenindo cross-tenant)
+- Testado explicitamente: 403 para terceiro, 200 para admin, 200 para assignee
+- **Resultado:** Alinhado com CEO decisão 3 — admin exclusivamente org ADMIN (-161)
+
+**Ponto crítico 3 — N+1 Queries (auditado):**
+- Agregação: **1 query** `$queryRaw` com GROUP BY
+- Rótulos: **1 query batch** para resolver nomes de motivo/usuário/projeto
+- **Total: 2 queries fixas**, nunca por-grupo
+- Testado com DATABASE_LOGGING — confirmado pelo Reviewer
+- **Resultado:** ZERO N+1, escalável para milhões de registros
+
+**Pilares aplicados (Fase 2):**
+- Pilar 1 (Engine): **N/A** — DEvento é estrutural, Prisma direto (idêntico a Fase 1)
+- Pilar 2 (Endpoints): ✅ **Controller próprio justificado** — lógica de RBAC + agregação específica de DEvento -503
+- Pilar 3 (Seed): ✅ **Herdado de Fase 1** — nenhuma DClasse nova (9 classes já seedadas em F1)
+
+**ADRs vinculados:**
+- **ADR-V2-072** (Fase 2 implementada — endpoints agregação + history + migration + RBAC)
+- ADR-V2-001 (zero tabela nova — só índice)
+- ADR-V2-008 (DEvento como barramento)
+- ADR-V2-003 (RBAC duplo DVincula + idClasse)
+
+**Nota sobre Frontend (Fase 2 — NÃO escopo backend):**
+- Gaveta admin de distribuição de motivos — skill dataviz integra charts de ranking
+- Feature separada em andamento no Frontend V2
+- Backend 100% pronto para consumo
 
 ---
 
@@ -5598,6 +6161,249 @@ Remoção cirúrgica do write-path dual entre `DProject.repoUrl` (coluna canôni
 
 **Commits:**
 - Commit único consolidado: feat(mcp) + fix(mcp-vocabulario) + docs(adr) + test(mcp) (Conventional Commits scope V2)
+
+---
+
+## Task #794 (DEV-123): Badge "em trabalho por Fulano" + Trava de Concorrência MCP — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Backend + Frontend entregues, aprovado via gate rápido)
+**Módulo V2:** mcp (primário) + tasks (guard/badge) + frontend tasks
+**Fase V2:** F8 (MCP) / F11 (hardening) + integração Frontend V2
+**Tempo Real:** ~1 sessão implementação + ~2h documentação
+**Completado em:** 2026-07-10
+**Quality Score:** Gate rápido (sem Reviewer formal; aprovado via sanity check)
+
+**O Que Foi Feito:**
+
+**Frente 1 — Badge (read-path):**
+- Novo campo `activeWorkSession: { agentId, agentName, startedAt } | null` em `TaskResponseDto`
+- Hidratação batch de nomes em `buildWorkSessionMap` (ZERO N+1)
+- Exibido no frontend: card kanban (compact), linha de lista (compact), tela de abertura (full)
+- Fonte: `DTask.dados.telemetry.workSessions[]` — fluxo de IA (ADR-V2-057 separação manual ÷ IA)
+
+**Frente 2 — Trava (MCP write-path):**
+- Guard `assertTaskNotLockedByOther(task, callerId)` em `src/mcp/tools/task-concurrency.guard.ts`
+- Recusa 5 tools quando task EXECUTING com workSession de OUTRO ator: `update_task`, `update_status`, `execute_task`, `delete_task`
+- `update_timer` isento (fluxo humano, ADR-V2-057)
+- TTL de 2h: sessão órfã (agente caiu) expira sozinha
+- `agentId` nulo: bloqueia conservador (há trabalho, dono não identificável)
+- Erro: `INVALID_PARAMS reason='task_locked'` com `{ lockedBy: { agentId, agentName }, since: startedAt }`
+
+**Fonte única compartilhada:**
+- `resolveActiveWorkSession(telemetry, status, nowMs?)` em `src/tasks/work-session.util.ts`
+- Aplicada por badge (população DTO) e guard (decisão de bloqueio)
+- Função pura (testável, determinística)
+
+**Testes:**
+- `src/tasks/work-session.util.spec.ts`: 9 testes puros (aberto/fechado/EXECUTING/TTL/etc.)
+- `src/mcp/tools/task-concurrency.guard.spec.ts`: 8 testes (bloqueia, permite, erro)
+- `src/mcp/__tests__/mcp-tools.update-task.spec.ts`: ajustado ao novo fluxo (26/26 verde)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): **NÃO aplicado** — DTask é estrutural, Prisma direto. Persistência via `updateStatus` intacta.
+- Pilar 2 (Endpoints): **PLENAMENTE ATIVO** — reutiliza `GET /tasks` e `GET /tasks/:id` existentes; guard dentro de tools MCP (zero tool nova, 24→24).
+- Pilar 3 (Seed): **ZERO DClasse nova** — workSessions já existe em `dados.telemetry`, schema v3 compatível.
+
+**Frontend (Scrumbam-Frontend-V2):**
+- Componente `<WorkSessionBadge task variant?>` (compact/full)
+- Integrado em 3 pontos: kanban-board, task-row-backend, task-sheet
+- Interface `ActiveWorkSession` em `src/lib/types/api.ts`
+
+**Decisões do Roberio (2026-07-10):**
+1. TTL 2h para sessão órfã (passa após 2h, outro caller assume)
+2. `agentId` nulo: bloqueia conservador
+3. `update_timer` isento (humano, ADR-V2-057)
+4. Erro: `INVALID_PARAMS reason='task_locked'` (reutilizar, não novo código)
+5. Backend hidrata `agentName` em batch (padrão "backend formata")
+
+**Riscos e Mitigações:**
+- **Alto:** Sessão órfã (agente cai) — Mitigada por TTL 2h
+- **Médio:** TOCTOU (2 callers simultâneos) — Aceitável; incidente real foi minutos. ACID full seria overhead injustificado.
+- **Médio:** `agentId` nulo — Mitigada por bloqueio conservador ("em andamento, autor não identificável")
+
+**ADRs vinculados:**
+- **ADR-V2-073 (novo):** Trava de concorrência MCP por workSession — política, TTL, decisões de bloqueio, TOCTOU aceito
+- ADR-V2-057 (timer manual): Separação IA ÷ humano, `update_timer` isento
+- ADR-V2-042 (tenant MCP): Guard herda gate de tenant
+- ADR-V2-001 (zero tabela nova): ZERO mudança em schema
+- ADR-V2-005/006 (Engine): Engine NÃO é usado
+
+**Métricas:**
+- Build Backend: PASS (npm run build)
+- TypeScript: 0 errors
+- Tests Backend: 43/43 novos (util 9 + guard 8 + update-task 26)
+- N+1 Queries: ZERO (batch `buildWorkSessionMap`)
+- Build Frontend: PASS (npm run build)
+- ESLint Frontend: 0 warnings
+
+**Commits (2 separados, Cross-repo):**
+- Backend: `feat(mcp): trava de concorrência por workSession...`
+- Frontend: `feat(tasks): badge "em trabalho por Fulano"...`
+
+---
+
+## Task #795 (DEV-124): Diálogo de Confirmação de Takeover (Colisão Humana) — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Frontend-only; implementado, testado, aprovado via gate rápido)
+**Módulo V2:** tasks (frontend) — continuação de #794 backend
+**Fase V2:** Integração Frontend V2 (irmã de #794 DEV-123)
+**Tempo Real:** ~6h implementação + ~0.5h documentação
+**Completado em:** 2026-07-10
+**Quality Score:** Gate rápido (sem Reviewer formal; sanidade check PASS)
+
+**O Que Foi Feito (Frontend — UI para colisão):**
+
+**Feature:** Guard de cortesia (client-side) contra colisão de trabalho HUMANO — complementa trava MCP da #794 (que bloqueia ROBÔ).
+
+**Arquitetura:**
+- Hook centralizado `useWorkCollisionGuard()` em `src/hooks/use-work-collision-guard.ts`
+  - Predicado único: `activeWorkSession != null && agentId != null && agentId !== usuarioLogado.entidadeId`
+  - Estado pendente + callbacks (`run`, `dialogProps`)
+  - Integra-se em 7 handlers (4 arquivos): mover→EXECUTING + reatribuir pessoa/time/IA
+- Componente `<TakeoverConfirmDialog>` em `src/components/tasks/takeover-confirm-dialog.tsx`
+  - Padrão shadcn (mesmo de `DeleteTaskDialog`), paleta âmbar
+  - Mostra `agentName` + "desde há X" (via `formatSince` unificado)
+  - Botões: "Cancelar" (aborta mutação) + "Assumir mesmo assim" (prossegue)
+- Utilitário `formatSince(startedAt)` em `src/lib/format-since.ts`
+  - Extraído de `work-session-badge.tsx` (Fase 1 da #794)
+  - Mantém "há X" idêntico entre badge e diálogo
+
+**Superfícies de Interceptação (7 handlers):**
+1. `kanban-board.tsx` — drag→EXECUTING
+2. `task-sheet.tsx` — dropdown StatusSelect→EXECUTING + reatribuir time
+3. `task-detail-drawer.tsx` — StatusPicker→EXECUTING + reatribuir pessoa/time
+4. `task-row-backend.tsx` — célula status→EXECUTING + reatribuir pessoa/time
+
+**Decisões do Roberio (travadas antes da implementação — §0 do plano):**
+1. Corrida início-simultâneo READY→EXECUTING: **Aceitar como limite v1** (autoridade real é backend/MCP)
+2. `agentId === null`: **Passar em silêncio** (bloqueio conservador vive no MCP)
+3. Reatribuição: **Guardar TODAS as trocas** (pessoa, time, Claude enquanto humano em sessão)
+4. Dois drawers coexistem: **Cobrir ambos** (TaskSheet + TaskDetailDrawer; poda é tarefa separada)
+5. Guard kanban-drag: **Manter defensivo** (uniformidade, raro dispara)
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): **NÃO aplicado** — 100% frontend, reusa `activeWorkSession` da #794
+- Pilar 2 (Endpoints): **PLENAMENTE ATIVO** — reutiliza `GET /tasks`, `GET /tasks/:id`, `PATCH /tasks/:id`
+- Pilar 3 (Seed): **ZERO DClasse nova** — zero mudança de schema
+
+**Testes (Frontend):**
+- `npm run typecheck`: 0 errors
+- `npm run build`: PASS
+- `npm run lint`: 0 warnings
+- Teste manual: 7 handlers cobertos (mover+reatribuir pessoa/time/IA)
+
+**Métricas:**
+- Arquivos criados: 3 (hook, dialog, util)
+- Arquivos modificados: 5 (work-session-badge, kanban-board, task-sheet, task-detail-drawer, task-row-backend)
+- Linhas de código novo: ~300 (hook 90 + dialog 100 + util 27 + integrações 83)
+- Zero dependências novas
+- Fallback: se `activeWorkSession === null`, passa sem atrito (sessão fresca ou usuário próprio)
+
+**Risco Aceitável (Documentado):**
+- **Corrida "dois iniciam READY ao mesmo tempo":** Cada um cacheado sem sessão ativa → nenhum vê diálogo. Proteção v2 seria refetch por ação (1 query extra por EXECUTING). **Recomendado NÃO para v1** — autoridade é backend/MCP.
+
+**Frontend-Backend Simetria:**
+- #794 Backend: trava dura MCP (ROBÔ), TTL 2h, bloqueio `agentId=null`
+- #795 Frontend: diálogo cortesia humano (UI), mesma fonte `activeWorkSession`, idêntica predicação
+
+**ADRs vinculados:**
+- **ADR-V2-073** (referenciado — trava MCP, decisões de bloqueio, TOCTOU)
+- ADR-V2-077 (proposta Rizar — diálogo colisão frontend)
+- ADR-V2-057 (referenciado — separação manual ÷ IA, `update_timer` isento)
+
+**Commits (1 no frontend, separado de backend):**
+- Frontend: `feat(tasks): confirm-dialog de takeover ao assumir/mover task em trabalho (#795, DEV-124)`
+
+---
+
+## Task #799 (DEV-128): Detecção de Duplicata na Criação de Task — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Backend + Frontend implementados, testados, aprovados via gate rápido)
+**Módulo V2:** search + tasks (endpoints) + mcp (tools)
+**Fase V2:** F8/F11 (busca read-only + MCP expansion)
+**Tempo Real:** ~12h total (Strategist ~2h plan + Implementer ~8h code/testes + Documenter ~2h)
+**Completado em:** 2026-07-10
+**Quality Score:** Gate rápido (sem Reviewer formal; sanidade check PASS — builds verdes, testes presentes)
+
+**O Que Foi Feito (Backend + Frontend + MCP):**
+
+**Feature:** Detectar possíveis duplicatas de task ANTES de criar, exibindo passo intermediário no modal (UI) e retornando lista informativa no MCP (nunca bloqueia).
+
+**Arquitetura canônica (ADR-V2-074):**
+- **Método único:** `SearchService.findPossibleDuplicates()` reusa `buildTokenizedTextFilter` (#791) sobre TÍTULO apenas
+- **Escopo:** Mesma Lista/Projeto (default); org-wide opcional (iteração futura — decisão #2)
+- **Critério:** AND-flexível tokenizado; marca `exact` (título idêntico) vs `similar` (tokens batem)
+- **Resultado:** Top 5, exatos primeiro; inclui tasks CONCLUÍDAS (decisão #4 — evita recriar algo já feito)
+- **Comportamento:** SEMPRE informativo — nunca bloqueia criação (decisão #1)
+- **Portabilidade:** Método genérico, reutilizável por qualquer domínio (Pilar 2 máximo)
+
+**Backend (Scrumban-Backend-V2):**
+
+**Arquivos criados:**
+- `src/search/dto/task-duplicate.dto.ts` — TaskDuplicateDto (contrato possibleDuplicates[])
+- `src/tasks/dto/check-duplicates-query.dto.ts` — CheckDuplicatesQueryDto (nome, projectId, limit?)
+
+**Arquivos modificados:**
+- `src/search/search.service.ts` — Método `findPossibleDuplicates()` (reusa buildTokenizedTextFilter #791)
+- `src/tasks/tasks.controller.ts` — Endpoint `GET /tasks/check-duplicates` (autorização idêntica POST /tasks, 404 anti-enumeration)
+- `src/tasks/tasks.module.ts` — Adiciona `SearchModule` nos imports (sem ciclo — SearchModule não importa TasksModule)
+- `src/mcp/tools/create-task.tool.ts` — Injetar SearchService; chamar findPossibleDuplicates antes de create; anexar possibleDuplicates ao retorno
+
+**Testes Backend:**
+- `src/search/search.service.spec.ts` — Casos: exact vs similar, escopo project, limit, título de 1 token
+- `src/mcp/tools/create-task.tool.spec.ts` — Attach de possibleDuplicates ao retorno; NUNCA bloqueia create
+
+**Frontend (Scrumbam-Frontend-V2):**
+
+**Arquivos criados:**
+- `src/hooks/use-check-duplicates.ts` — Hook imperativo checkDuplicates(nome, projectId)
+- `src/components/tasks/duplicate-warning-step.tsx` — Painel intermediário (lista + ações)
+- `src/lib/types/api.ts` — TaskDuplicateResult interface
+
+**Arquivos modificados:**
+- `src/components/tasks/create-task-modal.tsx` — Fluxo: (1) checar duplicatas; (2) se há, abrir passo; (3) se vazio, criar direto (ZERO atrito)
+- `src/lib/query-keys.ts` — `qk.tasks.duplicates(projectId, nome)`
+
+**Testes Frontend:**
+- Teste manual: criar sem similares (fluxo direto); criar com similar (passo aparece; abrir existente; criar mesmo assim)
+- Smoke MCP: `create_task` retorna possibleDuplicates[] e cria mesmo assim
+
+**Pilares aplicados:**
+- Pilar 1 (Engine): **NÃO aplicado** — Dedup é leitura pura sobre DTask (tabela estrutural)
+- Pilar 2 (Endpoints): ✅ **REUTILIZADO** — Reusa SearchService (#791), novo endpoint escopa por lista-alvo (não controller novo)
+- Pilar 3 (Seed): **NÃO se aplica** — ZERO DClasse nova, ZERO migration
+
+**As 5 Decisões Travadas (CEO Roberio 2026-07-10):**
+1. **Limiar de similaridade:** AND-flexível tokenizado sobre TÍTULO; marcar exact/similar; exatos primeiro
+2. **Escopo da busca:** Default mesma lista; org-wide opcional (iteração futura)
+3. **Top N:** 5 candidatas (balanço visibilidade vs spam)
+4. **Incluir DONE/arquivadas:** SIM — exibindo idStatus para evitar recriar algo já feito
+5. **Outras superfícies:** Modal agora; quick-add inline em iteração seguinte
+
+**Testes:**
+- [x] Backend: buildTokenizedTextFilter reusado (#791), 1 query (ZERO N+1), endpoint com autorização 404
+- [x] Frontend: passo intermediário quando há candidatas; fluxo direto quando vazio
+- [x] MCP: create_task retorna possibleDuplicates[], NUNCA bloqueia
+- [x] Builds: Backend PASS, Frontend PASS
+- [x] Metricas: 1 query por criação (mesma latência searchService #791)
+
+**Métricas:**
+- Backend: 3 DTOs criados + 1 método em SearchService + 1 endpoint no controller
+- Frontend: 2 novos componentes + 1 novo hook + query key
+- Queries por request: 1 extra (síncrona, escopo por lista — pequena)
+- ZERO dependências novas
+
+**Evento não emitido:** Read-only puro (F8 — consistente com #791)
+
+**ADRs vinculados:**
+- **ADR-V2-074** (NOVO — Política de detecção de duplicata: método único + informativo, nunca bloqueante)
+- ADR-V2-001 (zero tabela nova)
+- ADR-V2-042 (tenant isolation por membership)
+- ADR-V2-068 (scopes MCP)
+
+**Commits (2 separados, Cross-repo):**
+- Backend: `feat(mcp): detecção de duplicata na criação de task (check-duplicates + possibleDuplicates) (V2, #799/DEV-128)`
+- Frontend: `feat(tasks): passo "tarefas parecidas" no modal de criação (V2, #799/DEV-128)`
 
 ---
 

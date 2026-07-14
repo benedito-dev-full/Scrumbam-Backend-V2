@@ -61,9 +61,15 @@ const FROZEN_TOOLS_COUNT = 26;
 const FROZEN_INITIALIZE_HASH =
   '3eb52fbe08cb90ed3a3ef2f517c3fa66ea3002b6ab1ce83317367edbccebbe2d';
 
-/** Hash canonico SHA-256 do payload de `tools/list` (result) — Onda 2 (26 tools). */
+/**
+ * Hash canonico SHA-256 do payload de `tools/list` (result) — 26 tools.
+ * Re-baseline consciente 2026-07-13: merge trouxe a description atualizada de
+ * `create_task` (mencao a `possibleDuplicates[]`, feature de deteccao de
+ * duplicata do commit cbf8ca0). UNICA mudanca no wire (nomes/inputSchema/count
+ * inalterados); nao e regressao — feature deliberada do remote.
+ */
 const FROZEN_TOOLS_LIST_HASH =
-  '58397cb731bad2555c9a37b2b0668d14325e686be8ceed5185fd13610c63f8c9';
+  '776cae433e7b3d97761be629ab299643644c1629325f1a068efe64246fdb88a2';
 
 /** Hash canonico SHA-256 do array de NOMES das tools (ordem preservada) — Onda 2. */
 const FROZEN_TOOL_NAMES_HASH =

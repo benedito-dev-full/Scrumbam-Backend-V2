@@ -5,6 +5,8 @@ import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
 import { AuthService } from './auth.service';
 import { RefreshTokenService } from './services/refresh-token.service';
+import { RefreshIdempotencyService } from './services/refresh-idempotency.service';
+import { SessionService } from './services/session.service';
 import { PrismaService } from '../prisma.service';
 import { OrganizationsService } from '../organizations/organizations.service';
 
@@ -40,8 +42,12 @@ describe('AuthService', () => {
   let jwtService: { sign: jest.Mock };
   let refreshTokenService: {
     generate: jest.Mock;
+    /** F1 — estado detalhado (inclui `grace`) + hash corrente para o CAS. */
+    inspect: jest.Mock;
     validate: jest.Mock;
     rotate: jest.Mock;
+    /** F1 — rotação com compare-and-swap sobre o hash corrente. */
+    rotateFrom: jest.Mock;
     revoke: jest.Mock;
   };
   let organizationsService: { create: jest.Mock };
@@ -51,8 +57,12 @@ describe('AuthService', () => {
     jwtService = { sign: jest.fn().mockReturnValue('mock.jwt.token') };
     refreshTokenService = {
       generate: jest.fn().mockResolvedValue('mock-refresh-token'),
+      // F1: `inspect` substitui `validate` no fluxo de refresh — ele devolve o
+      // estado (incl. 'grace') + o hash corrente, insumo do compare-and-swap.
+      inspect: jest.fn(),
       validate: jest.fn(),
       rotate: jest.fn().mockResolvedValue('new-refresh-token'),
+      rotateFrom: jest.fn().mockResolvedValue('new-refresh-token'),
       revoke: jest.fn().mockResolvedValue(undefined),
     };
     organizationsService = {
@@ -73,7 +83,23 @@ describe('AuthService', () => {
         { provide: JwtService, useValue: jwtService },
         { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('900') } },
         { provide: RefreshTokenService, useValue: refreshTokenService },
+        // F1: idempotência do refresh. Instância REAL — é in-process e sem I/O,
+        // então o teste exercita o caminho de verdade (inclusive a serialização).
+        {
+          provide: RefreshIdempotencyService,
+          useValue: new RefreshIdempotencyService({
+            get: jest.fn().mockReturnValue('60'),
+          } as unknown as ConfigService),
+        },
         { provide: OrganizationsService, useValue: organizationsService },
+        // F3: esta suíte cobre o caminho F1 (slot único), que segue vivo como
+        // ROLLBACK da flag. `isEnabled: false` mantém as asserções originais
+        // válidas; o caminho de sessões tem suíte própria
+        // (`__tests__/session-multidevice.spec.ts`).
+        {
+          provide: SessionService,
+          useValue: { isEnabled: jest.fn().mockReturnValue(false) },
+        },
       ],
     }).compile();
 
@@ -268,7 +294,7 @@ describe('AuthService', () => {
 
   describe('refresh', () => {
     it('deve rotacionar refresh token (happy path)', async () => {
-      refreshTokenService.validate.mockResolvedValue('valid');
+      refreshTokenService.inspect.mockResolvedValue({ state: 'valid', currentHash: 'hash-0' });
 
       const mockUserGroup = {
         chave: BigInt(1),
@@ -283,34 +309,53 @@ describe('AuthService', () => {
 
       const result = await service.refresh('valid-refresh-token', BigInt(1));
 
-      expect(refreshTokenService.rotate).toHaveBeenCalledWith(BigInt(1));
+      // F1: rotação por compare-and-swap sobre o hash lido na inspeção.
+      expect(refreshTokenService.rotateFrom).toHaveBeenCalledWith(BigInt(1), 'hash-0');
       expect(result.refreshToken).toBe('new-refresh-token');
     });
 
+    it("F1 — estado 'grace' (corrida de abas) rotaciona e NÃO revoga", async () => {
+      refreshTokenService.inspect.mockResolvedValue({ state: 'grace', currentHash: 'hash-1' });
+      prisma.dUserGroup.findUnique.mockResolvedValue({
+        chave: BigInt(1),
+        usuario: 'joao@test.com',
+        entidades: [{ chave: BigInt(2), nome: 'João' }],
+      });
+      prisma.dVincula.findFirst.mockResolvedValue({
+        idClasse: BigInt(-161),
+        idLocEscritu: BigInt(3),
+      });
+
+      const result = await service.refresh('token-anterior-na-janela', BigInt(1));
+
+      expect(result.refreshToken).toBe('new-refresh-token');
+      // O QUE CONSERTA O INCIDENTE: nenhuma revogação.
+      expect(refreshTokenService.revoke).not.toHaveBeenCalled();
+    });
+
     it("deve detectar reuse attack ('invalid') e revogar tokens", async () => {
-      refreshTokenService.validate.mockResolvedValue('invalid');
+      refreshTokenService.inspect.mockResolvedValue({ state: 'invalid', currentHash: 'hash-1' });
 
       await expect(service.refresh('stolen-token', BigInt(1))).rejects.toThrow(
         UnauthorizedException,
       );
 
-      expect(refreshTokenService.revoke).toHaveBeenCalledWith(BigInt(1));
+      expect(refreshTokenService.revoke).toHaveBeenCalledWith(BigInt(1), 'reuse_detected');
     });
 
     it("deve lançar 401 benigno para token 'expired' SEM revogar como ataque", async () => {
-      refreshTokenService.validate.mockResolvedValue('expired');
+      refreshTokenService.inspect.mockResolvedValue({ state: 'expired', currentHash: 'hash-0' });
 
-      await expect(service.refresh('old-token', BigInt(1))).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(service.refresh('old-token', BigInt(1))).rejects.toThrow(UnauthorizedException);
 
       // Expiração benigna: NÃO trata como reuse → não revoga, não rotaciona.
       expect(refreshTokenService.revoke).not.toHaveBeenCalled();
       expect(refreshTokenService.rotate).not.toHaveBeenCalled();
+      expect(refreshTokenService.rotateFrom).not.toHaveBeenCalled();
     });
 
     it('deve emitir JWT órfão quando user perdeu todos os vínculos (ADR-V2-038)', async () => {
-      refreshTokenService.validate.mockResolvedValue('valid');
+      refreshTokenService.inspect.mockResolvedValue({ state: 'valid', currentHash: 'hash-0' });
 
       const mockUserGroup = {
         chave: BigInt(1),
@@ -325,7 +370,7 @@ describe('AuthService', () => {
       const result = await service.refresh('valid-refresh-token', BigInt(1));
 
       // Sucede com novo par de tokens — sem UnauthorizedException.
-      expect(refreshTokenService.rotate).toHaveBeenCalledWith(BigInt(1));
+      expect(refreshTokenService.rotateFrom).toHaveBeenCalledWith(BigInt(1), 'hash-0');
       expect(result.refreshToken).toBe('new-refresh-token');
       // JWT payload SEM organizationId.
       expect(jwtService.sign).toHaveBeenCalledWith(
@@ -344,7 +389,7 @@ describe('AuthService', () => {
 
       await service.logout(BigInt(1));
 
-      expect(refreshTokenService.revoke).toHaveBeenCalledWith(BigInt(1));
+      expect(refreshTokenService.revoke).toHaveBeenCalledWith(BigInt(1), 'logout');
     });
   });
 

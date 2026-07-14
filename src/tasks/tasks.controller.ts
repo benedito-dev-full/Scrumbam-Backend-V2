@@ -27,6 +27,8 @@ import {
 } from '@nestjs/swagger';
 import { AuthCompositeGuard } from '../auth/guards/auth-composite.guard';
 import { ProjectsService } from '../projects/projects.service';
+import { SearchService } from '../search/search.service';
+import { TaskDuplicateDto } from '../search/dto/task-duplicate.dto';
 import { TasksService } from './tasks.service';
 import { PhaseTreeService } from './services/phase-tree.service';
 import { PhaseMetricsService } from './services/phase-metrics.service';
@@ -35,6 +37,7 @@ import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { UpdateTaskStatusDto } from './dto/update-task-status.dto';
 import { ListTasksQueryDto } from './dto/list-tasks-query.dto';
+import { CheckDuplicatesQueryDto } from './dto/check-duplicates-query.dto';
 import { TaskResponseDto, ListTasksResponseDto } from './dto/task-response.dto';
 import { PhaseTreeResponseDto } from './dto/phase-tree-response.dto';
 import { PhaseMetricsResponseDto } from './dto/phase-metrics-response.dto';
@@ -72,6 +75,7 @@ export class TasksController {
     private readonly phaseTreeService: PhaseTreeService,
     private readonly phaseMetricsService: PhaseMetricsService,
     private readonly punctualityMetricsService: PunctualityMetricsService,
+    private readonly searchService: SearchService,
   ) {}
 
   /**
@@ -81,13 +85,35 @@ export class TasksController {
    * call. Se virar gargalo (>50ms / request), considerar AsyncLocalStorage
    * por request ou cache LRU compartilhado com `OrgTenantGuard`.
    *
+   * **F4 (item 4.2) — `ORG_CONTEXT_STALE`:** quando o escopo sai VAZIO, o
+   * service de tasks não consegue distinguir "usuário novo sem projetos" de
+   * "`organizationId` stale no JWT" — ele recebe só a lista de ids, nunca o
+   * claim. Por isso a decisão mora aqui, no único ponto do fluxo HTTP que tem
+   * o claim em mãos: `assertOrgContextFresh` lança 401 `ORG_CONTEXT_STALE`
+   * apenas quando a membership de org **não existe mais**; usuário novo em org
+   * válida segue adiante com `[]` (e o handler devolve 200 + lista vazia).
+   *
+   * A query extra só acontece no caminho já-vazio — fluxo normal, custo zero.
+   *
+   * @throws {UnauthorizedException} `{ code: 'ORG_CONTEXT_STALE' }`
    * @internal
    */
   private async resolveScopedProjectIds(req: JwtRequest): Promise<string[]> {
-    return this.projectsService.findAccessibleProjectIds(
-      BigInt(req.user.entidadeId),
+    const entidadeId = BigInt(req.user.entidadeId);
+    const ids = await this.projectsService.findAccessibleProjectIds(
+      entidadeId,
       req.user.organizationId,
     );
+
+    if (ids.length === 0) {
+      await this.projectsService.assertOrgContextFresh(
+        entidadeId,
+        req.user.organizationId,
+        'tasks.controller',
+      );
+    }
+
+    return ids;
   }
 
   /**
@@ -324,7 +350,11 @@ export class TasksController {
       'negativo=adiantou, null=sem amostras. Agregação SQL server-side (sem paginação).',
   })
   @ApiParam({ name: 'projectId', description: 'ID do projeto (List)', example: '5' })
-  @ApiResponse({ status: 200, description: 'Métrica calculada', type: PunctualityMetricsResponseDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Métrica calculada',
+    type: PunctualityMetricsResponseDto,
+  })
   @ApiResponse({ status: 404, description: 'Projeto não encontrado ou fora do scope' })
   async getProjectPunctuality(
     @Param('projectId') projectId: string,
@@ -387,7 +417,11 @@ export class TasksController {
       'Irmã de GET .../punctuality (que agrega atraso e adiantamento juntos).',
   })
   @ApiParam({ name: 'projectId', description: 'ID do projeto (List)', example: '5' })
-  @ApiResponse({ status: 200, description: 'Métrica calculada', type: PunctualityMetricsResponseDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Métrica calculada',
+    type: PunctualityMetricsResponseDto,
+  })
   @ApiResponse({ status: 404, description: 'Projeto não encontrado ou fora do scope' })
   async getProjectDelayMargin(
     @Param('projectId') projectId: string,
@@ -405,6 +439,88 @@ export class TasksController {
     }
 
     return this.punctualityMetricsService.computeStrictDelayForProject(BigInt(projectId));
+  }
+
+  /**
+   * Detecta possíveis duplicatas de uma task ANTES de criá-la (task #799 / DEV-128).
+   *
+   * Passo intermediário informativo do modal de criação: dado um título proposto
+   * e a Lista-alvo, retorna candidatas parecidas (exatas primeiro) para o usuário
+   * decidir abrir a existente ou criar mesmo assim. NUNCA bloqueia a criação —
+   * quem cria é o `POST /tasks`.
+   *
+   * Autorização idêntica ao `POST /tasks`: `projectId ∈ accessibleProjectIds`
+   * (404 anti-enumeration quando fora do scope). Delega a
+   * {@link SearchService.findPossibleDuplicates} (escopo = a própria lista,
+   * decisão #2). Read-only puro — reusa a busca tokenizada da #791.
+   *
+   * **Ordem de rotas:** declarada ANTES de `@Get(':id')`. O segmento literal
+   * `check-duplicates` não deve ser capturado pelo wildcard `:id`.
+   *
+   * @param query - `nome` + `projectId` obrigatórios; `excludeTaskId`/`limit` opcionais
+   * @param req - Request com user.entidadeId / organizationId
+   * @returns Lista de possíveis duplicatas (vazia quando não há candidatas)
+   *
+   * @throws {NotFoundException} Projeto fora do scope (404 anti-enumeration)
+   *
+   * @example
+   * ```bash
+   * curl "http://localhost:3000/api/v1/tasks/check-duplicates?nome=Corrigir%20login&projectId=352" \
+   *   -H "Authorization: Bearer {token}"
+   * ```
+   */
+  @Get('check-duplicates')
+  @ApiOperation({
+    summary: 'Detectar possíveis duplicatas antes de criar (task #799)',
+    description:
+      'Busca tasks com título parecido na MESMA Lista (escopo = projectId). ' +
+      'Informativo — nunca bloqueia. Exatas primeiro. Inclui tasks concluídas/' +
+      'arquivadas (exibe idStatus). Autorização idêntica ao POST /tasks.',
+  })
+  @ApiQuery({
+    name: 'nome',
+    description: 'Título proposto da nova task',
+    example: 'Corrigir login',
+  })
+  @ApiQuery({ name: 'projectId', description: 'ID da Lista-alvo (DProject)', example: '352' })
+  @ApiQuery({
+    name: 'excludeTaskId',
+    required: false,
+    description: 'ID a excluir (edição/rename) — evita auto-sugestão',
+    example: '1234',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description: 'Máximo de candidatas (default 5, cap 20)',
+    example: 5,
+  })
+  @ApiResponse({ status: 200, description: 'Possíveis duplicatas', type: [TaskDuplicateDto] })
+  @ApiResponse({ status: 404, description: 'Projeto não encontrado ou fora do scope' })
+  async checkDuplicates(
+    @Query() query: CheckDuplicatesQueryDto,
+    @Request() req: JwtRequest,
+  ): Promise<TaskDuplicateDto[]> {
+    this.logger.log(
+      `GET /tasks/check-duplicates — user=${req.user.entidadeId}, project=${query.projectId}`,
+    );
+
+    // Tenant gate: 404 anti-enumeration idêntico ao POST /tasks quando fora do scope.
+    const allowed = await this.resolveScopedProjectIds(req);
+    if (!allowed.includes(query.projectId)) {
+      this.logger.warn(
+        `tenant_mismatch_check_duplicates projectId=${query.projectId} fora do scope do user=${req.user.entidadeId}`,
+      );
+      throw new NotFoundException(`Projeto ${query.projectId} não encontrado`);
+    }
+
+    return this.searchService.findPossibleDuplicates({
+      nome: query.nome,
+      projectId: query.projectId,
+      scope: 'project',
+      excludeTaskId: query.excludeTaskId,
+      limit: query.limit,
+    });
   }
 
   /**
@@ -517,10 +633,7 @@ export class TasksController {
   @ApiResponse({ status: 200, description: 'Timer iniciado', type: TaskResponseDto })
   @ApiResponse({ status: 409, description: 'Já existe um timer em andamento nesta task' })
   @ApiResponse({ status: 404, description: 'Task não encontrada ou fora do scope' })
-  async timerStart(
-    @Param('id') id: string,
-    @Request() req: JwtRequest,
-  ): Promise<TaskResponseDto> {
+  async timerStart(@Param('id') id: string, @Request() req: JwtRequest): Promise<TaskResponseDto> {
     const allowed = await this.resolveScopedProjectIds(req);
     return this.tasksService.timer(id, 'start', BigInt(req.user.entidadeId), allowed);
   }
@@ -548,10 +661,7 @@ export class TasksController {
   @ApiResponse({ status: 200, description: 'Timer pausado', type: TaskResponseDto })
   @ApiResponse({ status: 409, description: 'Nenhum timer em andamento para este usuário' })
   @ApiResponse({ status: 404, description: 'Task não encontrada ou fora do scope' })
-  async timerPause(
-    @Param('id') id: string,
-    @Request() req: JwtRequest,
-  ): Promise<TaskResponseDto> {
+  async timerPause(@Param('id') id: string, @Request() req: JwtRequest): Promise<TaskResponseDto> {
     const allowed = await this.resolveScopedProjectIds(req);
     return this.tasksService.timer(id, 'pause', BigInt(req.user.entidadeId), allowed);
   }
@@ -578,10 +688,7 @@ export class TasksController {
   @ApiResponse({ status: 200, description: 'Timer retomado', type: TaskResponseDto })
   @ApiResponse({ status: 409, description: 'Já existe um timer em andamento nesta task' })
   @ApiResponse({ status: 404, description: 'Task não encontrada ou fora do scope' })
-  async timerResume(
-    @Param('id') id: string,
-    @Request() req: JwtRequest,
-  ): Promise<TaskResponseDto> {
+  async timerResume(@Param('id') id: string, @Request() req: JwtRequest): Promise<TaskResponseDto> {
     const allowed = await this.resolveScopedProjectIds(req);
     return this.tasksService.timer(id, 'resume', BigInt(req.user.entidadeId), allowed);
   }
@@ -608,10 +715,7 @@ export class TasksController {
   @ApiResponse({ status: 200, description: 'Timer encerrado', type: TaskResponseDto })
   @ApiResponse({ status: 409, description: 'Nenhum timer em andamento para este usuário' })
   @ApiResponse({ status: 404, description: 'Task não encontrada ou fora do scope' })
-  async timerStop(
-    @Param('id') id: string,
-    @Request() req: JwtRequest,
-  ): Promise<TaskResponseDto> {
+  async timerStop(@Param('id') id: string, @Request() req: JwtRequest): Promise<TaskResponseDto> {
     const allowed = await this.resolveScopedProjectIds(req);
     return this.tasksService.timer(id, 'stop', BigInt(req.user.entidadeId), allowed);
   }
@@ -665,6 +769,11 @@ export class TasksController {
   ): Promise<void> {
     const allowed = await this.resolveScopedProjectIds(req);
     const cascadeBool = cascade === undefined ? undefined : cascade === 'true';
-    await this.tasksService.delete(id, allowed, { cascade: cascadeBool }, BigInt(req.user.entidadeId));
+    await this.tasksService.delete(
+      id,
+      allowed,
+      { cascade: cascadeBool },
+      BigInt(req.user.entidadeId),
+    );
   }
 }
