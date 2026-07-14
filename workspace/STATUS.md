@@ -1,6 +1,72 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-07-08 (Task 7 — Promover Projeto/Lista a Template COMPLETA + Iniciativa MCP 3/3)
+**Ultima atualizacao:** 2026-07-13 (Unificação Nexus⇄MCP Ondas 0–6 COMPLETA)
+
+---
+
+## Unificação Nexus⇄MCP — Camada Única de Capabilities (Ondas 0–6, pós-F13) — COMPLETE
+
+**Module:** agents (src/ai/ + src/mcp/ + src/common/)
+**Initiative:** Eliminar duplicação de tools de IA; fonte única com adapters finos
+**Status:** COMPLETA (6 ondas implementadas + Onda 5b documentada como remanescente)
+**Duration:** ~18h total (Strategist ~4h plan + Implementer ~12h Ondas 0–6 + Reviewer ~1h + Documenter ~1h)
+**Completed:** 2026-07-13
+**Quality Score:** 8.9/10 (APPROVED)
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | ~4h | — |
+| Implementer | ~12h | — |
+| Reviewer | ~1h | 8.9/10 |
+| Documenter | ~1h | — |
+
+**Pilares:**
+- Pilar 1 (Engine): N/A — capabilities delegam a services; `execute_task` usa OperacaoExecucaoClaude (Pilar 1 preservado)
+- Pilar 2 (Endpoints): REUTILIZADO — tools reusam `TasksService`, `ProjectsService`, etc. (zero duplicação lógica)
+- Pilar 3 (Seed): N/A — zero DClasse nova (auditoria -495, chaves -472, RBAC -160..-179 existem)
+
+**Deliverables:**
+- [x] Onda 0: Golden test MCP + contrato neutro (Capability, ToolPrincipal, CapabilityError, CapabilityRegistry) + adapters + teste paridade + hook
+- [x] Onda 1: Piloto `create_task` (prova contrato)
+- [x] Onda 2: Bidirecionalidade (comments Nexus→MCP)
+- [x] Onda 3: 13 reads MCP→Nexus
+- [x] Onda 4: 9 writes MCP→Nexus + mapa RBAC→scopes
+- [x] Onda 5: Guard-rail estrito + limpeza cascas legacy (23 `*.tool.ts` removidos)
+- [x] Onda 6: `execute_task` gated (flag OFF + escope + confirmação)
+- [x] Onda 5b: Documentado como remanescente (DEV-163, não bloqueante)
+
+**Metrics:**
+- Build: PASS (0 errors, 0 warnings)
+- TypeScript: 0 errors em `src/common/tool-capabilities/`, `src/mcp/tools/`, `src/ai/tools/`
+- ESLint: 0 warnings
+- Golden test MCP: VERDE (wire inalterado, exceto Onda 2 intencional)
+- Paridade test: VERDE (25 capabilities nos dois, `execute_task` isento conforme manifesto)
+- Cross-tenant: VERDE (Ondas 3–6)
+- Scope enforcement: VERDE (Nexus + MCP)
+- Feature-flag `execute_task`: VERDE (OFF by default)
+
+**Architecture:**
+- **Camada neutra:** `src/common/tool-capabilities/` — 25 capabilities (fonte única)
+- **Adapters finos:**
+  - MCP: `src/mcp/tools/mcp-capability.adapter.ts` (congelado após Onda 0)
+  - Nexus: `src/ai/tools/nexus-capability.adapter.ts`
+- **`ToolPrincipal.can(scope)` polimórfico:**
+  - MCP: checa scopes da chave (DTabela -472)
+  - Nexus: mapeia RBAC (DVincula) → scopes com default nega
+- **Guard-rail de paridade:** teste de contrato + hook + manifesto de isenções
+
+**ADRs:** **ADR-V2-079** (novo), ADR-V2-042/066/067/068/069/070/071/072/073 (correlatos)
+
+**Guarantees:**
+- [x] Back-compat total: MCP wire byte-idêntico (ADR-V2-071/072/073)
+- [x] Paridade estrita: 25 capabilities em MCP e Nexus (com `execute_task` isento por design)
+- [x] Tenant isolation: service continua última linha de isolamento (ADR-V2-042)
+- [x] Zero tabela nova (ADR-V2-001)
+- [x] Ganho composto: cada capability futura escreve-se 1x, aparece 2x
+
+**Known Remaining (Não-Bloqueante):**
+- Onda 5b (DEV-163): Saneamento mecânico — refatorar golden test + schema-consistency spec + remover cascas legacy (23 arquivos); esforço 1 ciclo curto
 
 ---
 

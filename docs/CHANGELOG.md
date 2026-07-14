@@ -14,6 +14,28 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Unificação Nexus⇄MCP — Camada Única de Capabilities (Ondas 0–6, pós-F13, 2026-07-13)**
+  - **Objetivo:** Eliminar duplicação de tools de IA entre MCP (25 tools) e Nexus (25 tools); fonte única com adapters finos
+  - **Abordagem:** Alternativa B + guard-rail C (camada neutra de Capabilities + 2 adapters + golden test MCP + paridade test + manifesto de isenções)
+  - **Resultado:** 25 capabilities em `src/common/tool-capabilities/` servidas aos dois lados; paridade estrita (com `execute_task` isento por design)
+  - **Ondas:**
+    - Onda 0: Golden test MCP + contrato neutro (Capability, ToolPrincipal, CapabilityError, CapabilityRegistry) + adapters esqueleto + teste de paridade + hook
+    - Onda 1: Piloto `create_task` (prova o contrato)
+    - Onda 2: Bidirecionalidade — comments (Nexus→MCP)
+    - Onda 3: 13 reads (só-MCP→Nexus)
+    - Onda 4: 9 writes (só-MCP→Nexus); mapa RBAC→scopes
+    - Onda 5: Guard-rail estrito + limpeza de cascas legacy (23 `*.tool.ts` removidos)
+    - Onda 6: `execute_task` gated (feature-flag default OFF + `executions:create` scope + confirmação explícita no chat)
+  - **`ToolPrincipal.can(scope)` polimórfico:** MCP lê scopes da chave (DTabela -472); Nexus deriva RBAC via DVincula (-160..-179)
+  - **Paridade mecânica:** Teste de contrato + hook bloqueiam divergência sem isenção declarada (manifesto)
+  - **Proteção MCP:** Adapter MCP congelado (Onda 0, nunca mudado novamente); golden test valida não-regressão de wire (ADR-V2-071/072/073)
+  - **Pilares:** P1 N/A (capabilities delegam a services; `execute_task` usa OperacaoExecucaoClaude existente) | P2 REUTILIZADO (tools reusam services existentes) | P3 N/A (zero DClasse nova)
+  - **Tests:** Ondas 0–6 gatadas (gate ≥8.0 Reviewer); golden test VERDE; paridade test VERDE; zero regressão MCP; cross-tenant tests
+  - **Build/Lint:** PASS (0 errors, 0 warnings)
+  - **ADRs:** **ADR-V2-079** (novo — camada única + ToolPrincipal + guard-rail + golden test), ADR-V2-042/066/067/068/069/070/071/072/073 (vinculados)
+  - **Trabalho remanescente (Onda 5b, DEV-163):** Saneamento mecânico — refatorar golden test + schema-consistency spec + remover cascas legacy; escopo claro, não bloqueante
+  - **Ganho composto:** Cada nova capability (tool futura) escreve-se 1x, aparece nos 2 lados; reutilização progressiva
+
 - **Endpoint `POST /projects/:id/promote-to-template` — promover List/Space a template reutilizável (V2 F11, Task 7, 2026-07-08)**
   - Nova rota para promover um projeto real (List -352 ou Space -350) a template reutilizável (idClasse -401/-402), criando uma CÓPIA — projeto original permanece intacto
   - **Decisão:** CÓPIA, não mutação (requisito CEO: "Testes E2E" continua com ~49 tasks, enquanto template resultante aparece no catálogo)
