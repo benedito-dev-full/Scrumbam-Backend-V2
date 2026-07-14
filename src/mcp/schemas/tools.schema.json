@@ -551,6 +551,52 @@
           }
         }
       }
+    },
+    {
+      "name": "create_comment",
+      "description": "Cria um comentario em uma task, project, folder ou list. Use quando o usuario pedir para comentar/registrar algo.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "targetType": {
+            "type": "string",
+            "enum": ["task", "project", "folder", "list"],
+            "description": "Tipo do alvo do comentario"
+          },
+          "targetId": {
+            "type": "string",
+            "description": "ID do alvo (chave numerica como string)"
+          },
+          "texto": {
+            "type": "string",
+            "description": "Conteudo do comentario (1-10000 chars, markdown aceito)"
+          }
+        },
+        "required": ["targetType", "targetId", "texto"]
+      }
+    },
+    {
+      "name": "list_comments",
+      "description": "Lista os comentarios mais recentes de uma task, project, folder ou list. Use quando o usuario quiser saber o que foi comentado.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "targetType": {
+            "type": "string",
+            "enum": ["task", "project", "folder", "list"],
+            "description": "Tipo do alvo"
+          },
+          "targetId": {
+            "type": "string",
+            "description": "ID do alvo"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Quantidade maxima de comentarios (1-50, default 20)"
+          }
+        },
+        "required": ["targetType", "targetId"]
+      }
     }
   ]
 }

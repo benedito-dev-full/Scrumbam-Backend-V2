@@ -45,7 +45,7 @@ describe('MCP Bloco D - compatibilidade, timeout, metricas e doc', () => {
     });
   });
 
-  it('tools/list retorna 16 tools com schemas completos do schema estatico cacheado', async () => {
+  it('tools/list retorna as tools com schemas completos do schema estatico cacheado', async () => {
     const controller = new McpController(new McpJsonRpcService(), new McpRouterService());
 
     const result = await controller.handle({ jsonrpc: '2.0', method: 'tools/list', id: 'tools' }, {
@@ -57,7 +57,9 @@ describe('MCP Bloco D - compatibilidade, timeout, metricas e doc', () => {
       id: 'tools',
       result: { tools: toolsSchema.tools },
     });
-    expect(toolsSchema.tools).toHaveLength(24);
+    // 26 tools (ADR-V2-079 Onda 2 re-baseline consciente: create_comment/
+    // list_comments anexadas ao final — ver mcp-tools.schema-consistency.spec.ts).
+    expect(toolsSchema.tools).toHaveLength(26);
     expect(toolsSchema.tools.map((tool) => tool.name)).toEqual([
       'list_tasks',
       'create_task',
@@ -83,6 +85,8 @@ describe('MCP Bloco D - compatibilidade, timeout, metricas e doc', () => {
       'create_block',
       'create_project',
       'create_from_template',
+      'create_comment',
+      'list_comments',
     ]);
     for (const tool of toolsSchema.tools) {
       expect(tool.inputSchema).toEqual(expect.objectContaining({ type: 'object' }));

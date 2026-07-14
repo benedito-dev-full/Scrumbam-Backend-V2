@@ -28,6 +28,7 @@ import { ListMembersTool } from '../tools/list-members.tool';
 import { ListNotificationsTool } from '../tools/list-notifications.tool';
 import { ListProjectsTool } from '../tools/list-projects.tool';
 import { ListTasksTool } from '../tools/list-tasks.tool';
+import { McpCapabilityAdapter } from '../tools/mcp-capability.adapter';
 import { McpTool, McpToolError } from '../tools/tool.interface';
 import { SearchTasksTool } from '../tools/search-tasks.tool';
 import { UpdateNotificationTool } from '../tools/update-notification.tool';
@@ -95,32 +96,60 @@ export class McpRouterService {
     createProjectTool?: CreateProjectTool,
     createFromTemplateTool?: CreateFromTemplateTool,
     configService?: ConfigService,
+    capabilityAdapter?: McpCapabilityAdapter,
   ) {
     const tools: Array<McpTool | undefined> = [
-      listTasksTool,
-      createTaskTool,
-      updateStatusTool,
-      listProjectsTool,
-      getTaskTool,
-      updateTaskTool,
-      listMembersTool,
-      getProjectTool,
-      updateProjectTool,
-      listNotificationsTool,
-      updateNotificationTool,
-      getUnreadCountTool,
-      searchTasksTool,
-      listBlocksTool,
-      listBlockTasksTool,
+      // list_tasks (Onda 3 — ADR-V2-079): mesma disciplina de fallback de
+      // create_task — adapter GANHA quando disponivel E a capability esta
+      // registrada; senao cai no wrapper legado (wire identico).
+      this.resolveToolWithFallback('list_tasks', listTasksTool, capabilityAdapter),
+      // create_task (Onda 1 — ADR-V2-079): quando o `McpCapabilityAdapter` esta
+      // disponivel E a capability `create_task` esta registrada, o wire passa a
+      // ser servido pelo adapter (Capability -> McpTool). Sem adapter/capability
+      // (ex: golden test que instancia `CreateTaskTool` direto), cai no caminho
+      // legado — wire byte-a-byte identico (mesmo schema/nome/description, ver
+      // `tools.schema.json`).
+      this.resolveCreateTaskTool(createTaskTool, capabilityAdapter),
+      // update_status (Onda 4 — ADR-V2-079): mesma disciplina de fallback.
+      this.resolveToolWithFallback('update_status', updateStatusTool, capabilityAdapter),
+      this.resolveToolWithFallback('list_projects', listProjectsTool, capabilityAdapter),
+      this.resolveToolWithFallback('get_task', getTaskTool, capabilityAdapter),
+      // update_task (Onda 4)
+      this.resolveToolWithFallback('update_task', updateTaskTool, capabilityAdapter),
+      this.resolveToolWithFallback('list_members', listMembersTool, capabilityAdapter),
+      this.resolveToolWithFallback('get_project', getProjectTool, capabilityAdapter),
+      // update_project (Onda 4)
+      this.resolveToolWithFallback('update_project', updateProjectTool, capabilityAdapter),
+      this.resolveToolWithFallback('list_notifications', listNotificationsTool, capabilityAdapter),
+      // update_notification (Onda 4)
+      this.resolveToolWithFallback('update_notification', updateNotificationTool, capabilityAdapter),
+      this.resolveToolWithFallback('get_unread_count', getUnreadCountTool, capabilityAdapter),
+      this.resolveToolWithFallback('search_tasks', searchTasksTool, capabilityAdapter),
+      this.resolveToolWithFallback('list_blocks', listBlocksTool, capabilityAdapter),
+      this.resolveToolWithFallback('list_block_tasks', listBlockTasksTool, capabilityAdapter),
+      // execute_task: EXCLUIDA da unificacao (Pilar 1 — DPedido -300..-303).
       executeTaskTool,
-      updateTimerTool,
-      deleteTaskTool,
-      getTaskTreeTool,
-      getProjectMetricsTool,
-      listMyTasksTool,
-      createBlockTool,
-      createProjectTool,
-      createFromTemplateTool,
+      // update_timer (Onda 4)
+      this.resolveToolWithFallback('update_timer', updateTimerTool, capabilityAdapter),
+      // delete_task (Onda 4)
+      this.resolveToolWithFallback('delete_task', deleteTaskTool, capabilityAdapter),
+      this.resolveToolWithFallback('get_task_tree', getTaskTreeTool, capabilityAdapter),
+      this.resolveToolWithFallback('get_project_metrics', getProjectMetricsTool, capabilityAdapter),
+      this.resolveToolWithFallback('list_my_tasks', listMyTasksTool, capabilityAdapter),
+      // create_block (Onda 4)
+      this.resolveToolWithFallback('create_block', createBlockTool, capabilityAdapter),
+      // create_project (Onda 4)
+      this.resolveToolWithFallback('create_project', createProjectTool, capabilityAdapter),
+      // create_from_template (Onda 4)
+      this.resolveToolWithFallback('create_from_template', createFromTemplateTool, capabilityAdapter),
+      // create_comment / list_comments (Onda 2 — ADR-V2-079): NASCEM no MCP
+      // aqui — nunca existiram como wrapper legado nesta superficie. Servidas
+      // EXCLUSIVAMENTE via `McpCapabilityAdapter` (sem fallback legado, pois
+      // nao ha wrapper anterior a preservar). `undefined` quando o adapter ou
+      // a capability nao estao disponiveis (ex: specs que instanciam o router
+      // com poucos argumentos).
+      this.resolveCapabilityOnlyTool('create_comment', capabilityAdapter),
+      this.resolveCapabilityOnlyTool('list_comments', capabilityAdapter),
     ];
     this.tools = tools.filter((tool): tool is McpTool => tool !== undefined);
     this.cachedToolDefinitions = (toolsSchema.tools as McpToolDefinition[]).map((tool) => ({
@@ -131,6 +160,99 @@ export class McpRouterService {
     this.timeoutMs = this.readTimeoutMs(configService);
     this.metricsInterval = setInterval(() => this.logMetricsSnapshot(), 5 * 60 * 1000);
     this.metricsInterval.unref?.();
+  }
+
+  /**
+   * Resolve o `McpTool` efetivo para `create_task` (Onda 1 — piloto ADR-V2-079).
+   *
+   * Preferencia: adapter (Capability -> McpTool) quando `capabilityAdapter` foi
+   * injetado E a capability `create_task` esta registrada no `CapabilityRegistry`
+   * subjacente. Caso contrario, cai no wrapper legado `CreateTaskTool` — path
+   * usado hoje pelo golden test (`mcp-wire.golden.spec.ts`), que instancia
+   * `CreateTaskTool` diretamente sem passar `capabilityAdapter`.
+   *
+   * O wire (`name`/`description`/`inputSchema`) e IDENTICO nos dois caminhos —
+   * a capability espelha `tools.schema.json` byte-a-byte (ver
+   * `create-task.capability.ts`).
+   *
+   * @param legacyTool - Wrapper `CreateTaskTool` legado (pode ser `undefined`).
+   * @param capabilityAdapter - Adapter da camada neutra (pode ser `undefined`).
+   * @returns O `McpTool` a usar para `create_task`, ou `undefined` se nenhum
+   *   dos dois caminhos estiver disponivel.
+   */
+  private resolveCreateTaskTool(
+    legacyTool: CreateTaskTool | undefined,
+    capabilityAdapter: McpCapabilityAdapter | undefined,
+  ): McpTool | undefined {
+    if (capabilityAdapter) {
+      const capability = capabilityAdapter.getCapability('create_task');
+      if (capability) {
+        return capabilityAdapter.toMcpTool(capability);
+      }
+    }
+    return legacyTool;
+  }
+
+  /**
+   * Resolve o `McpTool` efetivo para uma capability generica MIGRADA na
+   * Onda 3 (reads so-MCP), com fallback ao wrapper legado — MESMA disciplina
+   * de {@link resolveCreateTaskTool}, generalizada para qualquer nome de
+   * capability. Preferencia: adapter (Capability -> McpTool) quando
+   * `capabilityAdapter` esta disponivel E a capability esta registrada no
+   * `CapabilityRegistry`. Caso contrario, cai no wrapper `*.tool.ts` legado —
+   * path usado hoje pelo golden test e por specs pre-existentes que
+   * instanciam `McpRouterService` com poucos argumentos posicionais.
+   *
+   * O wire (`name`/`description`/`inputSchema`) e IDENTICO nos dois caminhos
+   * — cada capability desta onda espelha `tools.schema.json` byte-a-byte
+   * (ver `*.capability.ts` em `src/common/tool-capabilities/capabilities/`).
+   *
+   * @param capabilityName - Nome canonico snake_case da capability.
+   * @param legacyTool - Wrapper `*.tool.ts` legado (pode ser `undefined`).
+   * @param capabilityAdapter - Adapter da camada neutra (pode ser `undefined`).
+   * @returns O `McpTool` a usar, ou `undefined` se nenhum dos dois caminhos
+   *   estiver disponivel.
+   */
+  private resolveToolWithFallback(
+    capabilityName: string,
+    legacyTool: McpTool | undefined,
+    capabilityAdapter: McpCapabilityAdapter | undefined,
+  ): McpTool | undefined {
+    if (capabilityAdapter) {
+      const capability = capabilityAdapter.getCapability(capabilityName);
+      if (capability) {
+        return capabilityAdapter.toMcpTool(capability);
+      }
+    }
+    return legacyTool;
+  }
+
+  /**
+   * Resolve um `McpTool` servido EXCLUSIVAMENTE pela camada de Capabilities —
+   * sem wrapper legado a preservar (Onda 2 — `create_comment`/`list_comments`,
+   * que NASCEM no MCP nesta onda; ADR-V2-079).
+   *
+   * Diferente de {@link resolveCreateTaskTool} (que tem fallback legado para
+   * compatibilidade com specs pre-existentes), aqui a ausencia do adapter ou
+   * da capability registrada resulta em `undefined` — a tool simplesmente nao
+   * aparece no `tools/call` (o `tools/list` estatico e independente disso).
+   *
+   * @param capabilityName - Nome canonico snake_case da capability.
+   * @param capabilityAdapter - Adapter da camada neutra (pode ser `undefined`).
+   * @returns O `McpTool` traduzido, ou `undefined` se nao disponivel.
+   */
+  private resolveCapabilityOnlyTool(
+    capabilityName: string,
+    capabilityAdapter: McpCapabilityAdapter | undefined,
+  ): McpTool | undefined {
+    if (!capabilityAdapter) {
+      return undefined;
+    }
+    const capability = capabilityAdapter.getCapability(capabilityName);
+    if (!capability) {
+      return undefined;
+    }
+    return capabilityAdapter.toMcpTool(capability);
   }
 
   async dispatch(

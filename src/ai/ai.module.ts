@@ -1,6 +1,7 @@
 import { forwardRef, Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { CommentsModule } from '../comments/comments.module';
+import { ToolCapabilitiesModule } from '../common/tool-capabilities/tool-capabilities.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { AiChatController } from './ai-chat.controller';
@@ -17,9 +18,9 @@ import { ClaudeProvider } from './providers/claude.provider';
 import { GeminiProvider } from './providers/gemini.provider';
 import { OpenAiProvider } from './providers/openai.provider';
 import { CreateCommentTool } from './tools/create-comment.tool';
-import { CreateTaskTool } from './tools/create-task.tool';
 import { GetProjectSummaryTool } from './tools/get-project-summary.tool';
 import { ListCommentsTool } from './tools/list-comments.tool';
+import { NexusCapabilityAdapter } from './tools/nexus-capability.adapter';
 import { ToolRegistry } from './tools/tool-registry';
 
 /**
@@ -58,6 +59,7 @@ import { ToolRegistry } from './tools/tool-registry';
     forwardRef(() => CommentsModule),
     forwardRef(() => TasksModule),
     forwardRef(() => ProjectsModule),
+    ToolCapabilitiesModule,
   ],
   controllers: [AiChatController, AiKeysController],
   providers: [
@@ -75,8 +77,8 @@ import { ToolRegistry } from './tools/tool-registry';
     ToolRegistry,
     CreateCommentTool,
     ListCommentsTool,
-    CreateTaskTool,
     GetProjectSummaryTool,
+    NexusCapabilityAdapter,
   ],
   exports: [AiChatService, ChatMessagesService],
 })

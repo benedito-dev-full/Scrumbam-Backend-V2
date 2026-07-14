@@ -2,6 +2,7 @@ import { Logger, Module, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { AuthModule } from '../auth/auth.module';
+import { ToolCapabilitiesModule } from '../common/tool-capabilities/tool-capabilities.module';
 import { EntidadesModule } from '../entidades/entidades.module';
 import { ExecutionsModule } from '../executions/executions.module';
 import { FlowMetricsModule } from '../flow-metrics/flow-metrics.module';
@@ -42,6 +43,7 @@ import { ListMembersTool } from './tools/list-members.tool';
 import { ListNotificationsTool } from './tools/list-notifications.tool';
 import { ListProjectsTool } from './tools/list-projects.tool';
 import { ListTasksTool } from './tools/list-tasks.tool';
+import { McpCapabilityAdapter } from './tools/mcp-capability.adapter';
 import { SearchTasksTool } from './tools/search-tasks.tool';
 import { UpdateNotificationTool } from './tools/update-notification.tool';
 import { UpdateProjectTool } from './tools/update-project.tool';
@@ -61,6 +63,7 @@ import { UpdateTimerTool } from './tools/update-timer.tool';
     ExecutionsModule.forRoot(),
     FlowMetricsModule,
     ForecastModule,
+    ToolCapabilitiesModule,
   ],
   controllers: [McpController, McpKeysController, WellKnownController],
   providers: [
@@ -98,6 +101,7 @@ import { UpdateTimerTool } from './tools/update-timer.tool';
     CreateBlockTool,
     CreateProjectTool,
     CreateFromTemplateTool,
+    McpCapabilityAdapter,
   ],
   exports: [McpKeyService, McpRouterService, McpRateLimitService, McpAuditService],
 })

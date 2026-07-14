@@ -32,13 +32,30 @@ import { UpdateTimerTool } from '../tools/update-timer.tool';
  *
  * Motivacao (R-3 do plano):
  *   `tools/list` retorna o schema cacheado do JSON; `tools/call` despacha
- *   pela classe. Drift entre os dois faz o LLM ver metadata divergente do
- *   comportamento real — falha silenciosa de protocolo.
+ *   pela classe (ou pelo `McpCapabilityAdapter`, ver nota abaixo). Drift entre
+ *   os dois faz o LLM ver metadata divergente do comportamento real — falha
+ *   silenciosa de protocolo.
  *
  * Como evoluir: cada nova tool registrada (Task #2-#8) deve ser adicionada
  * a este array. O spec entao valida automaticamente a paridade. Falha hard
  * se name ausente, description divergente ou inputSchema diferente.
+ *
+ * **ADR-V2-079 (Onda 2) — tools capability-only:** `create_comment` e
+ * `list_comments` NASCERAM diretamente na camada de Capabilities
+ * (`src/common/tool-capabilities/capabilities/comments/`) — nunca tiveram um
+ * wrapper `*.tool.ts` legado nesta superficie (dispatchadas exclusivamente
+ * via `McpCapabilityAdapter`, sem fallback). Elas TEM entrada em
+ * `tools.schema.json` (por isso aparecem em `tools/list`) mas
+ * INTENCIONALMENTE nao aparecem em `buildRegisteredTools()` — a cardinalidade
+ * abaixo compensa isso via `CAPABILITY_ONLY_TOOL_NAMES`.
  */
+
+/**
+ * Nomes de tools servidas EXCLUSIVAMENTE pela camada de Capabilities (sem
+ * `*.tool.ts` legado a instanciar aqui). Mantido em sincronia manual com
+ * `resolveCapabilityOnlyTool(...)` em `mcp-router.service.ts`.
+ */
+const CAPABILITY_ONLY_TOOL_NAMES = ['create_comment', 'list_comments'] as const;
 
 interface ToolSchemaEntry {
   name: string;
@@ -93,8 +110,11 @@ describe('MCP tools.schema.json ↔ classes (consistencia)', () => {
     }
   });
 
-  it('toda entrada de tools.schema.json corresponde a uma tool registrada', () => {
+  it('toda entrada de tools.schema.json corresponde a uma tool registrada (ou e capability-only)', () => {
     for (const entry of schemaEntries) {
+      if ((CAPABILITY_ONLY_TOOL_NAMES as readonly string[]).includes(entry.name)) {
+        continue;
+      }
       const tool = registeredTools.find((t) => t.name === entry.name);
       expect(tool).toBeDefined();
     }
@@ -114,8 +134,8 @@ describe('MCP tools.schema.json ↔ classes (consistencia)', () => {
     }
   });
 
-  it('cardinalidade: numero de tools registradas == numero de entradas no JSON', () => {
-    expect(registeredTools.length).toBe(schemaEntries.length);
+  it('cardinalidade: numero de tools registradas + capability-only == numero de entradas no JSON', () => {
+    expect(registeredTools.length + CAPABILITY_ONLY_TOOL_NAMES.length).toBe(schemaEntries.length);
   });
 
   it('nomes sao unicos no JSON (sem duplicatas)', () => {

@@ -23,6 +23,12 @@
           },
           {
             "type": "command",
+            "command": "./.claude/scripts/validate-capability-parity.sh",
+            "timeout": 180,
+            "statusMessage": "V2 (ADR-V2-079): golden MCP + paridade de Capabilities..."
+          },
+          {
+            "type": "command",
             "command": "./.claude/scripts/update-status-after-agent.sh implementer",
             "timeout": 30,
             "statusMessage": "Registrando conclusão Implementer V2..."
