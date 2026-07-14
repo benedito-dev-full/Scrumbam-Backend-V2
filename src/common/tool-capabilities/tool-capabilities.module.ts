@@ -1,4 +1,4 @@
-import { forwardRef, Module, OnModuleInit } from '@nestjs/common';
+import { forwardRef, Module, Optional, OnModuleInit } from '@nestjs/common';
 
 import { CommentsModule } from '../../comments/comments.module';
 import { EntidadesModule } from '../../entidades/entidades.module';
@@ -76,16 +76,26 @@ import { CapabilityRegistry } from './capability-registry';
     forwardRef(() => SearchModule),
     forwardRef(() => FlowMetricsModule),
     forwardRef(() => ForecastModule),
-    forwardRef(() => ExecutionsModule),
     forwardRef(() => EntidadesModule),
+    // Onda 6 — ExecutionsModule (dinamico) SO e importado com a flag ON.
+    // `ExecuteTaskCapability` depende de `ExecutionsService`, exportado apenas
+    // por `ExecutionsModule.forRoot()`. Com a flag OFF (default de producao) a
+    // capability nao existe como provider (ver abaixo), entao NAO precisamos —
+    // nem devemos — instanciar uma 2a copia do modulo dinamico (fila BullMQ,
+    // cron sweeper, throttler). App e MCP ja o configuram via `.forRoot()`.
+    ...(NEXUS_EXECUTE_TASK_ENABLED ? [ExecutionsModule.forRoot()] : []),
   ],
   providers: [
     CapabilityRegistry,
     CreateTaskCapability,
     CreateCommentCapability,
     ListCommentsCapability,
-    // Onda 6 — execute_task (sensivel; registrada so com flag ON)
-    ExecuteTaskCapability,
+    // Onda 6 — execute_task (sensivel): provider SO existe com a flag ON.
+    // Como provider, o Nest o instancia no boot e resolve suas dependencias
+    // (ExecutionsService). Fora da flag, mante-lo como provider quebraria o
+    // boot (ExecutionsService indisponivel). Condicionar o provider a flag
+    // mantem o design "flag OFF => execute_task nao existe no Nexus".
+    ...(NEXUS_EXECUTE_TASK_ENABLED ? [ExecuteTaskCapability] : []),
     // Onda 3 — reads so-MCP (tasks-read)
     GetTaskCapability,
     GetTaskTreeCapability,
@@ -148,8 +158,11 @@ export class ToolCapabilitiesModule implements OnModuleInit {
     private readonly createBlockCapability: CreateBlockCapability,
     private readonly createFromTemplateCapability: CreateFromTemplateCapability,
     private readonly updateNotificationCapability: UpdateNotificationCapability,
-    // Onda 6 — execute_task (registrada condicionalmente pela feature-flag)
-    private readonly executeTaskCapability: ExecuteTaskCapability,
+    // Onda 6 — execute_task: provider condicional a flag. Com a flag OFF nao ha
+    // provider (nem ExecutionsModule importado), entao a injecao e @Optional() —
+    // resolve `undefined` sem quebrar o boot. `onModuleInit` so registra quando
+    // a flag esta ON (e ai o provider existe).
+    @Optional() private readonly executeTaskCapability?: ExecuteTaskCapability,
   ) {}
 
   /**
@@ -186,7 +199,7 @@ export class ToolCapabilitiesModule implements OnModuleInit {
     // Onda 6 — execute_task SO e registrada com a feature-flag ON (default OFF).
     // Flag OFF => nao entra no registry => ausente do Nexus (e do McpCapability-
     // Adapter). MCP serve execute_task pelo wrapper legado independentemente.
-    if (NEXUS_EXECUTE_TASK_ENABLED) {
+    if (NEXUS_EXECUTE_TASK_ENABLED && this.executeTaskCapability) {
       this.registerIfAbsent(this.executeTaskCapability);
     }
   }
