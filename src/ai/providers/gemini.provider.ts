@@ -21,35 +21,58 @@ import {
 import { timeoutExceptionFor, translateProviderError } from './provider-error.util';
 
 /**
- * Modelo Gemini default — `gemini-3.5-flash`, o recomendado do Google para uso
- * **agentico e tool calling**, que e exatamente o que o Nexus faz (24 tools).
+ * Modelo Gemini default — `gemini-3.1-flash-lite`.
  *
- * ## Por que isto e configuravel por env
+ * ## Por que ESTE, e nao o "melhor"
  *
- * O Google aposenta modelo sem aviso util. Em 14/07/2026 o Nexus quebrou em
- * producao com:
+ * O Nexus e um **chat interativo**: o usuario digita e espera resposta na hora.
+ * O eixo que importa aqui e LATENCIA, nao capacidade maxima. O Google separa os
+ * modelos exatamente assim:
+ *
+ * | Modelo                  | Perfil segundo o Google                            |
+ * |-------------------------|----------------------------------------------------|
+ * | `gemini-3.5-flash`      | "Most intelligent" — agentico/coding. **Raciocina** |
+ * | `gemini-3.1-flash-lite` | Frontier-class a fracao do custo. **Rapido**        |
+ * | `gemini-2.5-flash`      | Baixa latencia (era o nosso — bloqueado, ver abaixo)|
+ *
+ * Em 14/07/2026 tentamos o `3.5-flash` e ele estourou o timeout respondendo um
+ * "oi" (>30s): com 24 tools no contexto, um modelo de raciocinio delibera muito
+ * antes de decidir que nao precisa chamar nenhuma. Otimo para agente autonomo,
+ * inutil para chat. O sucessor natural do `2.5-flash` (o de baixa latencia) para
+ * uma chave nova e o `3.1-flash-lite`.
+ *
+ * ## Por que e configuravel por env
+ *
+ * No mesmo dia, o Nexus quebrou em producao com:
  *
  *   404 — This model models/gemini-2.5-flash is no longer available to new users.
  *
- * Note o "**to new users**": o `2.5-flash` continua na documentacao como estavel,
- * e continua funcionando para projetos que ja o usavam — mas uma chave de API
- * nova nao consegue mais acessa-lo. Ou seja: o modelo pode morrer para VOCE sem
- * mudar de status na doc, e sem ninguem tocar no codigo.
+ * Note o "**to new users**": o `2.5-flash` continua listado como estavel na doc e
+ * continua funcionando para projetos que ja o usavam — mas uma chave de API nova
+ * nao o alcanca mais. O modelo morre para VOCE sem mudar de status na doc e sem
+ * ninguem tocar no codigo.
  *
- * Por isso o ID vem de `GEMINI_MODEL` (env). Da proxima vez que o Google
- * aposentar algo, a correcao e trocar uma variavel de ambiente — nao esperar um
- * build, um deploy e um PR.
+ * Por isso o ID vem de `GEMINI_MODEL` (env): trocar de modelo — por
+ * aposentadoria OU por preferencia (mais rapido vs mais inteligente) — e mudar
+ * uma variavel no Dokploy, nao esperar build + deploy + PR.
  *
  * Precedencia: `opts.model` (override por request) → `GEMINI_MODEL` (env) →
  * o default abaixo.
  */
-const GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || 'gemini-3.5-flash';
+const GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || 'gemini-3.1-flash-lite';
 
 /** Hard limit do loop de tool calling (defesa em profundidade — R-5). */
 const DEFAULT_MAX_TOOL_ITERATIONS = 5;
 
-/** Timeout total por chamada `sendMessage` ao Gemini (ms). */
-const GEMINI_TIMEOUT_MS = 30_000;
+/**
+ * Timeout total por chamada ao Gemini (ms) — `GEMINI_TIMEOUT_MS`, default 60s.
+ *
+ * Era 30s fixo, e foi o que transformou "o modelo demorou" em "o Nexus quebrou"
+ * (504 aos 30.088ms). Cortar cedo demais nao protege ninguem: o usuario perde a
+ * resposta e o token ja foi gasto. 60s da folga para uma pergunta pesada, e a env
+ * var permite apertar (chat) ou afrouxar (tarefa longa) sem mexer no codigo.
+ */
+const GEMINI_TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS) || 60_000;
 
 /** Tamanho maximo do preview do resultado da tool no audit. */
 const TOOL_RESULT_PREVIEW_MAX = 200;
