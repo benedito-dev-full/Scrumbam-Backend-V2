@@ -26,6 +26,14 @@ metadata:
 - `is_error:true` no output do Claude Code não entra automaticamente em `success` — débito semântico aceitável para MVP se documentado; senão M1.
 - Slug sanitização (`/^[a-zA-Z0-9._-]+$/`) ANTES de usar em parser de texto line-by-line — defesa contra injection.
 
+## Sessões Multi-Device em DTabela (F16 hardening, incidente auth, 2026-07-13)
+- Credencial (hash de refresh token) morando em `DTabela.codigo`/`metaDados` exige denylist EXPLÍCITA no service genérico (`TabelaService`) em TODAS as portas: list (via `resolveIdClasse`, inclusive o alias `?classe=`), get-by-id (por CHAVE, não só por query — `GET /tabelas/:id` de uma linha denylisted também deve barrar), create, update/delete (se herdam de `buscarPorId`, cobertos transitivamente). Checar com grep amplo por TODO outro service que toque `dTabela.findMany/findFirst` sem filtro de idClasse — é o vetor de vazamento se algum endpoint genérico "esquecer" o filtro.
+- Dual-read/dual-write (dois sistemas de verdade coexistindo: sessão nova em DTabela + slot legado em DUserGroup.dados) é o padrão correto para migração zero-downtime de auth. Validar com testes que simulam: (a) usuário só-no-legado renovando, (b) migração preguiçosa materializando a sessão, (c) resposta ao desligar a flag (`SESSIONS_V2_ENABLED=false`) não perder ninguém.
+- Testes de concorrência real (CAS, corrida de abas) exigem um FAKE com estado compartilhado (não `jest.fn()` sem estado) — reproduzir a corrida de verdade via `setImmediate`/promises intercaladas. Ver `src/auth/__tests__/fake-prisma.ts` como referência de padrão.
+- RFC 9700: replay de refresh token deve revogar o GRANT (família/sessão), não a conta inteira — escalar para "toda a conta" só quando o token replay-ado pertence a uma sessão JÁ revogada por replay (sinal de credencial vazada circulando), nunca em replay isolado.
+- `$queryRaw` para lookup por hash é aceitável (até preferível a filtro Json do Prisma, que já se mostrou não-confiável neste projeto) DESDE QUE 100% via `Prisma.sql` com interpolação `${}` — checar ausência total de concatenação de string em qualquer SQL cru tocando auth.
+- Migration de ÍNDICE (não tabela/coluna) em coluna Json (`(metaDados->>'campo')`) com `WHERE idClasse = N` (parcial) é o padrão correto para lookup rápido sobre campo polimórfico sem quebrar ADR-V2-001.
+
 ## Endpoints Hierárquicos (fases-via-dtask-idpai F4, 2026-05-21)
 - `@Matches()` obrigatório em DTOs que alimentam `BigInt()` — sem isso, string não-numérica = 500 em vez de 400.
 - Ordenação de rotas NestJS: `:id/tree` ANTES de `:id` (senão o catch-all captura a string composta).

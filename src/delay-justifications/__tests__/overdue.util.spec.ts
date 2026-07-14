@@ -94,9 +94,17 @@ describe('computeOverdue', () => {
     expect(r).toEqual({ isOverdue: true, delayKind: 'COMPLETED_LATE', delayDays: 1 });
   });
 
-  it('virada de dia TZ Brasil: due 04/07, now 05/07 00:30 BRT → atrasada 1 dia', () => {
-    // dueDate: 04/07 23:00 BRT = 2026-07-05T02:00:00Z
-    const dueDate = new Date('2026-07-05T02:00:00Z');
+  /* ── Virada de dia ──────────────────────────────────────────────────────────
+   * NOTA: a fixture destes dois casos foi corrigida. Antes usavam
+   * `dueDate = 2026-07-05T02:00:00Z` chamando isso de "prazo 04/07 em Brasília"
+   * — ou seja, tratavam `dueDate` como um INSTANTE com hora do dia. O sistema
+   * nunca produz esse valor: o prazo é uma DATA CIVIL, persistida como
+   * meia-noite UTC (`new Date('2026-07-04')` → `2026-07-04T00:00:00.000Z`), e a
+   * UI é um date-picker sem hora. A premissa antiga é o que fazia toda task com
+   * prazo HOJE nascer atrasada. Ver `overdue-due-today.spec.ts`. */
+
+  it('virada de dia: prazo 04/07, agora 05/07 00:30 BRT → atrasada 1 dia', () => {
+    const dueDate = new Date('2026-07-04T00:00:00.000Z'); // data civil 04/07
     // now: 05/07 00:30 BRT = 2026-07-05T03:30:00Z (já é dia 05 em Brasília)
     const now = new Date('2026-07-05T03:30:00Z');
     const r = computeOverdue(
@@ -107,8 +115,8 @@ describe('computeOverdue', () => {
     expect(r).toEqual({ isOverdue: true, delayKind: 'OPEN', delayDays: 1 });
   });
 
-  it('mesma virada mas ainda 04/07 em Brasília (23:30 UTC = 20:30 BRT) → não atrasada', () => {
-    const dueDate = new Date('2026-07-05T02:00:00Z'); // due 04/07 BRT
+  it('ainda 04/07 em Brasília (20:30 BRT do próprio dia do prazo) → NÃO atrasada', () => {
+    const dueDate = new Date('2026-07-04T00:00:00.000Z'); // data civil 04/07
     const now = new Date('2026-07-04T23:30:00Z'); // 20:30 BRT do dia 04
     const r = computeOverdue(
       { dueDate, dados: { v3: { state: 'READY' } }, atualizadoEm: now },

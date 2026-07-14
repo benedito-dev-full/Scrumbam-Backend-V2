@@ -19,6 +19,9 @@
 - [dados-json-merge-conventions.md](dados-json-merge-conventions.md) — Merge seletivo (DProject) vs raso (DTask) em `dados Json`; idClasses -350..-353.
 - [dvincula-fk-exige-dentidade.md](dvincula-fk-exige-dentidade.md) — DVincula FK exige DEntidade nos 2 lados; NUNCA gravar DProject.chave; usar DEntidade-espelho PROJECT_REF (ADR-V2-058, plan fk-systemic-fix).
 - [delay-justification-facts.md](delay-justification-facts.md) — Justificativa de Atraso: motivos=DClasse -530..-537, justificativa=DEvento -503; idEntidade=autor, identificadorExterno=taskId; painel via $queryRaw jsonb (ADR-V2-070).
+- [worksession-badge-lock-facts.md](worksession-badge-lock-facts.md) — Task #794: badge "em trabalho" + trava MCP via workSessions; agentId=movedBy vs ctx.dEntidadeId; guard MCP-only nos 5 tools de escrita.
+- [worksession-collision-ui-795-facts.md](worksession-collision-ui-795-facts.md) — Task #795: confirm-dialog humano (frontend-only, zero backend); 4 superfícies move→EXECUTING + 3 reatribuir; guard de reatribuir é o que realmente dispara.
+- [dedup-detection-799-facts.md](dedup-detection-799-facts.md) — Task #799: detecção de duplicata; método único SearchService.findPossibleDuplicates (reusa #791); GET /tasks/check-duplicates (UI) + possibleDuplicates[] no MCP create_task (não bloqueia).
 
 ## Instruções de uso
 - Consultar `referencia-v2-nucleo.md` / `v2-canonical-knowledge.md` ANTES de criar qualquer plan (contexto estrutural: 3 Pilares, 17 tabelas, fases, ADRs, seed).

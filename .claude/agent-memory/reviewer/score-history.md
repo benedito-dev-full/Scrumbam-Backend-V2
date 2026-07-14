@@ -14,6 +14,7 @@ metadata:
 
 | Task | Módulo | Fase | Score | Decisão | Issue principal |
 |------|--------|------|-------|---------|-----------------|
+| Task#1 | eventos-justificativa-atraso Fase2 (Painel Admin) | pós-F8 | **9.0** | **APPROVED** | GROUP_COLUMN whitelist estática + DELAY_REASONS_GROUP_BY única fonte para @IsIn e SQL (zero injection); filtros 100% via Prisma.sql bind params; RBAC org-ADMIN-somente com org-alvo=DProject.idEstab quando projectId presente (nunca JWT ativo se há projeto); /history reusa assertCanAccess da F1 (DRY, zero duplicação RBAC); INNER JOIN DProject exclui tasks sem projeto corretamente; 1 query agregação + 1 batch rótulos = zero N+1 (testado explicitamente); migration índice parcial idempotente (IF NOT EXISTS) segue precedente do repo; 36/36 specs próprios; MINOR: BigInt(query.userId) sem try/catch explícito (mitigado por @Matches no DTO) |
 | Task#1 | eventos-justificativa-atraso Fase1 (Captura) | pós-F8 | **9.0** | **APPROVED** | DEvento -503+seed -530..-537 corretos; taskId em identificadorExterno (nunca idEntidade); supersede atômico em $transaction; org-alvo=DProject.idEstab (mais seguro que JWT ativo); VALIDATING em COMPLETED_STATES coerente com doneAt persistente; autorId=req.user.entidadeId OK (JWT já carrega DEntidade.chave); 41 erros TS + 1 suite eventos = baseline confirmado via git stash -u; 22/22 specs próprios |
 | (2026-06-01) | rename-archive-builtin-columns | Frontend+Backend | **8.5** | **APPROVED** | Gate CEO 8.0 atingido; MINOR-1: spec de rename testa só __nome; MINOR-2: "arquivar todas as colunas" sem guard de mínimo; MINOR-3: applySetColumnHidden silencioso se key não existe |
 | Task#1 | heranca-rollup-timer-filhas | F5/F8 | **8.8** | **APPROVED** | 13/13 specs; anti-regressão INBOX OK; timer folha OK; M1 finalDueDate init dupla; M2 Array.isArray guard pragmático; L1 1 query extra por mutação (aceitável) |
@@ -45,5 +46,7 @@ metadata:
 | Task 1 | email+common | F4 | **8.2** | **APPROVED** | nestjs-pino não instalado (DoD explícito); @Public() ausente no HealthController |
 | Task 1 | auth | F3 | **7.8** | **APPROVED** | Bracket notation acesso privado + N+1 write path (ambos dívida F14) |
 | Task 1 | endpoints | F2 | **9.0** | **APPROVED** | Dívidas menores (PaginationMetaDto acoplamento, ParseBigIntPipe não aplicado) |
+
+| Task1 F3 | auth-sessao-multidevice (incidente sessão/auth) | F16 hardening | **9.2** | **APPROVED** | 4 pontos bloqueantes (vazamento credencial/deploy sem logout/segurança/SQLi) todos verificados adversarialmente OK; denylist -485 nas 6 portas TabelaService; dual-read/write testado com FakePrisma de estado real (18/18); TS baseline idêntico via stash (41 erros pré-existentes, zero novo); M1 revokeOtherSessions sem $transaction (capado em 10, não crítico) |
 
 Detalhes adicionais (scores antigos pré-consolidação): [F2 scores](project_f2_scores.md) | [F3 scores](project_f3_scores.md) | [F5 scores](project_f5_scores.md)

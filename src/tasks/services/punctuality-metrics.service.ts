@@ -28,6 +28,31 @@ const STATUS_DONE_IDCLASSE = -444 as const;
 const STATUS_VALIDATED_IDCLASSE = -449 as const;
 
 /**
+ * Atraso em DIAS DE CALENDÁRIO: `dia(doneAt em SP) − dia(dueDate)`.
+ *
+ * Os dois lados recebem tratamento DIFERENTE, e é aí que estava o bug:
+ *
+ * - **`doneAt` é um INSTANTE real** (gravado com `new Date()` na transição para
+ *   DONE) → converte-se para o dia em `America/Sao_Paulo`.
+ * - **`dueDate` é uma DATA CIVIL** ("dia 13"), que o banco guarda como
+ *   `2026-07-13T00:00:00.000Z` — meia-noite UTC. Ele NÃO deve ser convertido de
+ *   fuso: em Brasília isso seria 21h do dia 12, e o prazo "voltaria" um dia.
+ *   Lê-se a data UTC, que é exatamente o dia escolhido pelo usuário.
+ *
+ * A subtração crua de timestamps que existia aqui misturava as duas naturezas:
+ * uma task concluída às 10h do PRÓPRIO dia do prazo dava `+13h ≈ +0,54 dia`,
+ * entrando na média de atraso e na "Margem de atraso" como se tivesse atrasado.
+ * Concluir no dia do prazo é `0` — não é atraso.
+ */
+const DELAY_DAYS_EXPR = Prisma.sql`(
+  date_trunc(
+    'day',
+    ((t."dados"->'telemetry'->>'doneAt')::timestamptz) AT TIME ZONE 'America/Sao_Paulo'
+  )
+  - date_trunc('day', t."dueDate" AT TIME ZONE 'UTC')
+)`;
+
+/**
  * Service de métricas de pontualidade / margem de atraso (agregadas por projeto).
  *
  * Expõe DUAS métricas irmãs sobre a mesma base (`completedAt - dueDate`):
@@ -137,9 +162,7 @@ export class PunctualityMetricsService {
 
     const row = await this.aggregate([
       Prisma.sql`t."idProject" = ${projectId}`,
-      Prisma.sql`(
-        (t."dados"->'telemetry'->>'doneAt')::timestamptz - t."dueDate"
-      ) > interval '0'`,
+      Prisma.sql`${DELAY_DAYS_EXPR} > interval '0'`,
     ]);
 
     return this.buildResponse(row);
@@ -204,11 +227,7 @@ export class PunctualityMetricsService {
     const rows = await this.prisma.$queryRaw<PunctualityRow[]>(Prisma.sql`
       SELECT
         AVG(
-          EXTRACT(
-            EPOCH FROM (
-              (t."dados"->'telemetry'->>'doneAt')::timestamptz - t."dueDate"
-            )
-          ) / 86400.0
+          EXTRACT(EPOCH FROM ${DELAY_DAYS_EXPR}) / 86400.0
         ) AS "averageDelayDays",
         COUNT(*) AS "sampleSize"
       FROM "DTask" t

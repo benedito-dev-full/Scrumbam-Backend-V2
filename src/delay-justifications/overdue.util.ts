@@ -65,24 +65,47 @@ const NOT_OVERDUE: OverdueResult = Object.freeze({
 });
 
 /**
- * Diferença em DIAS DE CALENDÁRIO (America/Sao_Paulo) entre duas datas.
+ * Dia civil (`yyyy-MM-dd`) de um `dueDate`.
  *
- * Ambas são normalizadas para o início do dia em Brasília via
- * `TimezoneService.toStartOfDayBrazil` (que devolve o instante UTC do
- * meia-noite brasileiro). Como o offset de Brasília é constante (−03:00, sem
- * DST desde 2019), a diferença dos dois instantes normalizados é sempre um
- * múltiplo exato de 24h — `Math.round` elimina qualquer ruído de ponto
- * flutuante.
+ * `dueDate` NÃO é um instante — é uma **data civil** ("dia 13 de julho"), que o
+ * banco persiste como `2026-07-13T00:00:00.000Z` (meia-noite UTC), porque a API
+ * recebe `'2026-07-13'` e faz `new Date(...)` (`tasks.service.ts`).
  *
- * @param a - Data de referência (ex.: hoje, ou dia de conclusão).
- * @param b - Data-base (ex.: `dueDate`).
- * @param tz - Serviço de timezone (fonte única de verdade de dia em Brasília).
- * @returns `diaDe(a) − diaDe(b)` em dias inteiros (positivo se `a` é depois).
+ * Portanto ele NÃO pode passar por `toStartOfDayBrazil`: meia-noite UTC é 21:00
+ * do dia ANTERIOR em Brasília, e normalizar isso para o dia brasileiro devolve
+ * sempre **um dia a menos** — o que fazia toda tarefa com prazo HOJE ser lida
+ * como vencida ONTEM. A leitura correta é ler a parte de data do próprio UTC,
+ * que é exatamente o dia que o usuário escolheu.
  */
-function calendarDayDiffBrazil(a: Date, b: Date, tz: TimezoneService): number {
-  const aStart = tz.toStartOfDayBrazil(a).getTime();
-  const bStart = tz.toStartOfDayBrazil(b).getTime();
-  return Math.round((aStart - bStart) / MS_PER_DAY);
+function civilDayOfDueDate(dueDate: Date): string {
+  return dueDate.toISOString().slice(0, 10);
+}
+
+/**
+ * Dia civil (`yyyy-MM-dd`) em America/Sao_Paulo de um **instante real**
+ * (`now`, `doneAt`, `atualizadoEm`).
+ *
+ * Estes SÃO instantes de verdade — gerados por `new Date()` no servidor — e por
+ * isso devem mesmo ser convertidos para o dia brasileiro. É a assimetria que o
+ * bug original ignorava: prazo é DIA, conclusão é INSTANTE.
+ */
+function brazilDayOfInstant(instant: Date, tz: TimezoneService): string {
+  return tz.toStartOfDayBrazil(instant).toISOString().slice(0, 10);
+}
+
+/**
+ * Diferença em DIAS DE CALENDÁRIO entre um instante real e o dia do prazo.
+ *
+ * @param instant - Instante real (agora, ou momento de conclusão).
+ * @param dueDate - Prazo (data civil).
+ * @param tz - Serviço de timezone (dia em Brasília, para o lado do instante).
+ * @returns `dia(instant) − dia(dueDate)` em dias inteiros. `0` = vence hoje;
+ *   positivo = atrasada; negativo = ainda dentro do prazo.
+ */
+function calendarDayDiffBrazil(instant: Date, dueDate: Date, tz: TimezoneService): number {
+  const a = Date.parse(`${brazilDayOfInstant(instant, tz)}T00:00:00Z`);
+  const b = Date.parse(`${civilDayOfDueDate(dueDate)}T00:00:00Z`);
+  return Math.round((a - b) / MS_PER_DAY);
 }
 
 /**
