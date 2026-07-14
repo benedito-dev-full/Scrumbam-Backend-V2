@@ -20,10 +20,30 @@ import {
 } from './ai-provider.interface';
 import { timeoutExceptionFor, translateProviderError } from './provider-error.util';
 
-/** Modelo Gemini default — flash equilibra custo e latencia para chat MVP.
- *  NOTA: gemini-1.5-* foi descontinuado pelo Google em 2025; 2.5-flash e o atual.
- *  Pode ser sobrescrito por `opts.model` (override opcional). */
-const GEMINI_MODEL = 'gemini-2.5-flash';
+/**
+ * Modelo Gemini default — `gemini-3.5-flash`, o recomendado do Google para uso
+ * **agentico e tool calling**, que e exatamente o que o Nexus faz (24 tools).
+ *
+ * ## Por que isto e configuravel por env
+ *
+ * O Google aposenta modelo sem aviso util. Em 14/07/2026 o Nexus quebrou em
+ * producao com:
+ *
+ *   404 — This model models/gemini-2.5-flash is no longer available to new users.
+ *
+ * Note o "**to new users**": o `2.5-flash` continua na documentacao como estavel,
+ * e continua funcionando para projetos que ja o usavam — mas uma chave de API
+ * nova nao consegue mais acessa-lo. Ou seja: o modelo pode morrer para VOCE sem
+ * mudar de status na doc, e sem ninguem tocar no codigo.
+ *
+ * Por isso o ID vem de `GEMINI_MODEL` (env). Da proxima vez que o Google
+ * aposentar algo, a correcao e trocar uma variavel de ambiente — nao esperar um
+ * build, um deploy e um PR.
+ *
+ * Precedencia: `opts.model` (override por request) → `GEMINI_MODEL` (env) →
+ * o default abaixo.
+ */
+const GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || 'gemini-3.5-flash';
 
 /** Hard limit do loop de tool calling (defesa em profundidade — R-5). */
 const DEFAULT_MAX_TOOL_ITERATIONS = 5;
