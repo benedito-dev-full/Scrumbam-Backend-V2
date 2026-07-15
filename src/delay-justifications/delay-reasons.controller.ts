@@ -64,6 +64,13 @@ export class DelayReasonsController {
       'motivo/usuário/projeto, com filtros. Acesso: org ADMIN (-161) SOMENTE.',
   })
   @ApiQuery({ name: 'groupBy', required: true, enum: ['motivo', 'usuario', 'projeto'] })
+  @ApiQuery({
+    name: 'subGroupBy',
+    required: false,
+    enum: ['motivo', 'usuario', 'projeto'],
+    description:
+      'Sub-dimensão do cruzamento (ex: motivo). Deve diferir de groupBy; cada grupo ganha um array `sub`.',
+  })
   @ApiQuery({ name: 'userId', required: false, description: 'Filtro por autor (DEntidade.chave)' })
   @ApiQuery({
     name: 'projectId',

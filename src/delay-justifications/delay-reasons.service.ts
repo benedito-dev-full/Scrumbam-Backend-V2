@@ -1,4 +1,10 @@
-import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { TimezoneService } from '../common/services/timezone.service';
@@ -29,6 +35,12 @@ interface AggRow {
   count: number;
   /** `AVG(numeric)` → o driver Prisma entrega como `string` (ou `null`). */
   avgDelayDays: string | null;
+}
+
+/** Linha crua da agregação cruzada (`$queryRaw` com `GROUP BY groupCol, subCol`). */
+interface SubAggRow extends AggRow {
+  /** Chave da dimensão secundária (`subGroupBy`; string). */
+  subKey: string | null;
 }
 
 /**
@@ -87,17 +99,21 @@ export class DelayReasonsService {
     const orgId = await this.resolveTargetOrg(query.projectId, jwtOrgId);
     await this.assertOrgAdmin(requesterEntidadeId, orgId);
 
-    const rows = await this.runAggregation(query, orgId);
-    const groups = await this.resolveLabels(query.groupBy, rows);
+    const groups = query.subGroupBy
+      ? await this.aggregateWithSub(query, orgId)
+      : await this.resolveLabels(query.groupBy, await this.runAggregation(query, orgId));
+
     const total = groups.reduce((acc, g) => acc + g.count, 0);
 
     this.logger.log(
       `delay_reasons_panel org=${orgId.toString()} requester=${requesterEntidadeId.toString()} ` +
-        `groupBy=${query.groupBy} groups=${groups.length} total=${total}`,
+        `groupBy=${query.groupBy} subGroupBy=${query.subGroupBy ?? 'none'} ` +
+        `groups=${groups.length} total=${total}`,
     );
 
     return {
       groupBy: query.groupBy,
+      subGroupBy: query.subGroupBy ?? null,
       orgId: orgId.toString(),
       total,
       groups,
@@ -109,6 +125,77 @@ export class DelayReasonsService {
         to: query.to ?? null,
       },
     };
+  }
+
+  /**
+   * Agrega com CRUZAMENTO (`subGroupBy`): cada grupo do ranking primário é
+   * quebrado por uma segunda dimensão em `groups[].sub`.
+   *
+   * Continua sendo **1 única query** de agregação (`GROUP BY groupCol, subCol`,
+   * ZERO N+1) + no máximo 2 `findMany` de rótulos (uma por dimensão). O fold em
+   * JS soma os subs no pai (`count`) e calcula a média PONDERADA (idêntica ao
+   * `AVG` sobre as mesmas linhas). Pais e subs ordenados por `count` desc.
+   *
+   * @throws {BadRequestException} `subGroupBy` igual a `groupBy` (cruzamento
+   *   degenerado — não faz sentido cruzar uma dimensão com ela mesma).
+   */
+  private async aggregateWithSub(
+    query: DelayReasonsQueryDto,
+    orgId: bigint,
+  ): Promise<DelayReasonGroupDto[]> {
+    const subGroupBy = query.subGroupBy!;
+    if (subGroupBy === query.groupBy) {
+      throw new BadRequestException('subGroupBy deve ser diferente de groupBy');
+    }
+
+    const rows = await this.runSubAggregation(query, orgId);
+
+    // Conta só linhas com AMBAS as chaves resolvidas → garante `count` do pai =
+    // soma exata dos subs (linha sem sub-chave não vira card e não é somável).
+    const validRows = rows.filter(
+      (r): r is SubAggRow & { key: string; subKey: string } => r.key !== null && r.subKey !== null,
+    );
+
+    // Agrupa por chave do pai, preservando a ordem de primeira aparição.
+    const parentOrder: string[] = [];
+    const parentRows = new Map<string, (SubAggRow & { subKey: string })[]>();
+    for (const r of validRows) {
+      if (!parentRows.has(r.key)) {
+        parentRows.set(r.key, []);
+        parentOrder.push(r.key);
+      }
+      parentRows.get(r.key)!.push(r);
+    }
+
+    // Rótulos das DUAS dimensões: 1 findMany cada (ZERO N+1).
+    const parentKeys = parentOrder.map((k) => BigInt(k));
+    const subKeys = [...new Set(validRows.map((r) => r.subKey))].map((k) => BigInt(k));
+    const [parentLabels, subLabels] = await Promise.all([
+      this.resolveLabelMap(query.groupBy, parentKeys),
+      this.resolveLabelMap(subGroupBy, subKeys),
+    ]);
+
+    const groups = parentOrder.map((parentKey) => {
+      const subRows = parentRows.get(parentKey)!;
+      const sub = subRows
+        .map((r) => ({
+          key: r.subKey,
+          label: subLabels.get(r.subKey) ?? null,
+          count: Number(r.count),
+          avgDelayDays: this.normalizeAvg(r.avgDelayDays),
+        }))
+        .sort((a, b) => b.count - a.count);
+
+      return {
+        key: parentKey,
+        label: parentLabels.get(parentKey) ?? null,
+        count: subRows.reduce((acc, r) => acc + Number(r.count), 0),
+        avgDelayDays: this.weightedAvg(subRows),
+        sub,
+      };
+    });
+
+    return groups.sort((a, b) => b.count - a.count);
   }
 
   /**
@@ -160,15 +247,11 @@ export class DelayReasonsService {
   }
 
   /**
-   * Executa a agregação (1 query `$queryRaw`, ZERO N+1).
-   *
-   * Whitelist de coluna de grupo via {@link GROUP_COLUMN}; filtros e escopo de
-   * org como bind params (sem injeção). `INNER JOIN DProject` aplica o escopo
-   * de tenant e exclui justificativas de tasks sem projeto.
+   * Monta o fragmento `WHERE` dos filtros opcionais (autor/projeto/motivo/
+   * período) como bind params — ZERO interpolação de input do cliente. O escopo
+   * de org e o `idClasse` ficam fora daqui (fixos em cada query).
    */
-  private async runAggregation(query: DelayReasonsQueryDto, orgId: bigint): Promise<AggRow[]> {
-    const groupCol = GROUP_COLUMN[query.groupBy];
-
+  private buildFilters(query: DelayReasonsQueryDto): Prisma.Sql {
     const filters: Prisma.Sql[] = [];
     if (query.userId) {
       filters.push(Prisma.sql`e."idEntidade" = ${BigInt(query.userId)}`);
@@ -187,8 +270,19 @@ export class DelayReasonsService {
       const lte = this.timezone.toEndOfDayBrazil(new Date(query.to));
       filters.push(Prisma.sql`e."criadoEm" <= ${lte}`);
     }
+    return filters.length ? Prisma.join(filters, ' AND ', ' AND ', '') : Prisma.empty;
+  }
 
-    const where = filters.length ? Prisma.join(filters, ' AND ', ' AND ', '') : Prisma.empty;
+  /**
+   * Executa a agregação simples (1 query `$queryRaw`, ZERO N+1).
+   *
+   * Whitelist de coluna de grupo via {@link GROUP_COLUMN}; filtros e escopo de
+   * org como bind params (sem injeção). `INNER JOIN DProject` aplica o escopo
+   * de tenant e exclui justificativas de tasks sem projeto.
+   */
+  private async runAggregation(query: DelayReasonsQueryDto, orgId: bigint): Promise<AggRow[]> {
+    const groupCol = GROUP_COLUMN[query.groupBy];
+    const where = this.buildFilters(query);
 
     return this.prisma.$queryRaw<AggRow[]>(Prisma.sql`
       SELECT
@@ -209,6 +303,40 @@ export class DelayReasonsService {
   }
 
   /**
+   * Executa a agregação CRUZADA (1 query `$queryRaw`, ZERO N+1).
+   *
+   * Ambas as colunas (`groupCol`/`subCol`) vêm da whitelist {@link GROUP_COLUMN}
+   * — NUNCA de string do cliente. `GROUP BY groupCol, subCol` produz a matriz
+   * (pai × sub) numa única query; o fold em JS soma os subs no pai.
+   */
+  private async runSubAggregation(
+    query: DelayReasonsQueryDto,
+    orgId: bigint,
+  ): Promise<SubAggRow[]> {
+    const groupCol = GROUP_COLUMN[query.groupBy];
+    const subCol = GROUP_COLUMN[query.subGroupBy!];
+    const where = this.buildFilters(query);
+
+    return this.prisma.$queryRaw<SubAggRow[]>(Prisma.sql`
+      SELECT
+        ${groupCol} AS "key",
+        ${subCol} AS "subKey",
+        COUNT(*)::int AS "count",
+        AVG((e."metaDados" ->> 'delayDays')::numeric) AS "avgDelayDays"
+      FROM "DEvento" e
+      INNER JOIN "DProject" p
+        ON p."chave" = (e."metaDados" ->> 'projetoId')::bigint
+       AND p."excluido" = false
+      WHERE e."idClasse" = ${ID_CLASSE_DELAY_JUSTIFICATION}
+        AND e."excluido" = false
+        AND p."idEstab" = ${orgId}
+        ${where}
+      GROUP BY ${groupCol}, ${subCol}
+      ORDER BY COUNT(*) DESC
+    `);
+  }
+
+  /**
    * Resolve os rótulos legíveis dos grupos em 1 query batch (ZERO N+1).
    *
    * - `motivo` → `DClasse.nome` (chave in keys).
@@ -225,29 +353,7 @@ export class DelayReasonsService {
   ): Promise<DelayReasonGroupDto[]> {
     const validRows = rows.filter((r): r is AggRow & { key: string } => r.key !== null);
     const keys = validRows.map((r) => BigInt(r.key));
-
-    const labelMap = new Map<string, string>();
-    if (keys.length > 0) {
-      if (groupBy === 'motivo') {
-        const classes = await this.prisma.dClasse.findMany({
-          where: { chave: { in: keys } },
-          select: { chave: true, nome: true },
-        });
-        classes.forEach((c) => labelMap.set(c.chave.toString(), c.nome));
-      } else if (groupBy === 'usuario') {
-        const users = await this.prisma.dEntidade.findMany({
-          where: { chave: { in: keys } },
-          select: { chave: true, nome: true },
-        });
-        users.forEach((u) => labelMap.set(u.chave.toString(), u.nome ?? ''));
-      } else {
-        const projects = await this.prisma.dProject.findMany({
-          where: { chave: { in: keys } },
-          select: { chave: true, nome: true },
-        });
-        projects.forEach((p) => labelMap.set(p.chave.toString(), p.nome));
-      }
-    }
+    const labelMap = await this.resolveLabelMap(groupBy, keys);
 
     return validRows.map((r) => ({
       key: r.key,
@@ -255,6 +361,76 @@ export class DelayReasonsService {
       count: Number(r.count),
       avgDelayDays: this.normalizeAvg(r.avgDelayDays),
     }));
+  }
+
+  /**
+   * Resolve os rótulos legíveis de UMA dimensão em 1 query batch (ZERO N+1).
+   *
+   * Mapa dimensão → tabela: `motivo` → `DClasse.nome`, `usuario` →
+   * `DEntidade.nome`, `projeto` → `DProject.nome`. Chamado uma vez por dimensão
+   * (no cruzamento, 2 vezes → no máximo 2 `findMany`).
+   *
+   * @param dimension - Dimensão a resolver (define a tabela de rótulos).
+   * @param keys - Chaves (`DClasse`/`DEntidade`/`DProject`) a rotular.
+   * @returns Mapa `chave.toString()` → nome (vazio se `keys` vazio).
+   */
+  private async resolveLabelMap(
+    dimension: DelayReasonsGroupBy,
+    keys: bigint[],
+  ): Promise<Map<string, string>> {
+    const labelMap = new Map<string, string>();
+    if (keys.length === 0) {
+      return labelMap;
+    }
+
+    if (dimension === 'motivo') {
+      const classes = await this.prisma.dClasse.findMany({
+        where: { chave: { in: keys } },
+        select: { chave: true, nome: true },
+      });
+      classes.forEach((c) => labelMap.set(c.chave.toString(), c.nome));
+    } else if (dimension === 'usuario') {
+      const users = await this.prisma.dEntidade.findMany({
+        where: { chave: { in: keys } },
+        select: { chave: true, nome: true },
+      });
+      users.forEach((u) => labelMap.set(u.chave.toString(), u.nome ?? ''));
+    } else {
+      const projects = await this.prisma.dProject.findMany({
+        where: { chave: { in: keys } },
+        select: { chave: true, nome: true },
+      });
+      projects.forEach((p) => labelMap.set(p.chave.toString(), p.nome));
+    }
+
+    return labelMap;
+  }
+
+  /**
+   * Média PONDERADA de `avgDelayDays` das linhas-sub de um pai:
+   * `Σ(count · avg) / Σ(count)`, considerando SÓ subs com `avg` não-nulo (no
+   * numerador e no denominador). Usa o `avg` CRU de cada sub (não o arredondado)
+   * → matematicamente idêntico ao `AVG` sobre as mesmas linhas. Normaliza o
+   * resultado final a 1 casa. `null` se nenhum sub tiver amostra válida.
+   */
+  private weightedAvg(rows: SubAggRow[]): number | null {
+    let weighted = 0;
+    let counted = 0;
+    for (const r of rows) {
+      if (r.avgDelayDays === null || r.avgDelayDays === undefined) {
+        continue;
+      }
+      const avg = Number(r.avgDelayDays);
+      if (Number.isNaN(avg)) {
+        continue;
+      }
+      weighted += Number(r.count) * avg;
+      counted += Number(r.count);
+    }
+    if (counted === 0) {
+      return null;
+    }
+    return this.normalizeAvg(String(weighted / counted));
   }
 
   /**

@@ -43,6 +43,21 @@ export class DelayReasonGroupDto {
    */
   @ApiPropertyOptional({ description: 'Média de dias de atraso', example: 3.4, nullable: true })
   avgDelayDays!: number | null;
+
+  /**
+   * Quebra deste grupo pela dimensão secundária (`subGroupBy`), ordenada por
+   * `count` desc. Presente APENAS quando a query informa `subGroupBy`; ausente
+   * na resposta simples (1 dimensão). Cada item tem o mesmo shape
+   * `{ key, label, count, avgDelayDays }` — mas nunca aninha um novo `sub`.
+   *
+   * Invariantes: `count` do grupo-pai = soma dos `sub[].count`; `avgDelayDays`
+   * do pai = média ponderada dos subs.
+   */
+  @ApiPropertyOptional({
+    description: 'Quebra pela dimensão secundária (só quando subGroupBy é pedido)',
+    type: () => [DelayReasonGroupDto],
+  })
+  sub?: DelayReasonGroupDto[];
 }
 
 /**
@@ -100,6 +115,19 @@ export class DelayReasonsResponseDto {
     example: 'motivo',
   })
   groupBy!: DelayReasonsGroupBy;
+
+  /**
+   * Dimensão secundária do cruzamento (eco da query). `null` quando não pedido
+   * (resposta simples, sem `groups[].sub`). Quando string, cada grupo traz
+   * `sub[]` com a quebra por esta dimensão.
+   */
+  @ApiPropertyOptional({
+    description: 'Dimensão secundária do cruzamento (null se não pedido)',
+    enum: ['motivo', 'usuario', 'projeto'],
+    example: 'motivo',
+    nullable: true,
+  })
+  subGroupBy!: DelayReasonsGroupBy | null;
 
   /** Organização-alvo da agregação (escopo de tenant). */
   @ApiProperty({ description: 'ID da organização (DEntidade.chave)', example: '10' })

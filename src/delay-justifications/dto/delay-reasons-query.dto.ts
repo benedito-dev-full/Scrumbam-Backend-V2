@@ -55,6 +55,25 @@ export class DelayReasonsQueryDto {
   groupBy!: DelayReasonsGroupBy;
 
   /**
+   * Dimensão SECUNDÁRIA opcional (cruzamento). Quando presente, cada grupo do
+   * ranking primário (`groupBy`) é quebrado por esta dimensão em `groups[].sub`
+   * (alimenta o card "Onde concentra" do front: cada pessoa/projeto → motivos).
+   *
+   * DEVE ser diferente de `groupBy` (cruzar uma dimensão com ela mesma não faz
+   * sentido → 400). Ausente → resposta retrocompatível (sem `sub`).
+   */
+  @ApiPropertyOptional({
+    description: 'Dimensão secundária do cruzamento (deve diferir de groupBy)',
+    enum: DELAY_REASONS_GROUP_BY,
+    example: 'motivo',
+  })
+  @IsOptional()
+  @IsIn(DELAY_REASONS_GROUP_BY, {
+    message: `subGroupBy deve ser um de: ${DELAY_REASONS_GROUP_BY.join(', ')}`,
+  })
+  subGroupBy?: DelayReasonsGroupBy;
+
+  /**
    * Filtro por autor (DEntidade.chave). Restringe o ranking às justificativas
    * registradas por este usuário.
    */
