@@ -9,8 +9,10 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { TimezoneService } from '../common/services/timezone.service';
 import { RoleResolverService } from '../auth/services/role-resolver.service';
+import { parseTaskDados } from '../tasks/schemas/task-dados.schema';
 import { DelayReasonsGroupBy, DelayReasonsQueryDto } from './dto/delay-reasons-query.dto';
 import { DelayReasonGroupDto, DelayReasonsResponseDto } from './dto/delay-reasons-response.dto';
+import { computeOverdue } from './overdue.util';
 
 /** DClasse do evento de justificativa de atraso (seed F1 — ADR-V2-070). */
 const ID_CLASSE_DELAY_JUSTIFICATION = -503;
@@ -105,10 +107,18 @@ export class DelayReasonsService {
 
     const total = groups.reduce((acc, g) => acc + g.count, 0);
 
+    // KPI opcional "% com justificativa": só computa (2 queries extras) quando
+    // pedido — retrocompatível e sem custo quando ausente/false.
+    const overdue = query.includeOverdue
+      ? await this.computeOverdueCounts(orgId, query)
+      : { overdueTotal: null, overduePending: null };
+
     this.logger.log(
       `delay_reasons_panel org=${orgId.toString()} requester=${requesterEntidadeId.toString()} ` +
         `groupBy=${query.groupBy} subGroupBy=${query.subGroupBy ?? 'none'} ` +
-        `groups=${groups.length} total=${total}`,
+        `groups=${groups.length} total=${total} ` +
+        `includeOverdue=${query.includeOverdue ? 'yes' : 'no'} ` +
+        `overdueTotal=${overdue.overdueTotal ?? 'null'} overduePending=${overdue.overduePending ?? 'null'}`,
     );
 
     return {
@@ -124,7 +134,85 @@ export class DelayReasonsService {
         from: query.from ?? null,
         to: query.to ?? null,
       },
+      overdueTotal: overdue.overdueTotal,
+      overduePending: overdue.overduePending,
     };
+  }
+
+  /**
+   * Conta, org-wide, as tarefas ATRASADAS e quantas estão SEM justificativa
+   * vigente — alimenta o KPI "% com justificativa" do painel admin.
+   *
+   * Escopo: tarefas COM projeto (`idProject != null`) cujo projeto pertence à
+   * `orgId` (`DProject.idEstab`, `excluido=false`), respeitando os MESMOS
+   * filtros da agregação que se aplicam a tarefas: `userId` (assignee),
+   * `projectId` e período (`from`/`to` sobre `dueDate`, TZ Brasil).
+   * `motivoClasse` NÃO se aplica aqui (é filtro de justificativa, não de tarefa).
+   *
+   * "Atrasada" é decidido por {@link computeOverdue} (single source of truth —
+   * OPEN ou COMPLETED_LATE), avaliado em memória sobre a linha já carregada.
+   *
+   * **ZERO N+1 — exatamente 2 queries:** (1) `findMany` das tarefas candidatas
+   * (com JOIN de tenant em `DProject`); (2) `findMany` das justificativas
+   * vigentes (`DEvento -503`) do lote de atrasadas. A query 2 é pulada quando
+   * não há tarefa atrasada (`pending=0`).
+   *
+   * @param orgId - Org-alvo já resolvida (`resolveTargetOrg`) e autorizada
+   *   (`assertOrgAdmin`) pelo chamador. NÃO reautoriza aqui.
+   * @param query - Filtros da requisição (usa `userId`/`projectId`/`from`/`to`).
+   * @returns `{ overdueTotal, overduePending }` (ambos `number`).
+   */
+  private async computeOverdueCounts(
+    orgId: bigint,
+    query: DelayReasonsQueryDto,
+  ): Promise<{ overdueTotal: number; overduePending: number }> {
+    const dueDate: { not: null; gte?: Date; lte?: Date } = { not: null };
+    if (query.from) {
+      dueDate.gte = this.timezone.toStartOfDayBrazil(new Date(query.from));
+    }
+    if (query.to) {
+      dueDate.lte = this.timezone.toEndOfDayBrazil(new Date(query.to));
+    }
+
+    const tasks = await this.prisma.dTask.findMany({
+      where: {
+        excluido: false,
+        dueDate,
+        idProject: { not: null },
+        project: { idEstab: orgId, excluido: false },
+        ...(query.userId ? { idAssignee: BigInt(query.userId) } : {}),
+        ...(query.projectId ? { idProject: BigInt(query.projectId) } : {}),
+      },
+      select: { chave: true, dueDate: true, dados: true, atualizadoEm: true },
+    });
+
+    const overdueTaskIds = tasks
+      .filter(
+        (t) =>
+          computeOverdue(
+            { dueDate: t.dueDate, dados: parseTaskDados(t.dados), atualizadoEm: t.atualizadoEm },
+            this.timezone,
+          ).isOverdue,
+      )
+      .map((t) => t.chave.toString());
+
+    const overdueTotal = overdueTaskIds.length;
+    if (overdueTotal === 0) {
+      return { overdueTotal: 0, overduePending: 0 };
+    }
+
+    const justified = await this.prisma.dEvento.findMany({
+      where: {
+        idClasse: ID_CLASSE_DELAY_JUSTIFICATION,
+        excluido: false,
+        identificadorExterno: { in: overdueTaskIds },
+      },
+      select: { identificadorExterno: true },
+    });
+    const justifiedSet = new Set(justified.map((e) => e.identificadorExterno));
+
+    const overduePending = overdueTaskIds.filter((id) => !justifiedSet.has(id)).length;
+    return { overdueTotal, overduePending };
   }
 
   /**

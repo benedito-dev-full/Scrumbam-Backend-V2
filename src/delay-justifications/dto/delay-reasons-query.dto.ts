@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsString, Matches } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsBoolean, IsIn, IsOptional, IsString, Matches } from 'class-validator';
 
 /**
  * Dimensões de agrupamento suportadas pelo painel de motivos de atraso.
@@ -116,4 +117,27 @@ export class DelayReasonsQueryDto {
   @IsOptional()
   @Matches(/^\d{4}-\d{2}-\d{2}(T.*)?$/, { message: 'to deve ser uma data ISO 8601' })
   to?: string;
+
+  /**
+   * Quando `true`, a resposta ganha os contadores org-wide de tarefas ATRASADAS
+   * (`overdueTotal`) e das atrasadas SEM justificativa vigente
+   * (`overduePending`) — para o front montar o KPI "% com justificativa"
+   * (`justificadas = overdueTotal − overduePending`).
+   *
+   * Ausente/`false` → ambos os contadores voltam `null` e a query extra NÃO é
+   * executada (retrocompatível e sem custo de performance). Os contadores usam
+   * o MESMO escopo de org/filtros (`userId`, `projectId`, `from`, `to`) já
+   * resolvido pela agregação — `motivoClasse` não se aplica (é filtro de
+   * justificativa, não de tarefa).
+   */
+  @ApiPropertyOptional({
+    description:
+      'Quando true, inclui overdueTotal (tarefas atrasadas) e overduePending ' +
+      '(atrasadas sem justificativa) org-wide no mesmo escopo/filtros.',
+    example: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }: { value: unknown }) => value === 'true' || value === true)
+  includeOverdue?: boolean;
 }

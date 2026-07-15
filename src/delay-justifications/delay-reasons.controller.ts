@@ -84,6 +84,13 @@ export class DelayReasonsController {
   })
   @ApiQuery({ name: 'from', required: false, description: 'Início do período (ISO 8601)' })
   @ApiQuery({ name: 'to', required: false, description: 'Fim do período (ISO 8601)' })
+  @ApiQuery({
+    name: 'includeOverdue',
+    required: false,
+    type: Boolean,
+    description:
+      'Se true, adiciona overdueTotal + overduePending (tarefas atrasadas / sem justificativa) para o "% com justificativa". ATENÇÃO: from/to filtram a AGREGAÇÃO por DEvento.criadoEm (data da justificativa), mas a contagem de atrasadas por DTask.dueDate (data de vencimento) — bases temporais diferentes sob o mesmo parâmetro.',
+  })
   @ApiResponse({ status: 200, description: 'Ranking agregado', type: DelayReasonsResponseDto })
   @ApiResponse({ status: 401, description: 'Não autenticado' })
   @ApiResponse({ status: 403, description: 'Não é org ADMIN da organização' })

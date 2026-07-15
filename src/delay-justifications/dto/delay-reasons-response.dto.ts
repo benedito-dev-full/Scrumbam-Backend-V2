@@ -147,4 +147,34 @@ export class DelayReasonsResponseDto {
   /** Eco normalizado dos filtros aplicados. */
   @ApiProperty({ description: 'Filtros aplicados', type: DelayReasonsFiltersDto })
   filters!: DelayReasonsFiltersDto;
+
+  /**
+   * Total de tarefas ATRASADAS no escopo (org + filtros de autor/projeto/
+   * período), org-wide. Preenchido APENAS quando a query pede
+   * `includeOverdue=true`; `null` caso contrário (a query extra não roda).
+   *
+   * Alimenta o denominador do KPI "% com justificativa" do front.
+   */
+  @ApiProperty({
+    description: 'Total de tarefas atrasadas (só com includeOverdue=true; null caso contrário)',
+    example: 30,
+    nullable: true,
+  })
+  overdueTotal!: number | null;
+
+  /**
+   * Tarefas atrasadas SEM justificativa vigente (`DEvento -503`) no mesmo
+   * escopo. Preenchido APENAS quando `includeOverdue=true`; `null` caso
+   * contrário.
+   *
+   * O front calcula `justificadas = overdueTotal − overduePending` e daí o
+   * percentual.
+   */
+  @ApiProperty({
+    description:
+      'Tarefas atrasadas sem justificativa vigente (só com includeOverdue=true; null caso contrário)',
+    example: 12,
+    nullable: true,
+  })
+  overduePending!: number | null;
 }

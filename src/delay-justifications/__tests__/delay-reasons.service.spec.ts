@@ -19,6 +19,8 @@ describe('DelayReasonsService', () => {
     dProject: { findFirst: jest.Mock; findMany: jest.Mock };
     dClasse: { findMany: jest.Mock };
     dEntidade: { findMany: jest.Mock };
+    dTask: { findMany: jest.Mock };
+    dEvento: { findMany: jest.Mock };
     $queryRaw: jest.Mock;
   };
   let roleResolver: { getOrgRole: jest.Mock };
@@ -36,6 +38,8 @@ describe('DelayReasonsService', () => {
       dProject: { findFirst: jest.fn(), findMany: jest.fn() },
       dClasse: { findMany: jest.fn() },
       dEntidade: { findMany: jest.fn() },
+      dTask: { findMany: jest.fn() },
+      dEvento: { findMany: jest.fn() },
       $queryRaw: jest.fn(),
     };
     roleResolver = { getOrgRole: jest.fn().mockResolvedValue('ADMIN') };
@@ -295,6 +299,147 @@ describe('DelayReasonsService', () => {
       expect(prisma.dClasse.findMany).toHaveBeenCalledTimes(1);
       expect(prisma.dEntidade.findMany).not.toHaveBeenCalled();
       expect(prisma.dProject.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('includeOverdue (KPI % com justificativa)', () => {
+    // Prazos no passado longínquo → tarefas abertas ficam atrasadas contra `now`
+    // real de forma determinística (sem depender da data do teste).
+    const DUE_PAST = new Date('2020-01-10T00:00:00.000Z');
+
+    const overdueTasks = () => [
+      // OPEN atrasada — READY, prazo vencido. Será justificada.
+      {
+        chave: BigInt(1),
+        dueDate: DUE_PAST,
+        dados: { v3: { state: 'READY' } },
+        atualizadoEm: DUE_PAST,
+      },
+      // OPEN atrasada — EXECUTING, prazo vencido. SEM justificativa.
+      {
+        chave: BigInt(2),
+        dueDate: DUE_PAST,
+        dados: { v3: { state: 'EXECUTING' } },
+        atualizadoEm: DUE_PAST,
+      },
+      // DONE no prazo (concluída ANTES do due) → NÃO conta como atrasada.
+      {
+        chave: BigInt(3),
+        dueDate: DUE_PAST,
+        dados: { v3: { state: 'DONE' }, telemetry: { doneAt: '2020-01-05T12:00:00.000Z' } },
+        atualizadoEm: new Date('2020-01-05T12:00:00.000Z'),
+      },
+      // Sem dueDate → nunca atrasada → NÃO conta.
+      {
+        chave: BigInt(4),
+        dueDate: null,
+        dados: { v3: { state: 'READY' } },
+        atualizadoEm: new Date(),
+      },
+    ];
+
+    it('includeOverdue=true: conta atrasadas e pendentes (2 queries extras), roda computeOverdue', async () => {
+      prisma.$queryRaw.mockResolvedValue([{ key: '-535', count: 5, avgDelayDays: '3' }]);
+      prisma.dClasse.findMany.mockResolvedValue([{ chave: BigInt(-535), nome: 'Bug' }]);
+      prisma.dTask.findMany.mockResolvedValue(overdueTasks());
+      // Só a task 1 tem justificativa vigente.
+      prisma.dEvento.findMany.mockResolvedValue([{ identificadorExterno: '1' }]);
+
+      const res = await service.aggregate(query({ includeOverdue: true }), ADMIN, ORG.toString());
+
+      // 2 tarefas atrasadas (1 e 2); DONE-no-prazo e sem-dueDate não contam.
+      expect(res.overdueTotal).toBe(2);
+      // Só a 1 justificada → pendente = 1 (a task 2).
+      expect(res.overduePending).toBe(1);
+
+      // Exatamente 2 queries extras (tasks + eventos), ZERO N+1.
+      expect(prisma.dTask.findMany).toHaveBeenCalledTimes(1);
+      expect(prisma.dEvento.findMany).toHaveBeenCalledTimes(1);
+      // Escopo de tenant via relação DProject (idEstab = org, não excluído).
+      expect(prisma.dTask.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            excluido: false,
+            idProject: { not: null },
+            project: { idEstab: ORG, excluido: false },
+          }),
+        }),
+      );
+      // Query de eventos restrita ao lote de atrasadas.
+      expect(prisma.dEvento.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            idClasse: -503,
+            excluido: false,
+            identificadorExterno: { in: ['1', '2'] },
+          }),
+        }),
+      );
+    });
+
+    it('includeOverdue=true sem atrasadas: overduePending=0 e query de eventos NÃO roda (perf)', async () => {
+      prisma.$queryRaw.mockResolvedValue([]);
+      prisma.dClasse.findMany.mockResolvedValue([]);
+      // Só DONE-no-prazo e sem-dueDate → nenhuma atrasada.
+      prisma.dTask.findMany.mockResolvedValue([overdueTasks()[2], overdueTasks()[3]]);
+
+      const res = await service.aggregate(query({ includeOverdue: true }), ADMIN, ORG.toString());
+
+      expect(res.overdueTotal).toBe(0);
+      expect(res.overduePending).toBe(0);
+      expect(prisma.dTask.findMany).toHaveBeenCalledTimes(1);
+      // Lote vazio → pula a query 2.
+      expect(prisma.dEvento.findMany).not.toHaveBeenCalled();
+    });
+
+    it('includeOverdue ausente: overdueTotal/overduePending = null e dTask.findMany NÃO é chamado', async () => {
+      prisma.$queryRaw.mockResolvedValue([{ key: '-535', count: 5, avgDelayDays: '3' }]);
+      prisma.dClasse.findMany.mockResolvedValue([{ chave: BigInt(-535), nome: 'Bug' }]);
+
+      const res = await service.aggregate(query(), ADMIN, ORG.toString());
+
+      expect(res.overdueTotal).toBeNull();
+      expect(res.overduePending).toBeNull();
+      expect(prisma.dTask.findMany).not.toHaveBeenCalled();
+      expect(prisma.dEvento.findMany).not.toHaveBeenCalled();
+    });
+
+    it('RBAC: MEMBER → 403 mesmo com includeOverdue (assertOrgAdmin roda antes)', async () => {
+      roleResolver.getOrgRole.mockResolvedValue('MEMBER');
+
+      await expect(
+        service.aggregate(query({ includeOverdue: true }), ADMIN, ORG.toString()),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      // Nem agregação nem contagem de atrasadas chegam a rodar.
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+      expect(prisma.dTask.findMany).not.toHaveBeenCalled();
+    });
+
+    it('aplica userId/projectId/período no where das tarefas candidatas', async () => {
+      prisma.$queryRaw.mockResolvedValue([]);
+      prisma.dClasse.findMany.mockResolvedValue([]);
+      prisma.dProject.findFirst.mockResolvedValue({ idEstab: ORG });
+      prisma.dTask.findMany.mockResolvedValue([]);
+
+      await service.aggregate(
+        query({
+          includeOverdue: true,
+          projectId: '77',
+          userId: '42',
+          from: '2026-07-01',
+          to: '2026-07-31',
+        }),
+        ADMIN,
+        ORG.toString(),
+      );
+
+      const arg = prisma.dTask.findMany.mock.calls[0][0];
+      expect(arg.where.idAssignee).toBe(BigInt(42));
+      expect(arg.where.idProject).toEqual(BigInt(77));
+      expect(arg.where.dueDate.not).toBeNull();
+      expect(arg.where.dueDate.gte).toBeInstanceOf(Date);
+      expect(arg.where.dueDate.lte).toBeInstanceOf(Date);
     });
   });
 
