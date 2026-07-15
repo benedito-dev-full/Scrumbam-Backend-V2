@@ -253,7 +253,7 @@ export class FlowMetricsController {
   /**
    * Retorna as métricas de cycle time de um projeto.
    *
-   * Cycle time = tempo entre EXECUTING e DONE/VALIDATED (em horas).
+   * Cycle time = tempo entre EXECUTING e DONE (em horas).
    * Calculado sobre tasks com `dados.telemetry.cycleTime` preenchido.
    * Requer autenticação JWT; projeto deve pertencer à organização do usuário.
    *
@@ -310,7 +310,7 @@ export class FlowMetricsController {
   /**
    * Retorna as métricas de lead time de um projeto.
    *
-   * Lead time = tempo entre criação (INBOX) e DONE/VALIDATED (em horas).
+   * Lead time = tempo entre criação (INBOX) e DONE (em horas).
    * Calculado sobre tasks com `dados.telemetry.leadTime` preenchido.
    *
    * @param projectId - ID do projeto
@@ -355,7 +355,7 @@ export class FlowMetricsController {
    * Retorna a série temporal de throughput de um projeto.
    *
    * Throughput = quantidade de tasks concluídas por dia ou semana.
-   * Baseado em `dados.telemetry.doneAt` das tasks com status DONE/VALIDATED.
+   * Baseado em `dados.telemetry.doneAt` das tasks com status DONE.
    *
    * @param projectId - ID do projeto
    * @param query - Filtros de período

@@ -6,16 +6,17 @@ import { LeadTimeResponseDto } from '../dto/lead-time-response.dto';
 import { parseTaskDados } from '../../tasks/schemas/task-dados.schema';
 
 /**
- * idClasse DTabela para status DONE e VALIDATED (seed F1 V2).
+ * idClasse DTabela para status DONE (seed F1 V2). Único estado de conclusão
+ * após a poda 9 → 5 (VALIDATED removido).
  */
-const DONE_STATUS_IDS = [BigInt(-444), BigInt(-449)];
+const DONE_STATUS_IDS = [BigInt(-444)];
 
 /**
  * Serviço de cálculo de lead time de tasks de um projeto.
  *
  * Lead time = `dados.telemetry.leadTime` (em horas), calculado pelo
  * `TasksService.updateStatus` no momento da conclusão. Representa o
- * tempo total desde a criação da task (INBOX) até DONE/VALIDATED.
+ * tempo total desde a criação da task (INBOX) até DONE.
  *
  * F8 é read-only puro — NÃO persiste nada, NÃO emite eventos.
  * Fonte: DTask.dados.telemetry.leadTime (estrutural — Prisma direto).
@@ -36,7 +37,7 @@ export class LeadTimeService {
   /**
    * Calcula p50/p75/p90/p95/avg de lead time para um projeto.
    *
-   * Lê tasks em status DONE/VALIDATED com `dados.telemetry.leadTime`
+   * Lê tasks em status DONE com `dados.telemetry.leadTime`
    * preenchido dentro do período. Tasks sem telemetria são excluídas
    * do cálculo (`samples` reflete apenas as com dados disponíveis).
    *

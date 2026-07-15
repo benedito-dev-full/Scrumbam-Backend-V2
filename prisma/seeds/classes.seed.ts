@@ -4,11 +4,13 @@
  * Composicao do seed (ADR-V2-019: monolitico):
  *   - 45 classes fixas universais Devari-Core (range -1..-110), via spread de
  *     `templates/classes-base-template.ts`.
- *   - 126 classes especificas Scrumban-V2 (range -150..-537), declaradas
+ *   - 122 classes especificas Scrumban-V2 (range -150..-537), declaradas
  *     neste arquivo, agrupadas por seccao (DEntidade, DVincula, DPedido,
  *     DTabela, DEvento, DTabela secundario, Fases) com comentarios `// === ... ===`.
  *
- * Total: 157 DClasses (ADR-V2-026: +1 AUDIT_GENERIC; ADR-V2-028: +6 INVITE_*;
+ * Total: 153 DClasses (ADR-V2-078: -4 status V3 podados — CANCELLED (-446),
+ *   DISCARDED (-447), VALIDATING (-448), VALIDATED (-449);
+ *   ADR-V2-026: +1 AUDIT_GENERIC; ADR-V2-028: +6 INVITE_*;
  *   ADR-V2-029: +1 PROJECT_TEAM_LINK; ADR-V2-033: +2 AGENT_SESSION_*;
  *   ADR-V2-FOLDERS-001: +1 FOLDER, +1 FOLDER_PROJECT_LINK;
  *   ADR-V2-047: +1 PHASE;
@@ -241,16 +243,21 @@ const classesEspecificas: DClasseSeed[] = [
   esp(-433, 'IMPROVEMENT', 'Task IMPROVEMENT', -430),
   esp(-434, 'REVIEW', 'Task REVIEW', -430),
   esp(-435, 'EXPLAIN', 'Task EXPLAIN', -430),
+  // Status V3 Intention — 5 canonicos (poda 9 -> 5, ADR-V2-078).
+  // As chaves -446 (CANCELLED), -447 (DISCARDED), -448 (VALIDATING) e
+  // -449 (VALIDATED) foram REMOVIDAS: vieram de um PRD legado nunca
+  // implementado (ZERO produtores em producao) e o enum do MCP as expunha,
+  // fazendo IAs prenderem tasks humanas em VALIDATING. NAO reintroduzir —
+  // fonte unica em `src/tasks/constants/task-status.const.ts`.
+  // As chaves -446..-449 ficam RESERVADAS (nao reutilizar para outra coisa:
+  // ainda existem linhas de DTabela em producao apontando para elas ate a
+  // migracao de dados rodar).
   esp(-440, 'STATUS_INTENTION_V3', 'Status V3 (agrupador)', -52, true),
   esp(-441, 'INBOX', 'Status INBOX', -440),
   esp(-442, 'READY', 'Status READY', -440),
   esp(-443, 'EXECUTING', 'Status EXECUTING', -440),
   esp(-444, 'DONE', 'Status DONE', -440),
   esp(-445, 'FAILED', 'Status FAILED', -440),
-  esp(-446, 'CANCELLED', 'Status CANCELLED', -440),
-  esp(-447, 'DISCARDED', 'Status DISCARDED', -440),
-  esp(-448, 'VALIDATING', 'Status VALIDATING', -440),
-  esp(-449, 'VALIDATED', 'Status VALIDATED', -440),
   esp(-450, 'CHANNEL', 'Canal (agrupador)', -52, true),
   esp(-451, 'WEB', 'Canal WEB', -450),
   esp(-452, 'WHATSAPP', 'Canal WHATSAPP', -450),

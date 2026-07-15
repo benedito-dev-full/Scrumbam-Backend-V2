@@ -16,7 +16,7 @@ export class CfdDataPointDto {
    */
   @ApiProperty({
     description: 'Contagem de tasks por status',
-    example: { INBOX: 10, READY: 5, EXECUTING: 3, DONE: 8, VALIDATED: 2 },
+    example: { INBOX: 10, READY: 5, EXECUTING: 3, DONE: 8, FAILED: 1 },
   })
   counts!: Record<string, number>;
 }

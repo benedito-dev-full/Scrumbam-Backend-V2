@@ -11,7 +11,7 @@ import { PrismaService } from '../../prisma.service';
  * validam:
  *  - mapeamento correto row → DTO (null vs 0, sinal, conversão numérica);
  *  - que a query carrega os filtros/guards de negócio (dueDate NOT NULL,
- *    doneAt presente+parseável, status terminal -444/-449) — garantindo que
+ *    doneAt presente+parseável, status de conclusão -444) — garantindo que
  *    tasks sem dueDate são excluídas pela própria query;
  *  - que `computeForProject` restringe por `idProject` e `computeForUser`
  *    por `idAssignee` (+ scope opcional).
@@ -101,8 +101,10 @@ describe('PunctualityMetricsService (Task 8 — Pontualidade)', () => {
     expect(sql).toContain("'doneAt') IS NOT NULL");
     // Guard anti-500 no cast de timestamp malformado.
     expect(sql).toContain('doneAt');
-    // Status terminal DONE(-444)/VALIDATED(-449) via JOIN DTabela.idClasse.
-    expect(sql).toContain('"idClasse" IN (');
+    // Status de conclusão DONE(-444) via JOIN DTabela.idClasse. Após a poda
+    // 9 -> 5, VALIDATED(-449) saiu: o filtro virou igualdade, não mais `IN`.
+    expect(sql).toContain('"idClasse" = ');
+    expect(sql).not.toContain('-449');
     // Soft-delete respeitado.
     expect(sql).toContain('t.excluido = false');
   });
@@ -161,7 +163,8 @@ describe('PunctualityMetricsService (Task 8 — Pontualidade)', () => {
       // Filtros-base de sempre (mesmos de computeForProject).
       expect(sql).toContain('"dueDate" IS NOT NULL');
       expect(sql).toContain("'doneAt') IS NOT NULL");
-      expect(sql).toContain('"idClasse" IN (');
+      // Poda 9 -> 5: DONE(-444) é o único status de conclusão → igualdade, não `IN`.
+      expect(sql).toContain('"idClasse" = ');
       expect(sql).toContain('t.excluido = false');
       // Filtro adicional de atraso estrito — exclui diffDays = 0 e diffDays < 0.
       expect(sql).toContain("interval '0'");
@@ -180,7 +183,9 @@ describe('PunctualityMetricsService (Task 8 — Pontualidade)', () => {
 
     it('6. média calculada só sobre as tasks atrasadas → repassa o AVG (sempre positivo)', async () => {
       // Ex.: apenas tasks com diffDays > 0 entram no AVG do banco (ex.: +5, +2, +4 → 3.67).
-      prisma.$queryRaw.mockResolvedValueOnce([{ averageDelayDays: '3.6666666667', sampleSize: BigInt(3) }]);
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { averageDelayDays: '3.6666666667', sampleSize: BigInt(3) },
+      ]);
 
       const result = await service.computeStrictDelayForProject(BigInt(5));
 

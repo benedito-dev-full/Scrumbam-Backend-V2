@@ -12,7 +12,7 @@ export class ThroughputDataPointDto {
   date!: string;
 
   /**
-   * Quantidade de tasks concluídas (DONE ou VALIDATED) neste período.
+   * Quantidade de tasks concluídas (DONE) neste período.
    */
   @ApiProperty({ description: 'Tasks concluídas no período', example: 5 })
   count!: number;
@@ -21,7 +21,7 @@ export class ThroughputDataPointDto {
 /**
  * Response DTO para throughput de um projeto.
  *
- * Throughput = quantidade de tasks concluídas (status DONE ou VALIDATED)
+ * Throughput = quantidade de tasks concluídas (status DONE)
  * por intervalo de tempo. Fonte: `dados.telemetry.doneAt`.
  *
  * @example

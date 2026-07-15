@@ -20,9 +20,9 @@ interface BlockMetrics {
   percent: number;
 }
 
-const DONE_STATUS = new Set(['DONE', 'VALIDATED', 'CANCELLED']);
-const FAILED_STATUS = new Set(['FAILED', 'DISCARDED']);
-const IN_PROGRESS_STATUS = new Set(['EXECUTING', 'VALIDATING']);
+const DONE_STATUS = new Set(['DONE']);
+const FAILED_STATUS = new Set(['FAILED']);
+const IN_PROGRESS_STATUS = new Set(['EXECUTING']);
 
 /**
  * `ListBlockTasksCapability` — capability neutra `list_block_tasks`

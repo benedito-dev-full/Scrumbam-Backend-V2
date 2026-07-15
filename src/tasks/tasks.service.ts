@@ -18,6 +18,7 @@ import { ProjectRefService } from '../projects/project-ref.service';
 import { TEMPLATE_CLASSES } from '../projects/constants/template-classes.const';
 import { PhaseHierarchyService } from './services/phase-hierarchy.service';
 import { validateTransition, isValidState } from './tasks-state-machine';
+import { STATUS_TO_TABELA_CLASSE, isV3StatusCode } from './constants/task-status.const';
 import {
   TaskStatus,
   buildInitialTaskDados,
@@ -79,19 +80,6 @@ function buildPhaseDados(creatorId: string): Record<string, unknown> {
     createdBy: creatorId,
   };
 }
-
-/** Mapa de status string → idClasse DTabela (seed F1). */
-const STATUS_TO_TABELA_CLASSE: Record<string, bigint> = {
-  INBOX: BigInt(-441),
-  READY: BigInt(-442),
-  EXECUTING: BigInt(-443),
-  DONE: BigInt(-444),
-  FAILED: BigInt(-445),
-  CANCELLED: BigInt(-446),
-  DISCARDED: BigInt(-447),
-  VALIDATING: BigInt(-448),
-  VALIDATED: BigInt(-449),
-};
 
 /**
  * Mapa de priority enum → idClasse DTabela (seed F1).
@@ -837,9 +825,13 @@ export class TasksService {
     // Filtro por status: buscar idStatus das DTabelas correspondentes
     const statuses = query.statuses?.length ? query.statuses : query.status ? [query.status] : [];
     if (statuses.length > 0) {
+      // `statuses` vem de query string (string[]) — filtra pelos 5 códigos V3
+      // canônicos ANTES de indexar o mapa. Um código desconhecido é simplesmente
+      // ignorado aqui, e o `statusClasses.length > 0` abaixo garante que um
+      // filtro 100% inválido não vire "sem filtro".
       const statusClasses = statuses
-        .map((status) => STATUS_TO_TABELA_CLASSE[status])
-        .filter((statusClass): statusClass is bigint => statusClass !== undefined);
+        .filter(isV3StatusCode)
+        .map((status) => STATUS_TO_TABELA_CLASSE[status]);
       if (statusClasses.length > 0) {
         // Buscar todas as DTabelas deste status (podem ser de múltiplos projetos).
         // ADR-V2-058/059: filtro por projeto usa a DEntidade-espelho (E);
@@ -1513,7 +1505,7 @@ export class TasksService {
       | string
       | undefined;
     if (teamIdForFeed) {
-      const isCompleted = toStatus === 'DONE' || toStatus === 'VALIDATED';
+      const isCompleted = toStatus === 'DONE';
       await this.eventProducer.addInternalEvent(
         'task.status.changed',
         {

@@ -108,8 +108,7 @@ export class UpdateTaskTool implements McpTool {
       status: {
         type: 'string',
         enum: [...V3_STATUS_CODES],
-        description:
-          'Codigo V3: INBOX|READY|EXECUTING|DONE|FAILED|CANCELLED|DISCARDED|VALIDATING|VALIDATED',
+        description: 'Codigo V3: INBOX|READY|EXECUTING|DONE|FAILED',
       },
       dueDate: {
         type: ['string', 'null'],

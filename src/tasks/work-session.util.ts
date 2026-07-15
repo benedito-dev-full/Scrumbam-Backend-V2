@@ -38,7 +38,7 @@ export interface ActiveWorkSession {
  *
  * Uma sessão é considerada ATIVA quando TODAS as condições valem:
  * 1. `status === 'EXECUTING'` — fora de EXECUTING não há trava nem badge
- *    (FAILED/CANCELLED deixam a sessão aberta mas o status muda — ADR-V2-057).
+ *    (FAILED deixa a sessão aberta mas o status muda — ADR-V2-057).
  * 2. Existe ao menos uma workSession SEM `endedAt` (sessão aberta). Quando há
  *    mais de uma aberta (caso anômalo), considera a ÚLTIMA do array.
  * 3. A sessão aberta ainda é FRESCA: `now - startedAt <= WORK_SESSION_STALE_MS`

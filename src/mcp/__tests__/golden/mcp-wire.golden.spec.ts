@@ -58,22 +58,32 @@ import { McpRouterService } from '../../services/mcp-router.service';
 const FROZEN_TOOLS_COUNT = 26;
 
 /** Hash canonico SHA-256 do payload de `initialize` (result). */
-const FROZEN_INITIALIZE_HASH =
-  '3eb52fbe08cb90ed3a3ef2f517c3fa66ea3002b6ab1ce83317367edbccebbe2d';
+const FROZEN_INITIALIZE_HASH = '3eb52fbe08cb90ed3a3ef2f517c3fa66ea3002b6ab1ce83317367edbccebbe2d';
 
 /**
  * Hash canonico SHA-256 do payload de `tools/list` (result) — 26 tools.
- * Re-baseline consciente 2026-07-13: merge trouxe a description atualizada de
- * `create_task` (mencao a `possibleDuplicates[]`, feature de deteccao de
- * duplicata do commit cbf8ca0). UNICA mudanca no wire (nomes/inputSchema/count
- * inalterados); nao e regressao — feature deliberada do remote.
+ *
+ * Re-baseline consciente 2026-07-14 (PODA V3 9 -> 5): o enum de status V3
+ * encolheu de 9 para 5 codigos (`VALIDATING`, `VALIDATED`, `CANCELLED` e
+ * `DISCARDED` REMOVIDOS) em `update_status`, `update_task`, `list_tasks` e
+ * `list_my_tasks` — mais as descriptions correspondentes
+ * ('Codigo V3: INBOX|READY|EXECUTING|DONE|FAILED').
+ *
+ * Esta mudanca de wire e o PROPOSITO da task, nao um efeito colateral: era o
+ * enum inflado do MCP que fazia a IA escolher `VALIDATING` e prender tasks
+ * humanas num estado sem produtor nem consumidor. Verificado que NADA alem
+ * disso mudou: `tools/list` continua servindo as MESMAS 26 tools, na MESMA
+ * ordem (FROZEN_TOOLS_COUNT e FROZEN_TOOL_NAMES_HASH inalterados), e o
+ * snapshot `tools-list.baseline.json` bate deep-equal. `initialize` e os
+ * `tools/call` representativos nao mudaram.
+ *
+ * Re-baseline anterior (2026-07-13): description de `create_task`
+ * (`possibleDuplicates[]`, commit cbf8ca0).
  */
-const FROZEN_TOOLS_LIST_HASH =
-  '776cae433e7b3d97761be629ab299643644c1629325f1a068efe64246fdb88a2';
+const FROZEN_TOOLS_LIST_HASH = 'f0f77fdd23db8e0183990ec54333d270818217f438eccccaf33cb923cf472679';
 
 /** Hash canonico SHA-256 do array de NOMES das tools (ordem preservada) — Onda 2. */
-const FROZEN_TOOL_NAMES_HASH =
-  'd3145628a5d729311a3cae19a92384f6bd003d4ee8ee3774a5c5c49ff8b3fadd';
+const FROZEN_TOOL_NAMES_HASH = 'd3145628a5d729311a3cae19a92384f6bd003d4ee8ee3774a5c5c49ff8b3fadd';
 
 /**
  * Serializacao canonica (chaves ordenadas recursivamente) — torna o hash

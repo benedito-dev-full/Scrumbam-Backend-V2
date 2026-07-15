@@ -67,13 +67,13 @@ export class ProjectResponseDto {
   memberCount!: number;
 
   /**
-   * Progresso da Lista — tarefas concluídas (DONE + VALIDATED) sobre o total.
+   * Progresso da Lista — tarefas concluídas (DONE) sobre o total.
    *
    * Preenchido apenas na listagem (`GET /projects`). Para SPACE/FOLDER fica 0
    * (tarefas vinculam-se a Lists). Ausente em respostas de item único.
    */
   @ApiPropertyOptional({
-    description: 'Tarefas concluídas (DONE+VALIDATED) da Lista. Presente apenas na listagem.',
+    description: 'Tarefas concluídas (DONE) da Lista. Presente apenas na listagem.',
     example: 5,
   })
   doneCount?: number;

@@ -26,8 +26,7 @@ export class UpdateStatusTool implements McpTool {
       taskId: { type: 'string' },
       statusCode: {
         type: 'string',
-        description:
-          'Codigo V3: INBOX|READY|EXECUTING|DONE|FAILED|CANCELLED|DISCARDED|VALIDATING|VALIDATED',
+        description: 'Codigo V3: INBOX|READY|EXECUTING|DONE|FAILED',
       },
     },
   };

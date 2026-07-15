@@ -1,11 +1,4 @@
-import {
-  IsBoolean,
-  IsOptional,
-  IsString,
-  Matches,
-  MaxLength,
-  MinLength,
-} from 'class-validator';
+import { IsBoolean, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 import { REPO_URL_REGEX } from '../utils/repo-url';
@@ -16,7 +9,7 @@ import { REPO_URL_REGEX } from '../utils/repo-url';
  * Cria atomicamente:
  * 1. DProject (tabela canônica)
  * 2. DVincula -171 (PROJECT_ROLE_MANAGER) para o criador
- * 3. 9 DTabela statuses V3 padrão (INBOX a VALIDATED)
+ * 3. 5 DTabela statuses V3 padrão (INBOX a FAILED)
  *
  * A URL do repositório git é armazenada exclusivamente em `DProject.repoUrl`
  * (ADR-V2-043). O campo `dados.gitRepo` foi removido — use `repoUrl`.

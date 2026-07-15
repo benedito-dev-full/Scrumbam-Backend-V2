@@ -119,7 +119,7 @@
           },
           "statusCode": {
             "type": "string",
-            "description": "Codigo V3: INBOX|READY|EXECUTING|DONE|FAILED|CANCELLED|DISCARDED|VALIDATING|VALIDATED"
+            "description": "Codigo V3: INBOX|READY|EXECUTING|DONE|FAILED"
           }
         }
       }
@@ -201,13 +201,9 @@
               "READY",
               "EXECUTING",
               "DONE",
-              "FAILED",
-              "CANCELLED",
-              "DISCARDED",
-              "VALIDATING",
-              "VALIDATED"
+              "FAILED"
             ],
-            "description": "Codigo V3: INBOX|READY|EXECUTING|DONE|FAILED|CANCELLED|DISCARDED|VALIDATING|VALIDATED"
+            "description": "Codigo V3: INBOX|READY|EXECUTING|DONE|FAILED"
           },
           "dueDate": {
             "type": [
@@ -618,11 +614,7 @@
               "READY",
               "EXECUTING",
               "DONE",
-              "FAILED",
-              "CANCELLED",
-              "DISCARDED",
-              "VALIDATING",
-              "VALIDATED"
+              "FAILED"
             ],
             "description": "Filtra por status V3 (opcional)."
           },

@@ -15,8 +15,8 @@ import { DailySummaryResponseDto } from './dto/daily-summary-response.dto';
 
 const CACHE_TTL_SECONDS = 60;
 const CACHE_TTL_MS = CACHE_TTL_SECONDS * 1000;
-const DONE_STATUS_CLASS_IDS = [BigInt(-444), BigInt(-449)];
-const ACTIVE_STATUS_CODES = new Set(['EXECUTING', 'VALIDATING']);
+const DONE_STATUS_CLASS_IDS = [BigInt(-444)];
+const ACTIVE_STATUS_CODES = new Set(['EXECUTING']);
 const BLOCKED_OR_FAILED_STATUS_CODES = new Set(['FAILED']);
 const UNASSIGNED = 'Unassigned';
 
@@ -438,10 +438,6 @@ export class DashboardsService {
       '-443': 'EXECUTING',
       '-444': 'DONE',
       '-445': 'FAILED',
-      '-446': 'CANCELLED',
-      '-447': 'DISCARDED',
-      '-448': 'VALIDATING',
-      '-449': 'VALIDATED',
     };
     return fallback[id] ?? id;
   }

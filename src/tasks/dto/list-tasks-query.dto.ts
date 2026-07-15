@@ -14,6 +14,8 @@ import {
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 
+import { V3_STATUS_CODES } from '../constants/task-status.const';
+
 /**
  * DTO para query de listagem de tasks (GET /tasks).
  *
@@ -47,32 +49,12 @@ export class ListTasksQueryDto {
   projectId?: string;
 
   @ApiPropertyOptional({
-    description: 'Filtrar por status V3',
-    enum: [
-      'INBOX',
-      'READY',
-      'EXECUTING',
-      'DONE',
-      'FAILED',
-      'CANCELLED',
-      'DISCARDED',
-      'VALIDATING',
-      'VALIDATED',
-    ],
+    description: 'Filtrar por status V3 (5 canônicos — fonte única: V3_STATUS_CODES)',
+    enum: V3_STATUS_CODES,
     example: 'INBOX',
   })
   @IsOptional()
-  @IsEnum([
-    'INBOX',
-    'READY',
-    'EXECUTING',
-    'DONE',
-    'FAILED',
-    'CANCELLED',
-    'DISCARDED',
-    'VALIDATING',
-    'VALIDATED',
-  ])
+  @IsEnum(V3_STATUS_CODES)
   status?: string;
 
   /**
@@ -159,8 +141,7 @@ export class ListTasksQueryDto {
    * Em F5 outras classes (MILESTONE/EPIC/BLOCK) podem aparecer.
    */
   @ApiPropertyOptional({
-    description:
-      'Filtrar por idClasse da DTask. -200=PHASE, -154=SCRUMBAN_TASK. Inteiro negativo.',
+    description: 'Filtrar por idClasse da DTask. -200=PHASE, -154=SCRUMBAN_TASK. Inteiro negativo.',
     example: '-200',
   })
   @IsOptional()

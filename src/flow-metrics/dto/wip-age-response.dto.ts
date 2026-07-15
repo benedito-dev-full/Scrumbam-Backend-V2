@@ -37,7 +37,7 @@ export class WipAgeByStatusDto {
  * Útil para identificar gargalos e bloqueios.
  *
  * Timestamp inicial por status:
- * - EXECUTING / VALIDATING → `dados.telemetry.executingAt` (mais relevante)
+ * - EXECUTING → `dados.telemetry.executingAt` (mais relevante)
  * - INBOX / READY / outros → `criadoEm`
  *
  * @example

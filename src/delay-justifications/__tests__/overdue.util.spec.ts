@@ -66,10 +66,10 @@ describe('computeOverdue', () => {
     expect(r).toEqual({ isOverdue: true, delayKind: 'COMPLETED_LATE', delayDays: 3 });
   });
 
-  it('VALIDATED sem doneAt cai para v3.movedAt (fallback)', () => {
+  it('DONE sem doneAt cai para v3.movedAt (fallback)', () => {
     const dueDate = new Date('2026-07-01T15:00:00Z'); // 01/07
     const dados: TaskDados = {
-      v3: { state: 'VALIDATED', movedAt: '2026-07-03T12:00:00Z' }, // 03/07
+      v3: { state: 'DONE', movedAt: '2026-07-03T12:00:00Z' }, // 03/07
       telemetry: {},
     };
     const r = computeOverdue({ dueDate, dados, atualizadoEm: new Date() }, tz);
@@ -84,14 +84,24 @@ describe('computeOverdue', () => {
     expect(r).toEqual({ isOverdue: true, delayKind: 'COMPLETED_LATE', delayDays: 5 });
   });
 
-  it('VALIDATING é tratado como concluído (doneAt persiste)', () => {
-    const dueDate = new Date('2026-07-01T15:00:00Z');
+  /**
+   * Poda 9 -> 5: `VALIDATING` NAO existe mais e, portanto, NAO conta como
+   * concluido. Este teste trava a nova semantica E documenta a dependencia da
+   * MIGRACAO DE DADOS: enquanto houver linhas legadas com `dados.v3.state =
+   * 'VALIDATING'` em producao, elas serao tratadas como ABERTAS (atraso
+   * acumulando por dia) — que e exatamente o destino acordado para elas
+   * (VALIDATING -> EXECUTING). O cast e proposital: o tipo `TaskStatus` ja
+   * nao aceita o literal.
+   */
+  it('estado legado VALIDATING NAO e mais concluido — conta como OPEN', () => {
+    const dueDate = new Date('2026-07-01T15:00:00Z'); // 01/07
+    const now = new Date('2026-07-04T15:00:00Z'); // 04/07 → 3 dias em aberto
     const dados: TaskDados = {
-      v3: { state: 'VALIDATING' },
-      telemetry: { doneAt: '2026-07-02T12:00:00Z' }, // 02/07
+      v3: { state: 'VALIDATING' as unknown as TaskStatus },
+      telemetry: { doneAt: '2026-07-02T12:00:00Z' },
     };
-    const r = computeOverdue({ dueDate, dados, atualizadoEm: new Date() }, tz);
-    expect(r).toEqual({ isOverdue: true, delayKind: 'COMPLETED_LATE', delayDays: 1 });
+    const r = computeOverdue({ dueDate, dados, atualizadoEm: now }, tz, now);
+    expect(r.delayKind).toBe('OPEN');
   });
 
   /* ── Virada de dia ──────────────────────────────────────────────────────────

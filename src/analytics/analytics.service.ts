@@ -256,7 +256,7 @@ export class AnalyticsService {
       where: {
         idProject: projectId,
         excluido: false,
-        NOT: { idStatus: { in: [BigInt(-444), BigInt(-449)] } },
+        NOT: { idStatus: { in: [BigInt(-444)] } },
       },
     });
   }

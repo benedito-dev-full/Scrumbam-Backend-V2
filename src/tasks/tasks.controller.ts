@@ -313,7 +313,7 @@ export class TasksController {
    * Métrica de pontualidade / margem de atraso agregada de um projeto (Task 8).
    *
    * Retorna a média (em dias corridos) de `completedAt - dueDate` das tasks
-   * concluídas (DONE/VALIDATED) do projeto que possuem AMBOS `dueDate` e
+   * concluídas (DONE) do projeto que possuem AMBOS `dueDate` e
    * `doneAt`. Positivo = atraso médio; negativo = adiantamento médio;
    * `averageDelayDays: null` quando não há amostras. Cálculo 100% server-side
    * (`AVG` em SQL, sem paginação) — resolve o teto `@Max(100)` do `GET /tasks`.
@@ -346,7 +346,7 @@ export class TasksController {
     summary: 'Métrica de pontualidade agregada de um projeto (Task 8)',
     description:
       'Média de dias entre conclusão (completedAt) e prazo (dueDate) das tasks ' +
-      'concluídas DONE/VALIDATED do projeto com ambos os campos. Positivo=atraso, ' +
+      'concluídas DONE do projeto com ambos os campos. Positivo=atraso, ' +
       'negativo=adiantou, null=sem amostras. Agregação SQL server-side (sem paginação).',
   })
   @ApiParam({ name: 'projectId', description: 'ID do projeto (List)', example: '5' })

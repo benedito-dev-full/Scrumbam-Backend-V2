@@ -6,17 +6,17 @@ import { parseTaskDados } from '../../tasks/schemas/task-dados.schema';
 /**
  * idClasse dos status de conclusão — tasks nestes status são excluídas do WIP.
  */
-const DONE_STATUS_IDS = new Set([BigInt(-444), BigInt(-449)]);
+const DONE_STATUS_IDS = new Set([BigInt(-444)]);
 
 /**
  * idClasse de status que devem usar executingAt como timestamp inicial.
  */
-const EXECUTING_STATUS_IDS = new Set([BigInt(-443), BigInt(-448)]);
+const EXECUTING_STATUS_IDS = new Set([BigInt(-443)]);
 
 /**
- * Range de idClasse para status V3 (DTabela -441..-449, seed F1).
+ * Range de idClasse para status V3 (DTabela -441..-445, seed F1).
  */
-const STATUS_ID_MIN = BigInt(-449);
+const STATUS_ID_MIN = BigInt(-445);
 const STATUS_ID_MAX = BigInt(-441);
 
 /**
@@ -28,20 +28,16 @@ const STATUS_CODE_FALLBACK: Record<string, string> = {
   '-443': 'EXECUTING',
   '-444': 'DONE',
   '-445': 'FAILED',
-  '-446': 'CANCELLED',
-  '-447': 'DISCARDED',
-  '-448': 'VALIDATING',
-  '-449': 'VALIDATED',
 };
 
 /**
  * Serviço de cálculo de WIP (Work in Progress) age de tasks de um projeto.
  *
  * WIP age = tempo (em horas) desde o início do trabalho até agora,
- * para tasks ainda não concluídas (não-DONE/VALIDATED).
+ * para tasks ainda não concluídas (não-DONE).
  *
  * Timestamp inicial por status (plano §6 nota 5):
- * - EXECUTING / VALIDATING → `dados.telemetry.executingAt` (mais relevante)
+ * - EXECUTING → `dados.telemetry.executingAt` (mais relevante)
  * - INBOX / READY / outros → `criadoEm` (momento de entrada no sistema)
  *
  * Carrega o mapa de status uma única vez no boot via OnModuleInit (cache sem TTL —
@@ -63,7 +59,7 @@ export class WipAgeService implements OnModuleInit {
   /**
    * Inicializa o cache de status codes ao subir o módulo.
    *
-   * Carrega DTabela com idClasse no range -441..-449 para mapear
+   * Carrega DTabela com idClasse no range -441..-445 para mapear
    * idStatus → código do status (ex: '-444' → 'DONE').
    */
   async onModuleInit(): Promise<void> {
@@ -113,7 +109,7 @@ export class WipAgeService implements OnModuleInit {
   /**
    * Calcula a WIP age por status para um projeto.
    *
-   * Retorna apenas tasks não-DONE (excluindo DONE e VALIDATED).
+   * Retorna apenas tasks não-DONE.
    * Tasks agrupadas por status com métricas de idade média e máxima.
    *
    * @param projectId - Chave BigInt do DProject
@@ -147,7 +143,7 @@ export class WipAgeService implements OnModuleInit {
       return { byStatus: [], total: 0, calculatedAt: now.toISOString() };
     }
 
-    // Buscar tasks não-DONE (excluir DONE e VALIDATED)
+    // Buscar tasks não-DONE
     const tasks = await this.prisma.dTask.findMany({
       where: {
         idProject: projectId,
@@ -207,7 +203,7 @@ export class WipAgeService implements OnModuleInit {
    * Calcula a idade em horas de uma task a partir do timestamp correto.
    *
    * Regra (plano §6 nota 5):
-   * - EXECUTING / VALIDATING → usa `telemetry.executingAt` (mais preciso)
+   * - EXECUTING → usa `telemetry.executingAt` (mais preciso)
    * - outros → usa `criadoEm`
    *
    * @param task - Task com idStatus, criadoEm e dados

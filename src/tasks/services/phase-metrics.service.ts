@@ -37,8 +37,14 @@ const PHASE_IDCLASSE = -200 as const;
 const STATUS_DONE_IDCLASSE = -444 as const;
 const STATUS_FAILED_IDCLASSE = -445 as const;
 const STATUS_EXECUTING_IDCLASSE = -443 as const;
-// Pending: INBOX (-441), READY (-442), VALIDATING (-448), VALIDATED (-449)
-// CANCELLED (-446) e DISCARDED (-447) ficam FORA tanto de pending quanto de total.
+// Pending: INBOX (-441), READY (-442).
+//
+// Poda 9 -> 5: VALIDATING (-448) e VALIDATED (-449) contavam como PENDENTE aqui
+// e, ao mesmo tempo, como CONCLUIDO em `delay-justifications/overdue.util.ts` —
+// a MESMA task produzia dois numeros diferentes. Com a remocao dos 4 status a
+// divergencia morre: DONE (-444) e o unico estado de conclusao nos DOIS arquivos.
+// CANCELLED (-446) / DISCARDED (-447) tambem sairam — nao ha mais o que excluir
+// de `total`.
 
 /**
  * Service de métricas agregadas de fases (% conclusão + contagens).
@@ -52,8 +58,7 @@ const STATUS_EXECUTING_IDCLASSE = -443 as const;
  * - Modo `recursive=false`: query simples por `idPai = phaseId`.
  *
  * Identificação de estado via JOIN com `DTabela.idClasse` (constantes do seed
- * V2). Cancelados/descartados não entram em `total`. `percent = 0` quando
- * `total = 0` (sem NaN).
+ * V2). `percent = 0` quando `total = 0` (sem NaN).
  *
  * @see ADR-V2-047 (Fases via DTask.idPai)
  * @see PhaseHierarchyService — guardrail de profundidade compartilhado
@@ -149,8 +154,7 @@ export class PhaseMetricsService {
    * dentro do mesmo `idProject`, até guardrail hardcoded `depth < 20`.
    *
    * Exclui a própria raiz (`depth > 0`) e nós de classe PHASE (-200) do
-   * `total`. Cancelados (-446) e descartados (-447) ficam fora de `total`
-   * e `pending`.
+   * `total`.
    */
   private async computeRecursive(phaseId: bigint, rootProjectId: bigint): Promise<MetricsRow> {
     const rows = await this.prisma.$queryRaw<MetricsRow[]>`
@@ -171,14 +175,11 @@ export class PhaseMetricsService {
           AND d.depth < 20
       )
       SELECT
-        COUNT(*) FILTER (
-          WHERE d."idClasse" != ${PHASE_IDCLASSE}
-            AND (s."idClasse" IS NULL OR s."idClasse" NOT IN (-446, -447))
-        ) AS total,
+        COUNT(*) FILTER (WHERE d."idClasse" != ${PHASE_IDCLASSE}) AS total,
         COUNT(*) FILTER (WHERE s."idClasse" = ${STATUS_DONE_IDCLASSE}) AS done,
         COUNT(*) FILTER (WHERE s."idClasse" = ${STATUS_FAILED_IDCLASSE}) AS failed,
         COUNT(*) FILTER (WHERE s."idClasse" = ${STATUS_EXECUTING_IDCLASSE}) AS "inProgress",
-        COUNT(*) FILTER (WHERE s."idClasse" IN (-441, -442, -448, -449)) AS pending
+        COUNT(*) FILTER (WHERE s."idClasse" IN (-441, -442)) AS pending
       FROM descendants d
       LEFT JOIN "DTabela" s ON s.chave = d."idStatus" AND s.excluido = false
       WHERE d.depth > 0
@@ -193,14 +194,11 @@ export class PhaseMetricsService {
   private async computeDirect(phaseId: bigint, rootProjectId: bigint): Promise<MetricsRow> {
     const rows = await this.prisma.$queryRaw<MetricsRow[]>`
       SELECT
-        COUNT(*) FILTER (
-          WHERE t."idClasse" != ${PHASE_IDCLASSE}
-            AND (s."idClasse" IS NULL OR s."idClasse" NOT IN (-446, -447))
-        ) AS total,
+        COUNT(*) FILTER (WHERE t."idClasse" != ${PHASE_IDCLASSE}) AS total,
         COUNT(*) FILTER (WHERE s."idClasse" = ${STATUS_DONE_IDCLASSE}) AS done,
         COUNT(*) FILTER (WHERE s."idClasse" = ${STATUS_FAILED_IDCLASSE}) AS failed,
         COUNT(*) FILTER (WHERE s."idClasse" = ${STATUS_EXECUTING_IDCLASSE}) AS "inProgress",
-        COUNT(*) FILTER (WHERE s."idClasse" IN (-441, -442, -448, -449)) AS pending
+        COUNT(*) FILTER (WHERE s."idClasse" IN (-441, -442)) AS pending
       FROM "DTask" t
       LEFT JOIN "DTabela" s ON s.chave = t."idStatus" AND s.excluido = false
       WHERE t."idPai" = ${phaseId}

@@ -44,7 +44,7 @@ export class PhaseMetricsResponseDto {
   @ApiProperty({ description: 'Tasks em estado EXECUTING', example: 5 })
   inProgress!: number;
 
-  @ApiProperty({ description: 'Tasks em estados pendentes (INBOX/READY/VALIDATING)', example: 23 })
+  @ApiProperty({ description: 'Tasks em estados pendentes (INBOX/READY)', example: 23 })
   pending!: number;
 
   @ApiProperty({

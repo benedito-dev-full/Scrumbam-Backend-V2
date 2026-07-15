@@ -1,6 +1,8 @@
 import { IsEnum, IsOptional, IsString } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
+import { V3_STATUS_CODES } from '../constants/task-status.const';
+
 /**
  * DTO para mover task entre estados V3 (PUT /tasks/:id/status).
  *
@@ -16,11 +18,11 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
  */
 export class UpdateTaskStatusDto {
   @ApiProperty({
-    description: 'Novo estado V3 da task',
-    enum: ['INBOX', 'READY', 'EXECUTING', 'DONE', 'FAILED', 'CANCELLED', 'DISCARDED', 'VALIDATING', 'VALIDATED'],
+    description: 'Novo estado V3 da task (5 canônicos — fonte única: V3_STATUS_CODES)',
+    enum: V3_STATUS_CODES,
     example: 'READY',
   })
-  @IsEnum(['INBOX', 'READY', 'EXECUTING', 'DONE', 'FAILED', 'CANCELLED', 'DISCARDED', 'VALIDATING', 'VALIDATED'])
+  @IsEnum(V3_STATUS_CODES)
   status!: string;
 
   @ApiPropertyOptional({

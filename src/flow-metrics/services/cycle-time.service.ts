@@ -6,17 +6,18 @@ import { CycleTimeResponseDto } from '../dto/cycle-time-response.dto';
 import { parseTaskDados } from '../../tasks/schemas/task-dados.schema';
 
 /**
- * idClasse DTabela para status DONE e VALIDATED (seed F1 V2).
+ * idClasse DTabela para status DONE (seed F1 V2). Único estado de conclusão
+ * após a poda 9 → 5 (VALIDATED removido).
  * Apenas tasks nestes status possuem cycleTime preenchido na telemetria.
  */
-const DONE_STATUS_IDS = [BigInt(-444), BigInt(-449)];
+const DONE_STATUS_IDS = [BigInt(-444)];
 
 /**
  * Serviço de cálculo de cycle time de tasks de um projeto.
  *
  * Cycle time = `dados.telemetry.cycleTime` (em horas), calculado pelo
  * `TasksService.updateStatus` no momento em que a task entra em DONE ou
- * VALIDATED (F5). Representa o tempo entre EXECUTING e conclusão.
+ * (F5). Representa o tempo entre EXECUTING e conclusão.
  *
  * F8 é read-only puro — NÃO persiste nada, NÃO emite eventos.
  * Fonte: DTask.dados.telemetry.cycleTime (estrutural — Prisma direto).
@@ -37,7 +38,7 @@ export class CycleTimeService {
   /**
    * Calcula p50/p75/p90/p95/avg de cycle time para um projeto.
    *
-   * Lê tasks em status DONE/VALIDATED com `dados.telemetry.cycleTime`
+   * Lê tasks em status DONE com `dados.telemetry.cycleTime`
    * preenchido dentro do período especificado. Tasks sem telemetria são
    * excluídas do cálculo (`samples` reflete apenas as com dados).
    *
@@ -83,7 +84,7 @@ export class CycleTimeService {
 
     const dateRange = this.periodResolver.resolve(period);
 
-    // Buscar tasks DONE/VALIDATED do projeto — SEM filtro criadoEm.
+    // Buscar tasks DONE do projeto — SEM filtro criadoEm.
     // O filtro de período é aplicado em JS via dados.telemetry.doneAt,
     // garantindo inclusão de tasks criadas antes do período mas concluídas dentro.
     // (Prisma não suporta JSON path filter IS NOT NULL de forma portável)

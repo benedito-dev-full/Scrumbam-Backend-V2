@@ -16,7 +16,7 @@ import { ForecastResponseDto } from './dto/forecast-response.dto';
  *
  * Orquestra:
  * 1. Buscar throughput histórico (janela móvel agrupada por semana)
- * 2. Contar tasks restantes (não-DONE/VALIDATED)
+ * 2. Contar tasks restantes (não-DONE)
  * 3. Simular via bootstrap resample (Decisão D3)
  *
  * Throughput histórico é calculado a partir de uma janela móvel de 30 dias
@@ -81,7 +81,7 @@ export class ForecastService {
       );
     }
 
-    // 3. Contar tasks restantes (não-DONE/VALIDATED)
+    // 3. Contar tasks restantes (não-DONE)
     const tasksRemaining = await this.countTasksRemaining(projectId);
 
     if (tasksRemaining === 0) {
@@ -146,7 +146,7 @@ export class ForecastService {
   }
 
   /**
-   * Conta tasks restantes (não-DONE/VALIDATED) no projeto.
+   * Conta tasks restantes (não-DONE) no projeto.
    *
    * @param projectId - ID do projeto
    * @returns Número de tasks restantes
@@ -157,7 +157,7 @@ export class ForecastService {
         idProject: projectId,
         excluido: false,
         NOT: {
-          idStatus: { in: [BigInt(-444), BigInt(-449)] },
+          idStatus: { in: [BigInt(-444)] },
         },
       },
     });

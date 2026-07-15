@@ -929,19 +929,19 @@ export class ProjectsService implements OnModuleInit {
           _count: { chave: true },
         }),
         // Progresso: DTask.idStatus aponta para DTabela (status por projeto).
-        // Buscamos as chaves das DTabelas DONE(-444)/VALIDATED(-449) destes
+        // Buscamos as chaves das DTabelas DONE(-444) destes
         // projetos para depois contar as tasks concluídas por elas.
         this.prisma.dTabela.findMany({
           where: {
             dEntidadeId: { in: projectIds },
-            idClasse: { in: [BigInt(-444), BigInt(-449)] },
+            idClasse: { in: [BigInt(-444)] },
             excluido: false,
           },
           select: { chave: true },
         }),
       ]);
 
-    // Progresso: contagem de tarefas concluídas por projeto (DONE/VALIDATED).
+    // Progresso: contagem de tarefas concluídas por projeto (DONE).
     // Depende das chaves resolvidas acima — 1 groupBy adicional, ainda em batch.
     const doneStatusChaves = doneStatusRows.map((r) => r.chave);
     const doneCounts = doneStatusChaves.length
@@ -2779,17 +2779,7 @@ export class ProjectsService implements OnModuleInit {
       where: {
         dEntidadeId: projectId,
         idClasse: {
-          in: [
-            BigInt(-441),
-            BigInt(-442),
-            BigInt(-443),
-            BigInt(-444),
-            BigInt(-445),
-            BigInt(-446),
-            BigInt(-447),
-            BigInt(-448),
-            BigInt(-449),
-          ],
+          in: [BigInt(-441), BigInt(-442), BigInt(-443), BigInt(-444), BigInt(-445)],
         },
         excluido: false,
       },

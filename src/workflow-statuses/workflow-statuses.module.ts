@@ -8,7 +8,7 @@ import { PrismaService } from '../prisma.service';
  * WorkflowStatusesModule — wrapper thin sobre DTabela (ADR-V2-009).
  *
  * Expõe apenas:
- * - `POST /workflow-statuses/seed-defaults/:projectId` — cria 9 statuses V3 padrão
+ * - `POST /workflow-statuses/seed-defaults/:projectId` — cria 5 statuses V3 padrão
  *
  * CRUD de statuses → endpoint genérico /tabelas?idClasse=-440&dEntidadeId={projectId}
  *

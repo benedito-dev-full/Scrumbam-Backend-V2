@@ -5,19 +5,8 @@ import { TasksService } from '../../../../tasks/tasks.service';
 import { CapabilityError } from '../../capability-error';
 import { Capability, CapabilityResult } from '../../capability.interface';
 import { ToolPrincipal } from '../../tool-principal';
+import { V3_STATUS_CODES } from '../../../../tasks/constants/task-status.const';
 
-/** V3 status codes — espelha `V3_STATUS_CODES` de `mcp/tools/tool-params`. */
-const V3_STATUS_CODES = [
-  'INBOX',
-  'READY',
-  'EXECUTING',
-  'DONE',
-  'FAILED',
-  'CANCELLED',
-  'DISCARDED',
-  'VALIDATING',
-  'VALIDATED',
-] as const;
 
 /** Enum de prioridade alinhado ao DTO canonico `UpdateTaskDto`. */
 const PRIORITY_VALUES = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] as const;
@@ -77,7 +66,7 @@ export class UpdateTaskCapability implements Capability {
         type: 'string',
         enum: [...V3_STATUS_CODES],
         description:
-          'Codigo V3: INBOX|READY|EXECUTING|DONE|FAILED|CANCELLED|DISCARDED|VALIDATING|VALIDATED',
+          'Codigo V3: INBOX|READY|EXECUTING|DONE|FAILED',
       },
       dueDate: {
         type: ['string', 'null'],

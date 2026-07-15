@@ -21,7 +21,7 @@ export class WorkflowStatusesController {
   constructor(private readonly workflowStatusesService: WorkflowStatusesService) {}
 
   /**
-   * Cria os 9 statuses V3 padrão para o projeto se ainda não existirem.
+   * Cria os 5 statuses V3 padrão para o projeto se ainda não existirem.
    *
    * Operação idempotente — se os statuses já existem, retorna contagem 0.
    * Usado internamente pelo ProjectsService ao criar um novo projeto.
@@ -46,7 +46,7 @@ export class WorkflowStatusesController {
   @Post('seed-defaults/:projectId')
   @ApiOperation({
     summary: 'Inicializar statuses V3 padrão para um projeto',
-    description: 'Cria 9 DTabela idClasse=-441..-449 vinculadas ao projeto. Idempotente.',
+    description: 'Cria 5 DTabela idClasse=-441..-445 vinculadas ao projeto. Idempotente.',
   })
   @ApiParam({ name: 'projectId', description: 'ID do projeto (chave DEntidade)' })
   @ApiResponse({ status: 201, description: 'Statuses criados ou já existentes' })

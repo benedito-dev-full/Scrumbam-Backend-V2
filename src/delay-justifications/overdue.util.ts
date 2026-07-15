@@ -6,28 +6,21 @@ import { TaskDados, TaskStatus } from '../tasks/schemas/task-dados.schema';
  *
  * - `OPEN` — tarefa AINDA em aberto (estado não-terminal) cujo `dueDate` já
  *   passou. O atraso cresce a cada dia.
- * - `COMPLETED_LATE` — tarefa concluída (DONE/VALIDATING/VALIDATED) DEPOIS do
- *   `dueDate`. O atraso é fixo (dia de conclusão − dia do prazo).
+ * - `COMPLETED_LATE` — tarefa concluída (DONE) DEPOIS do `dueDate`. O atraso é
+ *   fixo (dia de conclusão − dia do prazo).
  */
 export type DelayKind = 'OPEN' | 'COMPLETED_LATE';
 
 /**
- * Estados "concluídos" para fins de atraso. Cobrem toda a cauda terminal do
- * ciclo V3 em que a tarefa já teve seu trabalho encerrado:
- * - `DONE` — concluída (grava `telemetry.doneAt` server-side).
- * - `VALIDATING` — concluída, aguardando validação (`doneAt` PERSISTE).
- * - `VALIDATED` — concluída e validada (`doneAt` PERSISTE).
+ * Estados "concluídos" para fins de atraso.
  *
- * Incluir `VALIDATING`/`VALIDATED` (além de `DONE`) é fiel à nota do plano §4:
- * `telemetry.doneAt` é purpose-built para o momento de conclusão e persiste
- * ao longo de DONE→VALIDATING→VALIDATED. Tratar VALIDATING como "aberto"
- * (acumulando dias) superestimaria o atraso de uma tarefa já concluída.
+ * Após a poda 9 → 5 há UM único estado de conclusão: `DONE` (grava
+ * `telemetry.doneAt` server-side). Antes, `VALIDATING`/`VALIDATED` entravam
+ * aqui como "concluídos" — enquanto `phase-metrics.service.ts` os contava como
+ * PENDENTES. A mesma task produzia dois números diferentes. Com os 4 status
+ * removidos, os dois arquivos convergem em `DONE`.
  */
-const COMPLETED_STATES: ReadonlySet<TaskStatus> = new Set<TaskStatus>([
-  'DONE',
-  'VALIDATING',
-  'VALIDATED',
-]);
+const COMPLETED_STATES: ReadonlySet<TaskStatus> = new Set<TaskStatus>(['DONE']);
 
 /** Milissegundos em um dia de calendário (Brasil não tem DST desde 2019). */
 const MS_PER_DAY = 86_400_000;
@@ -112,9 +105,9 @@ function calendarDayDiffBrazil(instant: Date, dueDate: Date, tz: TimezoneService
  * Resolve o "dia de conclusão" de uma tarefa concluída seguindo a cascata do
  * CEO (plano §4, decisão 2), da fonte mais confiável à de último recurso:
  *
- * 1. `dados.telemetry.doneAt` — gravado server-side na transição para DONE e
- *    persiste até VALIDATED. Primário.
- * 2. `dados.v3.movedAt` quando o estado é terminal (`DONE`/`VALIDATED`) —
+ * 1. `dados.telemetry.doneAt` — gravado server-side na transição para DONE.
+ *    Primário.
+ * 2. `dados.v3.movedAt` quando o estado é de conclusão (`DONE`) —
  *    cobre linhas legadas/importadas sem `telemetry.doneAt`. Fallback.
  * 3. `atualizadoEm` — rede de segurança (ruidoso: bumpado por qualquer
  *    escrita). Último recurso.
@@ -138,7 +131,7 @@ function resolveCompletionDate(
   }
 
   const movedAt = dados?.v3?.movedAt;
-  if (movedAt && (state === 'DONE' || state === 'VALIDATED')) {
+  if (movedAt && state === 'DONE') {
     const parsed = new Date(movedAt);
     if (!Number.isNaN(parsed.getTime())) {
       return parsed;
@@ -155,7 +148,7 @@ function resolveCompletionDate(
  *
  * Regras (plano §4):
  * - Sem `dueDate` → nunca atrasada.
- * - Estado concluído (`DONE`/`VALIDATING`/`VALIDATED`): compara o DIA de
+ * - Estado concluído (`DONE`): compara o DIA de
  *   conclusão (cascata `doneAt`→`movedAt`→`atualizadoEm`) com o DIA do prazo.
  *   Se depois → `COMPLETED_LATE`.
  * - Demais estados (aberto): compara o DIA de referência (`now`) com o DIA do

@@ -5,19 +5,8 @@ import { TasksService } from '../../../../tasks/tasks.service';
 import { CapabilityError } from '../../capability-error';
 import { Capability, CapabilityResult } from '../../capability.interface';
 import { ToolPrincipal } from '../../tool-principal';
+import { V3_STATUS_CODES } from '../../../../tasks/constants/task-status.const';
 
-/** Espelha `V3_STATUS_CODES` do MCP (`src/mcp/tools/tool-params.ts`). */
-const V3_STATUS_CODES = [
-  'INBOX',
-  'READY',
-  'EXECUTING',
-  'DONE',
-  'FAILED',
-  'CANCELLED',
-  'DISCARDED',
-  'VALIDATING',
-  'VALIDATED',
-] as const;
 
 const NUMERIC_RE = /^-?\d+$/;
 

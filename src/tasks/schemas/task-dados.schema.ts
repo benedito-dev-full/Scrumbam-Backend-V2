@@ -1,16 +1,13 @@
 /**
- * Estados V3 Intention — 9 estados canônicos do Scrumban.
+ * Estados V3 Intention — 5 estados canônicos do Scrumban.
+ *
+ * Re-export da fonte única (`constants/task-status.const`), mantido aqui para
+ * não quebrar os ~30 imports existentes de `TaskStatus`. NÃO redeclare a união
+ * — edite o catálogo em {@link V3_STATUS_CODES}.
  */
-export type TaskStatus =
-  | 'INBOX'
-  | 'READY'
-  | 'EXECUTING'
-  | 'DONE'
-  | 'FAILED'
-  | 'CANCELLED'
-  | 'DISCARDED'
-  | 'VALIDATING'
-  | 'VALIDATED';
+import type { TaskStatus } from '../constants/task-status.const';
+
+export type { TaskStatus };
 
 /**
  * Sessão de trabalho automática (workSession) de uma task — **fluxo de IA**.

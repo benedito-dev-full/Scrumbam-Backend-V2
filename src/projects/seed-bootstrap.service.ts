@@ -1,21 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
-/**
- * Status V3 padrão para seed de projetos.
- * idClasses -441 a -449 (seed F1).
- */
-const STATUS_V3_DEFAULTS: Array<{ idClasse: bigint; nome: string; codigo: string }> = [
-  { idClasse: BigInt(-441), nome: 'INBOX', codigo: 'INBOX' },
-  { idClasse: BigInt(-442), nome: 'READY', codigo: 'READY' },
-  { idClasse: BigInt(-443), nome: 'EXECUTING', codigo: 'EXECUTING' },
-  { idClasse: BigInt(-444), nome: 'DONE', codigo: 'DONE' },
-  { idClasse: BigInt(-445), nome: 'FAILED', codigo: 'FAILED' },
-  { idClasse: BigInt(-446), nome: 'CANCELLED', codigo: 'CANCELLED' },
-  { idClasse: BigInt(-447), nome: 'DISCARDED', codigo: 'DISCARDED' },
-  { idClasse: BigInt(-448), nome: 'VALIDATING', codigo: 'VALIDATING' },
-  { idClasse: BigInt(-449), nome: 'VALIDATED', codigo: 'VALIDATED' },
-];
+import { STATUS_V3_DEFAULTS } from '../tasks/constants/task-status.const';
 
 /**
  * Priorities V3 padrão para seed de projetos.
@@ -35,7 +21,7 @@ const PRIORITY_DEFAULTS: Array<{ idClasse: bigint; nome: string; codigo: string 
  * Service de bootstrap de projetos.
  *
  * Cria os dados padrão de um novo projeto dentro de uma transaction:
- * - 9 statuses V3 (DTabela -441 a -449, dEntidadeId=projectId)
+ * - 5 statuses V3 (DTabela -441 a -445, dEntidadeId=projectId)
  * - 4 priorities (DTabela -421 a -424, dEntidadeId=projectId)
  *
  * Chamado dentro de ProjectsService.create() via transaction.
@@ -56,7 +42,7 @@ export class SeedBootstrapService {
   /**
    * Semeia dados padrão do projeto na transaction fornecida.
    *
-   * Cria 9 statuses V3 + 4 priorities.
+   * Cria 5 statuses V3 + 4 priorities.
    * Idempotente por INBOX como sentinela; priorities têm idempotência
    * própria (lookup por `idClasse + dEntidadeId`).
    *
@@ -86,7 +72,7 @@ export class SeedBootstrapService {
     let created = 0;
 
     if (!existingInbox) {
-      // Criar os 9 statuses V3
+      // Criar os 5 statuses V3
       for (const status of STATUS_V3_DEFAULTS) {
         await tx.dTabela.create({
           data: {
@@ -112,7 +98,7 @@ export class SeedBootstrapService {
     if (created > 0) {
       this.logger.log(
         `seedProject: ${created} registros criados para projectId=${projectId}` +
-          ` (${existingInbox ? 'apenas priorities backfill' : '9 statuses + ' + prioritiesCreated + ' priorities'})`,
+          ` (${existingInbox ? 'apenas priorities backfill' : '5 statuses + ' + prioritiesCreated + ' priorities'})`,
       );
     }
 

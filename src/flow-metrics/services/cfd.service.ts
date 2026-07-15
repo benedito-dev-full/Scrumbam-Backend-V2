@@ -22,10 +22,6 @@ const STATUS_CODE_MAP: Record<string, string> = {
   '-443': 'EXECUTING',
   '-444': 'DONE',
   '-445': 'FAILED',
-  '-446': 'CANCELLED',
-  '-447': 'DISCARDED',
-  '-448': 'VALIDATING',
-  '-449': 'VALIDATED',
 };
 
 /**

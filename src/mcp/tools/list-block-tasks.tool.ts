@@ -31,11 +31,11 @@ interface BlockMetrics {
 }
 
 /** Status V3 considerados "concluídos" para fins de progresso (semântica do front). */
-const DONE_STATUS = new Set(['DONE', 'VALIDATED', 'CANCELLED']);
+const DONE_STATUS = new Set(['DONE']);
 /** Status V3 considerados "falha". */
-const FAILED_STATUS = new Set(['FAILED', 'DISCARDED']);
+const FAILED_STATUS = new Set(['FAILED']);
 /** Status V3 considerados "em andamento". */
-const IN_PROGRESS_STATUS = new Set(['EXECUTING', 'VALIDATING']);
+const IN_PROGRESS_STATUS = new Set(['EXECUTING']);
 
 /**
  * MCP tool `list_block_tasks` — lista as tasks de um Bloco (lista plana + métricas).

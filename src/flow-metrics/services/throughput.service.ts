@@ -16,7 +16,7 @@ interface ThroughputRawRow {
 /**
  * Serviço de cálculo de throughput de tasks de um projeto.
  *
- * Throughput = quantidade de tasks concluídas (DONE/VALIDATED) por período.
+ * Throughput = quantidade de tasks concluídas (DONE) por período.
  * Usa `dados.telemetry.doneAt` como timestamp de conclusão via $queryRaw
  * parametrizado com `date_trunc` — sem interpolação de string (seguro contra injection).
  *
@@ -119,8 +119,8 @@ export class ThroughputService {
     dateRange: DateRange,
     taskIdsFilter?: bigint[],
   ): Promise<ThroughputRawRow[]> {
-    // idClasse para DONE(-444) e VALIDATED(-449) como BigInt
-    const doneIds = [BigInt(-444), BigInt(-449)];
+    // idClasse para DONE(-444) como BigInt (único estado de conclusão)
+    const doneIds = [BigInt(-444)];
 
     // F9b: cláusula AND chave IN (...) só quando filtro presente e não-vazio.
     // Prisma.join produz lista parametrizada (sem SQL injection).
@@ -175,7 +175,7 @@ export class ThroughputService {
       where: {
         idProject: projectId,
         excluido: false,
-        idStatus: { in: [BigInt(-444), BigInt(-449)] },
+        idStatus: { in: [BigInt(-444)] },
         ...(taskIdsFilter !== undefined &&
           taskIdsFilter.length > 0 && {
             chave: { in: taskIdsFilter },

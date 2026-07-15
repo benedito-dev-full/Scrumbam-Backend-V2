@@ -36,12 +36,12 @@ describe('MCP list_block_tasks tool', () => {
   // Tasks do bloco com idPai=null (modelo PLANO — vínculo só por dados.idBloco).
   const blockTasks = [
     { id: '1', projectId, idClasse: '-154', idPai: null, status: 'DONE' },
-    { id: '2', projectId, idClasse: '-154', idPai: null, status: 'VALIDATED' },
-    { id: '3', projectId, idClasse: '-154', idPai: null, status: 'CANCELLED' },
+    { id: '2', projectId, idClasse: '-154', idPai: null, status: 'DONE' },
+    { id: '3', projectId, idClasse: '-154', idPai: null, status: 'DONE' },
     { id: '4', projectId, idClasse: '-154', idPai: null, status: 'FAILED' },
-    { id: '5', projectId, idClasse: '-154', idPai: null, status: 'DISCARDED' },
+    { id: '5', projectId, idClasse: '-154', idPai: null, status: 'FAILED' },
     { id: '6', projectId, idClasse: '-154', idPai: null, status: 'EXECUTING' },
-    { id: '7', projectId, idClasse: '-154', idPai: null, status: 'VALIDATING' },
+    { id: '7', projectId, idClasse: '-154', idPai: null, status: 'EXECUTING' },
     { id: '8', projectId, idClasse: '-154', idPai: null, status: 'READY' },
     { id: '9', projectId, idClasse: '-154', idPai: null, status: 'INBOX' },
   ];
@@ -145,8 +145,10 @@ describe('MCP list_block_tasks tool', () => {
     );
 
     const payload = parse(response);
-    // done = {DONE, VALIDATED, CANCELLED} = 3; failed = {FAILED, DISCARDED} = 2;
-    // inProgress = {EXECUTING, VALIDATING} = 2; total = 9; percent = round(3/9*100) = 33
+    // Poda 9 -> 5: os buckets agora sao mono-status (nao ha VALIDATED/CANCELLED
+    // em done, nem DISCARDED em failed, nem VALIDATING em inProgress).
+    // done = {DONE} = 3; failed = {FAILED} = 2; inProgress = {EXECUTING} = 2;
+    // total = 9; percent = round(3/9*100) = 33
     expect(payload.metrics).toEqual({
       total: 9,
       done: 3,

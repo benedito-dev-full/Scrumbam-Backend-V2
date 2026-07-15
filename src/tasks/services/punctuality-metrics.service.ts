@@ -22,10 +22,10 @@ type PunctualityRow = {
  * `PhaseMetricsService`. O JOIN é com `DTabela` (chave POSITIVA por projeto),
  * cujo `idClasse` NEGATIVO identifica o estado do registro.
  *
- * -444 = DONE, -449 = VALIDATED. Apenas estes entram no cálculo de pontualidade.
+ * -444 = DONE — ÚNICO estado de conclusão após a poda 9 → 5 (VALIDATED (-449)
+ * foi removido). Apenas ele entra no cálculo de pontualidade.
  */
 const STATUS_DONE_IDCLASSE = -444 as const;
-const STATUS_VALIDATED_IDCLASSE = -449 as const;
 
 /**
  * Atraso em DIAS DE CALENDÁRIO: `dia(doneAt em SP) − dia(dueDate)`.
@@ -76,7 +76,7 @@ const DELAY_DAYS_EXPR = Prisma.sql`(
  * - Tasks concluídas SEM `dueDate` são EXCLUÍDAS do cálculo (não entram nem como 0).
  * - Tasks sem `doneAt` (nunca de fato concluídas, ou concluídas antes da
  *   telemetria existir) são EXCLUÍDAS.
- * - Apenas status TERMINAL DONE (-444) / VALIDATED (-449) entram, via JOIN
+ * - Apenas o status de conclusão DONE (-444) entra, via JOIN
  *   `DTask.idStatus` → `DTabela.idClasse` (mesmo padrão de `PhaseMetricsService`).
  *
  * Agregação 100% no banco (`AVG`) — 1 query total, sem paginação, sem teto de
@@ -138,7 +138,7 @@ export class PunctualityMetricsService {
    *   `dueDate`/`doneAt` ausentes já usam em `computeForProject`).
    * - Tasks adiantadas (`diffDays < 0`) são EXCLUÍDAS.
    * - Mesmas exclusões-base de `computeForProject`: sem `dueDate`, sem
-   *   `doneAt`, ou fora de status terminal (DONE/VALIDATED) — ver `aggregate`.
+   *   `doneAt`, ou fora do status de conclusão (DONE) — ver `aggregate`.
    *
    * Reaproveita o núcleo compartilhado (`aggregate`) — mesma query base, com 1
    * filtro adicional (`(doneAt - dueDate) > 0`) concatenado ao WHERE.
@@ -215,7 +215,7 @@ export class PunctualityMetricsService {
    *
    * Base do WHERE (sempre presente):
    * - `excluido = false`
-   * - status terminal (`DTabela.idClasse IN (-444, -449)`)
+   * - status de conclusão (`DTabela.idClasse = -444`)
    * - `dueDate IS NOT NULL`
    * - `doneAt` presente E parseável como timestamp (guard anti-500 no cast).
    */
@@ -234,7 +234,7 @@ export class PunctualityMetricsService {
       INNER JOIN "DTabela" s
         ON s.chave = t."idStatus" AND s.excluido = false
       WHERE t.excluido = false
-        AND s."idClasse" IN (${STATUS_DONE_IDCLASSE}, ${STATUS_VALIDATED_IDCLASSE})
+        AND s."idClasse" = ${STATUS_DONE_IDCLASSE}
         AND t."dueDate" IS NOT NULL
         AND (t."dados"->'telemetry'->>'doneAt') IS NOT NULL
         AND (t."dados"->'telemetry'->>'doneAt') ~ '^\d{4}-\d{2}-\d{2}'

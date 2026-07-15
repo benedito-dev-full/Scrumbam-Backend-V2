@@ -1,29 +1,25 @@
 import { BadRequestException } from '@nestjs/common';
-import { TaskStatus } from './schemas/task-dados.schema';
+import { V3_STATUS_CODES, type TaskStatus } from './constants/task-status.const';
 
-const ALL_STATUSES: TaskStatus[] = [
-  'INBOX', 'READY', 'EXECUTING', 'DONE', 'FAILED',
-  'CANCELLED', 'DISCARDED', 'VALIDATING', 'VALIDATED',
-];
+const ALL_STATUSES: TaskStatus[] = [...V3_STATUS_CODES];
 
 /**
  * Mapa de transições válidas do state machine V3 Intentions.
  *
- * Política: movimento livre entre qualquer estado, exceto sair de VALIDATED
- * (estado terminal). Isso permite que o sistema (agent, backend) mova tasks
- * livremente sem restrições artificiais.
+ * Política: movimento livre entre quaisquer dos 5 estados — a única transição
+ * recusada é a de um estado para ele mesmo (no-op). O sistema (agent, backend,
+ * MCP) move tasks sem restrições artificiais.
+ *
+ * **Nota (poda 9 → 5):** antes existia um estado terminal sem saída
+ * (`VALIDATED`). Ele foi removido junto com VALIDATING/CANCELLED/DISCARDED —
+ * hoje NENHUM estado é via de mão única. Uma task `DONE` pode voltar a
+ * `EXECUTING` (reabertura), que já era o comportamento esperado do board.
+ *
+ * @see V3_STATUS_CODES — catálogo canônico (fonte única)
  */
-export const validTransitions: Record<TaskStatus, TaskStatus[]> = {
-  INBOX:      ALL_STATUSES.filter((s) => s !== 'INBOX'),
-  READY:      ALL_STATUSES.filter((s) => s !== 'READY'),
-  EXECUTING:  ALL_STATUSES.filter((s) => s !== 'EXECUTING'),
-  DONE:       ALL_STATUSES.filter((s) => s !== 'DONE'),
-  FAILED:     ALL_STATUSES.filter((s) => s !== 'FAILED'),
-  CANCELLED:  ALL_STATUSES.filter((s) => s !== 'CANCELLED'),
-  DISCARDED:  ALL_STATUSES.filter((s) => s !== 'DISCARDED'),
-  VALIDATING: ALL_STATUSES.filter((s) => s !== 'VALIDATING'),
-  VALIDATED:  [], // terminal — sem saída
-};
+export const validTransitions: Record<TaskStatus, TaskStatus[]> = Object.fromEntries(
+  ALL_STATUSES.map((from) => [from, ALL_STATUSES.filter((to) => to !== from)]),
+) as Record<TaskStatus, TaskStatus[]>;
 
 /**
  * Valida se a transição de estado é permitida pelo state machine V3.
@@ -35,9 +31,9 @@ export const validTransitions: Record<TaskStatus, TaskStatus[]> = {
  *
  * @example
  * ```typescript
- * validateTransition('INBOX', 'READY');        // OK
- * validateTransition('INBOX', 'DONE');         // Lança BadRequestException
- * validateTransition('VALIDATED', 'INBOX');    // Lança BadRequestException (terminal)
+ * validateTransition('INBOX', 'READY');      // OK
+ * validateTransition('DONE', 'EXECUTING');   // OK (reabertura)
+ * validateTransition('INBOX', 'INBOX');      // Lança BadRequestException (no-op)
  * ```
  */
 export function validateTransition(from: TaskStatus, to: TaskStatus): void {
@@ -61,8 +57,8 @@ export function validateTransition(from: TaskStatus, to: TaskStatus): void {
  *
  * @example
  * ```typescript
- * isValidState('INBOX');    // true
- * isValidState('INVALID');  // false
+ * isValidState('INBOX');       // true
+ * isValidState('VALIDATING');  // false — removido na poda 9 → 5
  * ```
  */
 export function isValidState(state: string): state is TaskStatus {

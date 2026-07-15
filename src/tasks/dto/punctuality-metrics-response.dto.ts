@@ -6,7 +6,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
  * Métrica de "pontualidade" / "margem de atraso" agregada de um projeto:
  * a média (em dias corridos) da diferença entre a data de conclusão
  * (`dados.telemetry.doneAt`) e o prazo combinado (`DTask.dueDate`) das tasks
- * em status terminal (DONE/VALIDATED) que possuem AMBOS os campos definidos.
+ * em status terminal (DONE) que possuem AMBOS os campos definidos.
  *
  * Convenção de sinal (informação central da métrica):
  * - `averageDelayDays > 0` → em média o projeto ATRASA (concluiu depois do prazo).
@@ -40,7 +40,7 @@ export class PunctualityMetricsResponseDto {
 
   @ApiProperty({
     description:
-      'Quantidade de tasks concluídas (DONE/VALIDATED) COM dueDate e doneAt ' +
+      'Quantidade de tasks concluídas (DONE) COM dueDate e doneAt ' +
       'que entraram no cálculo da média. `0` quando não há amostras.',
     example: 12,
     minimum: 0,

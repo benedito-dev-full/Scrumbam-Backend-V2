@@ -8,13 +8,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import {
-  ApiOperation,
-  ApiParam,
-  ApiQuery,
-  ApiResponse,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrgTenantGuard } from '../auth/guards/org-tenant.guard';
 import { TenantConfig } from '../auth/decorators/tenant-config.decorator';
@@ -53,7 +47,7 @@ export class ForecastController {
    * Retorna o forecast de conclusão do projeto via Monte Carlo.
    *
    * Calcula estimativa probabilística de dias até concluir todas as tasks
-   * restantes (não-DONE/VALIDATED), baseada no throughput histórico.
+   * restantes (não-DONE), baseada no throughput histórico.
    *
    * Histórico de throughput (Decisão D4):
    * - Fonte primária: últimos N sprints cadastrados (DTabela -400..-419)

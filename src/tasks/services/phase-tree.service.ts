@@ -264,7 +264,7 @@ export class PhaseTreeService {
    *
    * Semântica consistente com `PhaseMetricsService.compute(phaseId, recursive=true)`:
    * exclui a própria raiz (`depth > 0`), exclui PHASE do `total`, exclui
-   * CANCELLED/DISCARDED do `total`.
+   * (poda 9 → 5: não há mais status excluídos do `total`).
    */
   private async queryMetricsByPhase(
     rootId: bigint,
@@ -306,7 +306,6 @@ export class PhaseTreeService {
         d.phase_root::text AS "phaseId",
         COUNT(*) FILTER (
           WHERE d."idClasse" != -200
-            AND (s."idClasse" IS NULL OR s."idClasse" NOT IN (-446, -447))
         ) AS total,
         COUNT(*) FILTER (WHERE s."idClasse" = -444) AS done,
         COUNT(*) FILTER (WHERE s."idClasse" = -445) AS failed,

@@ -3,7 +3,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 /**
  * Response DTO para lead time de um projeto.
  *
- * Lead time = tempo entre INBOX (criadoEm) e DONE/VALIDATED (em horas).
+ * Lead time = tempo entre INBOX (criadoEm) e DONE (em horas).
  * Calculado sobre tasks com `dados.telemetry.leadTime` preenchido.
  *
  * Unidade: horas (não dias) para maior granularidade.
@@ -25,19 +25,31 @@ export class LeadTimeResponseDto {
   /**
    * 50º percentil (mediana) do lead time em horas.
    */
-  @ApiPropertyOptional({ description: 'Mediana do lead time (horas)', example: 24.0, nullable: true })
+  @ApiPropertyOptional({
+    description: 'Mediana do lead time (horas)',
+    example: 24.0,
+    nullable: true,
+  })
   p50!: number | null;
 
   /**
    * 75º percentil do lead time em horas.
    */
-  @ApiPropertyOptional({ description: '75º percentil do lead time (horas)', example: 48.5, nullable: true })
+  @ApiPropertyOptional({
+    description: '75º percentil do lead time (horas)',
+    example: 48.5,
+    nullable: true,
+  })
   p75!: number | null;
 
   /**
    * 90º percentil do lead time em horas.
    */
-  @ApiPropertyOptional({ description: '90º percentil do lead time (horas)', example: 96.0, nullable: true })
+  @ApiPropertyOptional({
+    description: '90º percentil do lead time (horas)',
+    example: 96.0,
+    nullable: true,
+  })
   p90!: number | null;
 
   /**

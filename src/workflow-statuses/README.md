@@ -38,7 +38,7 @@ DELETE /tabelas/:id
 POST /workflow-statuses/seed-defaults/:projectId
 ```
 
-Cria os 9 statuses V3 padrão para o projeto se ainda não existirem.
+Cria os 5 statuses V3 padrão para o projeto se ainda não existirem.
 Chamado automaticamente ao criar um projeto via `POST /projects`.
 
 ## Por que não há um WorkflowStatusesController completo?

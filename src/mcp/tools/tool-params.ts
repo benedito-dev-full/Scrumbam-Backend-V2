@@ -1,18 +1,18 @@
+import { V3_STATUS_CODES } from '../../tasks/constants/task-status.const';
 import { MCP_ERROR_CODES } from '../constants';
 import { McpUserContext } from '../interfaces/mcp.types';
 import { McpToolError } from './tool.interface';
 
-export const V3_STATUS_CODES = [
-  'INBOX',
-  'READY',
-  'EXECUTING',
-  'DONE',
-  'FAILED',
-  'CANCELLED',
-  'DISCARDED',
-  'VALIDATING',
-  'VALIDATED',
-] as const;
+/**
+ * Códigos V3 aceitos pelas tools MCP — re-export da FONTE ÚNICA
+ * (`tasks/constants/task-status.const`).
+ *
+ * **Não redeclare esta lista aqui.** Ela já foi uma cópia divergente: expunha
+ * 9 status no enum de `update_status`, e IAs escolhiam `VALIDATING` porque
+ * "soava certo" — prendendo tasks humanas num estado sem produtor nem
+ * consumidor. Apertar este enum É a correção da causa raiz da poda 9 → 5.
+ */
+export { V3_STATUS_CODES };
 
 export function assertRecord(params: unknown): Record<string, unknown> {
   if (!params || typeof params !== 'object' || Array.isArray(params)) {

@@ -150,14 +150,6 @@ export class TasksHandler implements OnModuleInit, CommandHandler {
         return '✅';
       case 'FAILED':
         return '❌';
-      case 'CANCELLED':
-        return '🚫';
-      case 'DISCARDED':
-        return '🗑️';
-      case 'VALIDATING':
-        return '🔍';
-      case 'VALIDATED':
-        return '✔️';
       default:
         return '📌';
     }

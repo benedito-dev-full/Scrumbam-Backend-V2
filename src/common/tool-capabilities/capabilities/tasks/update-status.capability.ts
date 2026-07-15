@@ -5,19 +5,8 @@ import { TasksService } from '../../../../tasks/tasks.service';
 import { CapabilityError } from '../../capability-error';
 import { Capability, CapabilityResult } from '../../capability.interface';
 import { ToolPrincipal } from '../../tool-principal';
+import { V3_STATUS_CODES } from '../../../../tasks/constants/task-status.const';
 
-/** V3 status codes — espelha `V3_STATUS_CODES` de `mcp/tools/tool-params`. */
-const V3_STATUS_CODES = [
-  'INBOX',
-  'READY',
-  'EXECUTING',
-  'DONE',
-  'FAILED',
-  'CANCELLED',
-  'DISCARDED',
-  'VALIDATING',
-  'VALIDATED',
-] as const;
 
 /**
  * `UpdateStatusCapability` — capability neutra `update_status` (Onda 4).
@@ -52,7 +41,7 @@ export class UpdateStatusCapability implements Capability {
       statusCode: {
         type: 'string',
         description:
-          'Codigo V3: INBOX|READY|EXECUTING|DONE|FAILED|CANCELLED|DISCARDED|VALIDATING|VALIDATED',
+          'Codigo V3: INBOX|READY|EXECUTING|DONE|FAILED',
       },
     },
   };

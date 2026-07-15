@@ -42,10 +42,6 @@ const PROJECT_SCOPED_TABELA_CLASSES: ReadonlySet<bigint> = new Set<bigint>([
   BigInt(-443), // EXECUTING
   BigInt(-444), // DONE
   BigInt(-445), // FAILED
-  BigInt(-446), // CANCELLED
-  BigInt(-447), // DISCARDED
-  BigInt(-448), // VALIDATING
-  BigInt(-449), // VALIDATED
 ]);
 
 /**
