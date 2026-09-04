@@ -1,5 +1,6 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 
+import { MCP_ERROR_CODES } from '../constants';
 import { McpRouterService } from '../services/mcp-router.service';
 import { UpdateProjectTool } from '../tools/update-project.tool';
 
@@ -161,13 +162,12 @@ describe('MCP update_project tool', () => {
   it('(e) ForbiddenException (caller não é MANAGER) → propagada como exception', async () => {
     projectsService.update.mockRejectedValueOnce(new ForbiddenException('Sem permissão'));
 
-    await expect(
-      router.dispatch(
-        'tools/call',
-        { name: 'update_project', arguments: { projectId, nome: 'Teste' } },
-        userCtx,
-      ),
-    ).rejects.toThrow(ForbiddenException);
+    const response = await router.dispatch(
+      'tools/call',
+      { name: 'update_project', arguments: { projectId, nome: 'Teste' } },
+      userCtx,
+    );
+    expect(response.error).toEqual(expect.objectContaining({ code: MCP_ERROR_CODES.FORBIDDEN }));
 
     expect(projectsService.update).toHaveBeenCalledTimes(1);
   });
@@ -177,13 +177,12 @@ describe('MCP update_project tool', () => {
       new NotFoundException(`Projeto ${projectId} não encontrado`),
     );
 
-    await expect(
-      router.dispatch(
-        'tools/call',
-        { name: 'update_project', arguments: { projectId, nome: 'Teste' } },
-        userCtx,
-      ),
-    ).rejects.toThrow(NotFoundException);
+    const response = await router.dispatch(
+      'tools/call',
+      { name: 'update_project', arguments: { projectId, nome: 'Teste' } },
+      userCtx,
+    );
+    expect(response.error).toEqual(expect.objectContaining({ code: MCP_ERROR_CODES.NOT_FOUND }));
 
     expect(projectsService.update).toHaveBeenCalledTimes(1);
   });

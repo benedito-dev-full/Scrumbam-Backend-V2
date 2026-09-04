@@ -253,13 +253,12 @@ describe('MCP update_timer tool', () => {
       new NotFoundException(`Task ${taskId} não encontrada`),
     );
 
-    await expect(
-      router.dispatch(
-        'tools/call',
-        { name: 'update_timer', arguments: { taskId, action: 'start' } },
-        ctxWithScope,
-      ),
-    ).rejects.toThrow(NotFoundException);
+    const response = await router.dispatch(
+      'tools/call',
+      { name: 'update_timer', arguments: { taskId, action: 'start' } },
+      ctxWithScope,
+    );
+    expect(response.error).toEqual(expect.objectContaining({ code: MCP_ERROR_CODES.NOT_FOUND }));
 
     // projectsService e timer não devem ser chamados se findOne falhou
     expect(projectsService.findOne).not.toHaveBeenCalled();
@@ -391,13 +390,12 @@ describe('MCP update_timer tool', () => {
       new ForbiddenException(`Usuário sem membership no projeto ${projectId}`),
     );
 
-    await expect(
-      router.dispatch(
-        'tools/call',
-        { name: 'update_timer', arguments: { taskId, action: 'start' } },
-        ctxWithScope,
-      ),
-    ).rejects.toThrow(ForbiddenException);
+    const response = await router.dispatch(
+      'tools/call',
+      { name: 'update_timer', arguments: { taskId, action: 'start' } },
+      ctxWithScope,
+    );
+    expect(response.error).toEqual(expect.objectContaining({ code: MCP_ERROR_CODES.FORBIDDEN }));
 
     // findOne foi chamado (passou pela etapa de tenant)
     expect(tasksService.findOne).toHaveBeenCalledWith(taskId, ctxWithScope.dEntidadeId);

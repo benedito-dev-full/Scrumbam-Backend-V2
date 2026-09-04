@@ -1,5 +1,6 @@
 import { NotFoundException } from '@nestjs/common';
 
+import { MCP_ERROR_CODES } from '../constants';
 import { McpRouterService } from '../services/mcp-router.service';
 import { GetTaskTool } from '../tools/get-task.tool';
 
@@ -131,13 +132,18 @@ describe('MCP get_task tool', () => {
     expect(projectsService.findAccessibleProjectIds).not.toHaveBeenCalled();
   });
 
-  it('(e) NotFoundException do service propaga ate o caller', async () => {
+  it('(e) NotFoundException do service propaga como erro JSON-RPC', async () => {
     const notFound = new NotFoundException(`Task ${taskId} não encontrada`);
     tasksService.findOne.mockRejectedValueOnce(notFound);
 
-    await expect(
-      router.dispatch('tools/call', { name: 'get_task', arguments: { taskId } }, userCtx),
-    ).rejects.toThrow(notFound);
+    const response = await router.dispatch(
+      'tools/call',
+      { name: 'get_task', arguments: { taskId } },
+      userCtx,
+    );
+    expect(response.error).toEqual(
+      expect.objectContaining({ code: MCP_ERROR_CODES.NOT_FOUND, message: notFound.message }),
+    );
 
     expect(projectsService.findAccessibleProjectIds).toHaveBeenCalledWith(userCtx.dEntidadeId);
   });
@@ -160,9 +166,12 @@ describe('MCP get_task tool', () => {
       new NotFoundException(`Task ${taskId} não encontrada`),
     );
 
-    await expect(
-      router.dispatch('tools/call', { name: 'get_task', arguments: { taskId } }, userCtx),
-    ).rejects.toThrow(NotFoundException);
+    const response = await router.dispatch(
+      'tools/call',
+      { name: 'get_task', arguments: { taskId } },
+      userCtx,
+    );
+    expect(response.error).toEqual(expect.objectContaining({ code: MCP_ERROR_CODES.NOT_FOUND }));
 
     expect(tasksService.findOne).toHaveBeenCalledWith(taskId, [otherProjectId]);
   });
@@ -173,9 +182,12 @@ describe('MCP get_task tool', () => {
       new NotFoundException(`Task ${taskId} não encontrada`),
     );
 
-    await expect(
-      router.dispatch('tools/call', { name: 'get_task', arguments: { taskId } }, userCtx),
-    ).rejects.toThrow(NotFoundException);
+    const response = await router.dispatch(
+      'tools/call',
+      { name: 'get_task', arguments: { taskId } },
+      userCtx,
+    );
+    expect(response.error).toEqual(expect.objectContaining({ code: MCP_ERROR_CODES.NOT_FOUND }));
 
     expect(tasksService.findOne).toHaveBeenCalledWith(taskId, []);
   });

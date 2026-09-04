@@ -206,13 +206,14 @@ describe('MCP create_block tool', () => {
       new NotFoundException(`Projeto ${projectId} não encontrado`),
     );
 
-    await expect(
-      router.dispatch(
+    const response = await router.dispatch(
         'tools/call',
         { name: 'create_block', arguments: { projectId, titulo: 'Bloco A' } },
         userCtx,
-      ),
-    ).rejects.toThrow(NotFoundException);
+      );
+    expect(response.error).toEqual(
+      expect.objectContaining({ code: MCP_ERROR_CODES.NOT_FOUND }),
+    );
 
     expect(tasksService.create).not.toHaveBeenCalled();
   });

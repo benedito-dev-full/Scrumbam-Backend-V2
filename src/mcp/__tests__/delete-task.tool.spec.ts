@@ -293,9 +293,12 @@ describe('MCP delete_task tool', () => {
       new NotFoundException(`Task ${taskId} não encontrada`),
     );
 
-    await expect(
-      router.dispatch('tools/call', { name: 'delete_task', arguments: { taskId } }, ctxWithScope),
-    ).rejects.toThrow(NotFoundException);
+    const response = await router.dispatch(
+      'tools/call',
+      { name: 'delete_task', arguments: { taskId } },
+      ctxWithScope,
+    );
+    expect(response.error).toEqual(expect.objectContaining({ code: MCP_ERROR_CODES.NOT_FOUND }));
 
     expect(projectsService.findOne).not.toHaveBeenCalled();
     expect(tasksService.delete).not.toHaveBeenCalled();
@@ -308,9 +311,12 @@ describe('MCP delete_task tool', () => {
       new ForbiddenException(`Usuário sem membership no projeto ${projectId}`),
     );
 
-    await expect(
-      router.dispatch('tools/call', { name: 'delete_task', arguments: { taskId } }, ctxWithScope),
-    ).rejects.toThrow(ForbiddenException);
+    const response = await router.dispatch(
+      'tools/call',
+      { name: 'delete_task', arguments: { taskId } },
+      ctxWithScope,
+    );
+    expect(response.error).toEqual(expect.objectContaining({ code: MCP_ERROR_CODES.FORBIDDEN }));
 
     expect(tasksService.findOne).toHaveBeenCalledWith(taskId);
     expect(tasksService.delete).not.toHaveBeenCalled();

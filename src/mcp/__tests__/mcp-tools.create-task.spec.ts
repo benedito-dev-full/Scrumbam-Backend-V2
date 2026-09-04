@@ -1,5 +1,6 @@
 import { NotFoundException } from '@nestjs/common';
 
+import { MCP_ERROR_CODES } from '../constants';
 import { McpRouterService } from '../services/mcp-router.service';
 import { CreateTaskTool } from '../tools/create-task.tool';
 
@@ -203,13 +204,14 @@ describe('MCP create_task tool', () => {
       new NotFoundException(`Projeto ${projectId} não encontrado`),
     );
 
-    await expect(
-      router.dispatch(
+    const response = await router.dispatch(
         'tools/call',
         { name: 'create_task', arguments: { projectId, titulo: 'X' } },
         userCtx,
-      ),
-    ).rejects.toThrow(NotFoundException);
+      );
+    expect(response.error).toEqual(
+      expect.objectContaining({ code: MCP_ERROR_CODES.NOT_FOUND }),
+    );
 
     expect(tasksService.create).not.toHaveBeenCalled();
   });

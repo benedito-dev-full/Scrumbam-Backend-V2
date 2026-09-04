@@ -246,16 +246,17 @@ describe('MCP create_project tool', () => {
       new NotFoundException(`Projeto ${parentId} não encontrado`),
     );
 
-    await expect(
-      router.dispatch(
+    const response = await router.dispatch(
         'tools/call',
         {
           name: 'create_project',
           arguments: { nome: 'Lista A', idClasse: '-352', idPai: parentId },
         },
         userCtx,
-      ),
-    ).rejects.toThrow(NotFoundException);
+      );
+    expect(response.error).toEqual(
+      expect.objectContaining({ code: MCP_ERROR_CODES.NOT_FOUND }),
+    );
 
     expect(projectsService.create).not.toHaveBeenCalled();
   });

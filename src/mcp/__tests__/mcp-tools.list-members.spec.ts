@@ -1,5 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
-
+import { MCP_ERROR_CODES } from '../constants';
 import { McpRouterService } from '../services/mcp-router.service';
 import { ListMembersTool } from '../tools/list-members.tool';
 
@@ -161,9 +160,12 @@ describe('MCP list_members tool', () => {
     const otherProjectId = '9007199254740001';
     projectsService.findAccessibleProjectIds.mockResolvedValueOnce([otherProjectId]);
 
-    await expect(
-      router.dispatch('tools/call', { name: 'list_members', arguments: { projectId } }, userCtx),
-    ).rejects.toThrow(NotFoundException);
+    const response = await router.dispatch(
+      'tools/call',
+      { name: 'list_members', arguments: { projectId } },
+      userCtx,
+    );
+    expect(response.error).toEqual(expect.objectContaining({ code: MCP_ERROR_CODES.NOT_FOUND }));
 
     expect(projectsService.findAccessibleProjectIds).toHaveBeenCalledWith(userCtx.dEntidadeId);
     expect(projectMembersService.getMembers).not.toHaveBeenCalled();
@@ -172,9 +174,12 @@ describe('MCP list_members tool', () => {
   it('(f) findAccessibleProjectIds vazio → NotFound (gate bloqueia, sem chamar getMembers)', async () => {
     projectsService.findAccessibleProjectIds.mockResolvedValueOnce([]);
 
-    await expect(
-      router.dispatch('tools/call', { name: 'list_members', arguments: { projectId } }, userCtx),
-    ).rejects.toThrow(NotFoundException);
+    const response = await router.dispatch(
+      'tools/call',
+      { name: 'list_members', arguments: { projectId } },
+      userCtx,
+    );
+    expect(response.error).toEqual(expect.objectContaining({ code: MCP_ERROR_CODES.NOT_FOUND }));
 
     expect(projectMembersService.getMembers).not.toHaveBeenCalled();
   });

@@ -189,9 +189,10 @@ describe('MCP get_task_tree tool', () => {
   it('(5) scope vazio → NotFoundException (anti-enumeration)', async () => {
     projectsService.findAccessibleProjectIds.mockResolvedValueOnce([]);
 
-    await expect(
-      router.dispatch('tools/call', { name: 'get_task_tree', arguments: { taskId } }, ctxWithScope),
-    ).rejects.toThrow(NotFoundException);
+    const response = await router.dispatch('tools/call', { name: 'get_task_tree', arguments: { taskId } }, ctxWithScope);
+    expect(response.error).toEqual(
+      expect.objectContaining({ code: MCP_ERROR_CODES.NOT_FOUND }),
+    );
 
     expect(tasksService.findOne).not.toHaveBeenCalled();
     expect(phaseTreeService.buildTree).not.toHaveBeenCalled();
@@ -202,9 +203,10 @@ describe('MCP get_task_tree tool', () => {
       new NotFoundException(`Task ${taskId} não encontrada`),
     );
 
-    await expect(
-      router.dispatch('tools/call', { name: 'get_task_tree', arguments: { taskId } }, ctxWithScope),
-    ).rejects.toThrow(NotFoundException);
+    const response = await router.dispatch('tools/call', { name: 'get_task_tree', arguments: { taskId } }, ctxWithScope);
+    expect(response.error).toEqual(
+      expect.objectContaining({ code: MCP_ERROR_CODES.NOT_FOUND }),
+    );
 
     expect(phaseTreeService.buildTree).not.toHaveBeenCalled();
   });

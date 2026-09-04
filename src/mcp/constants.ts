@@ -76,11 +76,7 @@ export const MCP_PROTOCOL_VERSION = '2024-11-05';
  *
  * @see ADR-V2-071 (transporte Streamable HTTP aditivo)
  */
-export const MCP_SUPPORTED_PROTOCOL_VERSIONS = [
-  '2025-06-18',
-  '2025-03-26',
-  '2024-11-05',
-] as const;
+export const MCP_SUPPORTED_PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'] as const;
 
 export type McpSupportedProtocolVersion = (typeof MCP_SUPPORTED_PROTOCOL_VERSIONS)[number];
 
@@ -127,8 +123,10 @@ export const MCP_ERROR_CODES = {
   INVALID_REQUEST: -32600,
   METHOD_NOT_FOUND: -32601,
   INVALID_PARAMS: -32602,
+  INTERNAL_ERROR: -32603,
   RATE_LIMIT_EXCEEDED: -32000,
   UNAUTHORIZED: -32001,
   FORBIDDEN: -32002,
   REQUEST_TIMEOUT: -32003,
+  NOT_FOUND: -32004,
 } as const;

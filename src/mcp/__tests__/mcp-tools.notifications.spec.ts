@@ -1,5 +1,6 @@
 import { NotFoundException } from '@nestjs/common';
 
+import { MCP_ERROR_CODES } from '../constants';
 import { McpRouterService } from '../services/mcp-router.service';
 import { GetUnreadCountTool } from '../tools/get-unread-count.tool';
 import { ListNotificationsTool } from '../tools/list-notifications.tool';
@@ -241,13 +242,14 @@ describe('MCP tools de notificacoes (list_notifications, update_notification, ge
       new NotFoundException('Notification not found'),
     );
 
-    await expect(
-      router.dispatch(
+    const response = await router.dispatch(
         'tools/call',
         { name: 'update_notification', arguments: { action: 'mark_read', notificationId } },
         userCtx,
-      ),
-    ).rejects.toThrow(NotFoundException);
+      );
+    expect(response.error).toEqual(
+      expect.objectContaining({ code: MCP_ERROR_CODES.NOT_FOUND }),
+    );
   });
 
   // ---------------------------------------------------------------------------

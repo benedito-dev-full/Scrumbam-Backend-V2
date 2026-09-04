@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import {
@@ -122,7 +122,11 @@ export class McpRouterService {
       this.resolveToolWithFallback('update_project', updateProjectTool, capabilityAdapter),
       this.resolveToolWithFallback('list_notifications', listNotificationsTool, capabilityAdapter),
       // update_notification (Onda 4)
-      this.resolveToolWithFallback('update_notification', updateNotificationTool, capabilityAdapter),
+      this.resolveToolWithFallback(
+        'update_notification',
+        updateNotificationTool,
+        capabilityAdapter,
+      ),
       this.resolveToolWithFallback('get_unread_count', getUnreadCountTool, capabilityAdapter),
       this.resolveToolWithFallback('search_tasks', searchTasksTool, capabilityAdapter),
       this.resolveToolWithFallback('list_blocks', listBlocksTool, capabilityAdapter),
@@ -141,7 +145,11 @@ export class McpRouterService {
       // create_project (Onda 4)
       this.resolveToolWithFallback('create_project', createProjectTool, capabilityAdapter),
       // create_from_template (Onda 4)
-      this.resolveToolWithFallback('create_from_template', createFromTemplateTool, capabilityAdapter),
+      this.resolveToolWithFallback(
+        'create_from_template',
+        createFromTemplateTool,
+        capabilityAdapter,
+      ),
       // create_comment / list_comments (Onda 2 — ADR-V2-079): NASCEM no MCP
       // aqui — nunca existiram como wrapper legado nesta superficie. Servidas
       // EXCLUSIVAMENTE via `McpCapabilityAdapter` (sem fallback legado, pois
@@ -370,6 +378,16 @@ export class McpRouterService {
           },
         };
       }
+      if (error instanceof HttpException) {
+        // Tools lançam exceções NestJS (NotFoundException, ForbiddenException,
+        // etc.) por conveniência de código, mas o transporte Streamable HTTP
+        // NUNCA pode deixar uma HttpException escapar até o filtro global: um
+        // request com `id` exige SEMPRE HTTP 200 + envelope JSON-RPC, mesmo em
+        // erro. Um HTTP 404/403 cru quebra o parser do cliente MCP, que
+        // interpreta a resposta malformada como sessão morta e reconecta —
+        // essa é a causa raiz do MCP caindo em loop (investigado 2026-09-04).
+        return { error: this.httpExceptionToJsonRpcError(error) };
+      }
 
       throw error;
     }
@@ -377,6 +395,31 @@ export class McpRouterService {
 
   getMetricsSnapshotForTesting(): Record<string, unknown> {
     return this.buildMetricsSnapshot();
+  }
+
+  /**
+   * Traduz uma `HttpException` do NestJS (ex.: `NotFoundException` lançada
+   * por tools que reutilizam services REST) para o formato JSON-RPC do MCP.
+   *
+   * Mapeamento por status HTTP → código JSON-RPC mais próximo do catálogo
+   * {@link MCP_ERROR_CODES}. Qualquer status sem mapeamento específico cai em
+   * `INTERNAL_ERROR` (-32603, código reservado da spec JSON-RPC 2.0).
+   */
+  private httpExceptionToJsonRpcError(error: HttpException): McpJsonRpcError {
+    const status = error.getStatus();
+    const codeByStatus: Partial<Record<number, number>> = {
+      [HttpStatus.BAD_REQUEST]: MCP_ERROR_CODES.INVALID_PARAMS,
+      [HttpStatus.UNAUTHORIZED]: MCP_ERROR_CODES.UNAUTHORIZED,
+      [HttpStatus.FORBIDDEN]: MCP_ERROR_CODES.FORBIDDEN,
+      [HttpStatus.NOT_FOUND]: MCP_ERROR_CODES.NOT_FOUND,
+      [HttpStatus.TOO_MANY_REQUESTS]: MCP_ERROR_CODES.RATE_LIMIT_EXCEEDED,
+      [HttpStatus.REQUEST_TIMEOUT]: MCP_ERROR_CODES.REQUEST_TIMEOUT,
+    };
+
+    return {
+      code: codeByStatus[status] ?? MCP_ERROR_CODES.INTERNAL_ERROR,
+      message: error.message,
+    };
   }
 
   private readTimeoutMs(configService?: ConfigService): number {

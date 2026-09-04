@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 
 import { MCP_ERROR_CODES } from '../constants';
 import { McpUserContext } from '../interfaces/mcp.types';
@@ -189,13 +189,12 @@ describe('MCP get_project_metrics tool', () => {
   it('(6) projectId fora do escopo → NotFoundException', async () => {
     projectsService.findAccessibleProjectIds.mockResolvedValueOnce(['999']);
 
-    await expect(
-      router.dispatch(
-        'tools/call',
-        { name: 'get_project_metrics', arguments: { projectId } },
-        ctxWithScope,
-      ),
-    ).rejects.toThrow(NotFoundException);
+    const response = await router.dispatch(
+      'tools/call',
+      { name: 'get_project_metrics', arguments: { projectId } },
+      ctxWithScope,
+    );
+    expect(response.error).toEqual(expect.objectContaining({ code: MCP_ERROR_CODES.NOT_FOUND }));
 
     expect(dashboardService.getDashboard).not.toHaveBeenCalled();
   });

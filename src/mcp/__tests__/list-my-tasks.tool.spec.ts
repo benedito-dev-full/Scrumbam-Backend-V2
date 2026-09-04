@@ -221,13 +221,14 @@ describe('MCP list_my_tasks tool', () => {
       new NotFoundException('Projeto 999 não encontrado'),
     );
 
-    await expect(
-      router.dispatch(
+    const response = await router.dispatch(
         'tools/call',
         { name: 'list_my_tasks', arguments: { projectId: '999' } },
         ctxWithScope,
-      ),
-    ).rejects.toThrow(NotFoundException);
+      );
+    expect(response.error).toEqual(
+      expect.objectContaining({ code: MCP_ERROR_CODES.NOT_FOUND }),
+    );
 
     expect(tasksService.findMany).not.toHaveBeenCalled();
   });

@@ -1,5 +1,6 @@
 import { NotFoundException } from '@nestjs/common';
 
+import { MCP_ERROR_CODES } from '../constants';
 import { McpRouterService } from '../services/mcp-router.service';
 import { ListBlockTasksTool } from '../tools/list-block-tasks.tool';
 
@@ -186,9 +187,10 @@ describe('MCP list_block_tasks tool', () => {
   it('(g) scope vazio → NotFoundException antes de findOne (anti-enumeration)', async () => {
     projectsService.findAccessibleProjectIds.mockResolvedValueOnce([]);
 
-    await expect(
-      router.dispatch('tools/call', { name: 'list_block_tasks', arguments: { blockId } }, userCtx),
-    ).rejects.toThrow(NotFoundException);
+    const response = await router.dispatch('tools/call', { name: 'list_block_tasks', arguments: { blockId } }, userCtx);
+    expect(response.error).toEqual(
+      expect.objectContaining({ code: MCP_ERROR_CODES.NOT_FOUND }),
+    );
 
     expect(tasksService.findOne).not.toHaveBeenCalled();
     expect(tasksService.findMany).not.toHaveBeenCalled();
@@ -199,13 +201,14 @@ describe('MCP list_block_tasks tool', () => {
       new NotFoundException(`Task ${otherBlockId} não encontrada`),
     );
 
-    await expect(
-      router.dispatch(
+    const response = await router.dispatch(
         'tools/call',
         { name: 'list_block_tasks', arguments: { blockId: otherBlockId } },
         userCtx,
-      ),
-    ).rejects.toThrow(NotFoundException);
+      );
+    expect(response.error).toEqual(
+      expect.objectContaining({ code: MCP_ERROR_CODES.NOT_FOUND }),
+    );
 
     expect(tasksService.findMany).not.toHaveBeenCalled();
   });

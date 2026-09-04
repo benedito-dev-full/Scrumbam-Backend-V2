@@ -1,5 +1,6 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 
+import { MCP_ERROR_CODES } from '../constants';
 import { McpRouterService } from '../services/mcp-router.service';
 import { UpdateTaskTool } from '../tools/update-task.tool';
 
@@ -248,13 +249,12 @@ describe('MCP update_task tool', () => {
       new NotFoundException(`Task ${taskId} não encontrada`),
     );
 
-    await expect(
-      router.dispatch(
-        'tools/call',
-        { name: 'update_task', arguments: { taskId, name: 'X' } },
-        userCtx,
-      ),
-    ).rejects.toThrow(NotFoundException);
+    const response = await router.dispatch(
+      'tools/call',
+      { name: 'update_task', arguments: { taskId, name: 'X' } },
+      userCtx,
+    );
+    expect(response.error).toEqual(expect.objectContaining({ code: MCP_ERROR_CODES.NOT_FOUND }));
 
     expect(tasksService.findOne).toHaveBeenCalledWith(taskId, [otherProjectId]);
     expect(tasksService.update).not.toHaveBeenCalled();
@@ -345,13 +345,14 @@ describe('MCP update_task tool', () => {
       new BadRequestException('Transicao invalida: INBOX → DONE'),
     );
 
-    await expect(
-      router.dispatch(
-        'tools/call',
-        { name: 'update_task', arguments: { taskId, status: 'DONE' } },
-        userCtx,
-      ),
-    ).rejects.toThrow(BadRequestException);
+    const response = await router.dispatch(
+      'tools/call',
+      { name: 'update_task', arguments: { taskId, status: 'DONE' } },
+      userCtx,
+    );
+    expect(response.error).toEqual(
+      expect.objectContaining({ code: MCP_ERROR_CODES.INVALID_PARAMS }),
+    );
   });
 
   // ── Novos campos: dueDate / idPai / idBloco (Task #2 paridade) ────────
@@ -480,13 +481,12 @@ describe('MCP update_task tool', () => {
       new NotFoundException(`Task ${taskId} não encontrada`),
     );
 
-    await expect(
-      router.dispatch(
-        'tools/call',
-        { name: 'update_task', arguments: { taskId, idBloco: '77' } },
-        userCtx,
-      ),
-    ).rejects.toThrow(NotFoundException);
+    const response = await router.dispatch(
+      'tools/call',
+      { name: 'update_task', arguments: { taskId, idBloco: '77' } },
+      userCtx,
+    );
+    expect(response.error).toEqual(expect.objectContaining({ code: MCP_ERROR_CODES.NOT_FOUND }));
 
     expect(tasksService.update).not.toHaveBeenCalled();
   });

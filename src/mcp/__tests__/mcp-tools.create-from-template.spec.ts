@@ -113,13 +113,14 @@ describe('MCP create_from_template tool', () => {
       new NotFoundException(`Template ${templateId} não encontrado`),
     );
 
-    await expect(
-      router.dispatch(
+    const response = await router.dispatch(
         'tools/call',
         { name: 'create_from_template', arguments: { templateId: '-402' } },
         userCtx,
-      ),
-    ).rejects.toThrow(NotFoundException);
+      );
+    expect(response.error).toEqual(
+      expect.objectContaining({ code: MCP_ERROR_CODES.NOT_FOUND }),
+    );
   });
 
   it('(d) scope ausente → FORBIDDEN, nenhum service chamado', async () => {
