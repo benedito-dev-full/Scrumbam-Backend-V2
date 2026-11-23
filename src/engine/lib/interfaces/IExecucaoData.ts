@@ -62,11 +62,31 @@ export interface IExecucaoData {
   /** Politica de rollback conservador em caso de falha */
   rollbackOnFailure?: boolean;
 
-  /** Risk Gate — preenchido pelo script DVFS chave=3 em calcula() */
+  /**
+   * Risk Gate — preenchido pelo script DVFS chave=3 em calcula().
+   *
+   * Campos `source`, `scannedSources` e `validatorVersion` são opcionais
+   * (retrocompat com registros/scripts v1). ADR-V2-081: o Engine eleva o
+   * risco para no mínimo MEDIUM quando há `prompt` e `scannedSources` não
+   * contém `'prompt'` (script DVFS desatualizado).
+   */
   risk?: {
     level: 'LOW' | 'MEDIUM' | 'HIGH';
     explanation: string;
-    matchedPatterns: Array<{ pattern: string; level: string }>;
+    /**
+     * Padrões casados — somente o regex e a fonte, NUNCA o trecho do texto
+     * (evita vazar o prompt na resposta HTTP). `source='engine'` indica
+     * elevação feita pelo próprio Engine (guarda de contrato / piso de emergência).
+     */
+    matchedPatterns: Array<{
+      pattern: string;
+      level: string;
+      source?: 'command' | 'prompt' | 'engine';
+    }>;
+    /** Fontes efetivamente varridas pelo validador (v2: `['command','prompt']`). */
+    scannedSources?: string[];
+    /** Versão do contrato do validador DVFS chave 3 (v2 = varre o prompt). */
+    validatorVersion?: number;
     classifiedAt: string; // ISO 8601
   };
 

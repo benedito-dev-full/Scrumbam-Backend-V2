@@ -123,6 +123,51 @@ export class PullRequestDto {
 }
 
 /**
+ * Padrão de risco casado pelo Risk Gate (ADR-V2-081).
+ *
+ * Contém apenas o regex e a fonte — NUNCA o trecho do prompt/comando casado
+ * (evita vazar o prompt da task na resposta HTTP).
+ */
+export class RiskMatchedPatternDto {
+  @ApiProperty({
+    description: 'Regex (ou marcador engine:*) que disparou',
+    example: '/\\bproduction\\b/i',
+  })
+  pattern!: string;
+
+  @ApiProperty({ description: 'Nível associado ao padrão', enum: ['LOW', 'MEDIUM', 'HIGH'] })
+  level!: string;
+
+  @ApiPropertyOptional({
+    description: 'Fonte onde o padrão casou (command | prompt | engine)',
+    enum: ['command', 'prompt', 'engine'],
+  })
+  source?: string;
+}
+
+/**
+ * Resumo do motivo da classificação de risco (ADR-V2-081).
+ *
+ * Insumo do frontend para o gestor entender POR QUE a execução aguarda
+ * aprovação. Ausente em registros antigos sem `dados.risk`.
+ *
+ * @example
+ * ```json
+ * {
+ *   "explanation": "Padrão de risco ALTO detectado (prompt): /.../",
+ *   "matchedPatterns": [{ "pattern": "/.../", "level": "HIGH", "source": "prompt" }]
+ * }
+ * ```
+ */
+export class RiskSummaryDto {
+  @ApiProperty({ description: 'Explicação legível da classificação de risco' })
+  explanation!: string;
+
+  @ApiProperty({ type: [RiskMatchedPatternDto] })
+  matchedPatterns!: RiskMatchedPatternDto[];
+}
+
+/**
  * DTO de resposta completo para uma Execution (DPedido idClasse=-301|-302|-303).
  *
  * Todos os BigInt são serializados como string (ADR-V2-025).
@@ -181,6 +226,13 @@ export class ExecutionResponseDto {
   @ApiPropertyOptional({ type: PullRequestDto })
   pullRequest?: PullRequestDto;
 
+  /**
+   * Motivo da classificação de risco (ADR-V2-081) — explanation + padrões
+   * casados com a fonte. Nunca contém o texto do prompt.
+   */
+  @ApiPropertyOptional({ type: RiskSummaryDto })
+  risk?: RiskSummaryDto;
+
   /** Data/hora de criação (ISO 8601) */
   @ApiProperty({ description: 'Data/hora de criação', example: '2026-05-09T10:00:00.000Z' })
   createdAt!: string;
@@ -234,7 +286,35 @@ export function serializeExecution(pedido: {
     claude: dados?.claude,
     git: dados?.git,
     pullRequest: dados?.pullRequest,
+    risk: toRiskSummary(dados?.risk),
     createdAt: pedido.criadoEm?.toISOString() ?? new Date().toISOString(),
     updatedAt: pedido.atualizadoEm?.toISOString() ?? new Date().toISOString(),
+  };
+}
+
+/**
+ * Projeta `dados.risk` em `RiskSummaryDto` copiando SOMENTE campos seguros
+ * (explanation + pattern/level/source). Nunca ecoa o prompt (ADR-V2-081, R8).
+ *
+ * @param risk - `dados.risk` bruto do DPedido (Json)
+ * @returns RiskSummaryDto ou undefined se ausente/malformado
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function toRiskSummary(risk: any): RiskSummaryDto | undefined {
+  if (!risk || typeof risk !== 'object' || typeof risk.explanation !== 'string') {
+    return undefined;
+  }
+  const patterns: unknown[] = Array.isArray(risk.matchedPatterns) ? risk.matchedPatterns : [];
+  return {
+    explanation: risk.explanation,
+    matchedPatterns: patterns
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .filter((p: any) => p && typeof p.pattern === 'string')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((p: any) => ({
+        pattern: p.pattern,
+        level: String(p.level ?? ''),
+        ...(typeof p.source === 'string' ? { source: p.source } : {}),
+      })),
   };
 }

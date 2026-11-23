@@ -1,8 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Logger } from '@nestjs/common';
 import { ExecutionsService } from '../executions.service';
+import OperacaoExecucaoClaude from '../../engine/lib/operacao/OperacaoExecucaoClaude';
 import { ExecuteCommandDto } from '../dto/execute-command.dto';
 import { CommandValidatorService } from '../services/command-validator.service';
+import * as fs from 'fs';
+import * as path from 'path';
 
 /**
  * Integration test do modo PROMPT do ExecutionsService (ADR-V2-049).
@@ -28,6 +31,11 @@ afterAll(() => {
   jest.restoreAllMocks();
 });
 
+/**
+ * Mock do Risk Gate. ADR-V2-081: declara `scannedSources:['command','prompt']`
+ * (contrato v2) — sem isso a guarda de contrato do Engine eleva o modo PROMPT
+ * para MEDIUM e "LOW → enfileirada" deixaria de valer.
+ */
 function buildRiskGateScript(riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'): string {
   return `(async function riskGateValidator(op) {
     if (!op.dados) op.dados = {};
@@ -35,14 +43,30 @@ function buildRiskGateScript(riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'): string {
       level: '${riskLevel}',
       explanation: 'Mock: ${riskLevel}',
       matchedPatterns: [],
+      scannedSources: ['command', 'prompt'],
+      validatorVersion: 2,
       classifiedAt: new Date().toISOString()
     };
   })`;
 }
 
-function buildService() {
+/** Script REAL do Risk Gate v2 (mesmo arquivo semeado na DVFS chave 3). */
+const REAL_RISK_GATE_SCRIPT = fs.readFileSync(
+  path.join(__dirname, '..', '..', 'engine', 'dvfs', 'risk-gate-validator.js'),
+  'utf8',
+);
+
+/**
+ * ProjectRefService mock (ADR-V2-058): passthrough P → P. O construtor do
+ * ExecutionsService ganhou este 9º parâmetro e o spec estava desatualizado.
+ */
+function buildMockProjectRef() {
+  return { resolveEntidadeRef: jest.fn().mockImplementation((id: bigint) => Promise.resolve(id)) };
+}
+
+function buildService(opts: { riskScript?: string; prompt?: string; taskName?: string } = {}) {
   // Snapshot do "DPedido persistido" após op.grava() — capturado pelo create do $transaction
-  const persisted: { dados: any } = { dados: null };
+  const persisted: { dados: any; idClasse?: unknown } = { dados: null };
 
   const mockPrisma: any = {
     dProject: {
@@ -83,6 +107,7 @@ function buildService() {
         dPedido: {
           create: jest.fn().mockImplementation(({ data }: any) => {
             persisted.dados = data?.dados ?? null;
+            persisted.idClasse = data?.idClasse;
             return Promise.resolve({ chave: BigInt(1000001) });
           }),
         },
@@ -91,7 +116,7 @@ function buildService() {
     dVFS: {
       findFirst: jest.fn().mockImplementation(({ where }: { where: any }) => {
         const scripts: Record<number, string> = {
-          3: buildRiskGateScript('LOW'),
+          3: opts.riskScript ?? buildRiskGateScript('LOW'),
           4: '(async function commandValidator(op) {})',
           5: '(async function posCalculo(op) {})',
           6: '(async function preGravacao(op) {})',
@@ -130,9 +155,10 @@ function buildService() {
   const mockPromptBuilder = {
     buildFromTaskId: jest.fn().mockResolvedValue({
       prompt:
+        opts.prompt ??
         'Você é um agente de automação do Scrumban. Implemente a task abaixo.\n\nTask #42 — criar AGENT_TEST.md\n\nCriterios: faça TODAS as mudanças.',
       taskType: 'code',
-      taskName: 'criar AGENT_TEST.md',
+      taskName: opts.taskName ?? 'criar AGENT_TEST.md',
     }),
   };
 
@@ -145,6 +171,7 @@ function buildService() {
     mockAgentTunnel as any,
     mockExecutionQueue as any,
     mockPromptBuilder as any,
+    buildMockProjectRef() as any,
   );
 
   return {
@@ -348,6 +375,7 @@ describe('ExecutionsService — modo PROMPT (ADR-V2-049)', () => {
       mockAgentTunnel as any,
       mockExecutionQueue as any,
       mockPromptBuilder as any,
+      buildMockProjectRef() as any,
     );
 
     const dto: ExecuteCommandDto = { taskId: '42' };
@@ -376,6 +404,74 @@ describe('ExecutionsService — modo PROMPT (ADR-V2-049)', () => {
     await service.execute('100', dto, '7');
 
     expect(mockExecutionQueue.enqueueExecution).toHaveBeenCalledTimes(1);
+  });
+
+  // ------------------------------------------------------------------
+  // ADR-V2-081 — Risk Gate v2 avalia o prompt (script REAL da DVFS chave 3)
+  // ------------------------------------------------------------------
+
+  it('ADR-V2-081: task "apague a tabela de clientes" → HIGH, awaiting_approval, NÃO enfileirada', async () => {
+    const { service, persisted, mockExecutionQueue } = buildService({
+      riskScript: REAL_RISK_GATE_SCRIPT,
+      prompt:
+        'Você é um agente de automação do Scrumban.\n\n**Task #42 — Limpeza**\n\n**Descrição:**\napague a tabela de clientes',
+      taskName: 'Limpeza',
+    });
+    const gravarAwaitingSpy = jest.spyOn(
+      OperacaoExecucaoClaude.prototype,
+      'gravarComoAwaitingApproval',
+    );
+    const gravarQueuedSpy = jest.spyOn(OperacaoExecucaoClaude.prototype, 'gravarComoQueued');
+
+    try {
+      const response = await service.execute('100', { taskId: '42' }, '7');
+
+      expect(gravarAwaitingSpy).toHaveBeenCalledTimes(1);
+      expect(gravarQueuedSpy).not.toHaveBeenCalled();
+      expect(mockExecutionQueue.enqueueExecution).not.toHaveBeenCalled();
+      expect(persisted.dados.risk.level).toBe('HIGH');
+      expect(persisted.dados.risk.matchedPatterns[0].source).toBe('prompt');
+      expect(persisted.dados.approval.status).toBe('awaiting_approval');
+      expect(persisted.dados.statusCode).toBe('-515');
+      // idClasse -303 (HIGH) definido pelo Engine (ADR-V2-006)
+      expect(String(persisted.idClasse)).toBe('-303');
+      // Resposta expõe o motivo sem ecoar o prompt (R8)
+      expect(response.risk?.explanation).toContain('(prompt)');
+      expect(JSON.stringify(response.risk)).not.toContain('clientes');
+    } finally {
+      gravarAwaitingSpy.mockRestore();
+      gravarQueuedSpy.mockRestore();
+    }
+  });
+
+  it('ADR-V2-081: task neutra com script REAL → LOW + enfileirada (não-regressão)', async () => {
+    const { service, persisted, mockExecutionQueue } = buildService({
+      riskScript: REAL_RISK_GATE_SCRIPT,
+      prompt:
+        'Você é um agente de automação do Scrumban.\n\n**Task #42 — Ajustar botão**\n\nAlinhar o botão de salvar à direita.',
+      taskName: 'Ajustar botão',
+    });
+
+    await service.execute('100', { taskId: '42' }, '7');
+
+    expect(persisted.dados.risk.level).toBe('LOW');
+    expect(persisted.dados.risk.validatorVersion).toBe(2);
+    expect(mockExecutionQueue.enqueueExecution).toHaveBeenCalledTimes(1);
+  });
+
+  it('ADR-V2-081: script DVFS v1 no banco (sem scannedSources) → guarda eleva PROMPT para MEDIUM e não enfileira', async () => {
+    const v1Script = `(async function riskGateValidator(op) {
+      if (!op.dados) op.dados = {};
+      op.dados.risk = { level: 'LOW', explanation: 'v1', matchedPatterns: [], classifiedAt: new Date().toISOString() };
+    })`;
+    const { service, persisted, mockExecutionQueue } = buildService({ riskScript: v1Script });
+
+    await service.execute('100', { taskId: '42' }, '7');
+
+    expect(persisted.dados.risk.level).toBe('MEDIUM');
+    expect(persisted.dados.risk.explanation).toContain('Risk Gate desatualizado');
+    expect(persisted.dados.approval.status).toBe('awaiting_approval');
+    expect(mockExecutionQueue.enqueueExecution).not.toHaveBeenCalled();
   });
 
   it('lança UnprocessableEntityException quando nem taskId nem command presentes', async () => {

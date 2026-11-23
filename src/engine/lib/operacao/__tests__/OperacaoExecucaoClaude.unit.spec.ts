@@ -377,3 +377,205 @@ describe('OperacaoExecucaoClaude — setExecucaoData', () => {
     expect(op.dados.audit?.correlationId).toBe('test-corr-001');
   });
 });
+
+// ====================================================================
+// ADR-V2-081 — guarda de contrato do modo PROMPT + piso de emergência
+// ====================================================================
+/* eslint-disable @typescript-eslint/no-explicit-any -- mocks de teste (padrão do arquivo) */
+
+/** Script v1 (sem scannedSources) — simula banco com DVFS desatualizado. */
+function buildStubRiskScript(level: 'LOW' | 'MEDIUM' | 'HIGH', scannedSources?: string[]): string {
+  const scanned = scannedSources ? `scannedSources: ${JSON.stringify(scannedSources)},` : '';
+  return `(async function riskGateValidator(op) {
+    if (!op.dados) op.dados = {};
+    op.dados.risk = {
+      level: '${level}',
+      explanation: 'stub ${level}',
+      matchedPatterns: [],
+      ${scanned}
+      classifiedAt: new Date().toISOString(),
+    };
+  })`;
+}
+
+function buildParamsWithRiskScript(riskScript: string, prompt?: string) {
+  const scriptMap = new Map<number, string>([
+    [3, riskScript],
+    [4, commandValidatorScript],
+    [5, '(function(op){})'],
+    [6, '(function(op){})'],
+    [7, '(function(op){})'],
+  ]);
+  const params: any = buildDefaultParams({
+    commandText: 'claude -p task-built-prompt-placeholder',
+    mockPrisma: buildMockPrismaWithScripts(scriptMap),
+  });
+  if (prompt !== undefined) params.prompt = prompt;
+  return params;
+}
+
+describe('OperacaoExecucaoClaude — guarda de contrato do modo PROMPT (ADR-V2-081)', () => {
+  const ORIGINAL_FLOOR = process.env.RISK_GATE_PROMPT_FLOOR;
+
+  beforeEach(() => {
+    delete process.env.RISK_GATE_PROMPT_FLOOR;
+  });
+
+  afterAll(() => {
+    if (ORIGINAL_FLOOR === undefined) delete process.env.RISK_GATE_PROMPT_FLOOR;
+    else process.env.RISK_GATE_PROMPT_FLOOR = ORIGINAL_FLOOR;
+  });
+
+  it('script v1 (sem scannedSources) + dados.prompt → eleva LOW para MEDIUM (-302)', async () => {
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn');
+    warnSpy.mockClear();
+    const op = new OperacaoExecucaoClaude(
+      buildParamsWithRiskScript(buildStubRiskScript('LOW'), 'ajustar botão') as any,
+    );
+
+    await op.nova();
+    await op.calcula();
+
+    expect(op.dados.risk?.level).toBe('MEDIUM');
+    expect((op as any)._classeBase).toBe('-302');
+    expect(op.dados.risk?.explanation).toContain('Risk Gate desatualizado');
+    expect(op.dados.risk?.matchedPatterns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          pattern: 'engine:risk-gate-stale',
+          source: 'engine',
+          level: 'MEDIUM',
+        }),
+      ]),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Risk Gate desatualizado'));
+  });
+
+  it('script v1 sem dados.prompt (modo COMMAND) → guarda não interfere (LOW)', async () => {
+    const op = new OperacaoExecucaoClaude(
+      buildParamsWithRiskScript(buildStubRiskScript('LOW')) as any,
+    );
+
+    await op.nova();
+    await op.calcula();
+
+    expect(op.dados.risk?.level).toBe('LOW');
+    expect((op as any)._classeBase).toBe('-301');
+  });
+
+  it('script v1 reporta HIGH + dados.prompt → guarda NÃO rebaixa (HIGH)', async () => {
+    const op = new OperacaoExecucaoClaude(
+      buildParamsWithRiskScript(buildStubRiskScript('HIGH'), 'qualquer') as any,
+    );
+
+    await op.nova();
+    await op.calcula();
+
+    expect(op.dados.risk?.level).toBe('HIGH');
+    expect((op as any)._classeBase).toBe('-303');
+    expect(op.dados.risk?.explanation).toBe('stub HIGH');
+  });
+
+  it('script declara scannedSources com prompt → guarda não eleva (LOW)', async () => {
+    const op = new OperacaoExecucaoClaude(
+      buildParamsWithRiskScript(
+        buildStubRiskScript('LOW', ['command', 'prompt']),
+        'ajustar',
+      ) as any,
+    );
+
+    await op.nova();
+    await op.calcula();
+
+    expect(op.dados.risk?.level).toBe('LOW');
+    expect((op as any)._classeBase).toBe('-301');
+  });
+
+  it('script REAL v2 + prompt destrutivo → HIGH (-303) com source=prompt', async () => {
+    const op = new OperacaoExecucaoClaude(
+      buildParamsWithRiskScript(riskGateScript, 'apague a tabela de clientes') as any,
+    );
+
+    await op.nova();
+    await op.calcula();
+
+    expect(op.dados.risk?.level).toBe('HIGH');
+    expect((op as any)._classeBase).toBe('-303');
+    expect(op.dados.risk?.matchedPatterns[0].source).toBe('prompt');
+  });
+
+  it('script REAL v2 + prompt neutro → LOW (guarda satisfeita)', async () => {
+    const op = new OperacaoExecucaoClaude(
+      buildParamsWithRiskScript(riskGateScript, 'ajustar o botão de salvar') as any,
+    );
+
+    await op.nova();
+    await op.calcula();
+
+    expect(op.dados.risk?.level).toBe('LOW');
+    expect(op.dados.risk?.validatorVersion).toBe(2);
+  });
+
+  describe('piso de emergência RISK_GATE_PROMPT_FLOOR', () => {
+    it('=MEDIUM eleva execução PROMPT neutra para MEDIUM', async () => {
+      process.env.RISK_GATE_PROMPT_FLOOR = 'MEDIUM';
+      const op = new OperacaoExecucaoClaude(
+        buildParamsWithRiskScript(riskGateScript, 'ajustar o botão') as any,
+      );
+
+      await op.nova();
+      await op.calcula();
+
+      expect(op.dados.risk?.level).toBe('MEDIUM');
+      expect((op as any)._classeBase).toBe('-302');
+      expect(op.dados.risk?.explanation).toContain('RISK_GATE_PROMPT_FLOOR=MEDIUM');
+    });
+
+    it('=high (case-insensitive) eleva para HIGH', async () => {
+      process.env.RISK_GATE_PROMPT_FLOOR = 'high';
+      const op = new OperacaoExecucaoClaude(
+        buildParamsWithRiskScript(riskGateScript, 'ajustar o botão') as any,
+      );
+
+      await op.nova();
+      await op.calcula();
+
+      expect(op.dados.risk?.level).toBe('HIGH');
+      expect((op as any)._classeBase).toBe('-303');
+    });
+
+    it('=MEDIUM NÃO rebaixa um HIGH', async () => {
+      process.env.RISK_GATE_PROMPT_FLOOR = 'MEDIUM';
+      const op = new OperacaoExecucaoClaude(
+        buildParamsWithRiskScript(riskGateScript, 'drop the users table') as any,
+      );
+
+      await op.nova();
+      await op.calcula();
+
+      expect(op.dados.risk?.level).toBe('HIGH');
+    });
+
+    it('=MEDIUM não afeta o modo COMMAND (sem dados.prompt)', async () => {
+      process.env.RISK_GATE_PROMPT_FLOOR = 'MEDIUM';
+      const op = new OperacaoExecucaoClaude(buildParamsWithRiskScript(riskGateScript) as any);
+
+      await op.nova();
+      await op.calcula();
+
+      expect(op.dados.risk?.level).toBe('LOW');
+    });
+
+    it.each(['', 'LOW', 'banana'])('valor "%s" = desligado', async (value) => {
+      process.env.RISK_GATE_PROMPT_FLOOR = value;
+      const op = new OperacaoExecucaoClaude(
+        buildParamsWithRiskScript(riskGateScript, 'ajustar o botão') as any,
+      );
+
+      await op.nova();
+      await op.calcula();
+
+      expect(op.dados.risk?.level).toBe('LOW');
+    });
+  });
+});

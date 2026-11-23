@@ -2,9 +2,37 @@
 
 **Versao:** 1.0
 **Mantido por:** Documenter Agent V2
-**Atualizado em:** 2026-07-13 (Task #997 F3 COMPLETA — Score 9.2/10)
+**Atualizado em:** 2026-11-23 (Task 1 Risk Gate prompt-mode COMPLETA — Score 8.6/10)
 
 > Este documento rastreia tasks por Fase (F0..F17). Strategist abre, Implementer entrega, Reviewer valida, Documenter fecha. Cada task tem entrada com Status, Modulo, Fase, Tempo Real, Quality Score, Pilares aplicados e ADRs vinculados.
+
+---
+
+## Risk Gate avalia o prompt no modo PROMPT (ADR-V2-081) — Task 1 — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Reviewer APPROVED 8.6/10 após 3 ciclos; gate do CEO = 8.5)
+**Módulo V2:** executions (toca `engine/dvfs`, `engine/lib/operacao`, `prisma/seeds/dvfs.seed.ts`)
+**Fase V2:** F13 (Automation Claude Code) — hardening de segurança
+**Completado em:** 2026-11-23
+**Quality Score:** 8.6/10 (histórico: 7.2 → 8.0 → 8.6)
+
+**O Que Foi Feito:**
+- Modo PROMPT (ADR-V2-049) deixava o Risk Gate cego: classificava tudo LOW porque lia só o placeholder de `command.text`
+- Validador DVFS chave 3 (v2) varre `command` e `prompt`, com padrões shell e linguagem natural PT-BR/EN (normalização NFKC, invisíveis, acentos, quebra de linha)
+- Guarda de contrato no Engine (`_aplicarGuardasModoPrompt`): script sem varredura do prompt eleva para no mínimo MEDIUM
+- Piso de emergência `RISK_GATE_PROMPT_FLOOR` (MEDIUM|HIGH, default desligado, só eleva)
+- `ExecutionResponseDto.risk` aditivo (explanation + padrões com fonte; nunca o prompt)
+
+**Pilares aplicados:**
+- Pilar 1: INSERT em DPedido -301/-302/-303 via `OperacaoExecucaoClaude` (inalterado); regra de risco na DVFS chave 3
+- Pilar 2: nenhum endpoint novo; campo aditivo em `ExecutionResponseDto`
+- Pilar 3: zero DClasse nova; seed DVFS reaplicado no deploy (`versao` mantida em 1)
+
+**Testes:** 370 passando nas suítes relevantes (3 rodadas seguidas); 58 adversariais intactos (sem diff); 169 testes de linguagem natural; 15 de templates; 13 da guarda. 3 suítes pré-existentes não compilam (drift de construtor, fora de escopo)
+
+**Pendências:** medição de falso positivo (Fase 5); deploy com seed DVFS e `RISK_GATE_PROMPT_FLOOR=MEDIUM` até a medição; esteira frontend (Aprovar/Rejeitar + `risk.explanation`); M3 (falsos positivos de "tabela" de UI)
+
+**ADRs vinculados:** ADR-V2-081 (Aceito), ADR-V2-006, ADR-V2-007, ADR-V2-049
 
 ---
 

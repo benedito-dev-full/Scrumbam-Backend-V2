@@ -61,6 +61,13 @@ export async function seedDvfs(prisma: PrismaClient): Promise<number> {
 
   const records = [
     {
+      // ADR-V2-081: conteúdo agora é o validador v2 (varre command + prompt;
+      // header `validatorVersion: 2`). `versao` MANTIDA em 1 de propósito:
+      // o DvfsLoaderHelper NÃO filtra por versao (findFirst por idClasse +
+      // chaveScript + ativo) — bumpar criaria 2 linhas ativas e a escolha
+      // seria não-determinística. O upsert abaixo sobrescreve `conteudo`
+      // (idempotente, ADR-V2-020). Após o seed: verificar md5 + restart
+      // (cache DVFS em memória, TTL 5min).
       chaveScript: 3,
       nome: 'risk-gate-validator',
       conteudo: riskGate,

@@ -271,6 +271,12 @@ export class ExecutionsService {
    *  - `taskId` + `command`   → HYBRID  — command vence; taskId fica como
    *                              metadado no Engine (dados.task.id), MAS prompt
    *                              NÃO é construído (debug puro).
+   *
+   * Risk Gate (ADR-V2-081): o placeholder do modo PROMPT serve APENAS ao
+   * CommandValidator (validação de shell). A classificação de risco NÃO olha
+   * só o placeholder — o validador DVFS chave 3 (v2) varre `dados.command.text`
+   * E `dados.prompt` (o texto real que o Claude recebe), e o Engine eleva para
+   * no mínimo MEDIUM se o script ativo não declarar a varredura do prompt.
    */
   private async resolveCommandAndPrompt(
     dto: ExecuteCommandDto,

@@ -12,6 +12,23 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Security
+
+- **Risk Gate avalia o prompt no modo PROMPT (ADR-V2-081, Task 1, V2 F13)**
+  - **Problema:** o Risk Gate lia só `command.text` (placeholder). Toda execução em modo PROMPT era LOW e auto-enfileirada
+  - **Correção:** validador DVFS chave 3 (v2) varre `command` e `prompt` (padrões shell + linguagem natural PT-BR/EN, com normalização Unicode)
+  - **Guarda de contrato no Engine:** script sem varredura do prompt (DVFS não reaplicado) eleva para no mínimo MEDIUM
+  - **Piso opcional** `RISK_GATE_PROMPT_FLOOR=MEDIUM|HIGH` (desligado por padrão; só eleva o nível)
+  - **Resposta:** `ExecutionResponseDto.risk` aditivo (explanation + padrões com fonte; nunca o texto do prompt)
+  - **Pilares:** P1 preservado (INSERT via `OperacaoExecucaoClaude`) | P2 campo aditivo, sem endpoint novo | P3 zero DClasse nova
+  - **Tests:** 370 passando nas suítes relevantes (3 rodadas seguidas); 58 adversariais intactos (sem diff)
+  - **Pendências:** medição de falso positivo (Fase 5); deploy com reaplicação do seed DVFS; falsos positivos de "tabela" de UI (M3)
+  - **ADRs:** ADR-V2-081 (Aceito), ADR-V2-006, ADR-V2-007, ADR-V2-049
+
+### Changed
+
+- Score gate APPROVED sobe de 7.0 para 8.5 (decisão do CEO, 2026-11-23; ADR-V2-015 a ratificar). Scripts `validate-review-score.sh` e `validate-review.sh` e docs de agentes atualizados
+
 ### Added
 
 - **Unificação Nexus⇄MCP — Camada Única de Capabilities (Ondas 0–6, pós-F13, 2026-07-13)**

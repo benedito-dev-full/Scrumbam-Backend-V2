@@ -1,6 +1,51 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-07-13 (merge: Unificação Nexus⇄MCP Ondas 0–6 COMPLETA + Task #998 F4 Cache/Contexto COMPLETA)
+**Ultima atualizacao:** 2026-11-23 (Task 1 Risk Gate avalia prompt no modo PROMPT COMPLETA — score 8.6)
+
+---
+
+## Risk Gate avalia o prompt no modo PROMPT (ADR-V2-081) — Task 1 — COMPLETE
+
+**Module:** executions (engine/dvfs, engine/lib/operacao)
+**Initiative:** Fechar o Risk Gate cego no modo PROMPT (HTTP, MCP e Nexus)
+**Status:** COMPLETA
+**Completed:** 2026-11-23
+**Quality Score:** 8.6/10 (APPROVED após 3 ciclos: 7.2 → 8.0 → 8.6; gate 8.5)
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | n/d | — |
+| Implementer | n/d (3 ciclos) | — |
+| Reviewer | n/d (3 ciclos) | 8.6/10 |
+| Documenter | n/d | — |
+
+**Pilares:**
+- Pilar 1 (Engine): preservado — INSERT via `OperacaoExecucaoClaude` (DPedido -301/-302/-303); regra de risco na DVFS chave 3
+- Pilar 2 (Endpoints): REUTILIZADO — campo aditivo `risk` em `ExecutionResponseDto`, sem endpoint novo
+- Pilar 3 (Seed): N/A — zero DClasse nova; seed DVFS reaplicado no deploy (`versao` 1 mantida)
+
+**Deliverables:**
+- [x] Validador DVFS chave 3 v2 (command + prompt; NL PT/EN; normalização Unicode)
+- [x] Guarda de contrato no Engine (script sem varredura do prompt → MEDIUM)
+- [x] Piso `RISK_GATE_PROMPT_FLOOR` (opcional, default desligado)
+- [x] `risk` aditivo na resposta (sem vazar o prompt)
+- [x] Runbook de deploy e SQL de verificação/medição (somente leitura)
+- [ ] Medição de falso positivo (Fase 5) — pendente do CEO
+- [ ] Deploy com seed DVFS + `RISK_GATE_PROMPT_FLOOR=MEDIUM` até a medição
+
+**Metrics:**
+- Build: PASS
+- TypeScript: 0 erros em arquivos tocados (78 pré-existentes em specs não tocados)
+- ESLint: 0 errors
+- Testes: 370 passando nas suítes relevantes; 58 adversariais intactos
+- Queries/request: zero query nova (validador CPU-only)
+
+**Pendências:** Fase 5 (medição), deploy, esteira frontend (Aprovar/Rejeitar), M3 (falsos positivos "tabela" de UI), 3 suítes com drift de construtor (task separada)
+
+**Governança:** gate APPROVED ≥ 8.5 aplicado nos scripts e docs de agentes (commit `chore(agents)` separado)
+
+**ADRs:** ADR-V2-081 (Aceito)
 
 ---
 

@@ -124,7 +124,9 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
    *   1. Validar que DVFS chaves 3 e 4 foram carregadas (obrigatórias para execution)
    *   2. Chamar super.calcula() que executa os scripts DVFS (3, 4, 5)
    *   3. Validar que op.dados.risk foi populado pelo script chave 3
-   *   4. Determinar _classeBase conforme risk.level (ADR-V2-006)
+   *   4. Modo PROMPT (ADR-V2-081): guarda de contrato (script sem varredura de
+   *      prompt → mínimo MEDIUM) + piso de emergência RISK_GATE_PROMPT_FLOOR
+   *   5. Determinar _classeBase conforme risk.level (ADR-V2-006)
    *
    * Os scripts DVFS recebem `this` como contexto — acesso a dados, _database, etc.
    *
@@ -157,6 +159,10 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
       });
     }
 
+    // ADR-V2-081: guarda de contrato + piso de emergência do modo PROMPT.
+    // Só eleva — nunca rebaixa a classificação do script.
+    this._aplicarGuardasModoPrompt();
+
     // ADR-V2-006: idClasse final baseado em risk.level (LOW=-301, MED=-302, HIGH=-303)
     const classeMap: Record<string, number> = {
       LOW: -301,
@@ -174,6 +180,83 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
     this.logger.log(
       `[${this.correlationId}] Risk Gate: ${this.dados.risk!.level}, idClasse=${this._classeBase}`,
     );
+  }
+
+  /**
+   * Guardas do modo PROMPT aplicadas após o Risk Gate (ADR-V2-081).
+   *
+   * Atua SOMENTE quando há `dados.prompt` (modo PROMPT — ADR-V2-049); no modo
+   * COMMAND/HÍBRIDO não interfere. Nunca rebaixa o nível do script.
+   *
+   *   1. Guarda de contrato: se o script DVFS chave 3 não declarou `'prompt'`
+   *      em `risk.scannedSources` (ex.: banco ainda com o validador v1 — seed
+   *      DVFS não reaplicado), eleva para no mínimo MEDIUM. Transforma o drift
+   *      "cego silencioso" em "aprovação extra visível". O Engine NÃO decide
+   *      padrões (regra de risco continua na DVFS — ADR-V2-007), só garante
+   *      a integridade do contrato.
+   *   2. Piso de emergência `RISK_GATE_PROMPT_FLOOR` (env, default desligado):
+   *      `MEDIUM` ou `HIGH` força todo modo PROMPT a exigir aprovação humana.
+   *      Valores ausentes/inválidos = desligado.
+   */
+  private _aplicarGuardasModoPrompt(): void {
+    const risk = this.dados.risk;
+    if (!risk || typeof this.dados.prompt !== 'string') return;
+
+    const scanned = Array.isArray(risk.scannedSources) ? risk.scannedSources : [];
+    if (!scanned.includes('prompt')) {
+      this.logger.warn(
+        `[${this.correlationId}] Risk Gate desatualizado: DVFS chave 3 não varre dados.prompt ` +
+          `(validatorVersion=${risk.validatorVersion ?? 'ausente'}). Elevando para no mínimo MEDIUM. ` +
+          'Reaplicar seed DVFS (ADR-V2-081).',
+      );
+      this._elevarRisco(
+        'MEDIUM',
+        'Risk Gate desatualizado (DVFS sem varredura de prompt) — aprovação humana exigida.',
+        'engine:risk-gate-stale',
+      );
+    }
+
+    const floor = OperacaoExecucaoClaude._lerPisoModoPrompt();
+    if (floor) {
+      this._elevarRisco(
+        floor,
+        `Piso de emergência RISK_GATE_PROMPT_FLOOR=${floor} ativo para o modo PROMPT.`,
+        'engine:risk-gate-prompt-floor',
+      );
+    }
+  }
+
+  /**
+   * Lê `RISK_GATE_PROMPT_FLOOR` do ambiente. Aceita apenas `MEDIUM`/`HIGH`
+   * (case-insensitive); qualquer outro valor (inclusive `LOW`/vazio) = desligado.
+   */
+  private static _lerPisoModoPrompt(): 'MEDIUM' | 'HIGH' | null {
+    const raw = (process.env.RISK_GATE_PROMPT_FLOOR ?? '').trim().toUpperCase();
+    return raw === 'MEDIUM' || raw === 'HIGH' ? raw : null;
+  }
+
+  /**
+   * Eleva `dados.risk.level` para `minimo` se o nível atual for menor.
+   * Registra o motivo em `explanation` e um `matchedPatterns` com `source='engine'`
+   * (sem trecho de texto do prompt). Nunca rebaixa.
+   */
+  private _elevarRisco(minimo: 'MEDIUM' | 'HIGH', motivo: string, pattern: string): void {
+    const risk = this.dados.risk!;
+    const rank: Record<string, number> = { LOW: 0, MEDIUM: 1, HIGH: 2 };
+    if ((rank[risk.level] ?? 0) >= rank[minimo]) return;
+
+    this.dados.risk = {
+      ...risk,
+      level: minimo,
+      explanation:
+        risk.level === 'LOW'
+          ? motivo
+          : `${motivo} (classificação original ${risk.level}: ${risk.explanation})`,
+      matchedPatterns: [
+        ...(Array.isArray(risk.matchedPatterns) ? risk.matchedPatterns : []),
+        { pattern, level: minimo, source: 'engine' },
+      ],
+    };
   }
 
   /**
