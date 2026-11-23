@@ -76,7 +76,7 @@ make dev
 1. **ZERO tabela nova.** Hook `enforce-canonical-tables.sh` bloqueia.
 2. **3 Pilares sempre ativos** — Engine, Endpoints Genéricos, Seed.
 3. **Engine APENAS em DPedido idClasse=-300** (Reviewer rejeita se vazar).
-4. **Score gate APPROVED ≥ 7.0** (hook `validate-review-score.sh` bloqueia).
+4. **Score gate APPROVED ≥ 8.5** (hook `validate-review-score.sh` bloqueia).
 5. **Sem `--no-verify`. Sem skip de Reviewer/Documenter. Nem uma vez.**
 6. **Conventional Commits scope V2** (validado por hook).
 

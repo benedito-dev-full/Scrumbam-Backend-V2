@@ -1,10 +1,10 @@
 #!/bin/bash
 # validate-review-score.sh (V2 — NEW)
-# Score gate enforcement: APPROVED requires score ≥ 7.0 (regra mecânica)
+# Score gate enforcement: APPROVED requires score ≥ 8.5 (regra mecânica)
 # Runs as second Stop hook for Reviewer (after validate-review.sh)
 # Or as PreCommit / additional Stop hook
 #
-# ADR-V2-015 (a ratificar): Score gate APPROVED ≥ 7.0
+# ADR-V2-015 (a ratificar): Score gate APPROVED ≥ 8.5
 
 set -euo pipefail
 
@@ -13,7 +13,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo "Validando score gate V2 (APPROVED ≥ 7.0)..."
+echo "Validando score gate V2 (APPROVED ≥ 8.5)..."
 
 REVIEW_DIR="workspace/reviews"
 
@@ -77,13 +77,13 @@ case "$DECISION" in
     ;;
 esac
 
-# REGRA MECÂNICA V2: APPROVED requer score >= 7.0
+# REGRA MECÂNICA V2: APPROVED requer score >= 8.5
 if [ "$DECISION" = "APPROVED" ]; then
-  if (( $(echo "$SCORE_VALUE < 7.0" | bc -l) )); then
+  if (( $(echo "$SCORE_VALUE < 8.5" | bc -l) )); then
     echo -e "${RED}========================================${NC}" >&2
-    echo -e "${RED}ERROR (V2 SCORE GATE): APPROVED com score $SCORE_VALUE < 7.0!${NC}" >&2
+    echo -e "${RED}ERROR (V2 SCORE GATE): APPROVED com score $SCORE_VALUE < 8.5!${NC}" >&2
     echo -e "${RED}========================================${NC}" >&2
-    echo -e "${YELLOW}Regra mecânica V2: APPROVED requer score numérico >= 7.0${NC}" >&2
+    echo -e "${YELLOW}Regra mecânica V2: APPROVED requer score numérico >= 8.5${NC}" >&2
     echo -e "${YELLOW}(ADR-V2-015 — Score gate)${NC}" >&2
     echo "" >&2
     echo -e "${YELLOW}Opções para o Reviewer:${NC}" >&2
@@ -94,12 +94,12 @@ if [ "$DECISION" = "APPROVED" ]; then
     echo -e "${YELLOW}Família depende. Corda justa.${NC}" >&2
     exit 2
   fi
-  echo -e "${GREEN}OK${NC} APPROVED com score $SCORE_VALUE >= 7.0"
+  echo -e "${GREEN}OK${NC} APPROVED com score $SCORE_VALUE >= 8.5"
 fi
 
-# REGRA: REJECTED com score >= 7.0 = inconsistência (warning, não bloqueia)
-if [ "$DECISION" = "REJECTED" ] && (( $(echo "$SCORE_VALUE >= 7.0" | bc -l) )); then
-  echo -e "${YELLOW}WARNING (V2): REJECTED com score $SCORE_VALUE >= 7.0 — inconsistência${NC}" >&2
+# REGRA: REJECTED com score >= 8.5 = inconsistência (warning, não bloqueia)
+if [ "$DECISION" = "REJECTED" ] && (( $(echo "$SCORE_VALUE >= 8.5" | bc -l) )); then
+  echo -e "${YELLOW}WARNING (V2): REJECTED com score $SCORE_VALUE >= 8.5 — inconsistência${NC}" >&2
   echo -e "${YELLOW}Considere mudar para NEEDS_CHANGES (warning não bloqueia).${NC}" >&2
 fi
 

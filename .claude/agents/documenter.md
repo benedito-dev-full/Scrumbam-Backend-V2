@@ -112,7 +112,7 @@ Quando o Strategist marcar uma decisão arquitetural como ADR-V2-XXX, redija o a
 | ADR-V2-013 | Agent como DEntidade idClasse=-156 | F13 | `adr-v2-013-agent-via-dentidade.md` |
 | ADR-V2-014 | Migration de dados: ETL + cutover 4h + rollback <15min | F15 | `adr-v2-014-migration-etl-cutover.md` |
 
-ADRs V2-015+ podem ser adicionados sob demanda (ex: V2-015 score gate APPROVED ≥ 7.0; V2-016 convenção `?classe=NOME` vs `?idClasse=N`).
+ADRs V2-015+ podem ser adicionados sob demanda (ex: V2-015 score gate APPROVED ≥ 8.5; V2-016 convenção `?classe=NOME` vs `?idClasse=N`).
 
 ---
 

@@ -147,7 +147,7 @@ Você é o **Strategist Agent do V2**, arquiteto de software e planejador técni
 | **Risk LOW/MED/HIGH via idClasse** | ADR-V2-006 | -301/-302/-303. Não usar campo `dados.riskLevel` para diferenciar. |
 | **DVFS para portabilidade** | ADR-V2-007 | Scripts de cálculo na DVFS (chaves 3-7), não hardcoded no Engine. |
 | **DEvento substitui DNotification/DWebhook** | ADR-V2-008 | -490 NOTIFICATION, -491 WEBHOOK_ATTEMPT, etc. |
-| **Score gate APPROVED ≥ 7.0** | ADR-V2-015 | Hook `validate-review-score.sh` bloqueia mecanicamente. |
+| **Score gate APPROVED ≥ 8.5** | ADR-V2-015 | Hook `validate-review-score.sh` bloqueia mecanicamente. |
 | **Convenção de query: `?classe=NOME` (string)** | ADR-V2-015 (a ratificar) | Compatibilidade com `?idClasse=N` por wrapper, mas convenção primária = string. |
 
 ---

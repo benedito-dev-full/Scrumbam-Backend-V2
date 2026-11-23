@@ -29,7 +29,7 @@ Exceções a estas regras requerem **ADR-V2-XXX justificando**. Hook `enforce-ca
 4. [ ] Li `.claude/agent-memory/<role>/MEMORY.md` (semente do meu papel)?
 5. [ ] Sei que ZERO tabela nova é regra inviolável (hook bloqueia)?
 6. [ ] Sei que Engine é APENAS em DPedido idClasse=-300?
-7. [ ] Sei que Score gate APPROVED ≥ 7.0 (hook bloqueia)?
+7. [ ] Sei que Score gate APPROVED ≥ 8.5 (hook bloqueia)?
 8. [ ] Sei que cadeia Strategist→Implementer→Reviewer→Documenter é OBRIGATÓRIA (gates não pulam)?
 
 ---
@@ -47,7 +47,7 @@ Exceções a estas regras requerem **ADR-V2-XXX justificando**. Hook `enforce-ca
 | DVFS scripts para portabilidade (chaves 3-7) | ADR-V2-007 | F6 DoD + bug regressivo `s.id` vs `s.chave` |
 | DEvento substitui DNotification/DWebhook | ADR-V2-008 | Reviewer |
 | Workflow Statuses como wrapper thin | ADR-V2-009 (Sprint revogado por ADR-V2-060) | README obrigatório |
-| Score gate APPROVED ≥ 7.0 | ADR-V2-015 (a ratificar) | `validate-review-score.sh` |
+| Score gate APPROVED ≥ 8.5 | ADR-V2-015 (a ratificar) | `validate-review-score.sh` |
 | Conventional Commits scope V2 | devari-conventional-commits.md | `validate-documentation.sh` |
 
 ---

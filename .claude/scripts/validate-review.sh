@@ -1,7 +1,7 @@
 #!/bin/bash
 # validate-review.sh (V2)
 # Stop hook for Reviewer agent — checks structural correctness
-# Score gate (APPROVED ≥ 7.0) is delegated to validate-review-score.sh
+# Score gate (APPROVED ≥ 8.5) is delegated to validate-review-score.sh
 
 set -euo pipefail
 
@@ -91,8 +91,8 @@ fi
 echo -e "${GREEN}OK${NC} Decisão: $DECISION"
 
 # Coerência score x decisão
-if [ "$DECISION" = "REJECTED" ] && (( $(echo "$SCORE_VALUE >= 7.0" | bc -l) )); then
-  echo -e "${YELLOW}WARNING: Inconsistência — REJECTED mas score $SCORE_VALUE >= 7.0${NC}" >&2
+if [ "$DECISION" = "REJECTED" ] && (( $(echo "$SCORE_VALUE >= 8.5" | bc -l) )); then
+  echo -e "${YELLOW}WARNING: Inconsistência — REJECTED mas score $SCORE_VALUE >= 8.5${NC}" >&2
 fi
 
 # Score gate é validado por validate-review-score.sh (separado, mais explícito)
@@ -124,7 +124,7 @@ echo ""
 # Score gate é o próximo hook (validate-review-score.sh)
 
 if [ "$DECISION" = "APPROVED" ]; then
-  echo -e "${GREEN}Approved! Score gate ≥7.0 será validado.${NC}"
+  echo -e "${GREEN}Approved! Score gate ≥8.5 será validado.${NC}"
 elif [ "$DECISION" = "REJECTED" ]; then
   echo -e "${YELLOW}Rejected. Implementer corrige (resume agentId).${NC}"
 else

@@ -23,7 +23,7 @@ herdada do Devari-Core.
 | **Hook Stop** | `validate-plan.sh` (60s) | `validate-implementation.sh` (180s) | `validate-review.sh` + `validate-review-score.sh` (30s) | `validate-documentation.sh` (60s) |
 | **Hook SubagentStop** | `update-status-after-agent.sh` | `validate-implementer-build.sh` + `update-status-after-agent.sh` | `update-status-after-agent.sh` | `update-status-after-agent.sh` |
 | **Output canônico** | `workspace/plans/plan-*-task[N].md` | `workspace/implementations/impl-*-task[N].md` + código | `workspace/reviews/review-*-task[N].md` | JSDoc + ROADMAP + CHANGELOG + STATUS + commit |
-| **Score gate** | — | build PASS + 0 TS + 0 ESLint | **APPROVED requer ≥ 7.0/10** (hook bloqueia) | STATUS.md atualizado |
+| **Score gate** | — | build PASS + 0 TS + 0 ESLint | **APPROVED requer ≥ 8.5/10** (hook bloqueia) | STATUS.md atualizado |
 | **Quem chama** | Conversa principal (Orchestrator) | Conversa principal | Conversa principal | Conversa principal |
 
 ---
@@ -49,7 +49,7 @@ herdada do Devari-Core.
 ### Reviewer
 - **SEMPRE roda** após Implementer (gate obrigatório)
 - Score numérico mandatório
-- **APPROVED ≥ 7.0** (regra mecânica via hook)
+- **APPROVED ≥ 8.5** (regra mecânica via hook)
 - F13 (Risk Gate / RCE): rodar 58 testes adversariais + checagem extra de Pilar 1
 
 ### Documenter
@@ -76,7 +76,7 @@ herdada do Devari-Core.
    └─ Hooks: validate-implementation.sh + validate-implementer-build.sh
 6. Conversa Principal chama Reviewer (Task tool)
    └─ Output: workspace/reviews/review-*-task[N].md com Score X/10 + Decisão
-   └─ Hooks: validate-review.sh + validate-review-score.sh (bloqueia APPROVED < 7.0)
+   └─ Hooks: validate-review.sh + validate-review-score.sh (bloqueia APPROVED < 8.5)
 7. Branch:
    └─ APPROVED → passo 8
    └─ NEEDS_CHANGES / REJECTED → resume Implementer (mesmo agentId) com feedback do Reviewer; volta ao passo 6 (limite: 3 rejeições, depois PAUSAR e consultar usuário)
@@ -96,7 +96,7 @@ herdada do Devari-Core.
 |------|------------|
 | Reviewer rejeita 3+ vezes | **PAUSAR, consultar usuário.** Opções: (a) simplificar, (b) relaxar padrões, (c) revisar manualmente, (d) novo Implementer. |
 | Hook `validate-implementer-build.sh` retorna `decision: block` | Implementer NÃO retorna; corrige build/TS antes |
-| Hook `validate-review-score.sh` retorna exit 2 (APPROVED < 7.0) | Reviewer corrige decisão (REJECTED ou NEEDS_CHANGES) ou aumenta score (se justificado) |
+| Hook `validate-review-score.sh` retorna exit 2 (APPROVED < 8.5) | Reviewer corrige decisão (REJECTED ou NEEDS_CHANGES) ou aumenta score (se justificado) |
 | Strategist propõe tabela nova | Hook `enforce-canonical-tables.sh` bloqueia. Plano REJEITADO no Stop. |
 | Implementer sequestra DClasse canônica (-40, -45, -47, -49, -50) | Reviewer rejeita score < 5. Implementer corrige seed. |
 | Documenter falha no STATUS.md | Hook `validate-documentation.sh` exit 2. Documenter corrige. |
