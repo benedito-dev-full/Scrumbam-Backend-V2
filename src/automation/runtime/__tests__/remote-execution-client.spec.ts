@@ -1,4 +1,5 @@
 import { ServiceUnavailableException } from '@nestjs/common';
+import { RemoteAgentHttpError } from '../remote-agent-http.error';
 import { RemoteExecutionClient, RemoteExecutionRequest } from '../remote-execution-client';
 import { AgentKeyService } from '../../agents/agent-key.service';
 
@@ -156,6 +157,36 @@ describe('RemoteExecutionClient (V2 protocol)', () => {
     mockFetchError(503);
 
     await expect(client.execute(baseRequest())).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
+  it('ADR-V2-082: 409 {errorCode:PROJECT_BUSY} → RemoteAgentHttpError (status+errorCode) e instanceof ServiceUnavailableException', async () => {
+    const { client } = buildClient();
+    mockFetchError(409, { accepted: false, errorCode: 'PROJECT_BUSY', message: 'busy' });
+
+    const err = await client.execute(baseRequest()).catch((e) => e);
+
+    expect(err).toBeInstanceOf(RemoteAgentHttpError);
+    expect(err).toBeInstanceOf(ServiceUnavailableException);
+    expect((err as RemoteAgentHttpError).httpStatus).toBe(409);
+    expect((err as RemoteAgentHttpError).errorCode).toBe('PROJECT_BUSY');
+    expect((err as RemoteAgentHttpError).isProjectBusy()).toBe(true);
+  });
+
+  it('ADR-V2-082: HTTP != 200 com body não-JSON → RemoteAgentHttpError sem errorCode (não é busy)', async () => {
+    const { client } = buildClient();
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => {
+        throw new Error('not json');
+      },
+    }) as unknown as typeof global.fetch;
+
+    const err = await client.execute(baseRequest()).catch((e) => e);
+
+    expect(err).toBeInstanceOf(RemoteAgentHttpError);
+    expect((err as RemoteAgentHttpError).errorCode).toBeUndefined();
+    expect((err as RemoteAgentHttpError).isProjectBusy()).toBe(false);
   });
 
   it('lanca ServiceUnavailableException quando body !accepted', async () => {

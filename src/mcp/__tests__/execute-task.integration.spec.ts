@@ -136,7 +136,7 @@ describe('MCP execute_task — integration (stack completo com mocks de service)
     );
 
     // Sem erro JSON-RPC
-    expect((result as Record<string, unknown>).error).toBeUndefined();
+    expect((result as unknown as Record<string, unknown>).error).toBeUndefined();
 
     // Resultado presente
     const rpcResult = (result as { result: { content: Array<{ type: string; text: string }> } })
@@ -238,7 +238,7 @@ describe('MCP execute_task — integration (stack completo com mocks de service)
         },
       ],
       { userCtx: ctxWithoutScope } as never,
-    )) as Array<Record<string, unknown>>;
+    )) as unknown as Array<Record<string, unknown>>;
 
     // Dois resultados no batch
     expect(result).toHaveLength(2);

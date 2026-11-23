@@ -51,6 +51,8 @@ export class ApprovalFlowSweeperService {
             ),
             '{statusCode}', to_jsonb(${AUTOMATION_CLASS_IDS.EXEC_STATUS_EXPIRED.toString()}::text)
           ),
+          -- ADR-V2-082: EXPIRED é terminal → baixa canônica (libera activeExecution)
+          baixado = true,
           "atualizadoEm" = NOW()
       WHERE chave = ANY(${expiredIds}::bigint[])
         AND dados->'approval'->>'status' = 'awaiting_approval'

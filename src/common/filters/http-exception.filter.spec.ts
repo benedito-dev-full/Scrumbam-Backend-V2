@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   HttpException,
   HttpStatus,
   ServiceUnavailableException,
@@ -130,5 +131,54 @@ describe('HttpExceptionFilter', () => {
         correlationId: 'test-correlation-id',
       }),
     );
+  });
+
+  it('ADR-V2-082: repassa `details` (objeto) do 409 EXECUTION_IN_PROGRESS — frontend precisa do executionId', () => {
+    const exception = new ConflictException({
+      statusCode: 409,
+      code: 'EXECUTION_IN_PROGRESS',
+      error: 'Conflict',
+      message: 'Task 55 já tem uma execução em andamento (777).',
+      details: { reason: 'execution_in_progress', executionId: '777', status: 'running' },
+    });
+
+    filter.catch(exception, mockHost as never);
+
+    expect(mockResponse.status).toHaveBeenCalledWith(409);
+    expect(mockResponse.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        statusCode: 409,
+        code: 'EXECUTION_IN_PROGRESS',
+        details: { reason: 'execution_in_progress', executionId: '777', status: 'running' },
+      }),
+    );
+  });
+
+  it('ADR-V2-082: campos extras fora de `details` continuam descartados; `details` não-objeto é ignorado', () => {
+    const exception = new ConflictException({
+      message: 'x',
+      segredo: 'nao-vaza',
+      details: ['array-nao-e-objeto'],
+    });
+
+    filter.catch(exception, mockHost as never);
+
+    const body = mockResponse.json.mock.calls[0][0];
+    expect(body.segredo).toBeUndefined();
+    expect(body.details).toBeUndefined();
+  });
+
+  it('L5: `details` de código FORA da whitelist é descartado', () => {
+    const exception = new ConflictException({
+      code: 'OUTRO_CODE',
+      message: 'x',
+      details: { token: 'nao-vaza' },
+    });
+
+    filter.catch(exception, mockHost as never);
+
+    const body = mockResponse.json.mock.calls[0][0];
+    expect(body.code).toBe('OUTRO_CODE');
+    expect(body.details).toBeUndefined();
   });
 });

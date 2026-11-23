@@ -1,11 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import {
+  ConflictException,
   ForbiddenException,
   Logger,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { ExecutionsService } from '../executions.service';
+import { ExecutionsService, parseExecutionInProgressConflict } from '../executions.service';
 import { ExecuteCommandDto } from '../dto/execute-command.dto';
 
 beforeAll(() => {
@@ -85,6 +86,8 @@ function buildService(
     $queryRaw: jest.fn().mockResolvedValue([{ nextval: BigInt(1000001) }]),
     $transaction: jest.fn().mockImplementation(async (fn: (tx: any) => Promise<any>) =>
       fn({
+        // tx.$executeRaw: advisory lock por task (Ciclo 2 / M1)
+        $executeRaw: jest.fn().mockResolvedValue(1),
         dPedido: {
           create: jest.fn().mockResolvedValue({ chave: BigInt(1000001) }),
         },
@@ -155,6 +158,8 @@ function buildService(
     mockAgentTunnel as any,
     mockExecutionQueue as any,
     mockPromptBuilder as any,
+    // ProjectRefService (ADR-V2-058) — 9º parâmetro; drift corrigido na Task 2 (ADR-V2-082).
+    { resolveEntidadeRef: jest.fn().mockImplementation((id: bigint) => Promise.resolve(id)) } as any,
   );
 
   return {
@@ -294,3 +299,242 @@ describe('ExecutionsService.execute()', () => {
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Captura o `dados` gravado pelo Engine no INSERT (`tx.dPedido.create`).
+ */
+function captureInsert(mockPrisma: any): { dados: any } {
+  const captured: { dados: any } = { dados: null };
+  mockPrisma.$transaction.mockImplementation(async (fn: (tx: any) => Promise<any>) =>
+    fn({
+      // tx.$executeRaw: advisory lock por task (Ciclo 2 / M1)
+      $executeRaw: jest.fn().mockResolvedValue(1),
+      dPedido: {
+        create: jest.fn().mockImplementation(({ data }: any) => {
+          captured.dados = data?.dados ?? null;
+          return Promise.resolve({ chave: BigInt(1000001) });
+        }),
+      },
+    }),
+  );
+  return captured;
+}
+
+describe('ExecutionsService.execute() — ADR-V2-082 (timeout fonte única + anti-duplicata)', () => {
+  const persistedRow = {
+    chave: BigInt(1000001),
+    idClasse: BigInt(-301),
+    idPessoa: BigInt(42),
+    dados: {
+      approval: { status: 'queued' },
+      command: { text: 'x' },
+      audit: { projectId: '100', triggeredBy: '42', agentId: '100', correlationId: 't' },
+      risk: { level: 'LOW', matchedPatterns: [] },
+    },
+    criadoEm: new Date(),
+    atualizadoEm: new Date(),
+  };
+
+  it('grava dados.timeoutSec = clamp(command.timeoutMs/1000) no modo COMMAND', async () => {
+    const { service, mockPrisma } = buildService({ riskLevel: 'LOW' });
+    const captured = captureInsert(mockPrisma);
+    mockPrisma.dPedido.findFirst.mockResolvedValue(persistedRow);
+
+    await service.execute(
+      '100',
+      { command: { executable: 'npm', args: ['test'], timeoutMs: 600000 } },
+      '1',
+    );
+
+    expect(captured.dados.timeoutSec).toBe(600);
+  });
+
+  it('modo PROMPT: timeoutSec=1800 e placeholder timeoutMs coerente (1.800.000)', async () => {
+    const { service, mockPrisma, mockPromptBuilder } = buildService({ riskLevel: 'LOW' });
+    const captured = captureInsert(mockPrisma);
+    // 1ª leitura = guard anti-duplicata (nenhuma ativa); depois = releitura pós-grava.
+    mockPrisma.dPedido.findFirst.mockResolvedValueOnce(null).mockResolvedValue(persistedRow);
+
+    await service.execute('100', { taskId: '55' }, '1');
+
+    expect(mockPromptBuilder.buildFromTaskId).toHaveBeenCalled();
+    expect(captured.dados.timeoutSec).toBe(1800);
+    expect(captured.dados.command.timeoutMs).toBe(1800000);
+  });
+
+  it('task com execução RUNNING → 409 execution_in_progress ANTES de montar prompt/Engine', async () => {
+    const { service, mockPrisma, mockPromptBuilder } = buildService({ riskLevel: 'LOW' });
+    mockPrisma.dPedido.findFirst.mockResolvedValueOnce({
+      chave: BigInt(777),
+      dados: { task: { id: '55' }, statusCode: '-518' },
+    });
+
+    const err = await service.execute('100', { taskId: '55' }, '1').catch((e) => e);
+
+    expect(err).toBeInstanceOf(ConflictException);
+    expect((err as ConflictException).getResponse()).toEqual(
+      expect.objectContaining({
+        statusCode: 409,
+        code: 'EXECUTION_IN_PROGRESS',
+        details: { reason: 'execution_in_progress', executionId: '777', status: 'running' },
+      }),
+    );
+    expect(parseExecutionInProgressConflict(err)).toEqual({
+      executionId: '777',
+      status: 'running',
+    });
+    expect(mockPromptBuilder.buildFromTaskId).not.toHaveBeenCalled();
+    // Única transação = a do advisory lock (Ciclo 2 / M1); nenhum INSERT do Engine.
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.$transaction.mock.calls[0][1]).toEqual({ maxWait: 10000, timeout: 60000 });
+
+    // Query única, filtrando baixado=false + task.id + status não-terminal
+    const where = mockPrisma.dPedido.findFirst.mock.calls[0][0].where;
+    expect(where.baixado).toBe(false);
+    expect(where.AND[0]).toEqual({ dados: { path: ['task', 'id'], equals: '55' } });
+    expect(where.AND[1].OR).toHaveLength(4);
+  });
+
+  it.each([
+    ['-514', 'queued'],
+    ['-515', 'awaiting_approval'],
+    ['-516', 'queued'],
+  ])('statusCode %s também bloqueia (status=%s)', async (code, status) => {
+    const { service, mockPrisma } = buildService({ riskLevel: 'LOW' });
+    mockPrisma.dPedido.findFirst.mockResolvedValueOnce({
+      chave: BigInt(778),
+      dados: { task: { id: '55' }, statusCode: code },
+    });
+
+    const err = await service.execute('100', { taskId: '55' }, '1').catch((e) => e);
+    expect(parseExecutionInProgressConflict(err)).toEqual({ executionId: '778', status });
+  });
+
+  it('zumbi legado (baixado=false + statusCode terminal) NÃO bloqueia', async () => {
+    const { service, mockPrisma } = buildService({ riskLevel: 'LOW' });
+    const captured = captureInsert(mockPrisma);
+    mockPrisma.dPedido.findFirst
+      .mockResolvedValueOnce({ chave: BigInt(700), dados: { task: { id: '55' }, statusCode: '-519' } })
+      .mockResolvedValue(persistedRow);
+
+    await expect(service.execute('100', { taskId: '55' }, '1')).resolves.toBeDefined();
+    // Nova execução criada (INSERT via Engine). Obs.: o nível final pode subir
+    // para MEDIUM pela guarda da ADR-V2-081 (mock sem scannedSources) — irrelevante aqui.
+    expect(mockPrisma.$transaction).toHaveBeenCalled();
+    expect(captured.dados.task).toEqual({ id: '55' });
+  });
+
+  it('modo COMMAND sem taskId não consulta trava de duplicata', async () => {
+    const { service, mockPrisma } = buildService({ riskLevel: 'LOW' });
+    mockPrisma.dPedido.findFirst.mockResolvedValue(persistedRow);
+
+    await service.execute('100', { command: { executable: 'npm', args: ['test'] } }, '1');
+
+    const guardCalls = mockPrisma.dPedido.findFirst.mock.calls.filter(
+      (c: any[]) => c[0]?.where?.baixado === false,
+    );
+    expect(guardCalls).toHaveLength(0);
+  });
+});
+
+describe('ExecutionsService.execute() — Ciclo 2 / M1 (advisory lock por task)', () => {
+  const row = (chave: number, taskId: string) => ({
+    chave: BigInt(chave),
+    idClasse: BigInt(-301),
+    idPessoa: BigInt(42),
+    dados: {
+      task: { id: taskId },
+      statusCode: '-514',
+      approval: { status: 'queued' },
+      command: { text: 'x' },
+      audit: { projectId: '100', triggeredBy: '42', agentId: '100', correlationId: 't' },
+      risk: { level: 'LOW', matchedPatterns: [] },
+    },
+    criadoEm: new Date(),
+    atualizadoEm: new Date(),
+  });
+
+  it('com taskId: adquire pg_advisory_xact_lock(exec-task:<id>) ANTES da trava anti-duplicata', async () => {
+    const { service, mockPrisma } = buildService({ riskLevel: 'LOW' });
+    const order: string[] = [];
+    const lockExec = jest.fn().mockImplementation(async () => {
+      order.push('lock');
+      return 1;
+    });
+    mockPrisma.$transaction.mockImplementation(async (fn: any, opts?: unknown) =>
+      fn(
+        opts
+          ? { $executeRaw: lockExec }
+          : { dPedido: { create: jest.fn().mockResolvedValue({ chave: BigInt(1) }) } },
+      ),
+    );
+    mockPrisma.dPedido.findFirst.mockImplementation(async ({ where }: any) => {
+      if (where?.baixado === false) order.push('guard');
+      return where?.baixado === false ? null : row(1000001, '55');
+    });
+
+    await service.execute('100', { taskId: '55' }, '1');
+
+    const [strings, key] = lockExec.mock.calls[0];
+    expect((strings as string[]).join('?')).toContain('pg_advisory_xact_lock(hashtext(');
+    expect(key).toBe('exec-task:55');
+    expect(order.slice(0, 2)).toEqual(['lock', 'guard']);
+  });
+
+  it('modo COMMAND sem taskId não abre transação de lock', async () => {
+    const { service, mockPrisma } = buildService({ riskLevel: 'LOW' });
+    mockPrisma.dPedido.findFirst.mockResolvedValue(row(1000001, '55'));
+
+    await service.execute('100', { command: { executable: 'npm', args: ['test'] } }, '1');
+
+    const lockCalls = mockPrisma.$transaction.mock.calls.filter((c: any[]) => c[1] !== undefined);
+    expect(lockCalls).toHaveLength(0);
+  });
+
+  it('2 requests SIMULTÂNEOS da mesma task: lock serializa → o 2º recebe 409 (sem write skew)', async () => {
+    const { service, mockPrisma } = buildService({ riskLevel: 'LOW' });
+    const db: any[] = [];
+    let chain: Promise<unknown> = Promise.resolve();
+    let nextKey = 2000;
+
+    // Lock fake: transações com `opts` (advisory lock) rodam em fila; as do
+    // Engine (INSERT) commitam na hora, como no Postgres.
+    mockPrisma.$transaction.mockImplementation((fn: any, opts?: unknown) => {
+      if (opts) {
+        const run = chain.then(() => fn({ $executeRaw: jest.fn().mockResolvedValue(1) }));
+        chain = run.catch(() => undefined);
+        return run;
+      }
+      return fn({
+        dPedido: {
+          create: jest.fn().mockImplementation(async ({ data }: any) => {
+            const chave = BigInt(nextKey++);
+            db.push({ ...row(Number(chave), '55'), chave, dados: data.dados });
+            return { chave };
+          }),
+        },
+      });
+    });
+    mockPrisma.$queryRaw.mockImplementation(async () => [{ nextval: BigInt(nextKey) }]);
+    mockPrisma.dPedido.findFirst.mockImplementation(async ({ where }: any) => {
+      if (where?.baixado === false) {
+        // Engine grava statusCode -514/-515: ambos não-terminais
+        return db.find((r) => r.dados?.task?.id === '55') ?? null;
+      }
+      return db[db.length - 1] ?? null;
+    });
+
+    const results = await Promise.allSettled([
+      service.execute('100', { taskId: '55' }, '1'),
+      service.execute('100', { taskId: '55' }, '1'),
+    ]);
+
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(parseExecutionInProgressConflict(rejected[0].reason)).not.toBeNull();
+    expect(db).toHaveLength(1);
+  });
+});
+

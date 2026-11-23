@@ -1,7 +1,10 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 
 import { EntidadeService } from '../../entidades/entidades.service';
-import { ExecutionsService } from '../../executions/executions.service';
+import {
+  ExecutionsService,
+  parseExecutionInProgressConflict,
+} from '../../executions/executions.service';
 import { ProjectsService } from '../../projects/projects.service';
 import { TasksService } from '../../tasks/tasks.service';
 import { MCP_ERROR_CODES, MCP_SCOPES } from '../constants';
@@ -130,6 +133,8 @@ export class ExecuteTaskTool implements McpTool {
    * @throws {McpToolError} INVALID_PARAMS com `reason='risk_gate_blocked'` se
    *   o `CommandValidatorService` rejeitar o command estruturado (defesa em
    *   profundidade — em modo PROMPT o placeholder é seguro por construção)
+   * @throws {McpToolError} INVALID_PARAMS com `reason='execution_in_progress'`
+   *   (+ `executionId`, `status`) quando a task já tem execução não-terminal (ADR-V2-082)
    * @throws {NotFoundException} Propagado quando task/projeto fora do tenant
    *   ou inexistente (ADR-V2-042)
    * @throws {ForbiddenException} Propagado quando usuário não tem membership
@@ -191,6 +196,16 @@ export class ExecuteTaskTool implements McpTool {
           'e exige POST /executions/:id/approve fora do MCP.',
       });
     } catch (err) {
+      // ADR-V2-082: task já tem execução não-terminal → INVALID_PARAMS com
+      // reason='execution_in_progress' (precedente `task_locked`, ADR-V2-073).
+      const conflict = parseExecutionInProgressConflict(err);
+      if (conflict) {
+        throw new McpToolError(MCP_ERROR_CODES.INVALID_PARAMS, 'Task already has an execution in progress', {
+          reason: 'execution_in_progress',
+          executionId: conflict.executionId,
+          status: conflict.status,
+        });
+      }
       // Defesa em profundidade (ADR-V2-066): o CommandValidator pode rejeitar
       // o command estruturado (placeholder do modo PROMPT é seguro por construção,
       // mas evolução do contrato pode ativar este caminho). Mapeia para INVALID_PARAMS

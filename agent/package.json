@@ -1,6 +1,6 @@
 {
   "name": "scrumban-agent",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Scrumban Agent V2 — binário cliente para VPS (executor passivo de Claude Code via HTTP+HMAC). Lado cliente da F13 (Automation Claude Code).",
   "private": true,
   "license": "UNLICENSED",

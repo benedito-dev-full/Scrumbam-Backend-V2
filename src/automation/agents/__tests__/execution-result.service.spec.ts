@@ -7,6 +7,8 @@ import { AgentInstallTokenService } from '../agent-install-token.service';
 import { AgentKeyService } from '../agent-key.service';
 import { AgentPortAllocatorService } from '../agent-port-allocator.service';
 import { ExecutionResultDto } from '../dto/execution-result.dto';
+import { Prisma } from '@prisma/client';
+import { TasksService } from '../../../tasks/tasks.service';
 
 /**
  * Cobertura mínima exigida pelo plan §3 Sub-tarefa 2.4 + §5 riscos #6/#7:
@@ -62,23 +64,40 @@ describe('AgentsService.recordExecutionResult', () => {
   function buildService(
     opts: {
       findFirstResult?: unknown;
-      updateMock?: jest.Mock;
+      /** Linhas devolvidas pela CAS do Engine (default: aplicou, sem supersede). */
+      casRows?: unknown[];
+      taskStatus?: string;
+      /** `dados.v3.movedBy` da task (marcador da falha sintética — Ciclo 2 / M2). */
+      taskMovedBy?: string | null;
     } = {},
   ) {
-    const updateMock = opts.updateMock ?? jest.fn().mockResolvedValue({});
     const findFirstMock = jest.fn().mockResolvedValue(opts.findFirstResult ?? null);
+    // ADR-V2-082: registrarOutcome grava via UPDATE … RETURNING com CAS ($queryRaw),
+    // não mais via dPedido.update incondicional.
+    const casMock = jest
+      .fn()
+      .mockResolvedValue(opts.casRows ?? [{ chave: BigInt(4815), supersedes: null }]);
+    const updateMock = jest.fn().mockResolvedValue({});
     // Mock DvfsLoaderHelper para o Engine — registrarOutcome chama _carregaScriptsGrav
     // que faz prisma.dVFS.findFirst (case sensitive — model é DVFS no Prisma client)
     const dvfsFindFirstMock = jest.fn().mockResolvedValue(null);
     const prisma = {
       dPedido: { findFirst: findFirstMock, update: updateMock },
       dVFS: { findFirst: dvfsFindFirstMock },
+      $queryRaw: casMock,
     } as unknown as PrismaService;
     const eventProducer = {
       addInternalEvent: jest.fn().mockResolvedValue(undefined),
     };
     const correlationIdService = {
       getOrGenerate: jest.fn().mockReturnValue(CORRELATION_ID),
+    };
+    const tasksService = {
+      updateStatus: jest.fn().mockResolvedValue({}),
+      findOne: jest.fn().mockResolvedValue({
+        status: opts.taskStatus ?? 'EXECUTING',
+        dados: { v3: { movedBy: opts.taskMovedBy ?? null } },
+      }),
     };
     const service = new AgentsService(
       prisma,
@@ -88,17 +107,27 @@ describe('AgentsService.recordExecutionResult', () => {
       eventProducer as unknown as EventProducerService,
       correlationIdService as unknown as CorrelationIdService,
       {} as unknown as import('../../../auth/services/role-resolver.service').RoleResolverService,
+      // TasksService — 8º parâmetro (drift corrigido na Task 2 / ADR-V2-082)
+      tasksService as unknown as TasksService,
     );
-    return { service, findFirstMock, updateMock, eventProducer };
+    return { service, findFirstMock, updateMock, casMock, eventProducer, tasksService };
+  }
+
+  /** Extrai o `dados` (JSON) enviado à CAS do Engine. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- JSON livre de DPedido.dados
+  function casDados(casMock: jest.Mock): Record<string, any> {
+    const sql = casMock.mock.calls[0][0] as Prisma.Sql;
+    const json = sql.values.find((v) => typeof v === 'string' && v.startsWith('{')) as string;
+    return JSON.parse(json);
   }
 
   describe('Cenário 1: Payload válido persiste e retorna accepted=true', () => {
     it('persiste outcome via Engine.registrarOutcome e emite eventos', async () => {
-      const { service, updateMock, eventProducer } = buildService({
+      const { service, updateMock, casMock, eventProducer, tasksService } = buildService({
         findFirstResult: {
           chave: BigInt(baseDtoValid.executionId),
           idClasse: BigInt(-301),
-          dados: buildDadosExecucao(),
+          dados: buildDadosExecucao({ task: { id: '55' } }),
         },
       });
 
@@ -111,11 +140,21 @@ describe('AgentsService.recordExecutionResult', () => {
       expect(result.accepted).toBe(true);
       expect(result.alreadyPersisted).toBeUndefined();
       expect(result.persistedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-      // Pilar 1: o UPDATE foi feito via Engine (mockado), não diretamente pelo service.
-      expect(updateMock).toHaveBeenCalled();
-      const updateCall = updateMock.mock.calls[0][0];
-      expect(updateCall.where).toEqual({ chave: BigInt(baseDtoValid.executionId) });
-      const persistedDados = updateCall.data.dados;
+      // Pilar 1: o UPDATE foi feito via Engine (CAS), não diretamente pelo service.
+      expect(updateMock).not.toHaveBeenCalled();
+      expect(casMock).toHaveBeenCalledTimes(1);
+      const casSql = (casMock.mock.calls[0][0] as Prisma.Sql).sql;
+      // ADR-V2-082: CAS (sem outcome OU outcome sintético) + baixa canônica
+      expect(casSql).toContain('baixado = true');
+      expect(casSql).toContain("dados->'audit'->'outcome' IS NULL");
+      expect(casSql).toContain("dados->'audit'->'outcome'->>'source' = 'system'");
+      expect((casMock.mock.calls[0][0] as Prisma.Sql).values).toContain(
+        BigInt(baseDtoValid.executionId),
+      );
+      const persistedDados = casDados(casMock);
+      expect(persistedDados.audit.outcome.source).toBe('agent');
+      expect(persistedDados.statusCode).toBe('-519');
+      expect(tasksService.updateStatus).toHaveBeenCalledWith('55', { status: 'DONE' });
       expect(persistedDados.claude.sessionId).toBe(baseDtoValid.claudeSessionId);
       expect(persistedDados.claude.sessionPath).toBe(baseDtoValid.claudeSessionPath);
       expect(persistedDados.claude.exitCode).toBe(0);
@@ -190,7 +229,7 @@ describe('AgentsService.recordExecutionResult', () => {
   describe('Cenário 5: Idempotência — mesmo executionId 2× retorna alreadyPersisted=true', () => {
     it('detecta outcome já persistido e retorna NO-OP', async () => {
       const previousPersistedAt = '2026-05-12T10:00:00.000Z';
-      const { service, updateMock, eventProducer } = buildService({
+      const { service, updateMock, casMock, eventProducer } = buildService({
         findFirstResult: {
           chave: BigInt(baseDtoValid.executionId),
           idClasse: BigInt(-301),
@@ -213,6 +252,7 @@ describe('AgentsService.recordExecutionResult', () => {
       expect(result.alreadyPersisted).toBe(true);
       expect(result.persistedAt).toBe(previousPersistedAt);
       expect(updateMock).not.toHaveBeenCalled();
+      expect(casMock).not.toHaveBeenCalled();
       expect(eventProducer.addInternalEvent).not.toHaveBeenCalled();
     });
   });
@@ -359,6 +399,153 @@ describe('AgentsService.recordExecutionResult', () => {
           dto: baseDtoValid,
         }),
       ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+  });
+
+  describe('ADR-V2-082: CAS do desfecho + supersede do FAILED sintético', () => {
+    const syntheticAudit = {
+      correlationId: CORRELATION_ID,
+      triggeredBy: 'user-1',
+      agentId: AGENT_ID,
+      projectId: PROJECT_ID,
+      errorCode: 'TIMEOUT_NO_CALLBACK',
+      outcome: {
+        success: false,
+        source: 'system',
+        reason: 'TIMEOUT_NO_CALLBACK',
+        recordedAt: '2026-11-23T10:00:00.000Z',
+      },
+    };
+
+    it('CAS retorna 0 linhas (outro callback venceu) → alreadyPersisted, sem eventos, sem task', async () => {
+      const { service, eventProducer, tasksService } = buildService({
+        findFirstResult: {
+          chave: BigInt(baseDtoValid.executionId),
+          idClasse: BigInt(-301),
+          dados: buildDadosExecucao({ task: { id: '55' } }),
+        },
+        casRows: [],
+      });
+
+      const result = await service.recordExecutionResult({
+        agentId: AGENT_ID,
+        agentEntity: authenticatedAgent,
+        dto: baseDtoValid,
+      });
+
+      expect(result.alreadyPersisted).toBe(true);
+      expect(eventProducer.addInternalEvent).not.toHaveBeenCalled();
+      expect(tasksService.updateStatus).not.toHaveBeenCalled();
+    });
+
+    it('outcome sintético (source=system) NÃO é fast-path: callback aplica, payload ganha supersedes, task FAILED→DONE', async () => {
+      const supersedes = { reason: 'TIMEOUT_NO_CALLBACK', recordedAt: '2026-11-23T10:00:00.000Z' };
+      const { service, casMock, eventProducer, tasksService } = buildService({
+        findFirstResult: {
+          chave: BigInt(baseDtoValid.executionId),
+          idClasse: BigInt(-301),
+          dados: buildDadosExecucao({ task: { id: '55' }, audit: syntheticAudit }),
+        },
+        casRows: [{ chave: BigInt(4815), supersedes }],
+        taskStatus: 'FAILED',
+        taskMovedBy: 'system:execution-4815', // FAILED veio da falha sintética DESTA execução
+      });
+
+      const result = await service.recordExecutionResult({
+        agentId: AGENT_ID,
+        agentEntity: authenticatedAgent,
+        dto: baseDtoValid,
+      });
+
+      expect(result.alreadyPersisted).toBeUndefined();
+      expect(casMock).toHaveBeenCalledTimes(1);
+      // errorCode do desfecho sintético não sobrevive ao resultado real
+      expect(casDados(casMock).audit.errorCode).toBeUndefined();
+      expect(eventProducer.addInternalEvent).toHaveBeenCalledWith(
+        'agent.execution.finished',
+        expect.objectContaining({ executionId: '4815', supersedes }),
+        CORRELATION_ID,
+        expect.any(Object),
+      );
+      expect(tasksService.updateStatus).toHaveBeenCalledWith('55', { status: 'DONE' });
+    });
+
+    it('supersede com task já movida por humano (READY) → não promove a DONE', async () => {
+      const { service, tasksService } = buildService({
+        findFirstResult: {
+          chave: BigInt(baseDtoValid.executionId),
+          idClasse: BigInt(-301),
+          dados: buildDadosExecucao({ task: { id: '55' }, audit: syntheticAudit }),
+        },
+        casRows: [{ chave: BigInt(4815), supersedes: { reason: 'TIMEOUT_NO_CALLBACK' } }],
+        taskStatus: 'READY',
+      });
+
+      await service.recordExecutionResult({
+        agentId: AGENT_ID,
+        agentEntity: authenticatedAgent,
+        dto: baseDtoValid,
+      });
+
+      expect(tasksService.updateStatus).not.toHaveBeenCalled();
+    });
+
+    it('supersede com falha real → task segue FAILED (no-op)', async () => {
+      const { service, tasksService } = buildService({
+        findFirstResult: {
+          chave: BigInt(baseDtoValid.executionId),
+          idClasse: BigInt(-301),
+          dados: buildDadosExecucao({ task: { id: '55' }, audit: syntheticAudit }),
+        },
+        casRows: [{ chave: BigInt(4815), supersedes: { reason: 'TIMEOUT_NO_CALLBACK' } }],
+        taskStatus: 'FAILED',
+      });
+
+      await service.recordExecutionResult({
+        agentId: AGENT_ID,
+        agentEntity: authenticatedAgent,
+        dto: { ...baseDtoValid, success: false, exitCode: 1 },
+      });
+
+      expect(tasksService.updateStatus).not.toHaveBeenCalled();
+      expect(tasksService.findOne).not.toHaveBeenCalled();
+    });
+
+    it('M2: supersede com task ainda EXECUTING (sweeper não liberou) → promove a DONE', async () => {
+      const { service, tasksService } = buildService({
+        findFirstResult: {
+          chave: BigInt(baseDtoValid.executionId),
+          idClasse: BigInt(-301),
+          dados: buildDadosExecucao({ task: { id: '55' }, audit: syntheticAudit }),
+        },
+        casRows: [{ chave: BigInt(4815), supersedes: { reason: 'TIMEOUT_NO_CALLBACK' } }],
+        taskStatus: 'EXECUTING',
+      });
+
+      await service.recordExecutionResult({ agentId: AGENT_ID, agentEntity: authenticatedAgent, dto: baseDtoValid });
+
+      expect(tasksService.updateStatus).toHaveBeenCalledWith('55', { status: 'DONE' });
+    });
+
+    it.each([
+      ['FAILED manual do usuário', '42'],
+      ['FAILED sem movedBy', null],
+      ['FAILED de OUTRA execução (L7)', 'system:execution-9999'],
+    ])('M2/L7: supersede NÃO promove %s', async (_label, movedBy) => {
+      const { service, tasksService } = buildService({
+        findFirstResult: {
+          chave: BigInt(baseDtoValid.executionId),
+          idClasse: BigInt(-301),
+          dados: buildDadosExecucao({ task: { id: '55' }, audit: syntheticAudit }),
+        },
+        casRows: [{ chave: BigInt(4815), supersedes: { reason: 'TIMEOUT_NO_CALLBACK' } }],
+        taskStatus: 'FAILED',
+        taskMovedBy: movedBy,
+      });
+
+      await service.recordExecutionResult({ agentId: AGENT_ID, agentEntity: authenticatedAgent, dto: baseDtoValid });
+
+      expect(tasksService.updateStatus).not.toHaveBeenCalled();
     });
   });
 });

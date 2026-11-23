@@ -12,8 +12,12 @@ import { TaskTimerSessionDto, TaskTimerStateDto } from './task-timer-response.dt
  * quando o usuário clica explicitamente em "Executar" — portanto
  * `activeExecution !== null` é o sinal canônico de "lock".
  *
- * Volta a `null` quando o agente conclui (`baixado=true`) ou quando a
- * execução é rejeitada/expirada (também `baixado=true`).
+ * Volta a `null` quando a execução chega a QUALQUER estado terminal — todos
+ * gravam `baixado=true` desde a ADR-V2-082: SUCCESS/FAILED (callback do agente,
+ * `OperacaoExecucaoClaude.registrarOutcome`), FAILED sintético (sweeper de
+ * RUNNING, falha de dispatch, 409 PROJECT_BUSY esgotado, duplicata), REJECTED
+ * (`ApprovalFlowService.reject`) e EXPIRED (`ApprovalFlowSweeperService`).
+ * Antes da ADR-V2-082 nenhum caminho gravava a baixa (lock "zumbi").
  *
  * @see OperacaoExecucaoClaude (Pilar 1 — DPedido idClasse=-301/-302/-303)
  * @see ADR-V2-005 (Engine Pilar 1 ATIVADO)
@@ -28,9 +32,10 @@ export class ActiveExecutionDto {
 
   @ApiProperty({
     description:
-      'Estado simplificado derivado de aprovado/baixado do DPedido: ' +
-      '`awaiting_approval` (aprovado=false), `running` (aprovado=true, baixado=false). ' +
-      'Quando `baixado=true`, a execução deixa de aparecer (o campo activeExecution vira null).',
+      'Estado simplificado derivado de `dados.approval.status` do DPedido: ' +
+      '`queued` (LOW aguardando o agente), `awaiting_approval` (MEDIUM/HIGH aguardando humano), ' +
+      '`running` (aprovado/rodando). Fallback legado: campo `aprovado`. ' +
+      'Estados terminais gravam `baixado=true` e a execução deixa de aparecer (activeExecution=null).',
     enum: ['queued', 'running', 'awaiting_approval'],
     example: 'running',
   })

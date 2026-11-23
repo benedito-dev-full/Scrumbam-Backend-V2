@@ -104,6 +104,8 @@ function buildService(opts: { riskScript?: string; prompt?: string; taskName?: s
     $queryRaw: jest.fn().mockResolvedValue([{ nextval: BigInt(1000001) }]),
     $transaction: jest.fn().mockImplementation(async (fn: (tx: any) => Promise<any>) =>
       fn({
+        // tx.$executeRaw: advisory lock por task (Ciclo 2 / M1)
+        $executeRaw: jest.fn().mockResolvedValue(1),
         dPedido: {
           create: jest.fn().mockImplementation(({ data }: any) => {
             persisted.dados = data?.dados ?? null;
@@ -313,6 +315,8 @@ describe('ExecutionsService — modo PROMPT (ADR-V2-049)', () => {
       $queryRaw: jest.fn().mockResolvedValue([{ nextval: BigInt(1000001) }]),
       $transaction: jest.fn().mockImplementation(async (fn: (tx: any) => Promise<any>) =>
         fn({
+          // tx.$executeRaw: advisory lock por task (Ciclo 2 / M1)
+          $executeRaw: jest.fn().mockResolvedValue(1),
           dPedido: {
             create: jest.fn().mockImplementation(({ data }: any) => {
               persisted.dados = data?.dados ?? null;

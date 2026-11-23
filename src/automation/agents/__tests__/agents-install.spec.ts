@@ -46,6 +46,8 @@ describe('AgentsService install', () => {
       eventProducer as unknown as EventProducerService,
       { getOrGenerate: jest.fn().mockReturnValue('corr') } as unknown as CorrelationIdService,
       {} as unknown as import('../../../auth/services/role-resolver.service').RoleResolverService,
+      // TasksService — 8º parâmetro (drift corrigido na Task 2 / ADR-V2-082)
+      {} as unknown as import('../../../tasks/tasks.service').TasksService,
     );
 
     const result = await service.install({
@@ -132,6 +134,8 @@ describe('AgentsService install', () => {
       eventProducer as unknown as EventProducerService,
       { getOrGenerate: jest.fn().mockReturnValue('corr') } as unknown as CorrelationIdService,
       {} as unknown as import('../../../auth/services/role-resolver.service').RoleResolverService,
+      // TasksService — 8º parâmetro (drift corrigido na Task 2 / ADR-V2-082)
+      {} as unknown as import('../../../tasks/tasks.service').TasksService,
     );
 
     const result = await service.install({

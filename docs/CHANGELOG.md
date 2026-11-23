@@ -12,6 +12,23 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Fixed
+
+- **Execuções presas em RUNNING / ciclo de vida terminal (ADR-V2-082, Task 2, V2 F13/F6)**
+  - **Problema:** execuções ficavam em `-518 RUNNING` para sempre quando o callback não chegava; `baixado` nunca era gravado (lock "zumbi" em `activeExecution`); 409 `PROJECT_BUSY` virava FAILED imediato; nada impedia duas execuções simultâneas da mesma task; `markRunning` podia sobrescrever desfecho; agente só mandava SIGTERM no timeout
+  - **Timeout fonte única:** `DPedido.dados.timeoutSec` gravado uma vez na criação (clamp 30–3600 s; PROMPT = 1800 s)
+  - **Sweeper 1/min** (`ExecutionRunningSweeperService`): fecha RUNNING vencidas (`startedAt + timeoutSec + 300s`) como `TIMEOUT_NO_CALLBACK`, ou `AGENT_RESTARTED` por heartbeat (`lastSeen − uptime`); QUEUED/APPROVED órfãs após 900 s viram `QUEUE_STALE`. `UPDATE … FROM (… FOR UPDATE SKIP LOCKED) RETURNING`, seguro com N réplicas
+  - **Desfecho com `source`:** `audit.outcome.source = 'agent' | 'system'`; callback real substitui um desfecho sintético uma única vez (P1), com `supersedes`; baixa (`baixado=true`) no mesmo UPDATE em todo terminal (SUCCESS, FAILED, REJECTED, EXPIRED)
+  - **409 PROJECT_BUSY:** `RemoteAgentHttpError` preserva `httpStatus`/`errorCode`; execução volta a QUEUED com backoff 30 s·2ⁿ⁻¹ (teto 300 s), até 10 tentativas, depois FAILED `PROJECT_BUSY_EXHAUSTED`
+  - **Anti-duplicata:** `execute` recusa task com execução não-terminal (409 `EXECUTION_IN_PROGRESS`, `details.reason=execution_in_progress`); MCP/Nexus mapeiam para erro de parâmetro; serialização por task com `pg_advisory_xact_lock(hashtext('exec-task:<taskId>'))` na criação e no `markRunning`
+  - **Agente 0.1.1 (`agent/`):** SIGKILL após 15 s de grace quando o SIGTERM do timeout é ignorado (libera o mutex do projeto)
+  - **Backfill P3:** `prisma/scripts/backfill-execution-baixado.ts` (dry-run padrão; `--apply`; `--close-stale-running` com o mesmo critério de deadline; `--release-tasks`; `--revert <snapshot>`). Sem eventos. Snapshot `backfill-execution-baixado.<ts>.json` fica fora do git (`.gitignore`)
+  - **Pilares:** P1 — desfecho terminal via `OperacaoExecucaoClaude` (desvio: `markRunning` raw no processor, sinalizado); P2 — sem controller novo; P3 — zero DClasse nova, zero tabela, zero migration
+  - **Tests:** backend jest relevante 716/717 (1 falha de tempo da Task 1, `risk-gate-natural-language` `ms < 50`, flaky sob carga, conhecida); agent 222/222; TypeScript 78 → 67 erros (baseline, 0 nos arquivos tocados)
+  - **Pendências:** validar SQL em Postgres de staging (L11); smoke na VPS; frontend F-1 (tratar 409 `EXECUTION_IN_PROGRESS`) obrigatório no mesmo release; follow-ups L6, L8, L9, L10 e `markRunning` fora do Engine (ADR-V2-082)
+  - **Deploy:** runbook em `docs/automation-security-runbook.md` (seção ADR-V2-082)
+  - **ADRs:** ADR-V2-082 (Aceito), ADR-V2-005, ADR-V2-006, ADR-V2-008, ADR-V2-033, ADR-V2-036, ADR-V2-073, ADR-V2-079, ADR-V2-081
+
 ### Security
 
 - **Risk Gate avalia o prompt no modo PROMPT (ADR-V2-081, Task 1, V2 F13)**

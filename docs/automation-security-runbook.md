@@ -95,3 +95,84 @@ até ele ser reaplicado, a guarda de contrato do Engine eleva toda execução em
 
 Chave de emergência: `RISK_GATE_PROMPT_FLOOR=MEDIUM` (ou `HIGH`) força todo modo PROMPT a exigir aprovação
 (`POST /executions/:id/approve`). Default desligado. Exige restart para valer.
+
+## Ciclo de vida terminal de execuções — deploy conjunto (ADR-V2-082, Task 2)
+
+> **Estado:** runbook pronto. Execução é do CEO/ops. **Smoke na VPS pendente.**
+> **Obrigatório no mesmo release:** frontend F-1 (tratar 409 `EXECUTION_IN_PROGRESS`). Sem ele, clique duplo em "Executar" mostra erro cru.
+
+### Ordem
+
+```
+ 1. pg_dump -t '"DPedido"'                                   backup (antes de tudo)
+ 2. backfill --dry-run                                       revisar contagens
+ 3. backfill --apply --close-stale-running [--release-tasks] silencioso, ANTES do backend novo
+ 4. seed DVFS (Task 1) + conferir md5                        ADR-V2-081
+ 5. RISK_GATE_PROMPT_FLOOR=MEDIUM                            até medir falso positivo (Task 1)
+ 6. deploy backend                                           sweeper começa a rodar 1/min
+ 7. deploy frontend (F-1 obrigatório)
+ 8. bundle do agente 0.1.1 (SIGKILL) na VPS                  encaixa no fluxo da Task 3
+ 9. smoke na VPS real
+```
+
+### Passo a passo
+
+**1. Backup**
+
+```bash
+pg_dump "$DATABASE_URL" -t '"DPedido"' -Fc -f dpedido-pre-adr082.dump
+```
+
+**2. Backfill em dry-run (não grava nada)**
+
+```bash
+npx ts-node prisma/scripts/backfill-execution-baixado.ts --dry-run
+```
+
+Conferir: contagem de terminais com `baixado=false`, RUNNING vencidas (critério do sweeper) e tasks EXECUTING afetadas.
+
+**3. Backfill em apply (grava snapshot antes)**
+
+```bash
+npx ts-node prisma/scripts/backfill-execution-baixado.ts --apply --close-stale-running
+# com --release-tasks só depois de revisar a lista de tasks EXECUTING no dry-run
+```
+
+- Grava `backfill-execution-baixado.<timestamp>.json` (contém `dados` completos, incluindo stdout/prompt): guardar com permissão 600 e fora do repositório. Não é versionado (`.gitignore`).
+- Sem eventos (`execution.failed`, notificação, webhook). Tasks liberadas emitem só os eventos normais de status.
+- Rollback: `npx ts-node prisma/scripts/backfill-execution-baixado.ts --revert <snapshot.json>` (só reverte linhas que ainda estão no estado gravado pelo backfill).
+
+**4. Seed DVFS e 5. piso do Risk Gate**
+
+Seguir o runbook do ADR-V2-081 (seção "Risk Gate v2" acima). Conferir md5 do seed DVFS antes de subir o backend.
+
+**6. Deploy do backend**
+
+Confirmar nos logs que o sweeper iniciou (1 ciclo por minuto) e que não houve rajada de `execution.failed` no primeiro ciclo.
+
+**7. Deploy do frontend (F-1)**
+
+Repo `scrumban/frontend`. Validar: 409 `EXECUTION_IN_PROGRESS` vira "Já existe uma execução em andamento" com retomada do polling da execução existente.
+
+**8. Agente 0.1.1 na VPS**
+
+Bundle com SIGKILL (grace de 15 s). Sem ele, o backend continua funcionando (cobre o agente antigo), mas um `claude` que ignora SIGTERM segura o mutex do projeto até o restart.
+
+**9. Smoke na VPS real (pendente)**
+
+- Execução normal: `started` → `finished`, `baixado=true` no terminal
+- Clique duplo em "Executar": segunda chamada recebe 409 `EXECUTION_IN_PROGRESS`
+- REJECTED / EXPIRED: `baixado=true`, lock liberado
+- RUNNING forçada sem callback: fechada como `TIMEOUT_NO_CALLBACK` após `timeoutSec + 300 s`
+
+### Rollback geral
+
+1. Reverter backend e frontend para o release anterior.
+2. Backfill: `--revert <snapshot>`.
+3. Restaurar `DPedido` do dump só se o revert não bastar (último recurso).
+
+### Pendências conhecidas
+
+- L11: validar SQL (advisory lock e ramo `QUEUE_STALE`) em Postgres de staging antes do deploy.
+- Follow-ups de ADR-V2-082: L6 (SIGKILL no process group), L8 (pool sob rajada), L9 (`movedBy` forjável), L10 (ordem `started`/`finished`), `markRunning` fora do Engine.
+- Task 3 (fluxo de agentes na VPS) ainda não planejada: se mudar `/v1/execute` ou o handler do agente, reavaliar esta sequência (R11 do plano).

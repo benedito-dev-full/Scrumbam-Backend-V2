@@ -500,3 +500,10 @@ export class [Nome]Dto {
   - Scope `tasks` é padrão (não `executions` ou outro genérico — reside em tasks/)
   - Priority DTabela escopada por projeto = chaves runtime únicas por projeto (importante para multi-tenant)
   - ADR-V2-034 precedente para future custom priorities (sem código novo)
+
+## Task 2 — execuções presas (ADR-V2-082) — 2026-11-23
+- ADR-V2-082 Aceito (8.9/10); follow-ups L6, L8, L9, L10, L11 e markRunning fora do Engine ficam no ADR.
+- Runbook de deploy conjunto em `docs/automation-security-runbook.md` (seção ADR-V2-082): backup → backfill dry-run → apply → seed DVFS → backend → frontend (F-1 obrigatório) → agente 0.1.1 → smoke VPS pendente.
+- `workspace/` está em `.gitignore`: artefatos da task entram no commit com `git add -f` (somente os da task).
+- Snapshot `backfill-execution-baixado.*.json` ignorado em `.gitignore` (contém dados completos); nunca versionar.
+- Hook `validate-documentation.sh` exige `Task N` com ✅/COMPLETA no ROADMAP e COMPLETE no STATUS; checar antes do Stop.

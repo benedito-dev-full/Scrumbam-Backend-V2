@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -19,15 +20,70 @@ import { ExecutionQueueService } from './queues/execution-queue.service';
 import { ExecuteCommandDto, StructuredCommandDto } from './dto/execute-command.dto';
 import { ExecutionResponseDto, serializeExecution } from './dto/execution-response.dto';
 import OperacaoExecucaoClaude from '../engine/lib/operacao/OperacaoExecucaoClaude';
+import {
+  EXECUTION_DEFAULT_TIMEOUT_SEC,
+  executionTaskLockKey,
+  NON_TERMINAL_STATUS_CODES,
+  resolveExecutionTimeoutSec,
+  toActiveExecutionStatus,
+} from './constants/execution-lifecycle.const';
 
 const PROJECT_MEMBERSHIP_CLASSES = [BigInt(-170), BigInt(-171), BigInt(-172), BigInt(-173)];
 
 /**
- * Default timeout para o placeholder estruturado de `command` quando
- * o caller usa modo PROMPT sem passar `command` explicitamente.
- * 10min — mesmo default semântico do `IExecucaoData.command.timeoutMs`.
+ * Timeout do placeholder estruturado de `command` no modo PROMPT.
+ * ADR-V2-082: coerente com a fonte única (`dados.timeoutSec` = 1800s) —
+ * some a incoerência antiga 600000 ms (placeholder) × 1800 s (processor).
  */
-const DEFAULT_PROMPT_MODE_TIMEOUT_MS = 600000;
+const DEFAULT_PROMPT_MODE_TIMEOUT_MS = EXECUTION_DEFAULT_TIMEOUT_SEC * 1000;
+
+/**
+ * `code` do 409 de execução duplicada (ADR-V2-082). Exportado para os
+ * adapters MCP/Nexus reconhecerem o conflito.
+ */
+export const EXECUTION_IN_PROGRESS_CODE = 'EXECUTION_IN_PROGRESS';
+
+/**
+ * Extrai `{ executionId, status }` do 409 `EXECUTION_IN_PROGRESS` lançado por
+ * `ExecutionsService.execute` (ADR-V2-082). Usado pelos adapters MCP/Nexus
+ * para mapear o conflito sem depender do formato HTTP.
+ *
+ * @param err - Erro capturado
+ * @returns Dados do conflito, ou `null` se não for este 409
+ *
+ * @example
+ * ```typescript
+ * const c = parseExecutionInProgressConflict(err);
+ * if (c) throw new McpToolError(INVALID_PARAMS, '...', { reason: 'execution_in_progress', ...c });
+ * ```
+ */
+export function parseExecutionInProgressConflict(
+  err: unknown,
+): { executionId: string; status: string } | null {
+  if (!(err instanceof ConflictException)) return null;
+  const resp = err.getResponse() as { code?: unknown; details?: Record<string, unknown> } | string;
+  if (typeof resp !== 'object' || resp === null || resp.code !== EXECUTION_IN_PROGRESS_CODE) {
+    return null;
+  }
+  return {
+    executionId: String(resp.details?.executionId ?? ''),
+    status: String(resp.details?.status ?? ''),
+  };
+}
+
+/**
+ * Limites da transação que segura o advisory lock por task (Ciclo 2 / M1):
+ * espera até 10s por conexão e até 60s pelo trabalho (prompt + Risk Gate + INSERT).
+ */
+const TASK_LOCK_MAX_WAIT_MS = 10_000;
+const TASK_LOCK_TIMEOUT_MS = 60_000;
+
+/** idClasse de execução (-301/-302/-303) — ADR-V2-006. */
+const EXECUTION_RISK_CLASSES = [
+  AUTOMATION_CLASS_IDS.EXEC_LOW,
+  AUTOMATION_CLASS_IDS.EXEC_MEDIUM,
+  AUTOMATION_CLASS_IDS.EXEC_HIGH,
+];
 
 /**
  * Marker simbólico colocado em `args[1]` do command estruturado quando
@@ -79,6 +135,10 @@ export class ExecutionsService {
    * @throws {NotFoundException} Projeto / task inexistente
    * @throws {ForbiddenException} Usuário sem membership / task de outro projeto
    * @throws {UnprocessableEntityException} Agent inválido / túnel down
+   * @throws {ConflictException} 409 `code:'EXECUTION_IN_PROGRESS'` +
+   *   `details:{ reason:'execution_in_progress', executionId, status }`
+   *   quando a task (`dto.taskId`) já tem execução não-terminal (ADR-V2-082) —
+   *   ponto único que cobre REST + MCP + Nexus (ADR-V2-079)
    */
   async execute(
     projectId: string,
@@ -126,6 +186,52 @@ export class ExecutionsService {
       throw new ForbiddenException(`Usuario nao tem acesso ao projeto ${projectId}.`);
     }
 
+    // ADR-V2-082 (Ciclo 2 / M1): com taskId, trava anti-duplicata + criação rodam
+    // sob `pg_advisory_xact_lock('exec-task:<taskId>')` — 2 requests simultâneos
+    // da mesma task são serializados e o 2º enxerga a execução do 1º (409).
+    if (dto.taskId) {
+      const taskId = dto.taskId;
+      return this.withTaskLock(taskId, async () => {
+        await this.assertNoActiveExecutionForTask(taskId);
+        return this.createExecution(projectId, dto, userId, userEntidadeId, idempotencyKey);
+      });
+    }
+    return this.createExecution(projectId, dto, userId, userEntidadeId, idempotencyKey);
+  }
+
+  /**
+   * Serializa por task (Ciclo 2 / M1). Abre uma transação interativa que só
+   * segura `pg_advisory_xact_lock(hashtext('exec-task:<taskId>'))` enquanto `fn`
+   * roda; `fn` usa as conexões normais (o Engine abre a própria transação de
+   * INSERT, que COMMITA antes do lock ser liberado). Assim o 2º request da
+   * mesma task só passa pela trava depois que a execução do 1º está visível.
+   * Mesmo lock do `markRunning` do processor.
+   *
+   * @param taskId - DTask.chave
+   * @param fn - Trabalho protegido (trava + criação)
+   * @returns Resultado de `fn`
+   */
+  private async withTaskLock<T>(taskId: string, fn: () => Promise<T>): Promise<T> {
+    return this.prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${executionTaskLockKey(taskId)}))`;
+        return fn();
+      },
+      { maxWait: TASK_LOCK_MAX_WAIT_MS, timeout: TASK_LOCK_TIMEOUT_MS },
+    );
+  }
+
+  /**
+   * Monta o command/prompt, roda o Engine (calcula + grava) e enfileira LOW.
+   * Extraído de `execute` para poder rodar sob {@link withTaskLock}.
+   */
+  private async createExecution(
+    projectId: string,
+    dto: ExecuteCommandDto,
+    userId: string,
+    userEntidadeId: bigint,
+    idempotencyKey?: string,
+  ): Promise<ExecutionResponseDto> {
     const correlationId = randomUUID();
 
     // ADR-V2-049: resolver modo (PROMPT / COMMAND / HÍBRIDO) e materializar
@@ -177,6 +283,9 @@ export class ExecutionsService {
         ? { key: idempotencyKey, userId: userEntidadeId.toString(), projectId }
         : undefined,
       rollbackOnFailure: dto.rollbackOnFailure === true,
+      // ADR-V2-082: fonte ÚNICA de timeout — gravada uma vez, na criação.
+      // Lida pelo processor (→ agente) e pelo sweeper de RUNNING (deadline).
+      timeoutSec: resolveExecutionTimeoutSec(structuredCommand),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
     await op.calcula();
@@ -247,6 +356,63 @@ export class ExecutionsService {
       });
     }
     return response;
+  }
+
+  /**
+   * Recusa (409) disparar uma task que já tem execução não-terminal (ADR-V2-082).
+   *
+   * 1 query: execução -301/-302/-303 não-baixada da task com statusCode
+   * QUEUED/AWAITING_APPROVAL/APPROVED/RUNNING (mais recente). Zumbis legados
+   * (`baixado=false` + statusCode terminal) NÃO bloqueiam — o filtro em memória
+   * repete o critério de status como defesa.
+   *
+   * @param taskId - DTask.chave (string)
+   * @throws {ConflictException} body `{ statusCode:409, code:'EXECUTION_IN_PROGRESS',
+   *   message, details:{ reason:'execution_in_progress', executionId,
+   *   status:'running'|'queued'|'awaiting_approval' } }` (HttpExceptionFilter repassa `details`)
+   */
+  private async assertNoActiveExecutionForTask(taskId: string): Promise<void> {
+    const active = await this.prisma.dPedido.findFirst({
+      where: {
+        idClasse: { in: EXECUTION_RISK_CLASSES },
+        excluido: false,
+        baixado: false,
+        AND: [
+          { dados: { path: ['task', 'id'], equals: taskId } },
+          {
+            OR: NON_TERMINAL_STATUS_CODES.map((code) => ({
+              dados: { path: ['statusCode'], equals: code },
+            })),
+          },
+        ],
+      },
+      select: { chave: true, dados: true },
+      orderBy: { chave: 'desc' },
+    });
+    if (!active) return;
+
+    const dados = (active.dados ?? {}) as Record<string, unknown>;
+    const taskRef = (dados.task ?? null) as Record<string, unknown> | null;
+    const statusCode = typeof dados.statusCode === 'string' ? dados.statusCode : undefined;
+    if (taskRef?.id !== taskId || !statusCode || !NON_TERMINAL_STATUS_CODES.includes(statusCode)) {
+      return;
+    }
+
+    const executionId = active.chave.toString();
+    this.logger.warn(
+      `execute_blocked_duplicate taskId=${taskId} activeExecutionId=${executionId} statusCode=${statusCode}`,
+    );
+    throw new ConflictException({
+      statusCode: 409,
+      code: EXECUTION_IN_PROGRESS_CODE,
+      error: 'Conflict',
+      message: `Task ${taskId} já tem uma execução em andamento (${executionId}).`,
+      details: {
+        reason: 'execution_in_progress',
+        executionId,
+        status: toActiveExecutionStatus(statusCode),
+      },
+    });
   }
 
   /**

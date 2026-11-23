@@ -46,3 +46,7 @@ workspace/
 # Codex local
 .codex
 AGENTS.md
+
+# Snapshot de rollback do backfill de execuções (ADR-V2-082) — contém DPedido.dados
+# completos (stdout/prompt). Nunca versionar; descartar após o deploy.
+backfill-execution-baixado.*.json

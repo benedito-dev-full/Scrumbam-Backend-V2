@@ -30,6 +30,8 @@ function buildService(
       getOrGenerate: jest.fn().mockReturnValue('corr-test'),
     } as unknown as CorrelationIdService,
     roleResolverMock as unknown as RoleResolverService,
+    // TasksService — 8º parâmetro (drift corrigido na Task 2 / ADR-V2-082)
+    {} as unknown as import('../../../tasks/tasks.service').TasksService,
   );
 }
 

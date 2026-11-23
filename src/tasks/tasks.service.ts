@@ -108,8 +108,8 @@ const TABELA_CLASSE_TO_PRIORITY: Record<string, string> = {
  *
  * Usado em `findActiveExecutionsForTasks` para filtrar DPedido cujo
  * `dados.taskId` aponta para uma task carregada. `baixado=false` é o
- * sinal de execução "ainda ativa" — quando o agente conclui (sucesso
- * ou falha), o DPedido é marcado como baixado.
+ * sinal de execução "ainda ativa" — todo estado terminal (SUCCESS, FAILED
+ * real ou sintético, REJECTED, EXPIRED) grava `baixado=true` (ADR-V2-082).
  */
 const EXECUTION_CLASS_IDS = [BigInt(-300), BigInt(-301), BigInt(-302), BigInt(-303), BigInt(-304)];
 
@@ -160,7 +160,9 @@ function deriveRiskLevel(idClasse: bigint): 'LOW' | 'MEDIUM' | 'HIGH' {
  * - `queued` → LOW risk, já liberado, aguardando agente VPS pegar (não bloqueia ação humana)
  * - `awaiting_approval` → MEDIUM/HIGH risk, requer aprovação humana antes de rodar
  * - `approved` → foi aprovado e está rodando no agente
- * - `rejected`/`expired` → não devem chegar aqui (baixado=true filtra)
+ * - `rejected`/`expired` → não chegam aqui: reject/expire gravam `baixado=true`
+ *   desde a ADR-V2-082 (antes caíam no fallback como `awaiting_approval` zumbi;
+ *   registros legados são corrigidos pelo backfill `backfill-execution-baixado.ts`)
  *
  * Fallback legado: se `dados.approval.status` ausente (DPedido antigo),
  * usa o campo raw `aprovado` — semântica histórica do Engine. Mantido

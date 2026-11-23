@@ -12,6 +12,7 @@ import { ExecutionsController } from './executions.controller';
 import { ExecutionsService } from './executions.service';
 import { ApprovalFlowService } from './approval-flow.service';
 import { ApprovalFlowSweeperService } from './approval-flow-sweeper.service';
+import { ExecutionRunningSweeperService } from './execution-running-sweeper.service';
 import { ExecutionHistoryService } from './execution-history.service';
 import { ClaudeRunnerService } from './claude-runner.service';
 import { CommandValidatorService } from './services/command-validator.service';
@@ -31,7 +32,8 @@ import { IdempotencyGuard } from './guards/idempotency.guard';
  * via Engine OperacaoExecucaoClaude.
  *
  * ThrottlerModule: 30 req/min por projectId (hash SHA-256).
- * ScheduleModule.forFeature(): cron @Cron do ApprovalFlowSweeperService.
+ * ScheduleModule.forRoot(): crons @Cron do ApprovalFlowSweeperService (AWAITING→EXPIRED)
+ * e do ExecutionRunningSweeperService (RUNNING vencida → FAILED, ADR-V2-082).
  *
  * F7 Bloco Q: ExecutionsService injeta EventProducerService real (sem stub).
  * EventosModule é `@Global()` — providers disponíveis via DI sem import explícito.
@@ -93,6 +95,8 @@ export class ExecutionsModule {
       ExecutionsService,
       ApprovalFlowService,
       ApprovalFlowSweeperService,
+      // ADR-V2-082: sweeper de RUNNING (cron 1/min) — roda com ou sem Redis.
+      ExecutionRunningSweeperService,
       ExecutionHistoryService,
       ClaudeRunnerService,
       CommandValidatorService,

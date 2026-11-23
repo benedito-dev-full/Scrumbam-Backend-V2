@@ -18,8 +18,36 @@ export interface IExecucaoData {
     cwd?: string;
     /** Variáveis de ambiente extras (sanitizadas) */
     env?: Record<string, string>;
-    /** Timeout em ms (default: 600000 = 10min) */
+    /**
+     * Timeout em ms informado pelo caller (modo COMMAND/HÍBRIDO) ou placeholder
+     * do modo PROMPT (1.800.000 ms). ESPELHO/legado: a fonte única de timeout
+     * é `timeoutSec` (top-level), gravado na criação (ADR-V2-082).
+     */
     timeoutMs?: number;
+  };
+
+  /**
+   * Timeout efetivo da execução em segundos — FONTE ÚNICA (ADR-V2-082).
+   * Gravado UMA vez por `ExecutionsService.execute` (clamp 30..3600, default 1800)
+   * e lido pelo processor (enviado ao agente) e pelo sweeper de RUNNING (deadline).
+   * Ausente em execuções legadas → fallback 1800.
+   */
+  timeoutSec?: number;
+
+  /**
+   * Estado de dispatch (ADR-V2-082) — preenchido quando o agente responde
+   * 409 PROJECT_BUSY e a execução volta para a fila.
+   */
+  dispatch?: {
+    busyAttempts: number;
+    nextAttemptAt: string; // ISO 8601
+    lastErrorCode: string;
+  };
+
+  /** Marcas de runtime gravadas pelo processor/sweeper (startedAt/finishedAt). */
+  runtime?: {
+    startedAt?: string;
+    finishedAt?: string;
   };
 
   /**
@@ -142,5 +170,30 @@ export interface IExecucaoData {
     triggeredBy: string; // entidadeId do user como string
     agentId: string; // entidadeId do AGENT (-310) como string
     projectId: string; // projectId como string
+    /**
+     * Sentinela de desfecho (ADR-V2-082) — disputada por CAS entre callback
+     * do agente (`source='agent'`) e falha marcada pelo sistema (`source='system'`).
+     * A verdade tardia (agent) substitui o desfecho sintético (system) uma única vez;
+     * nesse caso `supersedes` guarda o desfecho substituído.
+     */
+    outcome?: IExecucaoOutcome;
+    /** Categoria de erro reportada pelo agente ou motivo da falha sistêmica. */
+    errorCode?: string;
+    /** Sessão Claude anterior quando retomada via --resume. */
+    resumedFrom?: string;
   };
+}
+
+/**
+ * Desfecho terminal de uma execução (ADR-V2-082).
+ */
+export interface IExecucaoOutcome {
+  success: boolean;
+  recordedAt: string; // ISO 8601
+  /** Quem gravou: callback real do agente ou o próprio sistema (sweeper/dispatch/backfill). */
+  source?: 'agent' | 'system';
+  /** Motivo (apenas `source='system'`): TIMEOUT_NO_CALLBACK, AGENT_RESTARTED, ... */
+  reason?: string;
+  /** Desfecho sintético substituído pelo callback tardio (no máximo 1 vez). */
+  supersedes?: { reason?: string; recordedAt?: string };
 }

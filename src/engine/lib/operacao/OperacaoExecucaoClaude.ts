@@ -1,6 +1,8 @@
 import { Decimal } from '@prisma/client/runtime/library';
 import OperacaoPedido from './OperacaoPedido';
-import { IExecucaoData } from '../interfaces/IExecucaoData';
+import { Prisma } from '@prisma/client';
+import { IExecucaoData, IExecucaoOutcome } from '../interfaces/IExecucaoData';
+import { PrismaService } from '../../../prisma.service';
 import { IOperacaoExecucaoClaudeConstruct } from '../interfaces/IOperacaoExecucaoClaudeConstruct';
 // type-only: Engine não depende em runtime de src/eventos/
 import type { IEventProducer } from '../../../eventos/interfaces/event-producer.interface';
@@ -558,19 +560,23 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
    * outcome reportado pelo agente V2 via callback execution-result (ADR-V2-033).
    *
    * Diferente de gravarAposAprovacaoManual():
-   *   - NÃO chama aprova() (execução já foi aprovada antes de rodar)
-   *   - NÃO chama scripts DVFS de aprovação
-   *   - Apenas atualiza dados.claude com outcome (sessionId, exitCode, stdout, stderr)
+   *   - NÃO chama aprova() nem calcula() (execução já foi aprovada/classificada;
+   *     `dados.risk` não é tocado — guardas da ADR-V2-081 não re-executam)
+   *   - Atualiza dados.claude com outcome (sessionId, exitCode, stdout, stderr)
    *     e dados.audit com claudeSessionPath (INTERNAL — não exposto ao frontend)
-   *   - Executa DVFS chave 7 (pós-gravação) APÓS UPDATE — pr-auto-open se aplicável
+   *   - Executa DVFS chave 7 (pós-gravação) APÓS UPDATE — SOMENTE se a CAS aplicou
    *
-   * IDEMPOTÊNCIA: chamador (AgentsService) DEVE checar `dados.claude?.finishedAt`
-   * antes de instanciar o Engine — se já presente, retornar `alreadyPersisted=true`
-   * sem invocar este método.
+   * CAS + BAIXA (ADR-V2-082): o UPDATE é condicional — só grava se a execução
+   * ainda NÃO tem `audit.outcome` OU se o outcome existente é sintético
+   * (`source='system'`: sweeper, falha de dispatch, backfill). Política
+   * "verdade tardia prevalece sobre o desfecho sintético, uma única vez"
+   * (decisão CEO P1): ao substituir, grava `audit.outcome.supersedes`; como o
+   * novo outcome é `source='agent'`, qualquer callback seguinte encontra 0
+   * linhas. O mesmo UPDATE grava `baixado=true` (lock de `activeExecution`
+   * liberado).
    *
    * PILAR 1 PRESERVADO: única tabela transacional tocada é DPedido (idClasse -301/-302/-303),
-   * via UPDATE encapsulado no Engine. Handler `recordExecutionResult` NÃO chama prisma.dPedido.update
-   * direto.
+   * via UPDATE encapsulado no Engine. Handler `recordExecutionResult` NÃO chama prisma direto.
    *
    * @param params Outcome reportado pelo agente V2 via POST /agents/:id/execution-result
    * @param params.dadosExistentes DPedido carregado do banco (chave, dados, idClasse)
@@ -583,6 +589,15 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
    * @param params.stdoutTruncated Stdout (max 64KB no payload)
    * @param params.stderrTruncated Stderr (max 64KB no payload)
    * @param params.errorCode Categoria de erro se !success
+   * @returns `applied=false` quando outro callback já gravou (idempotência por CAS);
+   *   `superseded` preenchido quando substituiu um desfecho sintético;
+   *   `persistedAt` = recordedAt do outcome gravado (ou do existente, se !applied)
+   *
+   * @example
+   * ```typescript
+   * const r = await op.registrarOutcome({ dadosExistentes, exitCode: 0, success: true, ... });
+   * if (!r.applied) return { accepted: true, alreadyPersisted: true, persistedAt: r.persistedAt };
+   * ```
    */
   async registrarOutcome(params: {
     dadosExistentes: {
@@ -599,7 +614,7 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
     stdoutTruncated: string;
     stderrTruncated: string;
     errorCode?: string;
-  }): Promise<void> {
+  }): Promise<RegistrarOutcomeResult> {
     // 1. Restaura state sem chamar nova() (chave já existe no banco)
     this.chcriacao = params.dadosExistentes.chave;
     this.dados = { ...(params.dadosExistentes.dados as IExecucaoData) };
@@ -626,23 +641,33 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
       durationMs: params.durationMs,
     };
 
-    // 3. Marca outcome no audit trail (idempotency sentinel + errorCode + resumedFrom)
-    // IExecucaoData.audit não modela esses campos opcionais; usa Record<string, unknown>
-    // intermediário e re-cast no final para manter type safety sem `any`.
-    const previousAudit = (this.dados.audit ?? {}) as Record<string, unknown>;
-    const nextAudit: Record<string, unknown> = {
-      ...previousAudit,
-      outcome: { success: params.success, recordedAt: nowIso },
+    // 2.1 runtime.finishedAt real (no supersede, substitui o do desfecho sintético — L2).
+    this.dados.runtime = { ...(this.dados.runtime ?? {}), finishedAt: nowIso };
+
+    // 3. Sentinela de desfecho (source='agent') + errorCode + resumedFrom.
+    //    `supersedes` é calculado DENTRO do UPDATE (estado real no momento da CAS).
+    const previousAudit = this.dados.audit;
+    const nextAudit: NonNullable<IExecucaoData['audit']> = {
+      ...(previousAudit ?? {
+        correlationId: this.correlationId,
+        triggeredBy: '',
+        agentId: this.agentId.toString(),
+        projectId: this.projectId.toString(),
+      }),
+      outcome: { success: params.success, recordedAt: nowIso, source: 'agent' },
     };
     if (params.resumedFrom !== null && params.resumedFrom !== undefined) {
       nextAudit.resumedFrom = params.resumedFrom;
     }
     if (params.errorCode) {
       nextAudit.errorCode = params.errorCode;
+    } else {
+      // Remove errorCode de um desfecho sintético substituído (ex.: TIMEOUT_NO_CALLBACK).
+      delete nextAudit.errorCode;
     }
-    this.dados.audit = nextAudit as unknown as IExecucaoData['audit'];
+    this.dados.audit = nextAudit;
 
-    // 4. Marca status final em dados.claude já preenchido + sinalizador top-level
+    // 4. Status final
     this.dados.statusCode = params.success
       ? '-519' // EXEC_STATUS_SUCCESS
       : '-520'; // EXEC_STATUS_FAILED
@@ -651,10 +676,55 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
       `[${this.correlationId}] Registrando outcome: chave=${this.chcriacao} success=${params.success} exitCode=${params.exitCode}`,
     );
 
-    // 5. UPDATE DPedido via método centralizado (Engine encapsula Prisma)
-    await this._atualizarPedidoCompleto();
+    // 5. UPDATE com CAS + baixado=true (Engine encapsula Prisma)
+    const rows = await this._database.$queryRaw<
+      Array<{ chave: bigint; supersedes: { reason?: string; recordedAt?: string } | null }>
+    >(Prisma.sql`
+      UPDATE "DPedido"
+      SET dados = CASE
+            WHEN dados->'audit'->'outcome'->>'source' = 'system' THEN
+              jsonb_set(
+                ${JSON.stringify(this.dados)}::jsonb,
+                '{audit,outcome,supersedes}',
+                jsonb_build_object(
+                  'reason', dados->'audit'->'outcome'->'reason',
+                  'recordedAt', dados->'audit'->'outcome'->'recordedAt'
+                ),
+                true
+              )
+            ELSE ${JSON.stringify(this.dados)}::jsonb
+          END,
+          baixado = true,
+          "atualizadoEm" = NOW()
+      WHERE chave = ${this.chcriacao}
+        AND "idClasse" IN (${Prisma.join(EXECUTION_CLASS_IDS)})
+        AND (
+          dados->'audit'->'outcome' IS NULL
+          OR dados->'audit'->'outcome'->>'source' = 'system'
+        )
+      RETURNING chave, dados->'audit'->'outcome'->'supersedes' AS supersedes
+    `);
 
-    // 6. Executa DVFS chave 7 (pós-gravação) se carregada — pr-auto-open etc.
+    if (rows.length === 0) {
+      const existing = (params.dadosExistentes.dados?.audit?.outcome ?? null) as IExecucaoOutcome | null;
+      this.logger.log(
+        `[${this.correlationId}] Outcome NÃO aplicado (CAS: outro callback já gravou) chave=${this.chcriacao}`,
+      );
+      return { applied: false, persistedAt: existing?.recordedAt ?? nowIso };
+    }
+
+    const superseded = rows[0].supersedes ?? undefined;
+    if (superseded) {
+      this.dados.audit = {
+        ...this.dados.audit!,
+        outcome: { ...this.dados.audit!.outcome!, supersedes: superseded },
+      };
+      this.logger.warn(
+        `[${this.correlationId}] Callback tardio substituiu desfecho sintético (${superseded.reason ?? '?'}) chave=${this.chcriacao}`,
+      );
+    }
+
+    // 6. DVFS chave 7 (pós-gravação) SÓ quando a CAS aplicou — pr-auto-open etc.
     //    Carrega scripts se ainda não foram (callback pode chegar em processo distinto)
     if (!this._funcPosGravacao) {
       await this['_carregaScriptsGrav']();
@@ -672,5 +742,324 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
     }
 
     this.logger.log(`[${this.correlationId}] Outcome persistido chave=${this.chcriacao}`);
+    return { applied: true, persistedAt: nowIso, ...(superseded ? { superseded } : {}) };
   }
+
+  /**
+   * Encerra a execução como FAILED por decisão do SISTEMA (ADR-V2-082).
+   *
+   * Usado pelo processor (falha de dispatch, 409 esgotado, duplicata) — o
+   * sweeper usa a versão em lote {@link OperacaoExecucaoClaude.encerrarVencidas}.
+   * Grava, num único UPDATE com CAS (sem outcome prévio + status esperado):
+   *   - `statusCode=-520`, `baixado=true`
+   *   - `claude.exitCode=-1`, `claude.stderr=detail`, `claude.finishedAt` (o
+   *     frontend só encerra o polling com `claude.finishedAt` — requisito explícito)
+   *   - `runtime.finishedAt`
+   *   - `audit.outcome={success:false, source:'system', reason, recordedAt}` +
+   *     `audit.errorCode`
+   *
+   * Não chama calcula()/aprova() — `dados.risk` intocado. O JSON é montado no
+   * próprio SQL (jsonb_set sobre o estado ATUAL da linha), então não sobrescreve
+   * campos gravados concorrentemente.
+   *
+   * @param params.chave DPedido.chave da execução
+   * @param params.reason Motivo (EXECUTION_FAILURE_REASONS) → `audit.outcome.reason`
+   * @param params.detail Mensagem legível → `claude.stderr` (default = reason)
+   * @param params.errorCode Código → `audit.errorCode` (default = reason)
+   * @param params.expected `'RUNNING'` exige statusCode -518; `'ANY_NON_TERMINAL'`
+   *   aceita -514/-515/-516/-518 (ou statusCode ausente, legado)
+   * @returns true se esta chamada encerrou a execução (CAS aplicou)
+   *
+   * @example
+   * ```typescript
+   * const ok = await op.encerrarPorFalhaSistemica({
+   *   chave: BigInt(123), reason: 'DISPATCH_FAILED', detail: 'ACK timeout', expected: 'ANY_NON_TERMINAL',
+   * });
+   * if (ok) await eventProducer.addInternalEvent('execution.failed', ...);
+   * ```
+   */
+  async encerrarPorFalhaSistemica(params: {
+    chave: bigint;
+    reason: string;
+    detail?: string;
+    errorCode?: string;
+    expected: 'RUNNING' | 'ANY_NON_TERMINAL';
+  }): Promise<boolean> {
+    this.chcriacao = params.chave;
+    const detail = params.detail ?? params.reason;
+    const errorCode = params.errorCode ?? params.reason;
+    const statusFilter =
+      params.expected === 'RUNNING'
+        ? Prisma.sql`dados->>'statusCode' = '-518'`
+        : Prisma.sql`(dados->>'statusCode' IS NULL OR dados->>'statusCode' IN (${Prisma.join(
+            NON_TERMINAL_EXEC_STATUS,
+          )}))`;
+
+    const rows = await this._database.$queryRaw<Array<{ chave: bigint }>>(Prisma.sql`
+      UPDATE "DPedido"
+      SET dados = ${OperacaoExecucaoClaude.sqlDadosFalhaSistemica(
+        Prisma.sql`${params.reason}::text`,
+        Prisma.sql`${detail}::text`,
+        Prisma.sql`${errorCode}::text`,
+      )},
+          baixado = true,
+          "atualizadoEm" = NOW()
+      WHERE chave = ${params.chave}
+        AND "idClasse" IN (${Prisma.join(EXECUTION_CLASS_IDS)})
+        AND excluido = false
+        AND dados->'audit'->'outcome' IS NULL
+        AND ${statusFilter}
+      RETURNING chave
+    `);
+
+    const applied = rows.length > 0;
+    this.logger.log(
+      `[${this.correlationId}] encerrarPorFalhaSistemica chave=${params.chave} reason=${params.reason} applied=${applied}`,
+    );
+    return applied;
+  }
+
+  /**
+   * Devolve uma execução RUNNING para a fila (QUEUED) após 409 PROJECT_BUSY do
+   * agente (ADR-V2-082). CAS: só aplica se ainda -518 e sem outcome.
+   * Remove `runtime.startedAt` (o deadline do sweeper recomeça no próximo
+   * markRunning) e grava `dados.dispatch`.
+   *
+   * @param params.chave DPedido.chave
+   * @param params.busyAttempt Tentativa atual (1-based)
+   * @param params.nextAttemptAt ISO do próximo dispatch
+   * @returns true se a execução voltou para QUEUED
+   *
+   * @example
+   * ```typescript
+   * if (await op.devolverParaFila({ chave, busyAttempt: 1, nextAttemptAt })) await queue.enqueueRetry(...);
+   * ```
+   */
+  async devolverParaFila(params: {
+    chave: bigint;
+    busyAttempt: number;
+    nextAttemptAt: string;
+  }): Promise<boolean> {
+    this.chcriacao = params.chave;
+    const dispatch = {
+      busyAttempts: params.busyAttempt,
+      nextAttemptAt: params.nextAttemptAt,
+      lastErrorCode: 'PROJECT_BUSY',
+    };
+    const rows = await this._database.$queryRaw<Array<{ chave: bigint }>>(Prisma.sql`
+      UPDATE "DPedido"
+      SET dados = jsonb_set(
+            jsonb_set(
+              jsonb_set(
+                COALESCE(dados, '{}'::jsonb),
+                '{statusCode}', to_jsonb('-514'::text), true
+              ),
+              '{runtime}', COALESCE(dados->'runtime', '{}'::jsonb) - 'startedAt', true
+            ),
+            '{dispatch}', ${JSON.stringify(dispatch)}::jsonb, true
+          ),
+          "atualizadoEm" = NOW()
+      WHERE chave = ${params.chave}
+        AND "idClasse" IN (${Prisma.join(EXECUTION_CLASS_IDS)})
+        AND dados->>'statusCode' = '-518'
+        AND dados->'audit'->'outcome' IS NULL
+      RETURNING chave
+    `);
+    return rows.length > 0;
+  }
+
+  /**
+   * Encerra em LOTE as execuções vencidas (sweeper — ADR-V2-082).
+   *
+   * Um único `UPDATE … FROM (SELECT … LIMIT n FOR UPDATE SKIP LOCKED) … RETURNING`:
+   * seguro com várias réplicas do backend (cada linha é encerrada por uma só;
+   * só quem recebe a linha no RETURNING emite eventos). Sempre sem
+   * `audit.outcome`, `baixado=false`, não excluída. Critérios:
+   *   - RUNNING (-518) com **deadline vencido**: `COALESCE(runtime.startedAt,
+   *     atualizadoEm) + COALESCE(timeoutSec, defaultTimeoutSec) + marginSec < NOW()`
+   *     → `TIMEOUT_NO_CALLBACK`;
+   *   - RUNNING (-518) cujo **agente reiniciou** depois do início (heartbeat
+   *     persiste `lastSeen` — relógio do backend — e `uptime` em segundos):
+   *     `lastSeen − uptime > startedAt + 60s` → `AGENT_RESTARTED`;
+   *   - QUEUED (-514) / APPROVED (-516) **órfãs** (Ciclo 2 / M3 — job perdido no
+   *     Redis ou `REDIS_ENABLED=false` sem processor): `GREATEST(atualizadoEm,
+   *     dispatch.nextAttemptAt) + queueStaleSec < NOW()` → `QUEUE_STALE`.
+   *     Sem isso a task ficaria com 409 `execution_in_progress` para sempre.
+   *
+   * O UPDATE re-confere que o `statusCode` ainda é o lido no SELECT (CAS) — um
+   * `markRunning` concorrente que venceu tira a linha do lote.
+   *
+   * Grava o mesmo formato de {@link encerrarPorFalhaSistemica} (statusCode -520,
+   * baixado=true, claude.finishedAt/exitCode=-1, outcome source='system').
+   * Durações calculadas com NOW()/timestamptz do Postgres (não são filtros por
+   * dia — TimezoneService não se aplica).
+   *
+   * @param bd PrismaService
+   * @param opts.marginSec Margem do deadline de RUNNING (P4 = 300s)
+   * @param opts.defaultTimeoutSec Fallback p/ execuções legadas sem timeoutSec
+   * @param opts.queueStaleSec Prazo de QUEUED/APPROVED órfãs (default 900s)
+   * @param opts.limit Máximo de linhas por chamada
+   * @returns Linhas efetivamente encerradas (com `reason`)
+   *
+   * @example
+   * ```typescript
+   * const rows = await OperacaoExecucaoClaude.encerrarVencidas(prisma, {
+   *   marginSec: 300, defaultTimeoutSec: 1800, queueStaleSec: 900, limit: 100,
+   * });
+   * ```
+   */
+  static async encerrarVencidas(
+    bd: PrismaService,
+    opts: { marginSec: number; defaultTimeoutSec: number; queueStaleSec: number; limit: number },
+  ): Promise<ExecucaoEncerradaRow[]> {
+    const startedAtSql = Prisma.sql`COALESCE((p.dados->'runtime'->>'startedAt')::timestamptz, p."atualizadoEm")`;
+    const restartSql = Prisma.sql`EXISTS (
+      SELECT 1 FROM "DEntidade" a
+       WHERE a.chave = (CASE WHEN p.dados->'audit'->>'agentId' ~ '^-?[0-9]+$'
+                             THEN (p.dados->'audit'->>'agentId')::bigint END)
+         AND a."idClasse" = ${AGENT_CLASS_ID}
+         AND (CASE WHEN a.dados->>'uptime' ~ '^[0-9]+(\\.[0-9]+)?$'
+                    AND a.dados->>'lastSeen' IS NOT NULL
+                   THEN (a.dados->>'lastSeen')::timestamptz
+                        - make_interval(secs => (a.dados->>'uptime')::double precision)
+              END) > ${startedAtSql} + interval '60 seconds'
+    )`;
+    const timeoutSql = Prisma.sql`(CASE WHEN p.dados->>'timeoutSec' ~ '^[0-9]+$'
+                                        THEN (p.dados->>'timeoutSec')::int
+                                        ELSE ${opts.defaultTimeoutSec}::int END)`;
+    const queueRefSql = Prisma.sql`GREATEST(
+      p."atualizadoEm",
+      COALESCE((p.dados->'dispatch'->>'nextAttemptAt')::timestamptz, p."atualizadoEm")
+    )`;
+
+    const rows = await bd.$queryRaw<ExecucaoEncerradaRow[]>(Prisma.sql`
+      WITH alvo AS (
+        SELECT p.chave,
+               p.dados->>'statusCode' AS status_code,
+               CASE WHEN p.dados->>'statusCode' IN ('-514', '-516') THEN ${EXEC_REASON_QUEUE_STALE}::text
+                    WHEN ${restartSql} THEN ${EXEC_REASON_AGENT_RESTARTED}::text
+                    ELSE ${EXEC_REASON_TIMEOUT}::text END AS reason
+          FROM "DPedido" p
+         WHERE p."idClasse" IN (${Prisma.join(EXECUTION_CLASS_IDS)})
+           AND p.excluido = false
+           AND p.baixado = false
+           AND p.dados->'audit'->'outcome' IS NULL
+           AND (
+             (
+               p.dados->>'statusCode' = '-518'
+               AND (
+                 ${startedAtSql}
+                   + make_interval(secs => (${timeoutSql} + ${opts.marginSec}::int)::double precision) < NOW()
+                 OR ${restartSql}
+               )
+             )
+             OR (
+               p.dados->>'statusCode' IN ('-514', '-516')
+               AND ${queueRefSql} + make_interval(secs => ${opts.queueStaleSec}::int) < NOW()
+             )
+           )
+         ORDER BY p.chave
+         LIMIT ${opts.limit}::int
+         FOR UPDATE SKIP LOCKED
+      )
+      UPDATE "DPedido"
+         SET dados = ${OperacaoExecucaoClaude.sqlDadosFalhaSistemica(
+           Prisma.sql`alvo.reason`,
+           Prisma.sql`alvo.reason`,
+           Prisma.sql`alvo.reason`,
+         )},
+             baixado = true,
+             "atualizadoEm" = NOW()
+        FROM alvo
+       WHERE "DPedido".chave = alvo.chave
+         AND "DPedido".dados->>'statusCode' = alvo.status_code
+         AND "DPedido".dados->'audit'->'outcome' IS NULL
+      RETURNING "DPedido".chave AS chave, "DPedido"."idLocEscritu" AS "idLocEscritu",
+                "DPedido".dados AS dados, alvo.reason AS reason
+    `);
+    return rows;
+  }
+
+  /**
+   * Fragmento SQL (expressão jsonb sobre a coluna `dados` da linha alvo) que
+   * marca a execução como FAILED pelo sistema. Fonte única do formato usado
+   * por {@link encerrarPorFalhaSistemica}, {@link encerrarVencidas} e pelo
+   * script de backfill (`--close-stale-running`).
+   *
+   * Timestamps em ISO 8601 UTC (`YYYY-MM-DDTHH:MI:SS.MSZ`) — mesmo formato do
+   * `new Date().toISOString()` do lado Node (parseável pelo frontend).
+   *
+   * @param reasonSql Expressão SQL text do motivo (`audit.outcome.reason`)
+   * @param detailSql Expressão SQL text da mensagem (`claude.stderr`)
+   * @param errorCodeSql Expressão SQL text do código (`audit.errorCode`)
+   * @returns Prisma.Sql da expressão jsonb
+   */
+  static sqlDadosFalhaSistemica(
+    reasonSql: Prisma.Sql,
+    detailSql: Prisma.Sql,
+    errorCodeSql: Prisma.Sql,
+  ): Prisma.Sql {
+    const nowIso = Prisma.sql`to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
+    return Prisma.sql`jsonb_set(
+      jsonb_set(
+        jsonb_set(
+          jsonb_set(
+            COALESCE(dados, '{}'::jsonb),
+            '{statusCode}', to_jsonb('-520'::text), true
+          ),
+          '{claude}',
+          COALESCE(dados->'claude', '{}'::jsonb)
+            || jsonb_build_object('exitCode', -1, 'stderr', ${detailSql}, 'finishedAt', ${nowIso}),
+          true
+        ),
+        '{runtime}',
+        COALESCE(dados->'runtime', '{}'::jsonb) || jsonb_build_object('finishedAt', ${nowIso}),
+        true
+      ),
+      '{audit}',
+      COALESCE(dados->'audit', '{}'::jsonb)
+        || jsonb_build_object(
+             'errorCode', ${errorCodeSql},
+             'outcome', jsonb_build_object(
+               'success', false,
+               'source', 'system',
+               'reason', ${reasonSql},
+               'recordedAt', ${nowIso}
+             )
+           ),
+      true
+    )`;
+  }
+}
+
+/** idClasse de execução (ADR-V2-006) — CAS de desfecho restringe a elas. */
+const EXECUTION_CLASS_IDS = [BigInt(-301), BigInt(-302), BigInt(-303)];
+
+/** Status não-terminais (-514 QUEUED, -515 AWAITING, -516 APPROVED, -518 RUNNING). */
+const NON_TERMINAL_EXEC_STATUS = ['-514', '-515', '-516', '-518'];
+
+/** DClasse AGENT (DEntidade -156) — heartbeat persiste lastSeen/uptime. */
+const AGENT_CLASS_ID = BigInt(-156);
+
+/** Motivos gravados pelo sweeper (espelham EXECUTION_FAILURE_REASONS do módulo executions). */
+const EXEC_REASON_TIMEOUT = 'TIMEOUT_NO_CALLBACK';
+const EXEC_REASON_AGENT_RESTARTED = 'AGENT_RESTARTED';
+const EXEC_REASON_QUEUE_STALE = 'QUEUE_STALE';
+
+/** Resultado de {@link OperacaoExecucaoClaude.registrarOutcome}. */
+export interface RegistrarOutcomeResult {
+  /** false = CAS não aplicou (outro callback já gravou o desfecho real). */
+  applied: boolean;
+  /** recordedAt do outcome gravado (ou do existente quando !applied). */
+  persistedAt: string;
+  /** Desfecho sintético substituído (no máximo 1 vez por execução). */
+  superseded?: { reason?: string; recordedAt?: string };
+}
+
+/** Linha devolvida por {@link OperacaoExecucaoClaude.encerrarVencidas}. */
+export interface ExecucaoEncerradaRow {
+  chave: bigint;
+  idLocEscritu: bigint | null;
+  dados: IExecucaoData;
+  reason: string;
 }

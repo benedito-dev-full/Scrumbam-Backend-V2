@@ -124,6 +124,21 @@ function buildMockEntidadeService(entidadeId = BigInt(42)) {
   };
 }
 
+/**
+ * ProjectRefService mock (ADR-V2-058): passthrough P → P. O construtor do
+ * ApprovalFlowService ganhou este 5º parâmetro e o spec estava desatualizado
+ * (drift registrado no commit 277afb0 — corrigido na Task 2 / ADR-V2-082).
+ */
+function buildMockProjectRef() {
+  return { resolveEntidadeRef: jest.fn().mockImplementation((id: bigint) => Promise.resolve(id)) };
+}
+
+/** Concatena o SQL (partes literais) de uma chamada a `$executeRaw` tagged-template. */
+function sqlOf(call: unknown[]): string {
+  const strings = call[0] as unknown as { join?: (sep: string) => string };
+  return typeof strings?.join === 'function' ? strings.join('?') : String(call[0]);
+}
+
 function buildApprovalService(prismaOverrides = {}) {
   const mockPrisma = buildMockPrismaForApproval(prismaOverrides as any);
   const mockEntidade = buildMockEntidadeService();
@@ -135,6 +150,7 @@ function buildApprovalService(prismaOverrides = {}) {
     mockEntidade as any,
     mockEventProducer as any,
     mockExecutionQueue as any,
+    buildMockProjectRef() as any,
   );
 
   return { service, mockPrisma, mockEntidade, mockEventProducer, mockExecutionQueue };
@@ -279,6 +295,7 @@ describe('ApprovalFlowService.reject()', () => {
       mockEntidade as any,
       mockEventProducer as any,
       mockExecutionQueue as any,
+      buildMockProjectRef() as any,
     );
 
     const dto: RejectExecutionDto = { reason: 'Operação muito arriscada para produção' };
@@ -286,6 +303,11 @@ describe('ApprovalFlowService.reject()', () => {
 
     expect(result.approval.status).toBe('rejected');
     expect(result.approval.rejectedReason).toBe('Operação muito arriscada para produção');
+    // ADR-V2-082: REJECTED é terminal → baixa canônica no MESMO UPDATE
+    // (libera activeExecution; antes virava 'awaiting_approval' zumbi).
+    const rejectSql = sqlOf(mockPrisma.$executeRaw.mock.calls[0]);
+    expect(rejectSql).toContain('baixado = true');
+    expect(rejectSql).toContain("dados->'approval'->>'status' = 'awaiting_approval'");
   });
 });
 
@@ -395,5 +417,7 @@ describe('ApprovalFlowSweeperService', () => {
 
     expect(count).toBe(2); // apenas 2 expirados (1003 não expirou)
     expect(mockPrisma.$executeRaw).toHaveBeenCalledTimes(1);
+    // ADR-V2-082: EXPIRED é terminal → baixado=true no mesmo UPDATE
+    expect(sqlOf(mockPrisma.$executeRaw.mock.calls[0])).toContain('baixado = true');
   });
 });

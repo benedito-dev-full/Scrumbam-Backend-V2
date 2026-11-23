@@ -13,6 +13,12 @@ import { CorrelationIdService } from '../services/correlation-id.service';
 import { AUTH_ERROR_CODES } from '../errors/error-codes';
 
 /**
+ * Códigos cujo `details` (objeto) é repassado ao cliente (whitelist — L5).
+ * Adicionar um código aqui exige revisar que o `details` não carrega dado sensível.
+ */
+export const DETAILS_PASSTHROUGH_CODES: ReadonlySet<string> = new Set(['EXECUTION_IN_PROGRESS']);
+
+/**
  * Formato canônico do payload de error response V2.
  *
  * Todos os erros HTTP 4xx/5xx retornam este formato.
@@ -31,6 +37,14 @@ export interface ErrorResponsePayload {
   code?: string;
   message: string | string[];
   error?: string;
+  /**
+   * Dados estruturados do erro para o cliente agir (ADR-V2-082). Repassado
+   * SOMENTE quando a exceção declara `details` como objeto E o `code` está em
+   * {@link DETAILS_PASSTHROUGH_CODES} — hoje só 409 `EXECUTION_IN_PROGRESS`
+   * → `{ reason, executionId, status }`. Demais campos extras continuam
+   * descartados (sem vazamento).
+   */
+  details?: Record<string, unknown>;
   correlationId: string;
   timestamp: string;
   path: string;
@@ -137,6 +151,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     let message: string | string[];
     let error: string | undefined;
     let code: string | undefined;
+    let details: Record<string, unknown> | undefined;
 
     if (typeof exceptionResponse === 'string') {
       message = exceptionResponse;
@@ -146,6 +161,16 @@ export class HttpExceptionFilter implements ExceptionFilter {
       error = resp.error as string | undefined;
       // O CAMPO QUE ERA JOGADO FORA (RFC 9457).
       code = typeof resp.code === 'string' ? resp.code : undefined;
+      // L5 (Ciclo 2): `details` só é repassado para códigos explicitamente
+      // liberados (whitelist) — evita vazamento futuro por exceção qualquer.
+      details =
+        code !== undefined &&
+        DETAILS_PASSTHROUGH_CODES.has(code) &&
+        resp.details &&
+        typeof resp.details === 'object' &&
+        !Array.isArray(resp.details)
+          ? (resp.details as Record<string, unknown>)
+          : undefined;
     } else {
       message = exception.message;
     }
@@ -155,6 +180,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       ...(code ? { code } : {}),
       message,
       ...(error ? { error } : {}),
+      ...(details ? { details } : {}),
       correlationId,
       timestamp,
       path,

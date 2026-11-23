@@ -204,6 +204,8 @@ export class ApprovalFlowService {
    * Rejeita uma execution em awaiting_approval.
    *
    * Race-safe: UPDATE condicional com WHERE dados->approval->status = 'awaiting_approval'.
+   * Grava `baixado=true` no mesmo UPDATE (REJECTED é terminal — ADR-V2-082): a
+   * execução deixa de aparecer em `activeExecution` (antes virava "awaiting_approval" zumbi).
    *
    * @param executionId - ID da execution
    * @param userId - ID do DUserGroup do admin
@@ -269,6 +271,8 @@ export class ApprovalFlowService {
             ),
             '{statusCode}', to_jsonb(${AUTOMATION_CLASS_IDS.EXEC_STATUS_REJECTED.toString()}::text)
           ),
+          -- ADR-V2-082: REJECTED é terminal → baixa canônica (libera activeExecution)
+          baixado = true,
           "atualizadoEm" = NOW()
       WHERE chave = ${BigInt(executionId)}
         AND dados->'approval'->>'status' = 'awaiting_approval'

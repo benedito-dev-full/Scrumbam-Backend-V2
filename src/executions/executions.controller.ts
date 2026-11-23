@@ -116,7 +116,13 @@ export class ExecutionsController {
   @ApiResponse({ status: 400, description: 'Comando inválido ou perigoso' })
   @ApiResponse({ status: 401, description: 'Não autenticado' })
   @ApiResponse({ status: 403, description: 'Sem acesso ao projeto' })
-  @ApiResponse({ status: 409, description: 'Idempotency-Key duplicada' })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Idempotency-Key duplicada, OU a task já tem execução não-terminal (ADR-V2-082): ' +
+      "body `{ statusCode:409, code:'EXECUTION_IN_PROGRESS', message, details:{ reason:'execution_in_progress', " +
+      "executionId, status:'running'|'queued'|'awaiting_approval' } }` — use GET /executions/:executionId para retomar o polling.",
+  })
   @ApiResponse({ status: 422, description: 'Agente não configurado no projeto' })
   @ApiResponse({ status: 429, description: 'Rate limit: 30 execuções/min por projeto' })
   async execute(

@@ -2,9 +2,40 @@
 
 **Versao:** 1.0
 **Mantido por:** Documenter Agent V2
-**Atualizado em:** 2026-11-23 (Task 1 Risk Gate prompt-mode COMPLETA — Score 8.6/10)
+**Atualizado em:** 2026-11-23 (Task 2 Execuções presas em RUNNING COMPLETA — Score 8.9/10)
 
 > Este documento rastreia tasks por Fase (F0..F17). Strategist abre, Implementer entrega, Reviewer valida, Documenter fecha. Cada task tem entrada com Status, Modulo, Fase, Tempo Real, Quality Score, Pilares aplicados e ADRs vinculados.
+
+---
+
+## Execuções presas em RUNNING / ciclo de vida terminal (ADR-V2-082) — Task 2 — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Reviewer APPROVED 8.9/10; ciclo 1: 8.6 com M1-M3 corrigidos no ciclo 2; gate do CEO = 8.5)
+**Módulo V2:** executions (toca `engine/lib/operacao`, `automation/runtime`, `mcp`, `common/filters`, `tasks`, `agent/`, `prisma/scripts`)
+**Fase V2:** F13 (Automation Claude Code) sobre o Engine de F6
+**Completado em:** 2026-11-23
+**Quality Score:** 8.9/10 (histórico: 8.6 → 8.9)
+
+**O Que Foi Feito:**
+- Execuções em `-518 RUNNING` sem callback são encerradas pelo sweeper 1/min (`TIMEOUT_NO_CALLBACK` / `AGENT_RESTARTED`); órfãs em fila viram `QUEUE_STALE`
+- Timeout com fonte única (`dados.timeoutSec`) lido pelo processor, pelo sweeper e pelo agente
+- Sentinela de desfecho com `source` (agent/system) e política P1: callback real substitui desfecho sintético uma única vez
+- Baixa (`baixado=true`) em todos os terminais, incluindo REJECTED e EXPIRED (fim do lock "zumbi")
+- 409 `PROJECT_BUSY` do agente reenfileira com backoff (até 10 tentativas) em vez de falhar
+- Anti-duplicata em REST, MCP e Nexus (409 `EXECUTION_IN_PROGRESS`), com advisory lock por task
+- Agente 0.1.1 envia SIGKILL após 15 s de grace quando o SIGTERM é ignorado
+- Backfill `prisma/scripts/backfill-execution-baixado.ts` (dry-run, apply, close-stale-running, release-tasks, revert)
+
+**Pilares aplicados:**
+- Pilar 1: desfecho terminal via `OperacaoExecucaoClaude` (`registrarOutcome`, `encerrarPorFalhaSistemica`, `devolverParaFila`, `encerrarVencidas`); desvio sinalizado: `markRunning` raw no processor (follow-up)
+- Pilar 2: nenhum controller novo; `RemoteAgentHttpError` preserva `errorCode`
+- Pilar 3: zero DClasse nova; motivos de falha em `audit.outcome.reason`; zero tabela, zero migration
+
+**Testes:** backend jest relevante 716/717 (a falha é o teste de tempo `risk-gate-natural-language` da Task 1, flaky sob carga, passa isolado); agent 222/222; TypeScript 78 → 67 erros (baseline, 0 nos arquivos tocados)
+
+**Pendências:** validar SQL em Postgres de staging (L11); smoke na VPS; frontend F-1 obrigatório no mesmo release; follow-ups L6 (SIGKILL no grupo), L8 (pool), L9 (`movedBy` forjável), L10 (ordem de eventos); Task 3 (fluxo de agentes na VPS) ainda não planejada
+
+**ADRs vinculados:** ADR-V2-082 (Aceito), ADR-V2-005, ADR-V2-006, ADR-V2-008, ADR-V2-033, ADR-V2-036, ADR-V2-073, ADR-V2-079, ADR-V2-081
 
 ---
 

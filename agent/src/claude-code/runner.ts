@@ -11,8 +11,14 @@
  * (≥2.1.139 confirmado no spike do CEO), o output JSON tem o shape:
  * `{ type: "result", session_id, result, is_error, duration_ms, ... }`.
  *
- * **Timeout:** vem do payload (`timeoutSec`, default 30min). `execFile`
- * com `timeout` envia SIGTERM e depois SIGKILL — captura o que tem em
+ * **Timeout:** vem do payload (`timeoutSec`, default 30min — fonte única é
+ * `DPedido.dados.timeoutSec` no backend, ADR-V2-082). `execFile` com
+ * `timeout` envia APENAS SIGTERM (`killSignal`). Um `claude` que ignora
+ * SIGTERM seguraria o mutex do slug para sempre (todo dispatch do projeto
+ * viraria 409 PROJECT_BUSY). Por isso há escalonamento próprio: se o processo
+ * não sair em `KILL_GRACE_MS` (15s) após o SIGTERM, recebe SIGKILL — o
+ * callback do execFile dispara, `runAndReport` chega ao `finally` e libera o
+ * mutex. `timedOut=true` em ambos os casos. Captura o que houver em
  * `stdout`/`stderr` mesmo no abort.
  *
  * **maxBuffer:** 10MB. Output JSON do Claude Code tem `usage.iterations`
@@ -25,6 +31,8 @@ import { execFile, type ExecFileException } from 'node:child_process';
 import { buildClaudeArgs } from './command-builder';
 
 const DEFAULT_TIMEOUT_SEC = 30 * 60; // 30min
+/** Tolerância entre SIGTERM (timeout) e SIGKILL forçado (ADR-V2-082). */
+export const KILL_GRACE_MS = 15_000;
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024; // 10MB
 const CLAUDE_BINARY = 'claude';
 
@@ -45,6 +53,8 @@ export interface RunnerInput {
   systemPrompt?: string;
   /** Override do execFile (testes). Default: `child_process.execFile`. */
   execFileImpl?: typeof execFile;
+  /** Override do grace SIGTERM→SIGKILL em ms (testes). Default {@link KILL_GRACE_MS}. */
+  killGraceMs?: number;
 }
 
 export interface RunnerResult {
@@ -60,7 +70,10 @@ export interface RunnerResult {
   exitCode: number | null;
   /** Sinal que terminou o processo (ex: 'SIGTERM' em timeout) ou null. */
   signal: string | null;
-  /** True se o `execFile` reportou timeout (killed=true por timeout). */
+  /**
+   * True se o processo foi encerrado por timeout — SIGTERM do `execFile`
+   * (killed=true) ou SIGKILL forçado após o grace.
+   */
   timedOut: boolean;
   /** Duração medida no agente (Date.now diff), em ms. */
   durationMs: number;
@@ -102,19 +115,35 @@ export async function runClaudeCode(input: RunnerInput): Promise<RunnerResult> {
   });
 
   const startMs = Date.now();
+  const timeoutMs = timeoutSec * 1000;
+  const killGraceMs =
+    input.killGraceMs !== undefined && input.killGraceMs >= 0 ? input.killGraceMs : KILL_GRACE_MS;
 
   return await new Promise<RunnerResult>((resolve) => {
+    let settled = false;
+    let forcedKill = false;
+    let timeoutTimer: NodeJS.Timeout | undefined;
+    let killTimer: NodeJS.Timeout | undefined;
+
+    const clearTimers = (): void => {
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      if (killTimer) clearTimeout(killTimer);
+    };
+
     const child = execFn(
       CLAUDE_BINARY,
       args,
       {
         cwd: input.cwd,
-        timeout: timeoutSec * 1000,
+        timeout: timeoutMs,
         maxBuffer: MAX_BUFFER_BYTES,
         // O CLI deve respeitar locale básico; nada de shell.
         windowsHide: true,
       },
       (err, stdout, stderr) => {
+        if (settled) return;
+        settled = true;
+        clearTimers();
         const durationMs = Date.now() - startMs;
         const e = err as (ExecFileException & { stdout?: string; stderr?: string }) | null;
 
@@ -135,19 +164,42 @@ export async function runClaudeCode(input: RunnerInput): Promise<RunnerResult> {
         const capturedErr = toString(e.stderr ?? stderr);
 
         // execFile com timeout: `killed=true` e `signal='SIGTERM'`.
-        const timedOut = e.killed === true || e.signal === 'SIGTERM';
+        // Escalonamento próprio: SIGKILL forçado após o grace.
+        const timedOut =
+          forcedKill || e.killed === true || e.signal === 'SIGTERM' || e.signal === 'SIGKILL';
         const exitCode = typeof e.code === 'number' ? e.code : timedOut ? null : 1;
 
         resolve({
           stdout: capturedOut,
           stderr: capturedErr,
           exitCode,
-          signal: typeof e.signal === 'string' ? e.signal : null,
+          signal: typeof e.signal === 'string' ? e.signal : forcedKill ? 'SIGKILL' : null,
           timedOut,
           durationMs,
         });
       },
     );
+
+    // ADR-V2-082: o `timeout` do execFile só manda SIGTERM. Agenda nosso
+    // próprio relógio: no estouro, reforça o SIGTERM (idempotente) e arma o
+    // SIGKILL para `killGraceMs` depois, caso o processo ignore o SIGTERM.
+    timeoutTimer = setTimeout(() => {
+      if (settled) return;
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        /* processo já saiu */
+      }
+      killTimer = setTimeout(() => {
+        if (settled) return;
+        forcedKill = true;
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          /* processo já saiu */
+        }
+      }, killGraceMs);
+    }, timeoutMs);
 
     // Defesa: se o child falhar pre-spawn (ENOENT do binário), o callback
     // ainda é invocado pelo Node — não precisamos de listener extra.

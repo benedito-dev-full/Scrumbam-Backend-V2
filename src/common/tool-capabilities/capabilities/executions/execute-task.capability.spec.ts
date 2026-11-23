@@ -1,4 +1,9 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 
 import toolsSchema from '../../../../mcp/schemas/tools.schema.json';
 import { CapabilityError } from '../../capability-error';
@@ -215,5 +220,45 @@ describe('ExecuteTaskCapability (Onda 6 — execute_task no Nexus, gated)', () =
 
     expect(result.data.executionId).toBe('1000123');
     expect(executionsService.execute).toHaveBeenCalledWith(projectId, { taskId }, '55');
+  });
+
+  // ─── ADR-V2-073/079/082: paridade com o MCP ─────────────────────────────────
+
+  it('(trava #794) task EXECUTING com workSession aberta de OUTRO ator → INVALID_INPUT task_locked, service NÃO chamado', async () => {
+    tasksService.findOne.mockResolvedValue({
+      id: taskId,
+      projectId,
+      status: 'EXECUTING',
+      dados: {
+        telemetry: {
+          workSessions: [{ agentId: '999', startedAt: new Date().toISOString(), endedAt: null }],
+        },
+      },
+      activeWorkSession: { agentId: '999', agentName: 'Fulano', startedAt: new Date().toISOString() },
+    });
+
+    const err = await capability.run({ taskId, confirm: true }, nexusPrincipal()).catch((e) => e);
+
+    expect(err).toBeInstanceOf(CapabilityError);
+    expect(err).toMatchObject({ code: 'INVALID_INPUT', data: { reason: 'task_locked' } });
+    expect(executionsService.execute).not.toHaveBeenCalled();
+  });
+
+  it('(duplicata) 409 execution_in_progress → INVALID_INPUT reason=execution_in_progress + executionId', async () => {
+    executionsService.execute.mockRejectedValue(
+      new ConflictException({
+        statusCode: 409,
+        code: 'EXECUTION_IN_PROGRESS',
+        message: 'em andamento',
+        details: { reason: 'execution_in_progress', executionId: '999', status: 'queued' },
+      }),
+    );
+
+    await expect(
+      capability.run({ taskId, confirm: true }, nexusPrincipal()),
+    ).rejects.toMatchObject({
+      code: 'INVALID_INPUT',
+      data: { reason: 'execution_in_progress', executionId: '999', status: 'queued' },
+    });
   });
 });

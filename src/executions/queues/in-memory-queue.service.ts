@@ -23,4 +23,27 @@ export class InMemoryQueueService {
 
     return data;
   }
+
+  /**
+   * Paridade de interface com `ExecutionQueueService.enqueueRetry` (ADR-V2-082).
+   * Sem Redis não há processor — apenas loga (modo sem fila é fora de escopo).
+   *
+   * @param input - Dados do job
+   * @param opts - Tentativa e atraso
+   * @returns Dados do job (não enfileirado de fato)
+   */
+  async enqueueRetry(
+    input: Omit<ExecutionRunJobData, 'enqueuedAt' | 'busyAttempt'>,
+    opts: { attempt: number; delayMs: number },
+  ): Promise<ExecutionRunJobData> {
+    const data: ExecutionRunJobData = {
+      ...input,
+      busyAttempt: opts.attempt,
+      enqueuedAt: new Date().toISOString(),
+    };
+    this.logger.log(
+      `execution_requeued_busy_inmemory executionId=${data.executionId} attempt=${opts.attempt} delayMs=${opts.delayMs} (no-op)`,
+    );
+    return data;
+  }
 }

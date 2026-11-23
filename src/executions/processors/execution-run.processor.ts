@@ -12,8 +12,20 @@ import {
   RemoteExecutionClient,
 } from '../../automation/runtime/remote-execution-client';
 import { EXECUTION_QUEUE_NAME } from '../queues/execution-queue.constants';
-import { ExecutionRunJobData } from '../queues/execution-queue.service';
+import { RemoteAgentHttpError } from '../../automation/runtime/remote-agent-http.error';
+import { ExecutionQueueService, ExecutionRunJobData } from '../queues/execution-queue.service';
 import { TasksService } from '../../tasks/tasks.service';
+import OperacaoExecucaoClaude from '../../engine/lib/operacao/OperacaoExecucaoClaude';
+import { IExecucaoData } from '../../engine/lib/interfaces/IExecucaoData';
+import {
+  computeBusyDelayMs,
+  EXECUTION_DEFAULT_TIMEOUT_SEC,
+  EXECUTION_FAILURE_REASONS,
+  ExecutionLifecycleConfig,
+  executionTaskLockKey,
+  resolveExecutionLifecycleConfig,
+  systemFailureMovedBy,
+} from '../constants/execution-lifecycle.const';
 
 const EXECUTION_CLASSES = [
   AUTOMATION_CLASS_IDS.EXEC_LOW,
@@ -34,12 +46,8 @@ const VALID_RISK_CLASSES = new Set<number>([
   Number(AUTOMATION_CLASS_IDS.EXEC_HIGH),
 ]);
 
-/**
- * Timeout default (segundos) entregue ao agente caso `DPedido.dados.timeoutSec`
- * (ou equivalente) nao esteja preenchido. Plan-task1 §4 sugere 1800s (30min)
- * para execucoes Claude Code.
- */
-const DEFAULT_TIMEOUT_SEC = 1800;
+/** Regex de id numerico (BigInt-parseavel) — defesa antes de `BigInt()`. */
+const NUMERIC_ID_RE = /^-?\d+$/;
 
 interface ExecutionPedido {
   chave: bigint;
@@ -61,25 +69,42 @@ interface RuntimeAgent {
 /**
  * Processor BullMQ que dispara execucoes Claude Code remotamente.
  *
- * Modelo V2 (apos ADR-V2-030/-032/-033, Sub-tarefa 2.2 do
- * `plan-automation-backend-side-task2.md`):
+ * Fila: `execution-run-queue` (concurrency 3, attempts 1).
+ * Eventos emitidos: `execution.started` (apos markRunning), `execution.failed`
+ * (falha de dispatch / busy esgotado / duplicata — com `reason`).
  *
+ * Fluxo (ADR-V2-033 + ADR-V2-082):
  * 1. Carrega `DPedido` (idClasse=-301/-302/-303), `DProject`, agente.
- * 2. Resolve `projectSlug`, `prompt`, `resumeSessionId`, `idClasseRisk`.
- * 3. Marca execucao como RUNNING e emite `execution.started`.
- * 4. Chama `remoteClient.execute()` (payload `RUN_CLAUDE_CODE`, ACK sincrono).
- * 5. Retorna apos ACK. **O resultado real (exitCode, claudeSessionId,
- *    outcome) chega via callback `POST /agents/:id/execution-result`**
- *    (Sub-tarefa 2.4 — ainda nao implementada nesta sub-tarefa 2.2).
+ * 2. Probe do tunel.
+ * 3. `markRunning` (CAS sob `pg_advisory_xact_lock` por task): QUEUED/APPROVED
+ *    -> RUNNING, so se SEM `audit.outcome` e sem OUTRA execucao RUNNING da mesma
+ *    task. CAS perdida por duplicata -> FAILED `DUPLICATE_TASK_EXECUTION`.
+ * 4. Chama `remoteClient.execute()` (ACK sincrono) e, apos o ACK, emite
+ *    `execution.started` (uma vez — retries de 409 nao re-emitem).
+ * 5. ACK ok -> move a task vinculada para EXECUTING **somente se a execucao
+ *    ainda esta RUNNING** (callback ultrarrapido nao regride DONE->EXECUTING).
+ * 6. 409 `PROJECT_BUSY` do agente -> Engine `devolverParaFila` (RUNNING->QUEUED)
+ *    + `enqueueRetry` com backoff (30s, 60s, ... teto 300s) ate
+ *    `EXECUTION_BUSY_MAX_RETRIES` (10); esgotado -> FAILED `PROJECT_BUSY_EXHAUSTED`.
+ * 7. Demais erros -> FAILED via Engine `encerrarPorFalhaSistemica`
+ *    (`source='system'`, baixado=true, claude.finishedAt/exitCode=-1) e a task
+ *    sai de EXECUTING se estiver la.
  *
- * Git operations (worktree, commit, push, rollback) deixaram de ser
- * orquestradas pelo backend — sao responsabilidade do Claude Code dentro
- * do projeto remoto (resolvido via `~/.claude/CLAUDE.md`).
+ * O resultado real chega via callback `POST /agents/:id/execution-result`.
+ * Se o callback nunca chegar, o `ExecutionRunningSweeperService` encerra a
+ * execucao no deadline (`startedAt + timeoutSec + 300s`) ou ao detectar
+ * restart do agente via heartbeat.
+ *
+ * Desvio Pilar 1 sinalizado (nao expandido): `markRunning` segue como UPDATE
+ * raw neste processor (follow-up: mover para o Engine).
+ *
+ * Performance target: < 200ms por job (excluindo o ACK do agente, ate 30s).
  */
 @Injectable()
 @Processor(EXECUTION_QUEUE_NAME, { concurrency: 3 })
 export class ExecutionRunProcessor extends WorkerHost {
   private readonly logger = new Logger(ExecutionRunProcessor.name);
+  private readonly lifecycle: ExecutionLifecycleConfig = resolveExecutionLifecycleConfig();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -88,10 +113,17 @@ export class ExecutionRunProcessor extends WorkerHost {
     private readonly remoteClient: RemoteExecutionClient,
     private readonly logService: ExecutionRuntimeLogService,
     private readonly tasksService: TasksService,
+    private readonly executionQueue: ExecutionQueueService,
   ) {
     super();
   }
 
+  /**
+   * Processa um job `run` da fila (ver JSDoc da classe para o fluxo).
+   *
+   * @param job - Job BullMQ `{ executionId, projectId, agentId, busyAttempt? }`
+   * @returns Promise void (nunca lanca — falhas viram FAILED/retry)
+   */
   async process(job: Job<ExecutionRunJobData>): Promise<void> {
     const { executionId, projectId, agentId } = job.data;
     const pedido = await this.loadExecution(executionId);
@@ -120,16 +152,14 @@ export class ExecutionRunProcessor extends WorkerHost {
         return;
       }
 
-      const transitioned = await this.markRunning(executionId);
+      const transitioned = await this.markRunning(
+        executionId,
+        this.asString(this.asRecord(dados.task)?.id),
+      );
       if (!transitioned) {
-        this.logger.warn(`execution_run_skip_stale executionId=${executionId}`);
+        await this.handleMarkRunningLost(pedido, correlationId);
         return;
       }
-
-      // Move a task vinculada para EXECUTING assim que o dispatch for confirmado
-      await this.moveLinkedTaskToExecuting(pedido.dados);
-
-      await this.safeEmit('execution.started', { executionId, projectId, agentId }, correlationId);
 
       await this.dispatchRunClaudeCode({
         pedido,
@@ -137,10 +167,133 @@ export class ExecutionRunProcessor extends WorkerHost {
         agent: runtimeAgent,
         correlationId,
       });
+
+      // L1 (Ciclo 2): `execution.started` só após o ACK — retries de 409
+      // PROJECT_BUSY não re-emitem o evento.
+      await this.safeEmit('execution.started', { executionId, projectId, agentId }, correlationId);
+
+      // ADR-V2-082: task -> EXECUTING SO depois do ACK (evita task EXECUTING
+      // durante 409/backoff) e so se a execucao ainda esta RUNNING.
+      await this.moveLinkedTaskToExecutingIfStillRunning(pedido);
     } catch (error) {
+      if (error instanceof RemoteAgentHttpError && error.isProjectBusy()) {
+        await this.handleProjectBusy(job, pedido, correlationId);
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       await this.failExecution(pedido, correlationId, message);
     }
+  }
+
+  /**
+   * 409 PROJECT_BUSY do agente: devolve a execucao para QUEUED (Engine, CAS)
+   * e re-enfileira com backoff. Esgotadas as tentativas -> FAILED
+   * `PROJECT_BUSY_EXHAUSTED`. Se o re-enfileiramento falhar (Redis), falha
+   * a execucao para nao deixa-la QUEUED para sempre.
+   */
+  private async handleProjectBusy(
+    job: Job<ExecutionRunJobData>,
+    pedido: ExecutionPedido,
+    correlationId: string,
+  ): Promise<void> {
+    const { executionId, projectId, agentId } = job.data;
+    const attempt = (job.data.busyAttempt ?? 0) + 1;
+    const max = this.lifecycle.busyMaxRetries;
+
+    if (attempt > max) {
+      await this.failExecution(
+        pedido,
+        correlationId,
+        `PROJECT_BUSY: agente recusou ${max} tentativas (projeto ocupado)`,
+        EXECUTION_FAILURE_REASONS.PROJECT_BUSY_EXHAUSTED,
+      );
+      return;
+    }
+
+    const delayMs = computeBusyDelayMs(
+      attempt,
+      this.lifecycle.busyBaseDelayMs,
+      this.lifecycle.busyMaxDelayMs,
+    );
+    const nextAttemptAt = new Date(Date.now() + delayMs).toISOString();
+    const requeued = await this.buildEngine(pedido, correlationId).devolverParaFila({
+      chave: pedido.chave,
+      busyAttempt: attempt,
+      nextAttemptAt,
+    });
+    if (!requeued) {
+      // Callback/sweeper ja decidiram o desfecho — nada a fazer.
+      this.logger.warn(`execution_busy_requeue_skipped executionId=${executionId}`);
+      return;
+    }
+
+    try {
+      await this.executionQueue.enqueueRetry(
+        { executionId, projectId, agentId },
+        { attempt, delayMs },
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.failExecution(pedido, correlationId, `PROJECT_BUSY requeue falhou: ${message}`);
+      return;
+    }
+
+    const audit = this.asRecord(pedido.dados.audit);
+    await this.safeRecordSystem({
+      executionId,
+      projectId: this.asString(audit?.projectId) ?? projectId,
+      agentId: this.asString(audit?.agentId) ?? agentId,
+      correlationId,
+      line: `PROJECT_BUSY retry ${attempt}/${max} em ${Math.round(delayMs / 1000)}s`,
+      code: 'PROJECT_BUSY',
+    });
+  }
+
+  /**
+   * CAS do `markRunning` nao aplicou. Se ha OUTRA execucao RUNNING da mesma
+   * task, esta perdeu a corrida anti-duplicata -> FAILED
+   * `DUPLICATE_TASK_EXECUTION` (nao fica QUEUED para sempre). Senao e job
+   * stale (ja terminou/ja rodando) -> skip.
+   */
+  private async handleMarkRunningLost(
+    pedido: ExecutionPedido,
+    correlationId: string,
+  ): Promise<void> {
+    const executionId = pedido.chave.toString();
+    const taskId = this.asString(this.asRecord(pedido.dados.task)?.id);
+    const ownStatus = this.asString(pedido.dados.statusCode);
+    const ownOutcome = this.asRecord(this.asRecord(pedido.dados.audit)?.outcome);
+
+    if (taskId && ownStatus !== AUTOMATION_CLASS_IDS.EXEC_STATUS_RUNNING.toString() && !ownOutcome) {
+      const otherRunning = await this.prisma.dPedido.findFirst({
+        where: {
+          idClasse: { in: EXECUTION_CLASSES },
+          excluido: false,
+          chave: { not: pedido.chave },
+          AND: [
+            { dados: { path: ['task', 'id'], equals: taskId } },
+            {
+              dados: {
+                path: ['statusCode'],
+                equals: AUTOMATION_CLASS_IDS.EXEC_STATUS_RUNNING.toString(),
+              },
+            },
+          ],
+        },
+        select: { chave: true },
+      });
+      if (otherRunning) {
+        await this.failExecution(
+          pedido,
+          correlationId,
+          `Execucao ${otherRunning.chave.toString()} da mesma task ja esta RUNNING`,
+          EXECUTION_FAILURE_REASONS.DUPLICATE_TASK_EXECUTION,
+        );
+        return;
+      }
+    }
+
+    this.logger.warn(`execution_run_skip_stale executionId=${executionId}`);
   }
 
   /**
@@ -182,9 +335,9 @@ export class ExecutionRunProcessor extends WorkerHost {
       `execution_dispatched executionId=${executionId} projectSlug=${projectSlug} idClasseRisk=${idClasseRisk}`,
     );
 
-    // Aguardar callback `POST /agents/:id/execution-result` (Sub-tarefa 2.4)
-    // para fechar a execucao (finishExecution / emitFinished). Por enquanto
-    // a execucao permanece em RUNNING ate sweeper ou callback.
+    // A execucao permanece RUNNING ate o callback `POST /agents/:id/execution-result`
+    // (Engine.registrarOutcome) ou ate o ExecutionRunningSweeperService encerra-la
+    // no deadline (timeoutSec + margem) / restart do agente (ADR-V2-082).
   }
 
   /**
@@ -253,13 +406,14 @@ export class ExecutionRunProcessor extends WorkerHost {
   }
 
   /**
-   * Extrai timeout em segundos de `DPedido.dados.timeoutSec`. Default
-   * `DEFAULT_TIMEOUT_SEC` (1800s = 30min).
+   * Extrai timeout em segundos de `DPedido.dados.timeoutSec` — fonte unica
+   * gravada na criacao (ADR-V2-082). Fallback `EXECUTION_DEFAULT_TIMEOUT_SEC`
+   * (1800s) para execucoes legadas.
    */
   private resolveTimeoutSec(dados: Record<string, unknown>): number {
     const direct = this.asNumber(dados.timeoutSec);
     if (direct && direct > 0 && Number.isFinite(direct)) return direct;
-    return DEFAULT_TIMEOUT_SEC;
+    return EXECUTION_DEFAULT_TIMEOUT_SEC;
   }
 
   private async loadExecution(executionId: string): Promise<ExecutionPedido | null> {
@@ -328,10 +482,28 @@ export class ExecutionRunProcessor extends WorkerHost {
     };
   }
 
-  private async moveLinkedTaskToExecuting(dados: Record<string, unknown>): Promise<void> {
-    const taskId = this.asString(this.asRecord(dados.task)?.id);
+  /**
+   * Move a task vinculada para EXECUTING somente se a execucao ainda esta
+   * RUNNING e sem outcome (releitura — 1 query). Evita regredir DONE/FAILED ->
+   * EXECUTING quando um callback ultrarrapido chega antes.
+   */
+  private async moveLinkedTaskToExecutingIfStillRunning(pedido: ExecutionPedido): Promise<void> {
+    const taskId = this.asString(this.asRecord(pedido.dados.task)?.id);
     if (!taskId) return;
     try {
+      const current = await this.prisma.dPedido.findFirst({
+        where: { chave: pedido.chave, excluido: false },
+        select: { dados: true },
+      });
+      const dadosAtuais = (current?.dados ?? {}) as Record<string, unknown>;
+      const stillRunning =
+        this.asString(dadosAtuais.statusCode) ===
+          AUTOMATION_CLASS_IDS.EXEC_STATUS_RUNNING.toString() &&
+        !this.asRecord(this.asRecord(dadosAtuais.audit)?.outcome);
+      if (!stillRunning) {
+        this.logger.log(`task_move_executing_skipped taskId=${taskId} (execucao ja terminou)`);
+        return;
+      }
       await this.tasksService.updateStatus(taskId, { status: 'EXECUTING' });
       this.logger.log(`task_moved_to_executing taskId=${taskId}`);
     } catch (err) {
@@ -339,95 +511,177 @@ export class ExecutionRunProcessor extends WorkerHost {
     }
   }
 
-  private async markRunning(executionId: string): Promise<boolean> {
-    const updated = await this.prisma.$executeRaw`
-      UPDATE "DPedido"
-      SET dados = jsonb_set(
-            jsonb_set(
-              COALESCE(dados, '{}'::jsonb),
-              '{runtime}',
-              COALESCE(dados->'runtime', '{}'::jsonb) || jsonb_build_object('startedAt', NOW()::text),
-              true
-            ),
-            '{statusCode}',
-            to_jsonb(${AUTOMATION_CLASS_IDS.EXEC_STATUS_RUNNING.toString()}::text),
-            true
-          ),
-          "atualizadoEm" = NOW()
-      WHERE "chave" = ${BigInt(executionId)}
-        AND "idClasse" IN (${Prisma.join(EXECUTION_CLASSES)})
-        AND (
-          dados->>'statusCode' IN (
-            ${AUTOMATION_CLASS_IDS.EXEC_STATUS_QUEUED.toString()},
-            ${AUTOMATION_CLASS_IDS.EXEC_STATUS_APPROVED.toString()}
-          )
-          OR dados->'approval'->>'status' IN ('queued', 'approved')
-        )
-    `;
-    return updated > 0;
+  /**
+   * Tira a task vinculada de EXECUTING (-> FAILED) quando a execucao falhou
+   * pelo sistema. So age se a task AINDA esta EXECUTING (nao pisa em humano).
+   */
+  private async releaseLinkedTaskOnFailure(pedido: ExecutionPedido): Promise<void> {
+    const taskId = this.asString(this.asRecord(pedido.dados.task)?.id);
+    if (!taskId) return;
+    try {
+      const task = await this.tasksService.findOne(taskId);
+      if (task.status !== 'EXECUTING') return;
+      // M2/L7: marcador permite ao callback tardio promover FAILED -> DONE
+      // somente quando o FAILED veio desta falha sintética.
+      await this.tasksService.updateStatus(taskId, {
+        status: 'FAILED',
+        movedBy: systemFailureMovedBy(pedido.chave.toString()),
+      });
+      this.logger.log(`task_released_on_failure taskId=${taskId}`);
+    } catch (err) {
+      this.logger.warn(`task_release_failed taskId=${taskId} err=${(err as Error).message}`);
+    }
   }
 
+  /**
+   * CAS QUEUED/APPROVED -> RUNNING (desvio Pilar 1 sinalizado — raw fora do Engine).
+   *
+   * ADR-V2-082: reforcada com (a) `audit.outcome` ausente — um re-enfileiramento
+   * nunca sobrescreve SUCCESS/FAILED com RUNNING; (b) anti-duplicata — nenhuma
+   * OUTRA execucao da mesma task pode estar RUNNING.
+   *
+   * Ciclo 2 / M1: o `NOT EXISTS` sozinho sofre write skew sob READ COMMITTED
+   * (duas transacoes concorrentes nao enxergam o RUNNING nao-commitado uma da
+   * outra). Por isso o UPDATE roda numa transacao que antes adquire
+   * `pg_advisory_xact_lock(hashtext('exec-task:<taskId>'))`: a segunda espera a
+   * primeira commitar e, como cada statement em READ COMMITTED tira snapshot
+   * novo, o `NOT EXISTS` dela enxerga o RUNNING ja commitado -> CAS falha.
+   * Mesmo lock usado por `ExecutionsService.execute` (trava + criacao).
+   */
+  private async markRunning(executionId: string, taskId?: string): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      if (taskId) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${executionTaskLockKey(taskId)}))`;
+      }
+      const updated = await tx.$executeRaw`
+        UPDATE "DPedido"
+        SET dados = jsonb_set(
+              jsonb_set(
+                COALESCE(dados, '{}'::jsonb),
+                '{runtime}',
+                COALESCE(dados->'runtime', '{}'::jsonb) || jsonb_build_object('startedAt', NOW()::text),
+                true
+              ),
+              '{statusCode}',
+              to_jsonb(${AUTOMATION_CLASS_IDS.EXEC_STATUS_RUNNING.toString()}::text),
+              true
+            ),
+            "atualizadoEm" = NOW()
+        WHERE "chave" = ${BigInt(executionId)}
+          AND "idClasse" IN (${Prisma.join(EXECUTION_CLASSES)})
+          AND dados->'audit'->'outcome' IS NULL
+          AND (
+            dados->>'statusCode' IN (
+              ${AUTOMATION_CLASS_IDS.EXEC_STATUS_QUEUED.toString()},
+              ${AUTOMATION_CLASS_IDS.EXEC_STATUS_APPROVED.toString()}
+            )
+            OR dados->'approval'->>'status' IN ('queued', 'approved')
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM "DPedido" o
+             WHERE o."idClasse" IN (${Prisma.join(EXECUTION_CLASSES)})
+               AND o.excluido = false
+               AND o.chave <> ${BigInt(executionId)}
+               AND o.dados->'task'->>'id' IS NOT NULL
+               AND o.dados->'task'->>'id' = "DPedido".dados->'task'->>'id'
+               AND o.dados->>'statusCode' = ${AUTOMATION_CLASS_IDS.EXEC_STATUS_RUNNING.toString()}
+          )
+      `;
+      return updated > 0;
+    });
+  }
+
+  /**
+   * Falha a execucao pelo sistema via Engine (`encerrarPorFalhaSistemica`):
+   * statusCode -520, baixado=true, claude.finishedAt + exitCode=-1,
+   * outcome `source='system'`. SO se a CAS aplicou: log -496, task
+   * EXECUTING -> FAILED e `execution.failed {reason, errorCode}` (Padrao #7).
+   *
+   * @param detail - Mensagem legivel (vai para `claude.stderr` e log -496)
+   * @param reason - Motivo canonico (default `DISPATCH_FAILED`)
+   */
   private async failExecution(
     pedido: ExecutionPedido,
     correlationId: string,
-    reason: string,
+    detail: string,
+    reason: string = EXECUTION_FAILURE_REASONS.DISPATCH_FAILED,
   ): Promise<void> {
     const executionId = pedido.chave.toString();
     const dadosAudit = this.asRecord(pedido.dados.audit);
     const projectId = this.asString(dadosAudit?.projectId) ?? pedido.idLocEscritu?.toString() ?? '';
     const agentId = this.asString(dadosAudit?.agentId) ?? '0';
+    const taskId = this.asString(this.asRecord(pedido.dados.task)?.id);
+    // L3 (Ciclo 2): errorCode sempre canônico (motivo); o detalhe livre vai só
+    // para claude.stderr / log.
+    const errorCode = reason;
+
+    let applied = false;
+    try {
+      applied = await this.buildEngine(pedido, correlationId).encerrarPorFalhaSistemica({
+        chave: pedido.chave,
+        reason,
+        detail,
+        errorCode,
+        expected: 'ANY_NON_TERMINAL',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`execution_fail_persist_error executionId=${executionId} error=${message}`);
+      return;
+    }
+
+    if (!applied) {
+      this.logger.warn(
+        `execution_fail_skipped executionId=${executionId} reason=${reason} (desfecho ja gravado)`,
+      );
+      return;
+    }
+
     await this.safeRecordSystem({
       executionId,
       projectId,
       agentId,
       correlationId,
-      line: reason,
+      line: detail,
       code: reason,
     });
-    await this.finishExecution(pedido.chave, {
-      statusCode: AUTOMATION_CLASS_IDS.EXEC_STATUS_FAILED.toString(),
-      claude: {
-        exitCode: -1,
-        stderr: reason,
-        finishedAt: new Date().toISOString(),
+    await this.releaseLinkedTaskOnFailure(pedido);
+    await this.safeEmit(
+      'execution.failed',
+      {
+        executionId,
+        projectId,
+        agentId,
+        ...(taskId ? { taskId } : {}),
+        reason,
+        errorCode,
       },
-    });
-    await this.emitFinished('execution.failed', executionId, projectId, agentId, correlationId);
+      correlationId,
+    );
   }
 
-  private async finishExecution(
-    executionId: bigint,
-    patch: Record<string, unknown>,
-  ): Promise<void> {
-    const pedido = await this.prisma.dPedido.findFirst({
-      where: { chave: executionId, excluido: false },
-      select: { dados: true },
-    });
-    const dados = (pedido?.dados ?? {}) as Record<string, unknown>;
-    const runtime = {
-      ...this.asRecord(dados.runtime),
-      finishedAt: new Date().toISOString(),
+  /**
+   * Instancia o Engine apenas para os metodos de desfecho (sem nova/calcula —
+   * `dados.risk` intocado, guardas ADR-V2-081 nao re-executam).
+   */
+  private buildEngine(pedido: ExecutionPedido, correlationId: string): OperacaoExecucaoClaude {
+    const audit = this.asRecord(pedido.dados.audit);
+    const projectRaw = this.asString(audit?.projectId) ?? pedido.idLocEscritu?.toString() ?? '0';
+    const agentRaw = this.asString(audit?.agentId) ?? '0';
+    const command = (this.asRecord(pedido.dados.command) as unknown as IExecucaoData['command']) ?? {
+      text: '',
     };
-    await this.prisma.dPedido.update({
-      where: { chave: executionId },
-      data: {
-        dados: {
-          ...dados,
-          ...patch,
-          runtime,
-        } as Prisma.InputJsonValue,
-      },
+    return new OperacaoExecucaoClaude({
+      usuario: 'system:execution-run-processor',
+      classe: pedido.idClasse.toString(),
+      bd: this.prisma,
+      projectId: NUMERIC_ID_RE.test(projectRaw) ? projectRaw : '0',
+      agentId: NUMERIC_ID_RE.test(agentRaw) ? agentRaw : '0',
+      correlationId,
+      command,
+      agentTunnelService: { runClaudeCode: () => Promise.resolve({}) },
+      eventProducer: this.eventProducer,
     });
-  }
-
-  private async emitFinished(
-    type: 'execution.succeeded' | 'execution.failed' | 'execution.expired',
-    executionId: string,
-    projectId: string,
-    agentId: string,
-    correlationId: string,
-  ): Promise<void> {
-    await this.safeEmit(type, { executionId, projectId, agentId }, correlationId);
   }
 
   private async safeEmit(

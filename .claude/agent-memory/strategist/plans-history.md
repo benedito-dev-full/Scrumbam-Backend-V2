@@ -27,3 +27,4 @@ metadata:
 
 # Bug latente registrado
 - `projects.service.ts:~895` usava `dVincula.idEntidade = projectId` (FK p/ DEntidade recebendo ID de DProject). Resolvido sistemicamente por ADR-V2-058 (DEntidade-espelho PROJECT_REF) — ver dvincula-fk-exige-dentidade.md.
+| Exec-Task2 (rev.2 2026-11-23) | plan-executions-execucao-presa-task2.md | Sweeper RUNNING + CAS outcome.source (callback tardio substitui sintetico 1x), baixado=true em todos terminais, 409 PROJECT_BUSY retry 10x, anti-dup em ExecutionsService.execute, SIGKILL no agente. ADR-V2-082. Licao: frontend so encerra polling com claude.finishedAt (todo FAILED sintetico grava). Rejected/expired apareciam como awaiting_approval (deriveExecutionStatus sem baixa). Task1 (ADR-V2-081) zona disjunta: calcula()/guardas. Backfill silencioso com criterio = deadline. ~37h. |

@@ -1,7 +1,12 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 
 import { EntidadeService } from '../../../../entidades/entidades.service';
-import { ExecutionsService } from '../../../../executions/executions.service';
+import {
+  ExecutionsService,
+  parseExecutionInProgressConflict,
+} from '../../../../executions/executions.service';
+import { assertTaskNotLockedByOther } from '../../../../mcp/tools/task-concurrency.guard';
+import { McpToolError } from '../../../../mcp/tools/tool.interface';
 import { ProjectsService } from '../../../../projects/projects.service';
 import { TasksService } from '../../../../tasks/tasks.service';
 import { CapabilityError } from '../../capability-error';
@@ -115,7 +120,9 @@ export class ExecuteTaskCapability implements Capability {
    *   riskLevel, riskClassId, createdAt, pollHint }` (shape do legado).
    * @throws {CapabilityError} `INVALID_INPUT` quando `confirm` != true, `taskId`
    *   ausente/nao-BigInt, ou o Risk Gate rejeita o command (`reason:
-   *   'risk_gate_blocked'`).
+   *   'risk_gate_blocked'`), a task está travada por outro ator
+   *   (`reason:'task_locked'`, ADR-V2-073) ou já tem execução não-terminal
+   *   (`reason:'execution_in_progress'` + `executionId`, ADR-V2-082).
    * @throws {import('@nestjs/common').NotFoundException} Task/projeto fora do
    *   tenant ou inexistente (propagada).
    * @throws {import('@nestjs/common').ForbiddenException} Sem membership no
@@ -139,6 +146,17 @@ export class ExecuteTaskCapability implements Capability {
     // projectsService.findOne confirma membership do ator no projeto.
     const task = await this.tasksService.findOne(taskId);
     await this.projectsService.findOne(task.projectId, principal.actorEntidadeId);
+
+    // 3.1. Trava de concorrência (task #794 / ADR-V2-073) — paridade com o tool
+    // MCP (ADR-V2-079). O guard fala o dialeto MCP; traduz para CapabilityError.
+    try {
+      assertTaskNotLockedByOther(task, principal.actorEntidadeId);
+    } catch (err) {
+      if (err instanceof McpToolError) {
+        throw new CapabilityError('INVALID_INPUT', err.message, err.data);
+      }
+      throw err;
+    }
 
     // 4. Resolve DUserGroup.chave a partir da DEntidade.chave do ator.
     const userGroupId = await this.entidadeService.getUserGroupIdFromEntidade(
@@ -166,6 +184,16 @@ export class ExecuteTaskCapability implements Capability {
         },
       };
     } catch (err) {
+      // ADR-V2-082: task já tem execução não-terminal → INVALID_INPUT
+      // reason='execution_in_progress' (mesmo mapeamento semântico do MCP).
+      const conflict = parseExecutionInProgressConflict(err);
+      if (conflict) {
+        throw new CapabilityError('INVALID_INPUT', 'Task already has an execution in progress', {
+          reason: 'execution_in_progress',
+          executionId: conflict.executionId,
+          status: conflict.status,
+        });
+      }
       // Defesa em profundidade (ADR-V2-066): CommandValidator pode rejeitar o
       // command estruturado. Traduz para INVALID_INPUT com reason
       // 'risk_gate_blocked' (mesmo mapeamento semantico do wrapper legado).

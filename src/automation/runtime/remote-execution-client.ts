@@ -1,6 +1,7 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { createHash, createHmac, randomUUID } from 'crypto';
 import { AgentKeyService } from '../agents/agent-key.service';
+import { RemoteAgentHttpError } from './remote-agent-http.error';
 
 /**
  * Runtime data do agente remoto (DEntidade idClasse=-156) necessario para
@@ -286,8 +287,18 @@ export class RemoteExecutionClient {
       });
 
       if (!response.ok) {
-        throw new ServiceUnavailableException(
-          `Agent retornou HTTP ${response.status} para ${type} (agent=${ctx.agent.agentId})`,
+        // ADR-V2-082: preserva status + errorCode do body (ex.: 409 PROJECT_BUSY)
+        // para o processor decidir retry vs falha. Subclasse de
+        // ServiceUnavailableException → callers existentes intactos.
+        const errBody = (await response.json().catch(() => null)) as {
+          errorCode?: unknown;
+        } | null;
+        const errorCode =
+          errBody && typeof errBody.errorCode === 'string' ? errBody.errorCode : undefined;
+        throw new RemoteAgentHttpError(
+          response.status,
+          errorCode,
+          `Agent retornou HTTP ${response.status}${errorCode ? ` (${errorCode})` : ''} para ${type} (agent=${ctx.agent.agentId})`,
         );
       }
 

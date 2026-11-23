@@ -1,8 +1,59 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-11-23 (Task 1 Risk Gate avalia prompt no modo PROMPT COMPLETA — score 8.6)
+**Ultima atualizacao:** 2026-11-23 (Task 2 Execuções presas em RUNNING COMPLETA — score 8.9)
 
 ---
+
+## Execuções presas em RUNNING / ciclo de vida terminal (ADR-V2-082) — Task 2 — COMPLETE
+
+**Module:** executions (engine/lib/operacao, automation/runtime, mcp, tasks, agent/)
+**Initiative:** Fechar execuções presas em RUNNING, baixa canônica e anti-duplicata (REST/MCP/Nexus)
+**Status:** COMPLETA
+**Completed:** 2026-11-23
+**Quality Score:** 8.9/10 (APPROVED após 2 ciclos: 8.6 → 8.9; gate 8.5)
+
+**Agents Performance:**
+| Agent | Duration | Quality |
+|-------|----------|---------|
+| Strategist | n/d | — |
+| Implementer | n/d (2 ciclos) | — |
+| Reviewer | n/d (2 ciclos) | 8.9/10 |
+| Documenter | n/d | — |
+
+**Pilares:**
+- Pilar 1 (Engine): desfecho terminal via `OperacaoExecucaoClaude`; desvio sinalizado — `markRunning` raw no processor (follow-up)
+- Pilar 2 (Endpoints): REUTILIZADO — sem controller novo; `details` repassado só para `EXECUTION_IN_PROGRESS`
+- Pilar 3 (Seed): N/A — zero DClasse nova; zero tabela; zero migration (backfill é DML)
+
+**Deliverables:**
+- [x] Sweeper 1/min com deadline (`TIMEOUT_NO_CALLBACK`, `AGENT_RESTARTED`, `QUEUE_STALE`)
+- [x] Timeout fonte única (`dados.timeoutSec`) e sentinela de desfecho com `source`
+- [x] Baixa em todos os terminais (SUCCESS, FAILED, REJECTED, EXPIRED)
+- [x] 409 `PROJECT_BUSY` com backoff e `PROJECT_BUSY_EXHAUSTED`
+- [x] Anti-duplicata REST/MCP/Nexus com advisory lock por task
+- [x] Agente 0.1.1: SIGKILL após 15 s de grace
+- [x] Backfill com dry-run, apply, close-stale-running, release-tasks e revert
+- [ ] Validar SQL em Postgres de staging (L11)
+- [ ] Smoke na VPS (pendente)
+- [ ] Frontend F-1 (409 `EXECUTION_IN_PROGRESS`) no mesmo release — obrigatório
+
+**Metrics:**
+- Build: PASS
+- TypeScript: 67 erros (baseline; antes 78); 0 nos arquivos tocados
+- ESLint: 0 errors nos arquivos tocados
+- Tests: backend jest relevante 716/717 (1 flaky de tempo da Task 1); agent 222/222
+- N+1 Queries: ZERO (lotes + 1 query nas travas)
+
+**ADRs:** ADR-V2-082 (Aceito), ADR-V2-005, ADR-V2-006, ADR-V2-033, ADR-V2-036, ADR-V2-079, ADR-V2-081
+
+**Plan:** `workspace/plans/plan-executions-execucao-presa-task2.md`
+**Impl Notes:** `workspace/implementations/impl-executions-execucao-presa-task2.md`
+**Review:** `workspace/reviews/review-executions-execucao-presa-task2.md`
+**Runbook:** `docs/automation-security-runbook.md` (seção ADR-V2-082)
+
+---
+
+## Risk Gate avalia o prompt no modo PROMPT (ADR-V2-081) — Task 1 — COMPLETE
 
 ## Risk Gate avalia o prompt no modo PROMPT (ADR-V2-081) — Task 1 — COMPLETE
 

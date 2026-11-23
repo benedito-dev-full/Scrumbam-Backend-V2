@@ -26,6 +26,7 @@ import { AgentInstallTokenService } from './agent-install-token.service';
 import { AgentKeyService } from './agent-key.service';
 import { AgentPortAllocatorService } from './agent-port-allocator.service';
 import { TasksService } from '../../tasks/tasks.service';
+import { systemFailureMovedBy } from '../../executions/constants/execution-lifecycle.const';
 
 /**
  * Conjunto de idClasse válidas para DPedido de execução Claude Code.
@@ -613,8 +614,11 @@ export class AgentsService {
    *   1. Carrega DPedido por executionId
    *   2. Valida que idClasse pertence a {-301,-302,-303} (ADR-V2-006)
    *   3. Isolation: agente autenticado === agente registrado em DPedido.dados.audit.agentId
-   *   4. Idempotência: se `dados.audit.outcome` já presente, retorna alreadyPersisted=true
+   *   4. Idempotência: fast-path se `dados.audit.outcome` real (source≠'system') já presente;
+   *      decisão final pela CAS do Engine (`applied=false` → alreadyPersisted=true, sem eventos)
    *   5. Instancia OperacaoExecucaoClaude e chama registrarOutcome() — Engine encapsula UPDATE
+   *      com CAS + baixado=true. Outcome sintético (source='system') é substituído uma vez
+   *      (ADR-V2-082) → payload ganha `supersedes` e task FAILED→DONE só se ainda FAILED
    *      (Pilar 1 PRESERVADO: zero prisma.dPedido.update direto neste handler)
    *   6. Materializa DEvento via EventProducerService APÓS persistência (Padrão #7):
    *      - agent.execution.finished | agent.execution.failed (idClasse -496)
@@ -689,18 +693,21 @@ export class AgentsService {
       throw new ForbiddenException('Agent id mismatch (guard inconsistency)');
     }
 
-    // 4. Idempotência: se outcome já persistido, retorna NO-OP com persistedAt original
-    const auditExisting = dadosExecucao.audit as
-      | (IExecucaoData['audit'] & { outcome?: { recordedAt?: string } })
-      | undefined;
-    if (auditExisting?.outcome?.recordedAt) {
+    // 4. Idempotência — fast-path de leitura SÓ para outcome real do agente
+    //    (source 'agent' ou legado sem source). Outcome sintético
+    //    (source='system': sweeper/dispatch/backfill) NÃO bloqueia: a verdade
+    //    tardia substitui o FAILED sintético uma única vez (ADR-V2-082, P1).
+    //    A decisão final é da CAS no Engine (`applied`).
+    const auditExisting = dadosExecucao.audit;
+    const existingOutcome = auditExisting?.outcome;
+    if (existingOutcome?.recordedAt && existingOutcome.source !== 'system') {
       this.logger.log(
-        `[idempotent] Outcome para execução ${dto.executionId} já persistido em ${auditExisting.outcome.recordedAt}`,
+        `[idempotent] Outcome para execução ${dto.executionId} já persistido em ${existingOutcome.recordedAt}`,
       );
       return {
         accepted: true,
         alreadyPersisted: true,
-        persistedAt: auditExisting.outcome.recordedAt,
+        persistedAt: existingOutcome.recordedAt,
       };
     }
 
@@ -722,7 +729,7 @@ export class AgentsService {
       eventProducer: this.eventProducer,
     });
 
-    await operacao.registrarOutcome({
+    const outcome = await operacao.registrarOutcome({
       dadosExistentes: {
         chave: pedido.chave,
         dados: dadosExecucao,
@@ -739,22 +746,31 @@ export class AgentsService {
       errorCode: dto.errorCode,
     });
 
-    // Transição automática da task vinculada (EXECUTING → DONE | FAILED)
-    const linkedTaskId = (dadosExecucao as unknown as { task?: { id?: string } })?.task?.id;
-    if (linkedTaskId) {
-      try {
-        await this.tasksService.updateStatus(linkedTaskId, {
-          status: dto.success ? 'DONE' : 'FAILED',
-        });
-        this.logger.log(`Task ${linkedTaskId} movida para ${dto.success ? 'DONE' : 'FAILED'}`);
-      } catch (taskErr) {
-        this.logger.warn(
-          `Não foi possível mover task ${linkedTaskId}: ${(taskErr as Error).message}`,
-        );
-      }
+    // CAS não aplicou: outro callback (retry do agente) gravou antes — NO-OP,
+    // sem eventos nem transição de task (DVFS 7 também não rodou).
+    if (!outcome.applied) {
+      this.logger.log(
+        `[idempotent:cas] Outcome para execução ${dto.executionId} já persistido em ${outcome.persistedAt}`,
+      );
+      return { accepted: true, alreadyPersisted: true, persistedAt: outcome.persistedAt };
     }
 
-    const persistedAt = new Date().toISOString();
+    // Transição automática da task vinculada.
+    //  - Caminho normal: EXECUTING → DONE | FAILED (como antes).
+    //  - Supersede (callback tardio sobre FAILED sintético) + sucesso: promove a
+    //    DONE se a task está EXECUTING (sweeper ainda não a liberou) ou FAILED
+    //    com o marcador desta execução (ver transitionLinkedTask). Falha real: no-op.
+    const linkedTaskId = dadosExecucao.task?.id;
+    if (linkedTaskId) {
+      await this.transitionLinkedTask(
+        linkedTaskId,
+        dto.executionId,
+        dto.success,
+        outcome.superseded !== undefined,
+      );
+    }
+
+    const persistedAt = outcome.persistedAt;
 
     // 6. Materializa DEventos via EventProducerService (APÓS persistência — Padrão #7)
     //    Não bloqueia o response: producer absorve erros internamente.
@@ -765,6 +781,8 @@ export class AgentsService {
       exitCode: dto.exitCode,
       durationMs: dto.durationMs,
       errorCode: dto.errorCode ?? null,
+      // ADR-V2-082: aditivo — presente quando substituiu um FAILED sintético.
+      ...(outcome.superseded ? { supersedes: outcome.superseded } : {}),
     };
 
     await this.eventProducer.addInternalEvent(
@@ -792,5 +810,59 @@ export class AgentsService {
     }
 
     return { accepted: true, persistedAt };
+  }
+
+  /**
+   * Move a task vinculada conforme o desfecho real do agente (ADR-V2-082).
+   *
+   * Caminho normal: EXECUTING → DONE | FAILED.
+   *
+   * Supersede (callback tardio substituiu um FAILED sintético) — Ciclo 2 / M2 + L7.
+   * Critério seguro para promover a DONE quando `success`:
+   *  - task **EXECUTING**: o sweeper/processor ainda não liberou a task (corrida
+   *    entre o UPDATE sintético e a liberação) → DONE. O sweeper relê o outcome
+   *    antes/depois de liberar e não a derruba de volta;
+   *  - task **FAILED com `v3.movedBy === system:execution-<esta execução>`**: o
+   *    FAILED foi gravado pelo SISTEMA por causa DESTA execução → DONE.
+   *  - qualquer outro estado (FAILED manual de usuário, FAILED de OUTRA execução
+   *    — L7 —, READY, DONE…) → no-op. O marcador é a única prova de origem
+   *    disponível sem coluna nova; ele é sobrescrito por qualquer movimentação
+   *    posterior (humana ou de outra execução), então nunca promove indevidamente.
+   * Falha real no supersede: task já está FAILED → no-op.
+   *
+   * @param taskId - DTask.chave
+   * @param executionId - DPedido.chave da execução que reportou
+   * @param success - Desfecho reportado
+   * @param superseded - true quando o callback substituiu um FAILED sintético
+   */
+  private async transitionLinkedTask(
+    taskId: string,
+    executionId: string,
+    success: boolean,
+    superseded: boolean,
+  ): Promise<void> {
+    try {
+      if (superseded) {
+        if (!success) return; // já está FAILED pelo sistema — nada a fazer
+        const task = await this.tasksService.findOne(taskId);
+        const movedBy = (task.dados as { v3?: { movedBy?: string | null } } | null)?.v3?.movedBy;
+        const promovivel =
+          task.status === 'EXECUTING' ||
+          (task.status === 'FAILED' && movedBy === systemFailureMovedBy(executionId));
+        if (!promovivel) {
+          this.logger.log(
+            `Task ${taskId} não promovida a DONE (supersede): status=${task.status} movedBy=${movedBy ?? '-'}`,
+          );
+          return;
+        }
+        await this.tasksService.updateStatus(taskId, { status: 'DONE' });
+        this.logger.log(`Task ${taskId} movida ${task.status} → DONE (callback tardio)`);
+        return;
+      }
+      await this.tasksService.updateStatus(taskId, { status: success ? 'DONE' : 'FAILED' });
+      this.logger.log(`Task ${taskId} movida para ${success ? 'DONE' : 'FAILED'}`);
+    } catch (taskErr) {
+      this.logger.warn(`Não foi possível mover task ${taskId}: ${(taskErr as Error).message}`);
+    }
   }
 }

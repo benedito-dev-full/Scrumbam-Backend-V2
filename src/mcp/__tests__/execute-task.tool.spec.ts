@@ -1,4 +1,9 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 
 import { MCP_ERROR_CODES } from '../constants';
 import { McpUserContext } from '../interfaces/mcp.types';
@@ -443,5 +448,35 @@ describe('MCP execute_task tool', () => {
       const mcpErr = err as McpToolError;
       expect(mcpErr.code).toBe(MCP_ERROR_CODES.FORBIDDEN);
     }
+  });
+
+  // ─── ADR-V2-082: execução duplicada da mesma task ─────────────────────────
+
+  it('409 execution_in_progress do service → INVALID_PARAMS reason=execution_in_progress (+executionId)', async () => {
+    executionsService.execute.mockRejectedValue(
+      new ConflictException({
+        statusCode: 409,
+        code: 'EXECUTION_IN_PROGRESS',
+        message: 'Task 402 já tem uma execução em andamento (999).',
+        details: { reason: 'execution_in_progress', executionId: '999', status: 'running' },
+      }),
+    );
+
+    const err = await tool.handler({ taskId }, ctxWithScope).catch((e) => e);
+
+    expect(err).toBeInstanceOf(McpToolError);
+    expect((err as McpToolError).code).toBe(MCP_ERROR_CODES.INVALID_PARAMS);
+    expect((err as McpToolError).data).toEqual({
+      reason: 'execution_in_progress',
+      executionId: '999',
+      status: 'running',
+    });
+  });
+
+  it('outro ConflictException (sem code EXECUTION_IN_PROGRESS) propaga inalterado', async () => {
+    const other = new ConflictException('outro conflito');
+    executionsService.execute.mockRejectedValue(other);
+
+    await expect(tool.handler({ taskId }, ctxWithScope)).rejects.toBe(other);
   });
 });
