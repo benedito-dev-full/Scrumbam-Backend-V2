@@ -62,7 +62,15 @@ export const EXECUTION_FAILURE_REASONS = {
   PROJECT_BUSY_EXHAUSTED: 'PROJECT_BUSY_EXHAUSTED',
   /** Outra execução da mesma task já está RUNNING (CAS do markRunning). */
   DUPLICATE_TASK_EXECUTION: 'DUPLICATE_TASK_EXECUTION',
-  /** Falha no dispatch (túnel, ACK timeout, HTTP != 200 que não é busy, etc.). */
+  /**
+   * Túnel SSH do agente indisponível no probe pré-dispatch (Ciclo 3). O detalhe
+   * técnico (`ECONNREFUSED`, `TUNNEL_TIMEOUT`, …) fica só em `claude.stderr`.
+   */
+  TUNNEL_UNAVAILABLE: 'TUNNEL_UNAVAILABLE',
+  /**
+   * Demais falhas de dispatch: ACK timeout, HTTP != 200 que não é busy, agente/projeto
+   * não encontrado, contrato runtime incompleto, slug ausente, falha ao re-enfileirar.
+   */
   DISPATCH_FAILED: 'DISPATCH_FAILED',
   /** Fechamento silencioso de RUNNING antigas pelo script de backfill (decisão CEO P3). */
   BACKFILL_STALE: 'BACKFILL_STALE',
@@ -72,6 +80,29 @@ export const EXECUTION_FAILURE_REASONS = {
 
 export type ExecutionFailureReason =
   (typeof EXECUTION_FAILURE_REASONS)[keyof typeof EXECUTION_FAILURE_REASONS];
+
+/**
+ * Lista CANÔNICA e fechada dos motivos de falha marcada pelo sistema
+ * (`audit.outcome.reason` com `source='system'`) — Ciclo 3. É exatamente o
+ * conjunto exposto em `ExecutionResponseDto.outcome.reason`; o frontend mapeia
+ * cada código para um texto amigável. Adicionar código = atualizar ADR-V2-082
+ * e o frontend.
+ */
+export const EXECUTION_FAILURE_REASON_CODES: readonly ExecutionFailureReason[] =
+  Object.values(EXECUTION_FAILURE_REASONS);
+
+/**
+ * Type guard: o valor é um código canônico de falha sistêmica?
+ *
+ * @param value - Valor lido de `dados.audit.outcome.reason`
+ * @returns true se pertence a {@link EXECUTION_FAILURE_REASON_CODES}
+ */
+export function isExecutionFailureReason(value: unknown): value is ExecutionFailureReason {
+  return (
+    typeof value === 'string' &&
+    (EXECUTION_FAILURE_REASON_CODES as readonly string[]).includes(value)
+  );
+}
 
 /**
  * Status de execução NÃO-terminais (DClasse -514..-518): QUEUED, AWAITING_APPROVAL,

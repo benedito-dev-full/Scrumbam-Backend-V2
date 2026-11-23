@@ -21,6 +21,7 @@ import {
   computeBusyDelayMs,
   EXECUTION_DEFAULT_TIMEOUT_SEC,
   EXECUTION_FAILURE_REASONS,
+  ExecutionFailureReason,
   ExecutionLifecycleConfig,
   executionTaskLockKey,
   resolveExecutionLifecycleConfig,
@@ -148,7 +149,14 @@ export class ExecutionRunProcessor extends WorkerHost {
       runtimeAgent = this.resolveRuntimeAgent(agent);
       const probe = await this.agentTunnel.probe(runtimeAgent.tunnelPort);
       if (!probe.tunnelOk) {
-        await this.failExecution(pedido, correlationId, probe.error ?? 'TUNNEL_UNAVAILABLE');
+        // Ciclo 3: código canônico próprio; detalhe técnico (ECONNREFUSED,
+        // TUNNEL_TIMEOUT…) só em claude.stderr.
+        await this.failExecution(
+          pedido,
+          correlationId,
+          probe.error ?? EXECUTION_FAILURE_REASONS.TUNNEL_UNAVAILABLE,
+          EXECUTION_FAILURE_REASONS.TUNNEL_UNAVAILABLE,
+        );
         return;
       }
 
@@ -598,13 +606,14 @@ export class ExecutionRunProcessor extends WorkerHost {
    * EXECUTING -> FAILED e `execution.failed {reason, errorCode}` (Padrao #7).
    *
    * @param detail - Mensagem legivel (vai para `claude.stderr` e log -496)
-   * @param reason - Motivo canonico (default `DISPATCH_FAILED`)
+   * @param reason - Motivo canonico (tipado: so codigos de EXECUTION_FAILURE_REASONS;
+   *   default `DISPATCH_FAILED`) -> `audit.outcome.reason` e `errorCode`
    */
   private async failExecution(
     pedido: ExecutionPedido,
     correlationId: string,
     detail: string,
-    reason: string = EXECUTION_FAILURE_REASONS.DISPATCH_FAILED,
+    reason: ExecutionFailureReason = EXECUTION_FAILURE_REASONS.DISPATCH_FAILED,
   ): Promise<void> {
     const executionId = pedido.chave.toString();
     const dadosAudit = this.asRecord(pedido.dados.audit);

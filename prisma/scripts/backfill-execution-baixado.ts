@@ -64,13 +64,14 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import OperacaoExecucaoClaude from '../../src/engine/lib/operacao/OperacaoExecucaoClaude';
+import { EXECUTION_FAILURE_REASONS } from '../../src/executions/constants/execution-lifecycle.const';
 
 const logger = new Logger('backfill-execution-baixado');
 const prisma = new PrismaClient();
 
 const EXECUTION_CLASSES = [BigInt(-301), BigInt(-302), BigInt(-303)];
 const TERMINAL_STATUS = ['-517', '-519', '-520', '-521', '-522'];
-const REASON_BACKFILL = 'BACKFILL_STALE';
+const REASON_BACKFILL = EXECUTION_FAILURE_REASONS.BACKFILL_STALE;
 
 interface Args {
   apply: boolean;

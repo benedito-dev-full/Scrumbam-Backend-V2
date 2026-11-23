@@ -1,6 +1,6 @@
 # ADR-V2-082: Ciclo de vida terminal de execuções — deadline persistido, sentinela de desfecho com `source`, CAS sweeper×callback, baixa canônica e retry de PROJECT_BUSY
 
-**Status:** Aceito (Reviewer APPROVED 8.9/10 em 2026-11-23 — ciclo 1: 8.6 com M1-M3 corrigidos no ciclo 2; gate ≥ 8.5).
+**Status:** Aceito (Reviewer APPROVED 9.0/10 em 2026-11-23 — ciclo 1: 8.6; ciclo 2: 8.9 com M1-M3 corrigidos; ciclo 3: 9.0 com outcome no DTO; gate ≥ 8.5).
 **Data:** 2026-11-23
 **Decisores:** Strategist Agent V2 (plano `workspace/plans/plan-executions-execucao-presa-task2.md`), Implementer Agent V2, CEO (decisões P1–P4)
 **Tags:** #V2 #fase-F13 #F6 #automation #engine #concorrencia
@@ -95,9 +95,54 @@ callback externo (PIX, adquirente).
 | L10 | Ordem `execution.started` / `execution.finished` com callback ultrarrápido | Emitir `started` antes do ACK ou deduplicar no consumidor |
 | L11 | Semântica SQL (advisory lock real, ramo QUEUE_STALE) provada só em Postgres | Validar em staging antes/junto do deploy |
 | — | `markRunning` raw no processor (desvio Pilar 1) | Mover para o Engine (`OperacaoExecucaoClaude`) |
+| L12 | Engine (`OperacaoExecucaoClaude`) importa constantes de `src/executions/constants` (dependência de camada) | Mover a lista para `src/engine/` ou `src/common/` se o acoplamento crescer |
+| L13 | `encerrarPorFalhaSistemica(params.reason)` aceita string livre no Engine (canonicidade garantida só pelo processor) | Tipar como `ExecutionFailureReason` para fechar a API pública |
+| L14 | `source` legado sem campo vira `agent` (hipotético: outcome antigo sintético) | Improvável; sem ação |
 
 ## Deploy (conjunto Task 1 + Task 2 + Task 3)
 
 1. `pg_dump -t '"DPedido"'` → 2. backfill `--dry-run` → 3. backfill `--apply --close-stale-running [--release-tasks]`
 (ANTES do backend novo) → 4. seed DVFS (Task 1) → 5. `RISK_GATE_PROMPT_FLOOR=MEDIUM` → 6. deploy backend →
 7. deploy frontend com F-1 (tratar 409 `EXECUTION_IN_PROGRESS`) → 8. bundle do agente 0.1.1 (SIGKILL) → 9. smoke.
+
+---
+
+## Ciclo 3 — outcome no DTO (contrato do frontend)
+
+`ExecutionResponseDto` (`GET /executions/:id`, `GET /executions`, `POST /projects/:id/execute`, approve/reject)
+ganha o campo **sempre presente**:
+
+```ts
+outcome: {
+  reason: ExecutionFailureReason | null;   // código canônico — só quando source = "system"
+  source: "agent" | "system" | null;       // null = ainda sem desfecho
+}
+```
+
+| Situação | `outcome` |
+|---|---|
+| QUEUED / AWAITING_APPROVAL / APPROVED / RUNNING (sem desfecho) | `{ "reason": null, "source": null }` |
+| Falha marcada pelo sistema | `{ "reason": "<CÓDIGO>", "source": "system" }` |
+| Desfecho real do agente (sucesso ou falha real; ver `claude.exitCode`) | `{ "reason": null, "source": "agent" }` |
+| Callback tardio substituiu o FAILED sintético | `{ "reason": null, "source": "agent" }` |
+| Outcome legado sem `source` (pré-ADR-V2-082) | `{ "reason": null, "source": "agent" }` |
+
+Projeção por whitelist (`toOutcome`): `reason` só sai se pertencer à lista canônica (texto livre → `null`);
+nada de `supersedes`, `recordedAt`, `errorCode` ou stderr adicional. Nenhum outro campo do DTO mudou.
+
+### Lista FINAL de códigos (`EXECUTION_FAILURE_REASON_CODES` em `src/executions/constants/execution-lifecycle.const.ts`)
+
+| Código | Quem grava | Significado |
+|---|---|---|
+| `TIMEOUT_NO_CALLBACK` | sweeper | RUNNING passou de `timeoutSec + 300s` sem callback |
+| `AGENT_RESTARTED` | sweeper | heartbeat mostra que o agente reiniciou depois do início |
+| `QUEUE_STALE` | sweeper | QUEUED/APPROVED sem dispatch há mais de 900s (job perdido / sem Redis) |
+| `TUNNEL_UNAVAILABLE` | processor | túnel SSH do agente indisponível no probe (detalhe ECONNREFUSED/TUNNEL_TIMEOUT só em `claude.stderr`) |
+| `DISPATCH_FAILED` | processor | demais falhas de dispatch: ACK timeout, HTTP != 200 não-busy, projeto/agente não encontrado, contrato runtime incompleto, slug ausente, falha ao re-enfileirar |
+| `PROJECT_BUSY_EXHAUSTED` | processor | agente respondeu 409 PROJECT_BUSY em 10 tentativas |
+| `DUPLICATE_TASK_EXECUTION` | processor | outra execução da mesma task já estava RUNNING |
+| `BACKFILL_STALE` | script de backfill | RUNNING antiga fechada em silêncio antes do deploy |
+
+Fonte única: Engine (`encerrarVencidas`), processor (`failExecution`, parâmetro tipado `ExecutionFailureReason`)
+e backfill importam as constantes — não há literal solto. `audit.errorCode` e `execution.failed.errorCode` = mesmo código.
+

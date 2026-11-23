@@ -2,7 +2,7 @@
 
 **Versao:** 1.0
 **Mantido por:** Documenter Agent V2
-**Atualizado em:** 2026-11-23 (Task 2 Execuções presas em RUNNING COMPLETA — Score 8.9/10)
+**Atualizado em:** 2026-11-23 (Task 2 Execuções presas em RUNNING COMPLETA — Score 9.0/10, ciclo 3)
 
 > Este documento rastreia tasks por Fase (F0..F17). Strategist abre, Implementer entrega, Reviewer valida, Documenter fecha. Cada task tem entrada com Status, Modulo, Fase, Tempo Real, Quality Score, Pilares aplicados e ADRs vinculados.
 
@@ -10,11 +10,11 @@
 
 ## Execuções presas em RUNNING / ciclo de vida terminal (ADR-V2-082) — Task 2 — ✅ COMPLETA
 
-**Status:** ✅ COMPLETA (Reviewer APPROVED 8.9/10; ciclo 1: 8.6 com M1-M3 corrigidos no ciclo 2; gate do CEO = 8.5)
+**Status:** ✅ COMPLETA (Reviewer APPROVED 9.0/10; ciclo 1: 8.6, ciclo 2: 8.9, ciclo 3: 9.0; gate do CEO = 8.5)
 **Módulo V2:** executions (toca `engine/lib/operacao`, `automation/runtime`, `mcp`, `common/filters`, `tasks`, `agent/`, `prisma/scripts`)
 **Fase V2:** F13 (Automation Claude Code) sobre o Engine de F6
 **Completado em:** 2026-11-23
-**Quality Score:** 8.9/10 (histórico: 8.6 → 8.9)
+**Quality Score:** 9.0/10 (histórico: 8.6 → 8.9 → 9.0)
 
 **O Que Foi Feito:**
 - Execuções em `-518 RUNNING` sem callback são encerradas pelo sweeper 1/min (`TIMEOUT_NO_CALLBACK` / `AGENT_RESTARTED`); órfãs em fila viram `QUEUE_STALE`
@@ -25,6 +25,7 @@
 - Anti-duplicata em REST, MCP e Nexus (409 `EXECUTION_IN_PROGRESS`), com advisory lock por task
 - Agente 0.1.1 envia SIGKILL após 15 s de grace quando o SIGTERM é ignorado
 - Backfill `prisma/scripts/backfill-execution-baixado.ts` (dry-run, apply, close-stale-running, release-tasks, revert)
+- Ciclo 3: campo `outcome { reason, source }` no `ExecutionResponseDto` com 8 códigos canônicos (novo `TUNNEL_UNAVAILABLE`)
 
 **Pilares aplicados:**
 - Pilar 1: desfecho terminal via `OperacaoExecucaoClaude` (`registrarOutcome`, `encerrarPorFalhaSistemica`, `devolverParaFila`, `encerrarVencidas`); desvio sinalizado: `markRunning` raw no processor (follow-up)

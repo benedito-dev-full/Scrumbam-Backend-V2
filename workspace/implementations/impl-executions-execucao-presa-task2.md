@@ -233,3 +233,51 @@ Limite mantido: a semântica SQL (incluindo o ramo M3 e o advisory lock real) s�
 - `execution.failed.errorCode` agora é sempre o motivo canônico; o detalhe técnico fica em `dados.claude.stderr`.
 - 409 `EXECUTION_IN_PROGRESS` inalterado.
 - `DTask.dados.v3.movedBy` pode valer `system:execution-<id>` (falha marcada pelo sistema) — não exibir como nome de usuário.
+
+---
+
+# Ciclo 3 — outcome no DTO
+
+**Motivo:** o Reviewer do frontend apontou que o motivo canônico não chegava ao front: o DTO só expunha `claude.stderr` (texto livre) e o túnel indisponível gravava `probe.error` (`ECONNREFUSED`/`TUNNEL_TIMEOUT`, não canônico).
+
+## Mudanças
+
+| Arquivo | Mudança |
+|---|---|
+| `src/executions/constants/execution-lifecycle.const.ts` | + `TUNNEL_UNAVAILABLE` em `EXECUTION_FAILURE_REASONS`; `EXECUTION_FAILURE_REASON_CODES` (lista fechada) e `isExecutionFailureReason` |
+| `src/executions/dto/execution-response.dto.ts` | `ExecutionOutcomeDto` + campo `outcome` (sempre presente) + `toOutcome()` (whitelist) no `serializeExecution` |
+| `src/executions/processors/execution-run.processor.ts` | probe indisponível → `reason=TUNNEL_UNAVAILABLE` (detalhe só no stderr); `failExecution(reason: ExecutionFailureReason)` tipado — impossível passar código fora da lista |
+| `src/engine/lib/operacao/OperacaoExecucaoClaude.ts` | motivos do sweeper importados das constantes (sem literais); zona da Task 1 intocada |
+| `prisma/scripts/backfill-execution-baixado.ts` | `BACKFILL_STALE` importado das constantes |
+| `docs/decisions/ADR-V2-082-…md` | seção "Ciclo 3 — outcome no DTO" com o formato e a lista final |
+
+## Formato exato do campo
+
+```ts
+outcome: {
+  reason: 'TIMEOUT_NO_CALLBACK' | 'AGENT_RESTARTED' | 'QUEUE_STALE' | 'TUNNEL_UNAVAILABLE'
+        | 'DISPATCH_FAILED' | 'PROJECT_BUSY_EXHAUSTED' | 'DUPLICATE_TASK_EXECUTION'
+        | 'BACKFILL_STALE' | null;          // só preenchido com source='system'
+  source: 'agent' | 'system' | null;        // null = sem desfecho ainda
+}
+```
+
+Sem desfecho → `{reason:null, source:null}`; falha do sistema → `{reason:<código>, source:'system'}`; desfecho real do agente (inclusive supersede e legado sem source) → `{reason:null, source:'agent'}`. Nada além de `reason`/`source` é exposto (sem `supersedes`, `recordedAt`, `errorCode`, stderr extra).
+
+## Testes
+
+- `src/executions/dto/__tests__/execution-response.outcome.spec.ts` (novo, 20): **teste de contrato** da lista exata de 8 códigos; nulls sem desfecho; cada código → `{code,'system'}`; texto livre/`ECONNREFUSED` → `reason:null`; agent → null; legado → agent; `Object.keys(outcome)` só `reason`/`source`.
+- Processor (+9, parametrizado): projeto/agente não encontrado, túnel indisponível, contrato incompleto, slug ausente, ACK timeout, HTTP 500, 409 esgotado, falha ao re-enfileirar, duplicata → cada um grava exatamente 1 código canônico e emite `execution.failed{reason,errorCode}` com ele.
+- Race (+1): `serializeExecution(...).outcome` ponta a ponta: `null/null` → `TIMEOUT_NO_CALLBACK/system` (sweeper) → `null/agent` (supersede).
+- Mutação: túnel volta a `DISPATCH_FAILED` → 2 falham; DTO sem whitelist de reason → 1 falha; DTO não lê o outcome → 3 falham.
+
+## Resultados reais
+
+| Check | Resultado |
+|---|---|
+| `make build` | ✅ exit 0 |
+| `tsc --noEmit` | 67 (baseline), **0 em arquivos tocados**; backfill (tsc isolado) ✅ |
+| ESLint (8 tocados) | ✅ 0 errors, 0 warnings |
+| Jest relevante | 655/659 — mesmas 3 pré-existentes (provision 1, execute-task.integration 2) + 1 teste de tempo da Task 1 instável em paralelo |
+| `jest src/engine/dvfs --runInBand` | ✅ 242/242 |
+| `agent/` | sem mudanças neste ciclo |

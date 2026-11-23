@@ -11,6 +11,7 @@ import { RemoteExecutionClient } from '../../automation/runtime/remote-execution
 import { ExecutionRuntimeLogService } from '../../automation/runtime/execution-runtime-log.service';
 import { RemoteAgentHttpError } from '../../automation/runtime/remote-agent-http.error';
 import { TasksService } from '../../tasks/tasks.service';
+import { isExecutionFailureReason } from '../constants/execution-lifecycle.const';
 
 beforeAll(() => {
   jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
@@ -181,10 +182,10 @@ describe('ExecutionRunProcessor — falhas de dispatch (via Engine encerrarPorFa
     expect(t.remoteClient.execute).not.toHaveBeenCalled();
     expect(t.prisma.dPedido.update).not.toHaveBeenCalled(); // não usa mais o update raw do processor
     const [sql] = callsOf(t.prisma.$queryRaw, 'encerrar');
-    expect(sql.values).toEqual(
-      expect.arrayContaining(['DISPATCH_FAILED', 'TUNNEL_UNAVAILABLE', BigInt(123)]),
-    );
-    expect(sql.values.filter((v) => v === 'DISPATCH_FAILED')).toHaveLength(2); // reason + errorCode
+    // Ciclo 3: túnel indisponível tem código canônico próprio (reason + errorCode);
+    // o detalhe do probe vai só para claude.stderr.
+    expect(sql.values).toEqual(expect.arrayContaining(['TUNNEL_UNAVAILABLE', BigInt(123)]));
+    expect(sql.values).not.toContain('DISPATCH_FAILED');
     // Formato exigido pelo frontend: claude.finishedAt + exitCode=-1; baixa canônica.
     expect(sql.sql).toContain("'finishedAt'");
     expect(sql.sql).toContain("'exitCode', -1");
@@ -197,16 +198,16 @@ describe('ExecutionRunProcessor — falhas de dispatch (via Engine encerrarPorFa
         projectId: '20',
         agentId: '30',
         taskId: '55',
-        reason: 'DISPATCH_FAILED',
+        reason: 'TUNNEL_UNAVAILABLE',
         // L3 (Ciclo 2): errorCode canônico; detalhe só em claude.stderr/log
-        errorCode: 'DISPATCH_FAILED',
+        errorCode: 'TUNNEL_UNAVAILABLE',
       }),
       'corr',
       { source: ExecutionRunProcessor.name },
     );
     expect(eventTypes(t.eventProducer)).not.toContain('execution.started');
     expect(t.logService.recordSystem).toHaveBeenCalledWith(
-      expect.objectContaining({ code: 'DISPATCH_FAILED', line: 'TUNNEL_UNAVAILABLE' }),
+      expect.objectContaining({ code: 'TUNNEL_UNAVAILABLE', line: 'TUNNEL_UNAVAILABLE' }),
     );
   });
 
@@ -501,6 +502,57 @@ describe('ExecutionRunProcessor — Ciclo 2 (M1 lock, L1 started após ACK)', ()
     await t.processor.process(t.job);
 
     expect(eventTypes(t.eventProducer)).not.toContain('execution.started');
+  });
+});
+
+describe('ExecutionRunProcessor — Ciclo 3: TODA falha sistêmica grava código canônico', () => {
+  /** Códigos canônicos presentes nos valores do UPDATE de encerramento. */
+  function canonicalReasons(t: ReturnType<typeof build>): string[] {
+    const [sql] = callsOf(t.prisma.$queryRaw, 'encerrar');
+    return [...new Set(sql.values.filter((v) => isExecutionFailureReason(v)) as string[])];
+  }
+
+  const busy = () =>
+    jest.fn().mockRejectedValue(new RemoteAgentHttpError(409, 'PROJECT_BUSY', 'HTTP 409 (PROJECT_BUSY)'));
+
+  it.each<[string, Scenario, string]>([
+    ['projeto/agente não encontrado', { project: null }, 'DISPATCH_FAILED'],
+    ['túnel indisponível (probe ECONNREFUSED)', { probeOk: false }, 'TUNNEL_UNAVAILABLE'],
+    ['contrato runtime incompleto', { agentDados: { tunnelPort: 20000 } }, 'DISPATCH_FAILED'],
+    ['slug ausente', { project: { automation: {} } }, 'DISPATCH_FAILED'],
+    [
+      'ACK timeout / erro de rede',
+      { executeImpl: jest.fn().mockRejectedValue(new Error('This operation was aborted')) },
+      'DISPATCH_FAILED',
+    ],
+    [
+      'HTTP 500 do agente',
+      { executeImpl: jest.fn().mockRejectedValue(new RemoteAgentHttpError(500, 'X', 'HTTP 500')) },
+      'DISPATCH_FAILED',
+    ],
+    ['409 esgotado', { executeImpl: busy(), busyAttempt: 10 }, 'PROJECT_BUSY_EXHAUSTED'],
+    [
+      'falha ao re-enfileirar após 409',
+      { executeImpl: busy(), enqueueRetryImpl: jest.fn().mockRejectedValue(new Error('redis')) },
+      'DISPATCH_FAILED',
+    ],
+    [
+      'duplicata (outra RUNNING da task)',
+      { markRunningCount: 0, otherRunning: { chave: BigInt(99) } },
+      'DUPLICATE_TASK_EXECUTION',
+    ],
+  ])('%s → audit.outcome.reason = %s', async (_label, scenario, expected) => {
+    const t = build(scenario);
+
+    await t.processor.process(t.job);
+
+    expect(canonicalReasons(t)).toEqual([expected]);
+    expect(t.eventProducer.addInternalEvent).toHaveBeenCalledWith(
+      'execution.failed',
+      expect.objectContaining({ reason: expected, errorCode: expected }),
+      'corr',
+      expect.anything(),
+    );
   });
 });
 

@@ -19,3 +19,5 @@
   sintético (promoção FAILED→DONE só com ele). Sweeper cobre QUEUED/APPROVED órfãs (QUEUE_STALE, 900s).
 - Mutação no zsh: passar múltiplos specs com `${=VAR}`; método privado sem uso vira TS6133 (mutar o corpo, não a chamada).
 - Teste de tempo <50ms do risk-gate oscila em paralelo → validar `--runInBand`.
+- Ciclo 3: `ExecutionResponseDto.outcome {reason, source}` via `toOutcome` (whitelist EXECUTION_FAILURE_REASON_CODES,
+  8 códigos incl. TUNNEL_UNAVAILABLE). Engine/backfill importam as constantes (sem literais). failExecution tipado.

@@ -1,4 +1,49 @@
-# Review Report: Task 2 — Execuções presas em RUNNING (V2 F13/F6) — Ciclo 2 (re-review)
+# Review Report: Task 2 — Execuções presas em RUNNING (V2 F13/F6) — Ciclo 3 (re-review incremental)
+
+**Reviewed by:** Reviewer Agent V2
+**Date:** 2026-11-23
+**Escopo:** campo `outcome {reason, source}` no `ExecutionResponseDto` + códigos canônicos (novo `TUNNEL_UNAVAILABLE`)
+
+---
+
+## Resultado Final (atual)
+
+### APPROVED — Score: 9.0/10
+
+Mudança pequena, bem contida e testada; nada sensível exposto, lista fechada e compatível com outcomes antigos. Apenas ressalvas LOW.
+
+## Testes Automatizados
+- Build: PASS
+- TypeScript: 67 = baseline; 0 em arquivos tocados (backfill checado isoladamente: 0 erros)
+- ESLint (arquivos tocados): 0 errors, 0 warnings
+- Jest (executions, automation/agents+runtime, engine, filters, tool-capabilities, execute-task.tool): 758/759; a única falha é o teste de tempo `<50ms` da Task 1 (`risk-gate-natural-language`), mesma flakiness de carga já analisada (passa isolado, 169/169; arquivo não tocado).
+
+## Verificação objetiva
+
+- **Nada sensível exposto — OK.** `toOutcome()` é whitelist: devolve apenas `{reason, source}`. `reason` só é preenchido se `source==='system'` E `isExecutionFailureReason(reason)`; texto livre, `ECONNREFUSED`/`TUNNEL_TIMEOUT`, stderr, `supersedes`, `recordedAt` e `errorCode` não saem pelo outcome (teste verifica `Object.keys`). O detalhe técnico do túnel continua apenas em `claude.stderr` (exposição pré-existente, inalterada).
+- **Lista fechada — OK.** `EXECUTION_FAILURE_REASON_CODES = Object.values(EXECUTION_FAILURE_REASONS)` (8 códigos), usada no enum do Swagger e no type guard; teste de contrato fixa a lista exata. Valor fora da lista vira `null`.
+- **Pontos de falha gravam código canônico — OK.** Processor: todas as 6 chamadas de `failExecution` passam por `reason: ExecutionFailureReason` tipado (default `DISPATCH_FAILED`; túnel -> `TUNNEL_UNAVAILABLE`; 409 esgotado; duplicata) — impossível passar string livre em compile-time. Sweeper: `TIMEOUT_NO_CALLBACK`/`AGENT_RESTARTED`/`QUEUE_STALE` agora importados das constantes. Backfill: `BACKFILL_STALE` importado. Não há outro escritor de `source:'system'` (grep: único ponto é `sqlDadosFalhaSistemica`, alimentado por esses chamadores).
+- **Compatibilidade com outcomes antigos — OK.** Sem outcome -> `{null,null}`; legado sem `source` -> `{null,'agent'}` (só o callback gravava outcome antes da ADR-V2-082); campo é aditivo (`ApiProperty` obrigatório, sempre presente), todos os produtores passam por `serializeExecution` (histórico, aprovação, controller, agents). Sem mudança de schema/migration.
+- **Zona da Task 1 — intocada.** Diff do Engine: apenas import das constantes e as 3 constantes de motivo do sweeper.
+- **Testes — OK.** +20 (contrato do DTO) +9 parametrizados no processor (cada falha -> 1 código canônico + `execution.failed{reason,errorCode}`) +1 race ponta a ponta (`null/null` -> `TIMEOUT_NO_CALLBACK/system` -> `null/agent`); mutações reportadas falham os testes.
+
+## Issues Encontrados
+**CRITICAL / bloqueantes:** None. **MEDIUM:** None.
+**LOW:**
+- L12 O Engine passou a importar de `src/executions/constants` (dependência de camada Engine -> módulo de domínio); aceitável por serem constantes puras sem imports, mas considerar mover a lista para `src/engine/` ou `src/common/` se o acoplamento crescer.
+- L13 `encerrarPorFalhaSistemica(params.reason: string)` no Engine segue aceitando string livre; a garantia de canonicidade é só do processor. Tipar como `ExecutionFailureReason` fecharia a API pública.
+- L14 `source` legado sem campo vira `'agent'` mesmo que, hipoteticamente, um outcome antigo fosse sintético — improvável (nenhum caminho antigo gravava outcome sintético).
+- Mantidos do Ciclo 2: L8, L9, L10, L11 (validar SQL em staging), L6.
+
+**Score Final:** 9.0/10
+
+## Decisão: APPROVED
+
+**Próximo:** Documenter (atualizar ADR-V2-082 já inclui seção do Ciclo 3) e commit.
+
+---
+
+# Histórico — Ciclo 2 — Review Report: Task 2 (re-review)
 
 **Reviewed by:** Reviewer Agent V2
 **Date:** 2026-11-23

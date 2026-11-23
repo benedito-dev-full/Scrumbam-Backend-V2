@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { AgentsService, AuthenticatedAgent } from '../../automation/agents/agents.service';
 import { ExecutionRunningSweeperService } from '../execution-running-sweeper.service';
 import { ExecutionResultDto } from '../../automation/agents/dto/execution-result.dto';
+import { serializeExecution } from '../dto/execution-response.dto';
 
 beforeAll(() => {
   jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
@@ -366,6 +367,17 @@ describe('Corrida sweeper × callback (ADR-V2-082 — P1: verdade tardia substit
     await w.callback();
 
     expect(w.getTask()).toBe('FAILED');
+  });
+
+  it('(Ciclo 3) DTO.outcome acompanha o ciclo: null → system/TIMEOUT_NO_CALLBACK → agent/null (supersede)', async () => {
+    const w = buildWorld();
+    const dto = () => serializeExecution({ chave: w.db.row.chave, idClasse: w.db.row.idClasse, dados: w.db.row.dados });
+
+    expect(dto().outcome).toEqual({ reason: null, source: null });
+    await w.sweeper.sweepStaleRunning();
+    expect(dto().outcome).toEqual({ reason: 'TIMEOUT_NO_CALLBACK', source: 'system' });
+    await w.callback();
+    expect(dto().outcome).toEqual({ reason: null, source: 'agent' });
   });
 });
 

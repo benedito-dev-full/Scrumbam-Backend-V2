@@ -3,6 +3,8 @@ import OperacaoPedido from './OperacaoPedido';
 import { Prisma } from '@prisma/client';
 import { IExecucaoData, IExecucaoOutcome } from '../interfaces/IExecucaoData';
 import { PrismaService } from '../../../prisma.service';
+// Constantes puras (sem dependência de runtime de módulos Nest) — lista canônica de motivos.
+import { EXECUTION_FAILURE_REASONS } from '../../../executions/constants/execution-lifecycle.const';
 import { IOperacaoExecucaoClaudeConstruct } from '../interfaces/IOperacaoExecucaoClaudeConstruct';
 // type-only: Engine não depende em runtime de src/eventos/
 import type { IEventProducer } from '../../../eventos/interfaces/event-producer.interface';
@@ -1041,10 +1043,10 @@ const NON_TERMINAL_EXEC_STATUS = ['-514', '-515', '-516', '-518'];
 /** DClasse AGENT (DEntidade -156) — heartbeat persiste lastSeen/uptime. */
 const AGENT_CLASS_ID = BigInt(-156);
 
-/** Motivos gravados pelo sweeper (espelham EXECUTION_FAILURE_REASONS do módulo executions). */
-const EXEC_REASON_TIMEOUT = 'TIMEOUT_NO_CALLBACK';
-const EXEC_REASON_AGENT_RESTARTED = 'AGENT_RESTARTED';
-const EXEC_REASON_QUEUE_STALE = 'QUEUE_STALE';
+/** Motivos gravados pelo sweeper — fonte única: EXECUTION_FAILURE_REASONS (Ciclo 3). */
+const EXEC_REASON_TIMEOUT = EXECUTION_FAILURE_REASONS.TIMEOUT_NO_CALLBACK;
+const EXEC_REASON_AGENT_RESTARTED = EXECUTION_FAILURE_REASONS.AGENT_RESTARTED;
+const EXEC_REASON_QUEUE_STALE = EXECUTION_FAILURE_REASONS.QUEUE_STALE;
 
 /** Resultado de {@link OperacaoExecucaoClaude.registrarOutcome}. */
 export interface RegistrarOutcomeResult {

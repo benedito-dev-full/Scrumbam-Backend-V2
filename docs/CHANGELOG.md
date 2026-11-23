@@ -12,6 +12,10 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ## [Unreleased]
 
+### Added
+
+- **`outcome` no `ExecutionResponseDto` (ADR-V2-082, Task 2 Ciclo 3)** — campo sempre presente `{ reason, source }`: `reason` é um dos 8 códigos canônicos só quando `source = system`; texto livre nunca sai (whitelist `toOutcome`). `TUNNEL_UNAVAILABLE` novo para túnel indisponível no probe
+
 ### Fixed
 
 - **Execuções presas em RUNNING / ciclo de vida terminal (ADR-V2-082, Task 2, V2 F13/F6)**

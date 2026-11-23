@@ -1,4 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  EXECUTION_FAILURE_REASON_CODES,
+  ExecutionFailureReason,
+  isExecutionFailureReason,
+} from '../constants/execution-lifecycle.const';
 
 /**
  * Mapa de idClasse para riskLevel legível (ADR-V2-006).
@@ -168,6 +173,43 @@ export class RiskSummaryDto {
 }
 
 /**
+ * Desfecho terminal da execução (ADR-V2-082, Ciclo 3) — projeção SEGURA de
+ * `dados.audit.outcome`. Expõe só o código canônico e a origem; nunca
+ * stderr/stdout, `supersedes` ou mensagens livres.
+ *
+ * - `source='system'` → falha marcada pelo sistema; `reason` ∈
+ *   {@link EXECUTION_FAILURE_REASON_CODES} (valor fora da lista vira `null`).
+ * - `source='agent'` → desfecho real reportado pelo agente; `reason=null`
+ *   (sucesso/falha real: ver `claude.exitCode`).
+ * - Sem desfecho ainda (fila/rodando/aguardando aprovação) → ambos `null`.
+ * - Outcome legado sem `source` (gravado antes da ADR-V2-082, só pelo callback)
+ *   → `source='agent'`.
+ *
+ * @example
+ * ```json
+ * { "reason": "TIMEOUT_NO_CALLBACK", "source": "system" }
+ * ```
+ */
+export class ExecutionOutcomeDto {
+  @ApiProperty({
+    description:
+      'Código canônico da falha marcada pelo sistema (null se não houver, ou se o desfecho veio do agente)',
+    enum: EXECUTION_FAILURE_REASON_CODES,
+    nullable: true,
+    example: 'TIMEOUT_NO_CALLBACK',
+  })
+  reason!: ExecutionFailureReason | null;
+
+  @ApiProperty({
+    description: 'Origem do desfecho: agent (callback real) | system (sweeper/dispatch/backfill) | null (sem desfecho)',
+    enum: ['agent', 'system'],
+    nullable: true,
+    example: 'system',
+  })
+  source!: 'agent' | 'system' | null;
+}
+
+/**
  * DTO de resposta completo para uma Execution (DPedido idClasse=-301|-302|-303).
  *
  * Todos os BigInt são serializados como string (ADR-V2-025).
@@ -233,6 +275,13 @@ export class ExecutionResponseDto {
   @ApiPropertyOptional({ type: RiskSummaryDto })
   risk?: RiskSummaryDto;
 
+  /**
+   * Desfecho terminal (ADR-V2-082, Ciclo 3): `{ reason, source }` — sempre
+   * presente (ambos `null` enquanto não há desfecho). Ver {@link ExecutionOutcomeDto}.
+   */
+  @ApiProperty({ type: ExecutionOutcomeDto })
+  outcome!: ExecutionOutcomeDto;
+
   /** Data/hora de criação (ISO 8601) */
   @ApiProperty({ description: 'Data/hora de criação', example: '2026-05-09T10:00:00.000Z' })
   createdAt!: string;
@@ -287,6 +336,7 @@ export function serializeExecution(pedido: {
     git: dados?.git,
     pullRequest: dados?.pullRequest,
     risk: toRiskSummary(dados?.risk),
+    outcome: toOutcome(dados?.audit?.outcome),
     createdAt: pedido.criadoEm?.toISOString() ?? new Date().toISOString(),
     updatedAt: pedido.atualizadoEm?.toISOString() ?? new Date().toISOString(),
   };
@@ -317,4 +367,23 @@ function toRiskSummary(risk: any): RiskSummaryDto | undefined {
         ...(typeof p.source === 'string' ? { source: p.source } : {}),
       })),
   };
+}
+
+/**
+ * Projeta `dados.audit.outcome` em {@link ExecutionOutcomeDto} (ADR-V2-082, Ciclo 3).
+ * Whitelist: só `reason` canônico (com `source='system'`) e `source`; nada mais
+ * do outcome (nem `supersedes`, `recordedAt`) nem do stderr é exposto.
+ *
+ * @param outcome - `dados.audit.outcome` bruto (Json)
+ * @returns `{ reason, source }` (ambos `null` sem desfecho)
+ */
+export function toOutcome(outcome: unknown): ExecutionOutcomeDto {
+  if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)) {
+    return { reason: null, source: null };
+  }
+  const o = outcome as { source?: unknown; reason?: unknown };
+  // Legado (pré-ADR-V2-082): só o callback do agente gravava outcome, sem `source`.
+  const source: 'agent' | 'system' = o.source === 'system' ? 'system' : 'agent';
+  const reason = source === 'system' && isExecutionFailureReason(o.reason) ? o.reason : null;
+  return { reason, source };
 }

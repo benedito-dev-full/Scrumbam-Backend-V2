@@ -1,6 +1,6 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-11-23 (Task 2 Execuções presas em RUNNING COMPLETA — score 8.9)
+**Ultima atualizacao:** 2026-11-23 (Task 2 Execuções presas em RUNNING COMPLETA — score 9.0, ciclo 3 outcome no DTO)
 
 ---
 
@@ -10,7 +10,7 @@
 **Initiative:** Fechar execuções presas em RUNNING, baixa canônica e anti-duplicata (REST/MCP/Nexus)
 **Status:** COMPLETA
 **Completed:** 2026-11-23
-**Quality Score:** 8.9/10 (APPROVED após 2 ciclos: 8.6 → 8.9; gate 8.5)
+**Quality Score:** 9.0/10 (APPROVED após 3 ciclos: 8.6 → 8.9 → 9.0; gate 8.5)
 
 **Agents Performance:**
 | Agent | Duration | Quality |
@@ -33,6 +33,7 @@
 - [x] Anti-duplicata REST/MCP/Nexus com advisory lock por task
 - [x] Agente 0.1.1: SIGKILL após 15 s de grace
 - [x] Backfill com dry-run, apply, close-stale-running, release-tasks e revert
+- [x] Ciclo 3: `outcome { reason, source }` no `ExecutionResponseDto` (8 códigos canônicos, novo `TUNNEL_UNAVAILABLE`)
 - [ ] Validar SQL em Postgres de staging (L11)
 - [ ] Smoke na VPS (pendente)
 - [ ] Frontend F-1 (409 `EXECUTION_IN_PROGRESS`) no mesmo release — obrigatório
