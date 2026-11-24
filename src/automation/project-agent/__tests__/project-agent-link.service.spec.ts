@@ -76,6 +76,55 @@ function buildService(overrides?: {
 }
 
 describe('ProjectAgentLinkService', () => {
+  describe('ADR-V2-083 — projectSlug do vínculo novo = DProject.dados.slug', () => {
+    function txWith(project: Record<string, unknown>, existing: unknown = null) {
+      return {
+        $executeRaw: jest.fn().mockResolvedValue(1),
+        $queryRaw: jest.fn().mockResolvedValue([]),
+        dEntidade: { findFirst: jest.fn().mockResolvedValue({ chave: BigInt(900) }) },
+        dProject: { findUnique: jest.fn().mockResolvedValue(project) },
+        dVincula: {
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+          findFirst: jest.fn().mockResolvedValue(existing),
+          create: jest.fn().mockResolvedValue({ chave: BigInt(1000), idEntidade: BigInt(900), tipo: 'primary' }),
+          update: jest.fn().mockResolvedValue({ chave: BigInt(1000), idEntidade: BigInt(900), tipo: 'primary' }),
+        },
+      };
+    }
+    const slugOf = (call: unknown): unknown =>
+      (call as { data: { metaDados: { projectSlug: string } } }).data.metaDados.projectSlug;
+
+    it('homônimo com slug único (foo-2) NÃO colide com o 1º projeto (antes viraria "foo")', async () => {
+      const tx = txWith({ nome: 'Foo', dados: { slug: 'foo-2' } });
+      const { service } = buildService({ tx });
+
+      await service.linkAgent(BigInt(20), BigInt(900), 'primary', BigInt(1));
+
+      expect(slugOf(tx.dVincula.create.mock.calls[0][0])).toBe('foo-2');
+    });
+
+    it('projeto sem dados.slug válido → fallback slugify do nome', async () => {
+      const tx = txWith({ nome: 'Dinpayz Backend', dados: {} });
+      const { service } = buildService({ tx });
+
+      await service.linkAgent(BigInt(20), BigInt(900), 'primary', BigInt(1));
+
+      expect(slugOf(tx.dVincula.create.mock.calls[0][0])).toBe('dinpayz-backend');
+    });
+
+    it('vínculo existente mantém o slug já provisionado na VPS (não troca o que a VPS conhece)', async () => {
+      const tx = txWith(
+        { nome: 'Foo', dados: { slug: 'foo-2' } },
+        { chave: BigInt(1000), metaDados: { projectSlug: 'foo-legado' } },
+      );
+      const { service } = buildService({ tx });
+
+      await service.linkAgent(BigInt(20), BigInt(900), 'primary', BigInt(1));
+
+      expect(slugOf(tx.dVincula.update.mock.calls[0][0])).toBe('foo-legado');
+    });
+  });
+
   it('garante primary unico sob lock transacional ao vincular primary', async () => {
     const { service, tx } = buildService();
 

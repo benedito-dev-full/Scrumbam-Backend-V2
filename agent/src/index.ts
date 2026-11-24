@@ -75,7 +75,7 @@ import { createBackendClient } from './outbound/backend-client';
 import { createServer } from './server/http.server';
 import { createAutosshWrapper } from './tunnel/autossh.wrapper';
 
-const AGENT_VERSION = '0.1.0';
+const AGENT_VERSION = '0.2.0';
 
 async function bootstrap(): Promise<void> {
   const config = loadConfig();

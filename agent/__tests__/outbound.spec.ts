@@ -44,6 +44,8 @@ const TEST_CONFIG: AgentConfig = {
   claudeMdPath: '/home/dev/.claude/CLAUDE.md',
   agentSshKeyPath: '/etc/scrumban-agent/ssh_key',
   logLevel: 'error',
+  pipelineTimeoutMaxSec: 21_600,
+  prFallback: true,
 };
 
 function silentLogger() {

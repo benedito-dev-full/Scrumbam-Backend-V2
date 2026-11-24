@@ -507,3 +507,8 @@ export class [Nome]Dto {
 - `workspace/` está em `.gitignore`: artefatos da task entram no commit com `git add -f` (somente os da task).
 - Snapshot `backfill-execution-baixado.*.json` ignorado em `.gitignore` (contém dados completos); nunca versionar.
 - Hook `validate-documentation.sh` exige `Task N` com ✅/COMPLETA no ROADMAP e COMPLETE no STATUS; checar antes do Stop.
+
+## Task 3 — esteira headless VPS (ADR-V2-083) — 2026-11-23
+- ADR-V2-083 Aceito (9.1/10). Decisões do CEO P1–P4 ficam no ADR; follow-ups de auditoria usam F1–F4 (não P#, para não colidir).
+- Comando `scrumban-executar.md` existe em 3 lugares idênticos: backend/.claude/commands, backend/agent/templates e frontend/.claude/commands. Qualquer mudança exige recopiar nos três.
+- Runbook da esteira: `docs/automation-security-runbook.md` seção "Esteira headless" (ordem: backend antes do agente).

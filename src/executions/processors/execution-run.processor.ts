@@ -24,9 +24,27 @@ import {
   ExecutionFailureReason,
   ExecutionLifecycleConfig,
   executionTaskLockKey,
+  isBusyWaitExhausted,
   resolveExecutionLifecycleConfig,
   systemFailureMovedBy,
 } from '../constants/execution-lifecycle.const';
+
+/** Slug aceito pelo agente / gravado no vínculo PROJECT_AGENT (ADR-V2-035). */
+const PROJECT_SLUG_RE = /^[a-z0-9-]{1,64}$/;
+
+/** Branch segura para trafegar ao agente (ADR-V2-083). */
+const SAFE_GIT_REF_RE = /^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]{1,200}$/;
+
+/**
+ * `errorCode` do ACK do agente (preflight síncrono) → motivo canônico
+ * (ADR-V2-083). Ex.: repo sem `/scrumban-executar` ⇒ 422 `PIPELINE_NOT_INSTALLED`.
+ */
+const AGENT_ACK_ERROR_TO_REASON: Record<string, ExecutionFailureReason> = {
+  PIPELINE_NOT_INSTALLED: EXECUTION_FAILURE_REASONS.PIPELINE_NOT_INSTALLED,
+  PIPELINE_PRECONDITION_FAILED: EXECUTION_FAILURE_REASONS.PIPELINE_PRECONDITION_FAILED,
+  BASE_BRANCH_NOT_FOUND: EXECUTION_FAILURE_REASONS.PIPELINE_PRECONDITION_FAILED,
+  INVALID_GIT_BRANCH: EXECUTION_FAILURE_REASONS.PIPELINE_PRECONDITION_FAILED,
+};
 
 const EXECUTION_CLASSES = [
   AUTOMATION_CLASS_IDS.EXEC_LOW,
@@ -85,8 +103,11 @@ interface RuntimeAgent {
  * 5. ACK ok -> move a task vinculada para EXECUTING **somente se a execucao
  *    ainda esta RUNNING** (callback ultrarrapido nao regride DONE->EXECUTING).
  * 6. 409 `PROJECT_BUSY` do agente -> Engine `devolverParaFila` (RUNNING->QUEUED)
- *    + `enqueueRetry` com backoff (30s, 60s, ... teto 300s) ate
- *    `EXECUTION_BUSY_MAX_RETRIES` (10); esgotado -> FAILED `PROJECT_BUSY_EXHAUSTED`.
+ *    + `enqueueRetry` com backoff (30s, 60s, ... teto 300s) enquanto a espera
+ *    desde o 1º 409 nao passar de `EXECUTION_BUSY_MAX_WAIT_SEC` (~6h05 —
+ *    ADR-V2-083, decisao CEO P4); estourou -> FAILED `PROJECT_BUSY_EXHAUSTED`.
+ *    422 do preflight do agente (`PIPELINE_NOT_INSTALLED`, ...) -> FAILED com
+ *    o motivo canonico correspondente (ADR-V2-083).
  * 7. Demais erros -> FAILED via Engine `encerrarPorFalhaSistemica`
  *    (`source='system'`, baixado=true, claude.finishedAt/exitCode=-1) e a task
  *    sai de EXECUTING se estiver la.
@@ -189,15 +210,23 @@ export class ExecutionRunProcessor extends WorkerHost {
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
-      await this.failExecution(pedido, correlationId, message);
+      const ackReason =
+        error instanceof RemoteAgentHttpError && error.errorCode
+          ? AGENT_ACK_ERROR_TO_REASON[error.errorCode]
+          : undefined;
+      await this.failExecution(pedido, correlationId, message, ackReason);
     }
   }
 
   /**
    * 409 PROJECT_BUSY do agente: devolve a execucao para QUEUED (Engine, CAS)
-   * e re-enfileira com backoff. Esgotadas as tentativas -> FAILED
-   * `PROJECT_BUSY_EXHAUSTED`. Se o re-enfileiramento falhar (Redis), falha
-   * a execucao para nao deixa-la QUEUED para sempre.
+   * e re-enfileira com backoff. Desistencia POR TEMPO (ADR-V2-083, P4): se a
+   * espera desde o 1º 409 passou de `busyMaxWaitSec` (~6h05 — teto da esteira
+   * + margem) -> FAILED `PROJECT_BUSY_EXHAUSTED`. Se o re-enfileiramento falhar
+   * (Redis), falha a execucao para nao deixa-la QUEUED para sempre.
+   *
+   * O QUEUE_STALE do sweeper continua seguro: cada retry regrava
+   * `dispatch.nextAttemptAt` (<= 300s a frente) e o prazo de fila e 900s.
    */
   private async handleProjectBusy(
     job: Job<ExecutionRunJobData>,
@@ -206,13 +235,20 @@ export class ExecutionRunProcessor extends WorkerHost {
   ): Promise<void> {
     const { executionId, projectId, agentId } = job.data;
     const attempt = (job.data.busyAttempt ?? 0) + 1;
-    const max = this.lifecycle.busyMaxRetries;
+    const nowMs = Date.now();
+    // Fonte: job (retries novos) -> dados.dispatch (job pre-deploy) -> agora (1º 409).
+    const dispatchAtual = this.asRecord(pedido.dados.dispatch);
+    const busySince =
+      this.asString(job.data.busySince) ??
+      this.asString(dispatchAtual?.firstBusyAt) ??
+      new Date(nowMs).toISOString();
+    const maxWaitSec = this.lifecycle.busyMaxWaitSec;
 
-    if (attempt > max) {
+    if (isBusyWaitExhausted(busySince, nowMs, maxWaitSec)) {
       await this.failExecution(
         pedido,
         correlationId,
-        `PROJECT_BUSY: agente recusou ${max} tentativas (projeto ocupado)`,
+        `PROJECT_BUSY: projeto ocupado por mais de ${maxWaitSec}s (${attempt - 1} tentativas desde ${busySince})`,
         EXECUTION_FAILURE_REASONS.PROJECT_BUSY_EXHAUSTED,
       );
       return;
@@ -223,11 +259,12 @@ export class ExecutionRunProcessor extends WorkerHost {
       this.lifecycle.busyBaseDelayMs,
       this.lifecycle.busyMaxDelayMs,
     );
-    const nextAttemptAt = new Date(Date.now() + delayMs).toISOString();
+    const nextAttemptAt = new Date(nowMs + delayMs).toISOString();
     const requeued = await this.buildEngine(pedido, correlationId).devolverParaFila({
       chave: pedido.chave,
       busyAttempt: attempt,
       nextAttemptAt,
+      firstBusyAt: busySince,
     });
     if (!requeued) {
       // Callback/sweeper ja decidiram o desfecho — nada a fazer.
@@ -237,7 +274,7 @@ export class ExecutionRunProcessor extends WorkerHost {
 
     try {
       await this.executionQueue.enqueueRetry(
-        { executionId, projectId, agentId },
+        { executionId, projectId, agentId, busySince },
         { attempt, delayMs },
       );
     } catch (error) {
@@ -252,7 +289,7 @@ export class ExecutionRunProcessor extends WorkerHost {
       projectId: this.asString(audit?.projectId) ?? projectId,
       agentId: this.asString(audit?.agentId) ?? agentId,
       correlationId,
-      line: `PROJECT_BUSY retry ${attempt}/${max} em ${Math.round(delayMs / 1000)}s`,
+      line: `PROJECT_BUSY retry ${attempt} em ${Math.round(delayMs / 1000)}s (aguardando ha ${Math.round((nowMs - Date.parse(busySince)) / 1000)}s de ate ${maxWaitSec}s)`,
       code: 'PROJECT_BUSY',
     });
   }
@@ -317,8 +354,9 @@ export class ExecutionRunProcessor extends WorkerHost {
     const executionId = input.pedido.chave.toString();
     const projectId = input.project.chave.toString();
 
-    const projectSlug = this.resolveProjectSlug(input.project);
+    const projectSlug = await this.resolveProjectSlug(input.project, input.agent.agentId);
     const prompt = this.resolvePrompt(input.pedido.dados);
+    const { git, pipeline } = this.resolvePipelineRequest(input.pedido.dados);
     const resumeSessionId = this.resolveResumeSessionId(input.pedido.dados);
     const timeoutSec = this.resolveTimeoutSec(input.pedido.dados);
     const idClasseRisk = Number(input.pedido.idClasse);
@@ -336,11 +374,13 @@ export class ExecutionRunProcessor extends WorkerHost {
       prompt,
       resumeSessionId,
       timeoutSec,
+      ...(git ? { git } : {}),
+      ...(pipeline ? { pipeline } : {}),
       agent: input.agent,
     });
 
     this.logger.log(
-      `execution_dispatched executionId=${executionId} projectSlug=${projectSlug} idClasseRisk=${idClasseRisk}`,
+      `execution_dispatched executionId=${executionId} projectSlug=${projectSlug} idClasseRisk=${idClasseRisk} mode=${pipeline ? 'pipeline' : 'simple'}`,
     );
 
     // A execucao permanece RUNNING ate o callback `POST /agents/:id/execution-result`
@@ -349,12 +389,39 @@ export class ExecutionRunProcessor extends WorkerHost {
   }
 
   /**
-   * Extrai `projectSlug` de `DProject.dados.slug`. Falha barulhento se
-   * ausente — sub-tarefa 2.3 (backfill) deve garantir que todo DProject
-   * tenha slug antes desta funcao rodar em producao.
+   * Resolve o `projectSlug` que a VPS CONHECE (ADR-V2-083 — correcao de slug).
+   *
+   * Fonte primaria: `DVincula(PROJECT_AGENT).metaDados.projectSlug` do par
+   * projeto×agente — e exatamente o slug usado no PROVISION_PROJECT (secao
+   * `## <slug>` do CLAUDE.md global da VPS). Antes o dispatch usava
+   * `DProject.dados.slug` (com sufixo de colisao `-2`), divergente do slug
+   * provisionado (sem sufixo) ⇒ execucao no repo errado / slug desconhecido.
+   * Fallback: `DProject.dados.slug` (vinculo legado sem projectSlug). 1 query.
    */
-  private resolveProjectSlug(project: RuntimeProject): string {
-    const slug = this.asString(project.dados.slug);
+  private async resolveProjectSlug(project: RuntimeProject, agentId: string): Promise<string> {
+    let linkSlug: string | undefined;
+    if (NUMERIC_ID_RE.test(agentId)) {
+      const link = await this.prisma.dVincula.findFirst({
+        where: {
+          idClasse: AUTOMATION_CLASS_IDS.PROJECT_AGENT,
+          idLocEscritu: project.chave,
+          idEntidade: BigInt(agentId),
+          excluido: false,
+        },
+        select: { metaDados: true },
+      });
+      const meta = this.asRecord(link?.metaDados);
+      const candidate = this.asString(meta?.projectSlug);
+      if (candidate && PROJECT_SLUG_RE.test(candidate)) linkSlug = candidate;
+    }
+    const projectSlug = this.asString(project.dados.slug);
+    if (linkSlug && projectSlug && linkSlug !== projectSlug) {
+      this.logger.warn(
+        `project_slug_divergence projectId=${project.chave.toString()} agentId=${agentId} link=${linkSlug} project=${projectSlug} (usando o do vinculo)`,
+      );
+    }
+    if (linkSlug) return linkSlug;
+    const slug = projectSlug;
     if (!slug) {
       throw new InternalServerErrorException(
         `DProject.dados.slug ausente para projectId=${project.chave.toString()} — execute Sub-tarefa 2.3 (backfill) antes de disparar execucoes V2`,
@@ -402,6 +469,33 @@ export class ExecutionRunProcessor extends WorkerHost {
     throw new Error(
       'DPedido.dados.prompt ausente — protocolo V2 espera `dados.prompt` (canonico) ou `dados.command.args` no formato `["-p", "<prompt>"]` (legado, deprecated).',
     );
+  }
+
+  /**
+   * Monta `git` + `pipeline` do payload RUN_CLAUDE_CODE a partir de
+   * `dados.git`/`dados.pipeline` gravados na criacao (ADR-V2-083). Execucoes
+   * sem `pipeline.required` (legado/COMMAND/HIBRIDO) ⇒ ambos `null` (modo simples).
+   */
+  private resolvePipelineRequest(dados: Record<string, unknown>): {
+    git: { branch: string; baseBranch: string | null } | null;
+    pipeline: { required: boolean; prRequired: boolean; taskType: string } | null;
+  } {
+    const pipeline = this.asRecord(dados.pipeline);
+    if (pipeline?.required !== true) return { git: null, pipeline: null };
+    const git = this.asRecord(dados.git);
+    const branch = this.asString(git?.branch);
+    const base = this.asString(git?.baseBranch);
+    if (!branch || !SAFE_GIT_REF_RE.test(branch)) {
+      throw new Error('dados.git.branch ausente/invalida em execucao do modo esteira (ADR-V2-083)');
+    }
+    return {
+      git: { branch, baseBranch: base && SAFE_GIT_REF_RE.test(base) ? base : null },
+      pipeline: {
+        required: true,
+        prRequired: pipeline.prRequired === true,
+        taskType: this.asString(pipeline.taskType) ?? 'other',
+      },
+    };
   }
 
   /**

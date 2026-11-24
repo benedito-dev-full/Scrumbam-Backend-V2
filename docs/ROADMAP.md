@@ -2,9 +2,33 @@
 
 **Versao:** 1.0
 **Mantido por:** Documenter Agent V2
-**Atualizado em:** 2026-11-23 (Task 2 Execuções presas em RUNNING COMPLETA — Score 9.0/10, ciclo 3)
+**Atualizado em:** 2026-11-23 (Task 3 Esteira headless na VPS COMPLETA — Score 9.1/10)
 
 > Este documento rastreia tasks por Fase (F0..F17). Strategist abre, Implementer entrega, Reviewer valida, Documenter fecha. Cada task tem entrada com Status, Modulo, Fase, Tempo Real, Quality Score, Pilares aplicados e ADRs vinculados.
+
+---
+
+## Esteira multi-agent headless na VPS com contrato verificável (ADR-V2-083) — Task 3 — ✅ COMPLETA
+
+**Status:** ✅ COMPLETA (Reviewer APPROVED 9.1/10 após 3 ciclos: 8.6 → 8.9 → 9.1; Fase 0 na VPS e smoke PENDENTES)
+**Módulo V2:** executions (toca `engine/lib/operacao`, `automation/agents`, `automation/project-agent`, `agent/` 0.2.0)
+**Fase V2:** F13 (Automation Claude Code) sobre o Engine de F6
+**Completado em:** 2026-11-23
+**Quality Score:** 9.1/10
+
+**O Que Foi Feito:**
+- Comando headless `/scrumban-executar` no repo do cliente (PR da esteira, aprovação verificada pelo runtime)
+- Desfecho decidido pelo Engine: 5 motivos novos de falha (total 13 canônicos)
+- Agente 0.2.0: preflight, verificação independente (HEAD, push, PR, `subagent_stats`), rede de segurança P3 (PR rascunho)
+- Timeout da esteira 4h (teto 6h); busy por tempo (P4, emenda ADR-V2-082)
+
+**Pilares:** P1 desfecho no Engine; P2 sem controller novo (callback aditivo `pipeline`); P3 zero DClasse, zero tabela, zero migration
+
+**Testes:** backend jest 676/677 (falha pré-existente de `provision.service.spec`); agent 312/312; TypeScript 67 = baseline
+
+**Pendências:** Fase 0 e smoke na VPS; `maxBudgetUsd` após medir 5–10 execuções; follow-ups F1–F4 (ADR-V2-083)
+
+**ADRs vinculados:** ADR-V2-083 (Aceito), ADR-V2-082 (emenda P4), ADR-V2-046, ADR-V2-033
 
 ---
 

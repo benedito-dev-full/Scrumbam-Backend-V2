@@ -744,6 +744,8 @@ export class AgentsService {
       stdoutTruncated: dto.stdoutTruncated,
       stderrTruncated: dto.stderrTruncated,
       errorCode: dto.errorCode,
+      // ADR-V2-083: bloco da esteira (declarado + verificado) — opcional/aditivo.
+      pipeline: dto.pipeline ?? null,
     });
 
     // CAS não aplicou: outro callback (retry do agente) gravou antes — NO-OP,
@@ -760,12 +762,15 @@ export class AgentsService {
     //  - Supersede (callback tardio sobre FAILED sintético) + sucesso: promove a
     //    DONE se a task está EXECUTING (sweeper ainda não a liberou) ou FAILED
     //    com o marcador desta execução (ver transitionLinkedTask). Falha real: no-op.
+    // ADR-V2-083: o desfecho que vale é o do Engine (política da esteira pode
+    // rebaixar o `success` do agente) — nunca `dto.success` direto.
+    const finalSuccess = outcome.success;
     const linkedTaskId = dadosExecucao.task?.id;
     if (linkedTaskId) {
       await this.transitionLinkedTask(
         linkedTaskId,
         dto.executionId,
-        dto.success,
+        finalSuccess,
         outcome.superseded !== undefined,
       );
     }
@@ -774,23 +779,63 @@ export class AgentsService {
 
     // 6. Materializa DEventos via EventProducerService (APÓS persistência — Padrão #7)
     //    Não bloqueia o response: producer absorve erros internamente.
+    const verifiedPr = dto.pipeline?.verified?.pr ?? null;
+    const declared = dto.pipeline?.declared ?? null;
+    const pipelineEventFields = dto.pipeline
+      ? {
+          // ADR-V2-083: aditivo — consumidores antigos ignoram.
+          prUrl: verifiedPr?.url ?? null,
+          branch: dadosExecucao.git?.branch ?? declared?.branch ?? null,
+          decision: declared?.decision ?? null,
+          reviewScore: declared?.reviewScore ?? null,
+          pipelineReason: outcome.reason ?? null,
+        }
+      : {};
     const baseEventPayload = {
       executionId: dto.executionId,
       agentId,
       projectId,
       exitCode: dto.exitCode,
       durationMs: dto.durationMs,
-      errorCode: dto.errorCode ?? null,
+      errorCode: dto.errorCode ?? outcome.reason ?? null,
       // ADR-V2-082: aditivo — presente quando substituiu um FAILED sintético.
       ...(outcome.superseded ? { supersedes: outcome.superseded } : {}),
+      ...pipelineEventFields,
     };
 
     await this.eventProducer.addInternalEvent(
-      dto.success ? 'agent.execution.finished' : 'agent.execution.failed',
+      finalSuccess ? 'agent.execution.finished' : 'agent.execution.failed',
       baseEventPayload,
       correlationId,
       { source: AgentsService.name },
     );
+
+    // ADR-V2-083: eventos canônicos de domínio a partir do caminho REAL (callback),
+    // SEMPRE após a persistência (Padrão #7). `execution.failed` não é re-emitido
+    // num supersede (o sistema já emitiu ao gravar o FAILED sintético).
+    if (dto.pipeline) {
+      const domainPayload = {
+        executionId: dto.executionId,
+        projectId,
+        agentId,
+        ...(linkedTaskId ? { taskId: linkedTaskId } : {}),
+        prUrl: verifiedPr?.url ?? null,
+        branch: pipelineEventFields.branch ?? null,
+        reviewScore: declared?.reviewScore ?? null,
+      };
+      if (finalSuccess) {
+        await this.eventProducer.addInternalEvent('execution.succeeded', domainPayload, correlationId, {
+          source: AgentsService.name,
+        });
+      } else if (!outcome.superseded) {
+        await this.eventProducer.addInternalEvent(
+          'execution.failed',
+          { ...domainPayload, reason: outcome.reason ?? null, errorCode: baseEventPayload.errorCode },
+          correlationId,
+          { source: AgentsService.name },
+        );
+      }
+    }
 
     // Session lifecycle: emite SOMENTE se claudeSessionId presente
     if (dto.claudeSessionId) {

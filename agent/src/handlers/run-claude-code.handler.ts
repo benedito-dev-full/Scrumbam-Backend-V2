@@ -27,15 +27,31 @@
  *
  * Stdout/stderr são truncados a 64KB antes do envio (limite ADR-V2-032).
  *
- * @see ADR-V2-032
+ * **ADR-V2-083 — dois modos:**
+ *  - **Esteira** (payload com `pipeline.required` + `git.branch`): preflight
+ *    SÍNCRONO antes do ACK (repo sem `.claude/commands/scrumban-executar.md` ⇒
+ *    422 `PIPELINE_NOT_INSTALLED`, decisão CEO P1); depois do ACK,
+ *    `runPipelineFlow` (gh/token, base, branch, `claude -p /scrumban-executar`
+ *    com `--append-system-prompt` + `--json-schema`, verificação independente,
+ *    rede de segurança de PR) e callback com bloco `pipeline`.
+ *  - **Simples** (payload sem `pipeline` — modo COMMAND/HÍBRIDO ou backend
+ *    antigo): comportamento legado, SEM `--system-prompt` (o CLI já carrega o
+ *    CLAUDE.md do repo) e com a base = default do repo (fim do `main` fixo).
+ *
+ * Status extra: 400 `INVALID_GIT_BRANCH`/`MISSING_GIT_BRANCH`, 422 `PIPELINE_NOT_INSTALLED`.
+ *
+ * @see ADR-V2-032, ADR-V2-083
  */
-import { readFile } from 'node:fs/promises';
 import type { Request, Response } from 'express';
 import type { Logger } from 'pino';
 import type { AgentConfig } from '../config/schema';
 import { AllowlistError, validateWorkspace } from '../claude-code/allowlist';
 import { IdentityResolverError, resolveProjectPath } from '../claude-code/identity-resolver';
 import { runClaudeCode, type RunnerResult } from '../claude-code/runner';
+import { runPipelineFlow, type GitRequest, type PipelineRequest } from '../claude-code/pipeline-flow';
+import { isPipelineInstalled, PIPELINE_COMMAND_RELATIVE_PATH } from '../claude-code/pipeline-preflight';
+import { defaultGitExec, isSafeRef, type GitExec } from '../git/pipeline-git';
+import { buildRedactor, redactDeep, type Redactor } from '../security/redact';
 import {
   computeSessionJsonlPath,
   findNewSessionIdFromFilesystem,
@@ -71,11 +87,12 @@ export interface RunClaudeCodeDeps {
   snapshotImpl?: typeof snapshotSessionDir;
   /** Override do fallback FS (testes). */
   fallbackImpl?: typeof findNewSessionIdFromFilesystem;
-  /**
-   * Override de `fs/promises.readFile` (testes). Default: `readFile` do Node.
-   * Permite simular conteúdo do CLAUDE.md sem tocar filesystem.
-   */
-  readFileImpl?: (path: string, enc: BufferEncoding) => Promise<string>;
+  /** Override do executor git/gh (testes). Default: `execFile` sem shell. */
+  gitExecImpl?: GitExec;
+  /** Override de `fs.existsSync` do preflight síncrono (testes). */
+  existsImpl?: (p: string) => boolean;
+  /** Ambiente lido pelo preflight (`GITHUB_TOKEN`). Default: `process.env`. */
+  env?: NodeJS.ProcessEnv;
 }
 
 interface ValidatedPayload {
@@ -84,6 +101,9 @@ interface ValidatedPayload {
   prompt: string;
   resumeSessionId: string | null;
   timeoutSec: number | undefined;
+  /** ADR-V2-083 — presente ⇒ modo esteira. */
+  git: GitRequest | null;
+  pipeline: PipelineRequest | null;
 }
 
 /**
@@ -105,7 +125,9 @@ export function createRunClaudeCodeHandler(deps: RunClaudeCodeDeps) {
     validateImpl = validateWorkspace,
     snapshotImpl = snapshotSessionDir,
     fallbackImpl = findNewSessionIdFromFilesystem,
-    readFileImpl = readFile,
+    gitExecImpl = defaultGitExec,
+    existsImpl,
+    env = process.env,
   } = deps;
 
   return function handle(req: Request, res: Response): void {
@@ -200,9 +222,30 @@ export function createRunClaudeCodeHandler(deps: RunClaudeCodeDeps) {
       return;
     }
 
+    // ─── Preflight SÍNCRONO da esteira (ADR-V2-083, decisão CEO P1) ──────
+    // Repo sem o comando headless ⇒ PARAR E AVISAR (todos os tipos), sem
+    // fallback de execução simples. Mutex não é adquirido.
+    if (payload.pipeline?.required === true && !isPipelineInstalled(canonicalCwd, existsImpl)) {
+      log.warn('repo sem a esteira headless — recusando 422 PIPELINE_NOT_INSTALLED');
+      res.status(422).json({
+        accepted: false,
+        errorCode: 'PIPELINE_NOT_INSTALLED',
+        message: `Repositório do projeto "${payload.projectSlug}" sem a esteira: instale ${PIPELINE_COMMAND_RELATIVE_PATH} (template Devari-Core) na branch base`,
+        executionId: payload.executionId,
+      });
+      return;
+    }
+
     // ─── Mutex acquire + dispatch async ─────────────────────────────────
     mutex.add(payload.projectSlug);
-    log.info({ cwd: canonicalCwd, hasResume: payload.resumeSessionId !== null }, 'aceito');
+    log.info(
+      {
+        cwd: canonicalCwd,
+        hasResume: payload.resumeSessionId !== null,
+        mode: payload.pipeline ? 'pipeline' : 'simple',
+      },
+      'aceito',
+    );
 
     // ACK imediato — resultado vai chegar via execution-result outbound.
     res.status(200).json({
@@ -220,8 +263,9 @@ export function createRunClaudeCodeHandler(deps: RunClaudeCodeDeps) {
       runImpl,
       snapshotImpl,
       fallbackImpl,
-      readFileImpl,
-      claudeMdPath: config.claudeMdPath,
+      gitExec: gitExecImpl,
+      env,
+      config,
     });
   };
 }
@@ -307,8 +351,50 @@ function validatePayload(
   const timeoutSec =
     typeof body.timeoutSec === 'number' && body.timeoutSec > 0 ? body.timeoutSec : undefined;
 
+  // ─── ADR-V2-083: git + pipeline (opcionais; ausentes ⇒ modo simples) ───
+  let pipeline: PipelineRequest | null = null;
+  if (body.pipeline !== undefined && body.pipeline !== null) {
+    const p = body.pipeline as Record<string, unknown>;
+    if (typeof p !== 'object' || p.required !== true) {
+      pipeline = null; // required=false ⇒ modo simples
+    } else {
+      pipeline = {
+        required: true,
+        prRequired: p.prRequired === true,
+        taskType: typeof p.taskType === 'string' ? p.taskType.slice(0, 40) : 'other',
+      };
+    }
+  }
+  let git: GitRequest | null = null;
+  if (body.git !== undefined && body.git !== null) {
+    const g = body.git as Record<string, unknown>;
+    const branch = typeof g.branch === 'string' ? g.branch : null;
+    const baseBranch = typeof g.baseBranch === 'string' ? g.baseBranch : null;
+    if (!isSafeRef(branch) || (baseBranch !== null && !isSafeRef(baseBranch))) {
+      return {
+        error: {
+          status: 400,
+          errorCode: 'INVALID_GIT_BRANCH',
+          message: 'git.branch/git.baseBranch invalidos',
+          executionId,
+        },
+      };
+    }
+    git = { branch, baseBranch };
+  }
+  if (pipeline !== null && git === null) {
+    return {
+      error: {
+        status: 400,
+        errorCode: 'MISSING_GIT_BRANCH',
+        message: 'modo esteira exige git.branch',
+        executionId,
+      },
+    };
+  }
+
   return {
-    value: { executionId, projectSlug, prompt, resumeSessionId, timeoutSec },
+    value: { executionId, projectSlug, prompt, resumeSessionId, timeoutSec, git, pipeline },
   };
 }
 
@@ -322,70 +408,115 @@ async function runAndReport(args: {
   runImpl: typeof runClaudeCode;
   snapshotImpl: typeof snapshotSessionDir;
   fallbackImpl: typeof findNewSessionIdFromFilesystem;
-  readFileImpl: (path: string, enc: BufferEncoding) => Promise<string>;
-  claudeMdPath: string;
+  gitExec: GitExec;
+  env: NodeJS.ProcessEnv;
+  config: AgentConfig;
 }): Promise<void> {
-  const {
-    payload,
-    cwd,
-    logger,
-    backendClient,
-    mutex,
-    runImpl,
-    snapshotImpl,
-    fallbackImpl,
-    readFileImpl,
-    claudeMdPath,
-  } = args;
+  const { payload, logger, backendClient, mutex } = args;
+  // Ciclo 2 / M3: nenhum segredo do ambiente/config sai do agente.
+  const redact = buildRedactor(args.env, [
+    args.config.agentApiKey,
+    args.config.agentCommandSecret,
+  ]);
+  try {
+    const resultPayload =
+      payload.pipeline !== null && payload.git !== null
+        ? await runPipelineFlow(
+            {
+              executionId: payload.executionId,
+              prompt: payload.prompt,
+              resumeSessionId: payload.resumeSessionId,
+              // P2: default 4h vem do backend; teto local (6h) por config.
+              timeoutSec: Math.min(
+                payload.timeoutSec ?? args.config.pipelineTimeoutMaxSec,
+                args.config.pipelineTimeoutMaxSec,
+              ),
+              git: payload.git,
+              pipeline: payload.pipeline,
+              cwd: args.cwd,
+              maxBudgetUsd: args.config.maxBudgetUsd,
+              prFallback: args.config.prFallback,
+            },
+            {
+              logger,
+              exec: args.gitExec,
+              env: args.env,
+              runImpl: args.runImpl,
+              snapshotImpl: args.snapshotImpl,
+              fallbackImpl: args.fallbackImpl,
+              truncate: (s: string) => truncate(s, STDOUT_TRUNCATE_BYTES),
+              redact,
+            },
+          )
+        : await runSimpleMode({ ...args, redact });
+
+    // M3: passada final em TODAS as strings (summary do modelo, contractError, …).
+    const safePayload = redactDeep(resultPayload, redact);
+
+    // sendExecutionResult retorna Promise; capturamos erro de transporte
+    // para nunca subir como unhandled rejection.
+    await backendClient.sendExecutionResult(safePayload).catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error(
+        { err: message, executionId: payload.executionId },
+        'falha ao enviar execution-result (esgotou retries)',
+      );
+    });
+  } catch (err) {
+    const message = redact(err instanceof Error ? err.message : String(err));
+    logger.error({ err: message }, 'falha inesperada no run-claude-code');
+  } finally {
+    mutex.delete(payload.projectSlug);
+  }
+}
+
+/**
+ * MODO SIMPLES (legado: COMMAND/HÍBRIDO ou backend sem `pipeline`).
+ * ADR-V2-083: sem `--system-prompt` (o CLI carrega o CLAUDE.md do repo) e com
+ * a base = default do repo (`origin/HEAD`), não mais `main` fixo.
+ */
+async function runSimpleMode(args: {
+  payload: ValidatedPayload;
+  cwd: string;
+  logger: Logger;
+  runImpl: typeof runClaudeCode;
+  snapshotImpl: typeof snapshotSessionDir;
+  fallbackImpl: typeof findNewSessionIdFromFilesystem;
+  gitExec: GitExec;
+  redact: Redactor;
+}): Promise<ExecutionResultPayload> {
+  const { payload, cwd, logger, runImpl, snapshotImpl, fallbackImpl, redact } = args;
 
   let claudeSessionId: string | null = null;
   let claudeSessionPath: string | null = null;
   let errorCode: string | undefined;
-  let runResult: RunnerResult | null = null;
+  let runResult: RunnerResult;
 
+  // Snapshot ANTES — base do diff para o fallback FS.
+  const beforeFiles = snapshotImpl(cwd);
+
+  // Volta para a base (default do repo) e atualiza. Falha ⇒ GIT_PULL_FAILED.
+  let base = 'main';
   try {
-    // Snapshot ANTES — base do diff para o fallback FS.
-    const beforeFiles = snapshotImpl(cwd);
+    base = await gitPullRebase(cwd, logger, args.gitExec);
+  } catch (pullErr) {
+    const msg = redact(pullErr instanceof Error ? pullErr.message : String(pullErr));
+    logger.error({ err: msg }, 'git pull --rebase falhou — execucao abortada');
+    return {
+      executionId: payload.executionId,
+      exitCode: -1,
+      success: false,
+      durationMs: 0,
+      claudeSessionId: null,
+      claudeSessionPath: null,
+      resumedFrom: payload.resumeSessionId,
+      stdoutTruncated: '',
+      stderrTruncated: msg,
+      errorCode: 'GIT_PULL_FAILED',
+    };
+  }
 
-    // git pull --rebase antes de executar — garante repo atualizado.
-    // Se falhar, aborta a execução com GIT_PULL_FAILED (não executa Claude em cima de código desatualizado).
-    try {
-      await gitPullRebase(cwd, logger);
-    } catch (pullErr) {
-      const msg = pullErr instanceof Error ? pullErr.message : String(pullErr);
-      logger.error({ err: msg }, 'git pull --rebase falhou — execucao abortada');
-      errorCode = 'GIT_PULL_FAILED';
-      const resultPayload: ExecutionResultPayload = {
-        executionId: payload.executionId,
-        exitCode: -1,
-        success: false,
-        durationMs: 0,
-        claudeSessionId: null,
-        claudeSessionPath: null,
-        resumedFrom: payload.resumeSessionId,
-        stdoutTruncated: '',
-        stderrTruncated: msg,
-        errorCode,
-      };
-      await backendClient.sendExecutionResult(resultPayload);
-      return;
-    }
-
-    // Lê o CLAUDE.md global para injetar como system-prompt no Claude Code.
-    // Em modo `-p`, o Claude não lê o CLAUDE.md automaticamente — esta leitura
-    // supre essa ausência sem poluir o prompt da tarefa.
-    let systemPrompt: string | undefined;
-    try {
-      const content = await readFileImpl(claudeMdPath, 'utf-8');
-      if (content.trim() !== '') systemPrompt = content;
-    } catch {
-      logger.warn(
-        { path: claudeMdPath },
-        'claudeMdPath nao encontrado ou ilegivel — continuando sem system-prompt',
-      );
-    }
-
-    const promptWithGitRules = `${payload.prompt}
+  const promptWithGitRules = `${payload.prompt}
 
 ---
 OBRIGATÓRIO após concluir a tarefa:
@@ -394,131 +525,118 @@ OBRIGATÓRIO após concluir a tarefa:
    b. git add -A && git commit -m "<tipo>: <descrição curta>"
    c. git push origin <branch>
 2. Sempre que houver uma branch scrumban/ com commits não mergeados, abra o PR se ainda não existir:
-   gh pr create --title "<tipo>: <descrição curta>" --body "Criado automaticamente pelo agente Scrumban." --base main
+   gh pr create --title "<tipo>: <descrição curta>" --body "Criado automaticamente pelo agente Scrumban." --base ${base}
    (Se o PR já existir, apenas informe a URL — não tente criar novamente.)
 3. Se nenhum arquivo foi alterado e não há branch pendente, não crie branch nem commit nem PR.`;
 
-    try {
-      runResult = await runImpl({
-        prompt: promptWithGitRules,
-        cwd,
-        resumeSessionId: payload.resumeSessionId,
-        timeoutSec: payload.timeoutSec,
-        systemPrompt,
-      });
-    } catch (err) {
-      // runClaudeCode é projetado para nunca lançar, mas defensivo.
-      const message = err instanceof Error ? err.message : String(err);
-      logger.error({ err: message }, 'runner lancou (inesperado)');
-      runResult = {
-        stdout: '',
-        stderr: message,
-        exitCode: -1,
-        signal: null,
-        timedOut: false,
-        durationMs: 0,
-      };
-    }
-
-    // Tenta parse do JSON do stdout.
-    try {
-      const parsed = parseClaudeOutput(runResult.stdout);
-      claudeSessionId = parsed.sessionId;
-      claudeSessionPath = computeSessionJsonlPath(cwd, parsed.sessionId);
-      if (parsed.isError) {
-        logger.warn(
-          { sessionId: parsed.sessionId, terminalReason: parsed.terminalReason },
-          'claude reportou is_error=true',
-        );
-      }
-    } catch (err) {
-      if (err instanceof SessionParseError) {
-        logger.warn(
-          { errorCode: err.code, message: err.message },
-          'parse do stdout falhou — tentando fallback filesystem',
-        );
-      }
-
-      // Fallback: diff do diretório.
-      const fallbackId = fallbackImpl(cwd, beforeFiles);
-      if (fallbackId !== null) {
-        claudeSessionId = fallbackId;
-        claudeSessionPath = computeSessionJsonlPath(cwd, fallbackId);
-        logger.info({ sessionId: fallbackId }, 'session_id obtido via fallback FS');
-      } else {
-        errorCode = 'SESSION_ID_EXTRACTION_FAILED';
-        logger.error('falha ao extrair session_id (JSON + fallback ambos falharam)');
-      }
-    }
-
-    // Sucesso global: exit 0 + JSON parseado SEM is_error.
-    const parsedSuccess = errorCode === undefined && claudeSessionId !== null;
-    const success = runResult.exitCode === 0 && parsedSuccess && !runResult.timedOut;
-
-    const resultPayload: ExecutionResultPayload = {
-      executionId: payload.executionId,
-      exitCode: runResult.exitCode ?? -1,
-      success,
-      durationMs: runResult.durationMs,
-      claudeSessionId,
-      claudeSessionPath,
-      resumedFrom: payload.resumeSessionId,
-      stdoutTruncated: truncate(runResult.stdout, STDOUT_TRUNCATE_BYTES),
-      stderrTruncated: truncate(runResult.stderr, STDOUT_TRUNCATE_BYTES),
-      ...(errorCode !== undefined ? { errorCode } : {}),
-    };
-
-    // sendExecutionResult retorna Promise; capturamos erro de transporte
-    // para nunca subir como unhandled rejection.
-    backendClient.sendExecutionResult(resultPayload).catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      logger.error(
-        { err: message, executionId: payload.executionId },
-        'falha ao enviar execution-result (esgotou retries)',
-      );
+  try {
+    runResult = await runImpl({
+      prompt: promptWithGitRules,
+      cwd,
+      resumeSessionId: payload.resumeSessionId,
+      timeoutSec: payload.timeoutSec,
     });
-  } finally {
-    mutex.delete(payload.projectSlug);
+  } catch (err) {
+    // runClaudeCode é projetado para nunca lançar, mas defensivo.
+    const message = redact(err instanceof Error ? err.message : String(err));
+    logger.error({ err: message }, 'runner lancou (inesperado)');
+    runResult = {
+      stdout: '',
+      stderr: message,
+      exitCode: -1,
+      signal: null,
+      timedOut: false,
+      durationMs: 0,
+    };
   }
+
+  // Tenta parse do JSON do stdout.
+  try {
+    const parsed = parseClaudeOutput(runResult.stdout);
+    claudeSessionId = parsed.sessionId;
+    claudeSessionPath = computeSessionJsonlPath(cwd, parsed.sessionId);
+    if (parsed.isError) {
+      logger.warn(
+        { sessionId: parsed.sessionId, terminalReason: parsed.terminalReason },
+        'claude reportou is_error=true',
+      );
+    }
+  } catch (err) {
+    if (err instanceof SessionParseError) {
+      logger.warn(
+        { errorCode: err.code, message: err.message },
+        'parse do stdout falhou — tentando fallback filesystem',
+      );
+    }
+    const fallbackId = fallbackImpl(cwd, beforeFiles);
+    if (fallbackId !== null) {
+      claudeSessionId = fallbackId;
+      claudeSessionPath = computeSessionJsonlPath(cwd, fallbackId);
+      logger.info({ sessionId: fallbackId }, 'session_id obtido via fallback FS');
+    } else {
+      errorCode = 'SESSION_ID_EXTRACTION_FAILED';
+      logger.error('falha ao extrair session_id (JSON + fallback ambos falharam)');
+    }
+  }
+
+  // Sucesso global: exit 0 + JSON parseado SEM is_error.
+  const parsedSuccess = errorCode === undefined && claudeSessionId !== null;
+  const success = runResult.exitCode === 0 && parsedSuccess && !runResult.timedOut;
+
+  return {
+    executionId: payload.executionId,
+    exitCode: runResult.exitCode ?? -1,
+    success,
+    durationMs: runResult.durationMs,
+    claudeSessionId,
+    claudeSessionPath,
+    resumedFrom: payload.resumeSessionId,
+    // M3: redige ANTES de truncar (um token cortado no limite não vaza pela metade).
+    stdoutTruncated: truncate(redact(runResult.stdout), STDOUT_TRUNCATE_BYTES),
+    stderrTruncated: truncate(redact(runResult.stderr), STDOUT_TRUNCATE_BYTES),
+    ...(errorCode !== undefined ? { errorCode } : {}),
+  };
 }
 
 /**
- * Volta para main e atualiza via pull --rebase antes de cada execução.
- * Garante que o Claude nunca roda em cima de uma branch de task anterior.
- * Lança erro se qualquer etapa falhar — execução é abortada com GIT_PULL_FAILED.
- * Não lança se o diretório não for um repo git (ex: projeto sem versionamento).
+ * Modo simples: volta para a branch DEFAULT do repo (`origin/HEAD`, fallback
+ * `main`) e atualiza via pull --rebase antes de cada execução.
+ * Lança se checkout/pull falharem (⇒ GIT_PULL_FAILED). Não lança se o
+ * diretório não for repo git (projeto sem versionamento).
+ *
+ * @returns Nome da base usada
  */
 async function gitPullRebase(
   cwd: string,
   log: { info: (msg: string) => void; warn: (msg: string) => void },
-): Promise<void> {
-  const { execFile } = await import('node:child_process');
-  const { promisify } = await import('node:util');
-  const execFileAsync = promisify(execFile);
-
+  exec: GitExec,
+): Promise<string> {
   // Se não for repo git, ignora silenciosamente.
   try {
-    await execFileAsync('git', ['rev-parse', '--git-dir'], { cwd });
+    await exec('git', ['rev-parse', '--git-dir'], { cwd, timeoutMs: 15_000 });
   } catch {
     log.warn('diretorio nao e um repositorio git — pulando git pull');
-    return;
+    return 'main';
   }
 
-  // Volta para main antes de qualquer coisa — evita acumular branches de tasks anteriores.
-  const { stdout: checkoutOut, stderr: checkoutErr } = await execFileAsync(
-    'git',
-    ['checkout', 'main'],
-    { cwd, timeout: 30_000 },
-  );
-  log.info(`git checkout main: ${(checkoutOut || checkoutErr || 'ok').trim()}`);
+  let base = 'main';
+  try {
+    const { stdout } = await exec('git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], {
+      cwd,
+      timeoutMs: 15_000,
+    });
+    const name = stdout.trim().replace(/^origin\//, '');
+    if (isSafeRef(name)) base = name;
+  } catch {
+    /* sem origin/HEAD — mantém main (comportamento anterior) */
+  }
 
-  // Atualiza main com o remoto.
-  const { stdout, stderr } = await execFileAsync(
-    'git',
-    ['pull', '--rebase', '--autostash'],
-    { cwd, timeout: 60_000 },
-  );
-  log.info(`git pull --rebase: ${(stdout || stderr || 'ok').trim()}`);
+  const co = await exec('git', ['checkout', base], { cwd, timeoutMs: 30_000 });
+  log.info(`git checkout ${base}: ${(co.stdout || co.stderr || 'ok').trim()}`);
+
+  const pull = await exec('git', ['pull', '--rebase', '--autostash'], { cwd, timeoutMs: 60_000 });
+  log.info(`git pull --rebase: ${(pull.stdout || pull.stderr || 'ok').trim()}`);
+  return base;
 }
 
 /** Trunca string respeitando bytes UTF-8 (aproximação por chars; OK pra logs). */

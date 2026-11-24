@@ -75,6 +75,20 @@ export interface RemoteExecutionRequest {
   timeoutSec: number;
 
   /**
+   * Git da execução (ADR-V2-083) — OPCIONAL/aditivo. O backend decide a
+   * branch; `baseBranch=null` ⇒ agente usa o default do repo (`origin/HEAD`).
+   * Agente 0.1.x ignora o campo.
+   */
+  git?: { branch: string; baseBranch: string | null } | null;
+
+  /**
+   * Exigências da esteira (ADR-V2-083) — OPCIONAL/aditivo. Presente ⇒ o agente
+   * roda `/scrumban-executar` (preflight: comando ausente ⇒ 422
+   * `PIPELINE_NOT_INSTALLED`). Ausente ⇒ modo simples (legado).
+   */
+  pipeline?: { required: boolean; prRequired: boolean; taskType: string } | null;
+
+  /**
    * Runtime do agente alvo (HMAC secret, porta, id).
    */
   agent: RemoteAgentRuntime;
@@ -184,6 +198,9 @@ export class RemoteExecutionClient {
       prompt: request.prompt,
       resumeSessionId: request.resumeSessionId ?? null,
       timeoutSec: request.timeoutSec,
+      // ADR-V2-083: aditivos — só trafegam quando a execução é do modo esteira.
+      ...(request.git ? { git: request.git } : {}),
+      ...(request.pipeline ? { pipeline: request.pipeline } : {}),
     };
 
     const ack = await this.dispatch<typeof payload, { accepted?: unknown; executionId?: unknown }>(

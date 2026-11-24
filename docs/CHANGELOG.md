@@ -14,6 +14,15 @@ Tipos de entrada usados: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
 
 ### Added
 
+- **Esteira multi-agent headless na VPS com contrato verificável (ADR-V2-083, Task 3, V2 F13)**
+  - Comando `.claude/commands/scrumban-executar.md` (cópias em backend e frontend, template em `agent/templates/`); o repo do cliente define a esteira
+  - Backend envia envelope (branch `scrumban/exec-<id>`, base, `dados.pipeline`); agente 0.2.0 faz preflight (`PIPELINE_NOT_INSTALLED`), verifica HEAD, push, PR e `subagent_stats` independente do modelo
+  - Desfecho decidido pelo Engine (`avaliarDesfechoEsteira`): 5 motivos novos (`PIPELINE_NOT_INSTALLED`, `PIPELINE_PRECONDITION_FAILED`, `PIPELINE_CONTRACT_MISSING`, `PIPELINE_NOT_APPROVED`, `PR_NOT_CREATED`); total 13
+  - Timeout da esteira 4h (teto 6h); 409 `PROJECT_BUSY` espera até 6h05 (emenda P4 à ADR-V2-082); slug do dispatch via vínculo (`projectSlug`)
+  - Segurança: redação de segredos antes de qualquer corte, envelope com nonce, kill do grupo de processos (L6)
+  - Tests: backend jest 676/677 (falha pré-existente de `provision.service.spec`); agent 312/312; TypeScript 67 = baseline
+  - Pendências: Fase 0 (spike na VPS como `scrumban-agent`) e smoke PENDENTES; `maxBudgetUsd` desligado até medir
+
 - **`outcome` no `ExecutionResponseDto` (ADR-V2-082, Task 2 Ciclo 3)** — campo sempre presente `{ reason, source }`: `reason` é um dos 8 códigos canônicos só quando `source = system`; texto livre nunca sai (whitelist `toOutcome`). `TUNNEL_UNAVAILABLE` novo para túnel indisponível no probe
 
 ### Fixed

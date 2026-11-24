@@ -175,4 +175,86 @@ Bundle com SIGKILL (grace de 15 s). Sem ele, o backend continua funcionando (cob
 
 - L11: validar SQL (advisory lock e ramo `QUEUE_STALE`) em Postgres de staging antes do deploy.
 - Follow-ups de ADR-V2-082: L6 (SIGKILL no process group), L8 (pool sob rajada), L9 (`movedBy` forjável), L10 (ordem `started`/`finished`), `markRunning` fora do Engine.
-- Task 3 (fluxo de agentes na VPS) ainda não planejada: se mudar `/v1/execute` ou o handler do agente, reavaliar esta sequência (R11 do plano).
+- Task 3 (fluxo de agentes na VPS): implementada — ver a seção "Esteira headless na VPS" abaixo, que SUBSTITUI os passos 6–9 desta sequência no deploy conjunto. L6 (kill do process group) foi resolvido na Task 3.
+
+## Esteira headless na VPS — deploy conjunto T1+T2+T3 (ADR-V2-083, Task 3)
+
+> **Estado:** runbook pronto; execução é do CEO/ops. **Fase 0 (spike na VPS como `scrumban-agent`) e smoke PENDENTES.**
+> **Regra de ouro:** o **backend sobe ANTES do agente**. O `ValidationPipe` global usa `forbidNonWhitelisted`: agente 0.2.0 mandando o bloco `pipeline` para backend antigo ⇒ 400 ⇒ o resultado de horas de esteira se perde (4xx não tem retry).
+
+### Ordem (encaixa na sequência da Task 2)
+
+```
+ 1-5. (Task 2) pg_dump, backfill, seed DVFS, RISK_GATE_PROMPT_FLOOR
+ 3b.  npx ts-node prisma/scripts/detect-project-slug-divergence.ts   dry-run (só leitura)
+      └─ colisões (exit 2) ⇒ re-provisionar os pares ANTES do deploy (unlink + link + provision)
+ 6.   deploy BACKEND (T1+T2+T3)        ← antes do agente
+ 7.   deploy FRONTEND (link do PR + 5 motivos novos + duração até 6h)
+ 8.   agente 0.2.0 na VPS (L6 + contrato) + CLAUDE.md global SEM regras git (agent/CLAUDE-md-template.md)
+ 8b.  comando .claude/commands/scrumban-executar.md em CADA repo de cliente (PR em cada repo, mergeado na base)
+ 8c.  GITHUB_TOKEN no env do agente (SET_ENV ou /etc/scrumban-agent/environment), escopo repo
+ 9.   smoke Task 2 + smoke Task 3 (abaixo)
+```
+
+- Agente 0.1.x com backend novo **funciona** (campos novos opcionais; sem bloco `pipeline` no callback ⇒ regra legada). Mas o 0.1.x ignora o preflight: repo sem o comando não falha com `PIPELINE_NOT_INSTALLED` até o 0.2.0 subir.
+- Repo sem o comando + agente 0.2.0 ⇒ toda execução de task daquele repo falha em < 5 s com `PIPELINE_NOT_INSTALLED` (decisão CEO P1, todos os tipos). Por isso o passo 8b vem junto com o 8.
+- Execuções `COMMAND`/`HÍBRIDO` (sem task) seguem no modo simples.
+
+### Variáveis novas (opcionais)
+
+| Onde | Variável | Default | Efeito |
+|---|---|---|---|
+| backend | `EXECUTION_PIPELINE_DEFAULT_TIMEOUT_SEC` | 14400 | timeout do modo esteira (teto fixo 21600) |
+| backend | `EXECUTION_BUSY_MAX_WAIT_SEC` | 21900 | janela de espera do 409 PROJECT_BUSY (P4) |
+| backend | `EXECUTION_DEFAULT_TIMEOUT_SEC` | 1800 | agora também respeitado na criação (modo simples) |
+| agente (`config.json`) | `pipelineTimeoutMaxSec` | 21600 | teto local do timeout |
+| agente | `maxBudgetUsd` | ausente (desligado — P2) | `--max-budget-usd` por execução |
+| agente | `prFallback` | `true` | rede de segurança: commits sem PR ⇒ PR rascunho |
+
+### Fase 0 — spike na VPS (bloqueante para confiar no agente 0.2.0)
+
+Rodar **como `scrumban-agent`** (não root), num repo provisionado e com o comando instalado:
+
+```bash
+sudo -u scrumban-agent -H bash -lc '
+  cd <repo-provisionado> &&
+  claude --version &&
+  gh auth status &&
+  claude -p "/scrumban-executar CONTROLE-SCRUMBAN v1
+\`\`\`json
+{\"contractVersion\":1,\"executionId\":\"spike\",\"branch\":\"scrumban/exec-spike\",\"baseBranch\":\"<base>\",\"taskType\":\"research\",\"prRequired\":false}
+\`\`\`
+
+Tarefa de teste: liste os agentes do repo e não altere arquivos." \
+    --append-system-prompt "$(node -e "console.log(require(\"/opt/scrumban-agent/dist/claude-code/pipeline-contract.js\").PIPELINE_APPEND_SYSTEM_PROMPT)")" \
+    --json-schema "$(node -e "console.log(require(\"/opt/scrumban-agent/dist/claude-code/pipeline-contract.js\").PIPELINE_RESULT_SCHEMA_JSON)")" \
+    --exclude-dynamic-system-prompt-sections \
+    --output-format json --dangerously-skip-permissions < /dev/null > /tmp/spike.json; echo exit=$?'
+jq "{subtype, is_error, structured_output, subagent_stats}" /tmp/spike.json
+```
+
+Conferir e anotar no ADR-V2-083 (seção "Fatos verificados"):
+
+1. `structured_output` presente e válido; `subagent_stats.by_type` lista os papéis que rodaram; `started_in_background == 0`.
+2. CLAUDE.md do repo e `.claude/agents` carregados como `scrumban-agent` (pergunte ao modelo quais regras/agentes vê).
+3. Hooks `SubagentStop`/`PreToolUse` rodam sob `--dangerously-skip-permissions`; `PreToolUse` com exit 2 BLOQUEIA? (criar hook de teste que sai 2 para `Bash(echo bloqueado)`).
+4. `permissionMode` dos subagentes sob pai em bypass (subagente consegue Edit?).
+5. `gh auth status` OK com `GITHUB_TOKEN` do EnvironmentFile; `gh pr list` no repo funciona.
+6. `env` de `.claude/settings.local.json` é ignorado em workspace não confiado? (os hooks que dependem dele precisam de alternativa).
+7. Ferramentas usadas pelos hooks presentes: `bc`, `jq`, `npm`, `node`.
+8. `--max-turns=1` + `--json-schema` no warm: `subtype=error_max_turns` com `cache_creation_input_tokens > 0` (o warmer conta como sucesso).
+
+### Smoke Task 3
+
+- Task `code` num repo com o comando ⇒ PR aberto **pela esteira**; `GET /executions/:id` com `pullRequest.url`, `pullRequest.openedBy='pipeline'`, `git.branch=scrumban/exec-<id>`, `pipeline.decision='APPROVED'`, `pipeline.subagents` com os 4 papéis; task DONE.
+- Esteira reprovada (forçar) ⇒ PR em **rascunho**, execução FAILED `PIPELINE_NOT_APPROVED`, task FAILED.
+- Repo sem o comando ⇒ FAILED `PIPELINE_NOT_INSTALLED` em < 5 s; mutex livre (2ª execução não recebe 409).
+- Timeout curto forçado (ex.: `EXECUTION_PIPELINE_DEFAULT_TIMEOUT_SEC=120`) com a esteira rodando `npm run dev` ⇒ grupo inteiro morto (`pgrep -u scrumban-agent` vazio), mutex liberado, callback chega.
+- 2ª execução no mesmo projeto durante a esteira ⇒ fica QUEUED com retries de 300 s (log `PROJECT_BUSY retry N … aguardando ha Xs de ate 21900s`), não falha em 41 min.
+- Medir `cache_read_input_tokens` da 2ª execução do mesmo projeto (re-baseline do warmer, ADR-V2-046).
+
+### Rollback
+
+1. Agente: reinstalar o bundle 0.1.1 (o backend novo aceita callback sem `pipeline`).
+2. Backend: reverter o release. Execuções criadas no modo esteira ficam com `dados.pipeline`/`dados.git` (inofensivo para o código antigo); timeouts de 4h seguem valendo no sweeper antigo (lê `dados.timeoutSec`).
+3. Comando nos repos: pode ficar (só é usado pelo agente 0.2.0).

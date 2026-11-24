@@ -349,7 +349,7 @@ describe('ExecutionsService.execute() — ADR-V2-082 (timeout fonte única + ant
     expect(captured.dados.timeoutSec).toBe(600);
   });
 
-  it('modo PROMPT: timeoutSec=1800 e placeholder timeoutMs coerente (1.800.000)', async () => {
+  it('modo PROMPT = modo ESTEIRA (ADR-V2-083): timeoutSec=14400 (4h); placeholder timeoutMs segue 1.800.000 (só p/ CommandValidator)', async () => {
     const { service, mockPrisma, mockPromptBuilder } = buildService({ riskLevel: 'LOW' });
     const captured = captureInsert(mockPrisma);
     // 1ª leitura = guard anti-duplicata (nenhuma ativa); depois = releitura pós-grava.
@@ -358,8 +358,77 @@ describe('ExecutionsService.execute() — ADR-V2-082 (timeout fonte única + ant
     await service.execute('100', { taskId: '55' }, '1');
 
     expect(mockPromptBuilder.buildFromTaskId).toHaveBeenCalled();
-    expect(captured.dados.timeoutSec).toBe(1800);
+    expect(captured.dados.timeoutSec).toBe(14400);
     expect(captured.dados.command.timeoutMs).toBe(1800000);
+  });
+
+  it('modo ESTEIRA: grava branch scrumban/exec-<chave>, base null (default do repo) e exigências por tipo (code ⇒ prRequired)', async () => {
+    const { service, mockPrisma } = buildService({ riskLevel: 'LOW' });
+    const captured = captureInsert(mockPrisma);
+    mockPrisma.dPedido.findFirst.mockResolvedValueOnce(null).mockResolvedValue(persistedRow);
+
+    await service.execute('100', { taskId: '55' }, '1');
+
+    expect(captured.dados.git).toEqual({ branch: 'scrumban/exec-1000001', baseBranch: null });
+    expect(captured.dados.pipeline).toEqual({
+      required: true,
+      prRequired: true,
+      taskType: 'code',
+      contractVersion: 1,
+    });
+  });
+
+  it('modo ESTEIRA: base = DProject.dados.automation.remoteBranch (fim do main fixo); ref insegura é ignorada', async () => {
+    const ok = buildService({ riskLevel: 'LOW' });
+    ok.mockPrisma.dProject.findFirst.mockResolvedValue({
+      chave: BigInt(100),
+      dados: { automation: { remoteBranch: 'develop' } },
+      excluido: false,
+    });
+    const capOk = captureInsert(ok.mockPrisma);
+    ok.mockPrisma.dPedido.findFirst.mockResolvedValueOnce(null).mockResolvedValue(persistedRow);
+    await ok.service.execute('100', { taskId: '55' }, '1');
+    expect(capOk.dados.git.baseBranch).toBe('develop');
+
+    const bad = buildService({ riskLevel: 'LOW' });
+    bad.mockPrisma.dProject.findFirst.mockResolvedValue({
+      chave: BigInt(100),
+      dados: { automation: { remoteBranch: '--upload-pack=evil' } },
+      excluido: false,
+    });
+    const capBad = captureInsert(bad.mockPrisma);
+    bad.mockPrisma.dPedido.findFirst.mockResolvedValueOnce(null).mockResolvedValue(persistedRow);
+    await bad.service.execute('100', { taskId: '55' }, '1');
+    expect(capBad.dados.git.baseBranch).toBeNull();
+  });
+
+  it('modo ESTEIRA para research (P1: TODOS os tipos pela esteira) → required=true, prRequired=false', async () => {
+    const { service, mockPrisma, mockPromptBuilder } = buildService({ riskLevel: 'LOW' });
+    mockPromptBuilder.buildFromTaskId.mockResolvedValue({
+      prompt: 'p',
+      taskType: 'research',
+      taskName: 't',
+    });
+    const captured = captureInsert(mockPrisma);
+    mockPrisma.dPedido.findFirst.mockResolvedValueOnce(null).mockResolvedValue(persistedRow);
+
+    await service.execute('100', { taskId: '55' }, '1');
+
+    expect(captured.dados.pipeline).toEqual(
+      expect.objectContaining({ required: true, prRequired: false, taskType: 'research' }),
+    );
+  });
+
+  it('modo COMMAND (sem task) continua simples: sem dados.pipeline/git', async () => {
+    const { service, mockPrisma } = buildService({ riskLevel: 'LOW' });
+    const captured = captureInsert(mockPrisma);
+    mockPrisma.dPedido.findFirst.mockResolvedValue(persistedRow);
+
+    await service.execute('100', { command: { executable: 'npm', args: ['test'] } }, '1');
+
+    expect(captured.dados.pipeline).toBeUndefined();
+    expect(captured.dados.git).toBeUndefined();
+    expect(captured.dados.timeoutSec).toBe(1800);
   });
 
   it('task com execução RUNNING → 409 execution_in_progress ANTES de montar prompt/Engine', async () => {

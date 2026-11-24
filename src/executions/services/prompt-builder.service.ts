@@ -71,6 +71,13 @@ interface TaskRow {
  * Service responsável por montar o prompt natural enviado ao Claude Code
  * a partir de uma `DTask` persistida (ADR-V2-049).
  *
+ * ADR-V2-083: o prompt é um ENVELOPE (dados da task + exigências do tipo).
+ * Não carrega regras de git/branch/PR — a branch e a base são decididas pelo
+ * backend (`dados.git`) e preparadas pelo agente, e o fluxo (plano →
+ * implementação → revisão → documentação → PR) é do comando
+ * `/scrumban-executar` do próprio repositório. O agente prefixa o envelope
+ * com o comando e um bloco de controle JSON (executionId, branch, base).
+ *
  * Fluxo:
  *   1. Carrega templates Markdown do disco UMA vez no constructor (cache em memória).
  *   2. `buildFromTaskId(taskId, projectId, userId)` busca a DTask via Prisma
@@ -196,6 +203,7 @@ export class PromptBuilderService {
       taskId,
       taskName,
       description,
+      taskType,
     });
 
     this.logger.log(
@@ -284,7 +292,8 @@ export class PromptBuilderService {
    * Renderiza template substituindo placeholders.
    *
    * Sintaxe suportada (mínima e propositadamente simples):
-   *  - `{{var}}` → substitui pela variável correspondente (escape literal de regex)
+   *  - `{{var}}` → substitui pela variável correspondente (`taskId`, `taskName`,
+ *    `taskType`, `description`)
    *  - `{{#if description}}...{{/if}}` → bloco condicional; só inclui se
    *    `description` for não-vazia. Suporta apenas a chave `description`
    *    (única usada nos 5 templates atuais).
@@ -298,7 +307,7 @@ export class PromptBuilderService {
    */
   private render(
     template: string,
-    vars: { taskId: string; taskName: string; description: string },
+    vars: { taskId: string; taskName: string; description: string; taskType: string },
   ): string {
     // 1. Resolver bloco condicional {{#if description}}...{{/if}}
     //    Multi-line, non-greedy.
@@ -311,6 +320,7 @@ export class PromptBuilderService {
     result = result
       .replace(/\{\{taskId\}\}/g, vars.taskId)
       .replace(/\{\{taskName\}\}/g, vars.taskName)
+      .replace(/\{\{taskType\}\}/g, vars.taskType)
       .replace(/\{\{description\}\}/g, vars.description);
 
     // 3. Limpar excessos de newlines (3+ seguidos viram 2)

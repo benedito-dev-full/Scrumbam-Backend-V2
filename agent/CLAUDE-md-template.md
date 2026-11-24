@@ -1,18 +1,11 @@
 # Regras Globais (valem para TODOS os projetos)
 
-## Git — commit e push obrigatórios após qualquer mudança
+## Git — controlado pelo agente Scrumban (ADR-V2-083)
 
-Após concluir qualquer tarefa que altere arquivos:
-
-1. Crie uma branch com o formato `scrumban/auto-<slug-curto-da-tarefa>`
-   - Exemplo: `scrumban/auto-remove-botao-automacao`
-2. Faça commit de todas as alterações com mensagem descritiva em português
-   - Formato: `<tipo>: <descrição curta>`
-   - Exemplo: `feat: remove botão de automação da sidebar`
-3. Faça push da branch para o repositório remoto (`origin`)
-4. **NUNCA** faça push direto em `main` ou `master`
-
-Se não houver nenhuma alteração real nos arquivos, não crie branch nem commit.
+Não há regra global de branch/commit/PR aqui. Em execuções vindas do Scrumban,
+o agente da VPS prepara a branch `scrumban/exec-<id>` a partir da base do
+projeto e a esteira do PRÓPRIO repositório (`/scrumban-executar`) faz commit,
+push e PR. Nunca faça push direto em `main`/`master`.
 
 ---
 

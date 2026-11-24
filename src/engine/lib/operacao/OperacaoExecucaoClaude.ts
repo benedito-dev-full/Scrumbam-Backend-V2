@@ -1,7 +1,12 @@
 import { Decimal } from '@prisma/client/runtime/library';
 import OperacaoPedido from './OperacaoPedido';
 import { Prisma } from '@prisma/client';
-import { IExecucaoData, IExecucaoOutcome } from '../interfaces/IExecucaoData';
+import {
+  IExecucaoData,
+  IExecucaoOutcome,
+  IExecucaoPipeline,
+  IPipelineCallback,
+} from '../interfaces/IExecucaoData';
 import { PrismaService } from '../../../prisma.service';
 // Constantes puras (sem dependência de runtime de módulos Nest) — lista canônica de motivos.
 import { EXECUTION_FAILURE_REASONS } from '../../../executions/constants/execution-lifecycle.const';
@@ -591,7 +596,12 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
    * @param params.stdoutTruncated Stdout (max 64KB no payload)
    * @param params.stderrTruncated Stderr (max 64KB no payload)
    * @param params.errorCode Categoria de erro se !success
+   * @param params.pipeline Bloco da esteira (ADR-V2-083): declarado + verificado pelo agente.
+   *   Quando `dados.pipeline.required`, o desfecho final vem de
+   *   {@link OperacaoExecucaoClaude.avaliarDesfechoEsteira} (pode rebaixar `success`)
+   *   e `dados.git`/`pullRequest`/`pipeline` são gravados no MESMO UPDATE CAS.
    * @returns `applied=false` quando outro callback já gravou (idempotência por CAS);
+   *   `success`/`reason` = desfecho FINAL após a política da esteira;
    *   `superseded` preenchido quando substituiu um desfecho sintético;
    *   `persistedAt` = recordedAt do outcome gravado (ou do existente, se !applied)
    *
@@ -616,6 +626,8 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
     stdoutTruncated: string;
     stderrTruncated: string;
     errorCode?: string;
+    /** Bloco `pipeline` do callback (ADR-V2-083) — ausente = agente 0.1.x / regra legada. */
+    pipeline?: IPipelineCallback | null;
   }): Promise<RegistrarOutcomeResult> {
     // 1. Restaura state sem chamar nova() (chave já existe no banco)
     this.chcriacao = params.dadosExistentes.chave;
@@ -646,6 +658,18 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
     // 2.1 runtime.finishedAt real (no supersede, substitui o do desfecho sintético — L2).
     this.dados.runtime = { ...(this.dados.runtime ?? {}), finishedAt: nowIso };
 
+    // 2.2 Política da esteira (ADR-V2-083) — pura, ANTES do UPDATE. Pode rebaixar
+    //     o sucesso reportado pelo agente (exit 0) para FAILED com motivo canônico.
+    const avaliacao = OperacaoExecucaoClaude.avaliarDesfechoEsteira({
+      agentSuccess: params.success,
+      errorCode: params.errorCode,
+      requisitos: this.dados.pipeline,
+      callback: params.pipeline ?? null,
+    });
+    const finalSuccess = avaliacao.success;
+    const finalReason = avaliacao.reason;
+    this._aplicarResultadoEsteira(params.pipeline ?? null, finalReason, nowIso);
+
     // 3. Sentinela de desfecho (source='agent') + errorCode + resumedFrom.
     //    `supersedes` é calculado DENTRO do UPDATE (estado real no momento da CAS).
     const previousAudit = this.dados.audit;
@@ -656,13 +680,20 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
         agentId: this.agentId.toString(),
         projectId: this.projectId.toString(),
       }),
-      outcome: { success: params.success, recordedAt: nowIso, source: 'agent' },
+      outcome: {
+        success: finalSuccess,
+        recordedAt: nowIso,
+        source: 'agent',
+        ...(finalReason ? { reason: finalReason } : {}),
+      },
     };
     if (params.resumedFrom !== null && params.resumedFrom !== undefined) {
       nextAudit.resumedFrom = params.resumedFrom;
     }
     if (params.errorCode) {
       nextAudit.errorCode = params.errorCode;
+    } else if (finalReason) {
+      nextAudit.errorCode = finalReason;
     } else {
       // Remove errorCode de um desfecho sintético substituído (ex.: TIMEOUT_NO_CALLBACK).
       delete nextAudit.errorCode;
@@ -670,12 +701,12 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
     this.dados.audit = nextAudit;
 
     // 4. Status final
-    this.dados.statusCode = params.success
+    this.dados.statusCode = finalSuccess
       ? '-519' // EXEC_STATUS_SUCCESS
       : '-520'; // EXEC_STATUS_FAILED
 
     this.logger.log(
-      `[${this.correlationId}] Registrando outcome: chave=${this.chcriacao} success=${params.success} exitCode=${params.exitCode}`,
+      `[${this.correlationId}] Registrando outcome: chave=${this.chcriacao} success=${finalSuccess} (agente=${params.success}) exitCode=${params.exitCode}${finalReason ? ` reason=${finalReason}` : ''}`,
     );
 
     // 5. UPDATE com CAS + baixado=true (Engine encapsula Prisma)
@@ -712,7 +743,12 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
       this.logger.log(
         `[${this.correlationId}] Outcome NÃO aplicado (CAS: outro callback já gravou) chave=${this.chcriacao}`,
       );
-      return { applied: false, persistedAt: existing?.recordedAt ?? nowIso };
+      return {
+        applied: false,
+        persistedAt: existing?.recordedAt ?? nowIso,
+        success: existing?.success ?? finalSuccess,
+        ...(existing?.reason ? { reason: existing.reason } : {}),
+      };
     }
 
     const superseded = rows[0].supersedes ?? undefined;
@@ -744,7 +780,183 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
     }
 
     this.logger.log(`[${this.correlationId}] Outcome persistido chave=${this.chcriacao}`);
-    return { applied: true, persistedAt: nowIso, ...(superseded ? { superseded } : {}) };
+    return {
+      applied: true,
+      persistedAt: nowIso,
+      success: finalSuccess,
+      ...(finalReason ? { reason: finalReason } : {}),
+      ...(superseded ? { superseded } : {}),
+    };
+  }
+
+  /**
+   * Política de desfecho da esteira headless (ADR-V2-083) — FUNÇÃO PURA.
+   *
+   * Decide o desfecho final a partir de 3 fontes independentes: o que o
+   * modelo DISSE (`declared`), o que o agente CONFERIU no git/GitHub
+   * (`verified`) e o que o RUNTIME registrou (`verified.subagents`).
+   *
+   * | Situação | Resultado |
+   * |---|---|
+   * | execução sem `dados.pipeline.required` (legado/COMMAND/HÍBRIDO) | regra atual (`agentSuccess`) |
+   * | callback sem bloco `pipeline` (agente 0.1.x) | regra atual — compat |
+   * | agente falhou com `PIPELINE_NOT_INSTALLED` | FAILED `PIPELINE_NOT_INSTALLED` |
+   * | agente falhou com `PIPELINE_PRECONDITION_FAILED`/`BASE_BRANCH_NOT_FOUND` | FAILED `PIPELINE_PRECONDITION_FAILED` |
+   * | agente falhou (exit≠0, timeout…) | FAILED sem motivo de esteira |
+   * | contrato ausente/inválido | FAILED `PIPELINE_CONTRACT_MISSING` |
+   * | `NEEDS_CHANGES`/`REJECTED`/`ABORTED` | FAILED `PIPELINE_NOT_APPROVED` |
+   * | `NO_CHANGES` + `prRequired` | FAILED `PR_NOT_CREATED` |
+   * | `NO_CHANGES` sem `prRequired` | SUCCESS |
+   * | `APPROVED` + `prRequired` sem reviewer/implementer no runtime | FAILED `PIPELINE_CONTRACT_MISSING` |
+   * | `APPROVED` + `prRequired` sem PR da esteira com `headRefOid == headSha` e push | FAILED `PR_NOT_CREATED` |
+   * | `APPROVED` + `prRequired` + PR verificado | SUCCESS |
+   * | `APPROVED` sem `prRequired` e sem nenhum subagente no runtime | FAILED `PIPELINE_CONTRACT_MISSING` (Ciclo 2 / M2) |
+   * | `APPROVED` sem `prRequired` com ≥1 subagente no runtime | SUCCESS |
+   *
+   * @param input.agentSuccess - `success` derivado pelo agente (exit 0 + sessão)
+   * @param input.errorCode - `errorCode` do callback
+   * @param input.requisitos - `dados.pipeline` gravado na criação
+   * @param input.callback - Bloco `pipeline` do callback (null = ausente)
+   * @returns `{ success, reason? }` — `reason` ∈ EXECUTION_PIPELINE_REASON_CODES
+   *
+   * @example
+   * ```typescript
+   * OperacaoExecucaoClaude.avaliarDesfechoEsteira({
+   *   agentSuccess: true, requisitos: { required: true, prRequired: true },
+   *   callback: { mode: 'pipeline', declared: null, verified: null },
+   * }); // { success: false, reason: 'PIPELINE_CONTRACT_MISSING' }
+   * ```
+   */
+  static avaliarDesfechoEsteira(input: {
+    agentSuccess: boolean;
+    errorCode?: string;
+    requisitos?: IExecucaoPipeline | null;
+    callback: IPipelineCallback | null;
+  }): { success: boolean; reason?: string } {
+    const R = EXECUTION_FAILURE_REASONS;
+    if (input.requisitos?.required !== true) return { success: input.agentSuccess };
+
+    if (!input.agentSuccess) {
+      if (input.errorCode === R.PIPELINE_NOT_INSTALLED) {
+        return { success: false, reason: R.PIPELINE_NOT_INSTALLED };
+      }
+      if (
+        input.errorCode === R.PIPELINE_PRECONDITION_FAILED ||
+        input.errorCode === 'BASE_BRANCH_NOT_FOUND'
+      ) {
+        return { success: false, reason: R.PIPELINE_PRECONDITION_FAILED };
+      }
+      return { success: false };
+    }
+
+    // Compat (agente 0.1.x não manda `pipeline`): regra legada, sem rebaixar.
+    if (!input.callback) return { success: true };
+
+    const declared = input.callback.declared;
+    const verified = input.callback.verified;
+    if (!declared || !verified || verified.contractValid !== true) {
+      return { success: false, reason: R.PIPELINE_CONTRACT_MISSING };
+    }
+
+    switch (declared.decision) {
+      case 'NEEDS_CHANGES':
+      case 'REJECTED':
+      case 'ABORTED':
+        return { success: false, reason: R.PIPELINE_NOT_APPROVED };
+      case 'NO_CHANGES':
+        return input.requisitos.prRequired
+          ? { success: false, reason: R.PR_NOT_CREATED }
+          : { success: true };
+      case 'APPROVED':
+        break;
+      default:
+        return { success: false, reason: R.PIPELINE_CONTRACT_MISSING };
+    }
+
+    // R1: APPROVED precisa de prova do runtime de que a esteira rodou.
+    const subagents = verified.subagents ?? null;
+    if (!input.requisitos.prRequired) {
+      // Ciclo 2 / M2: tipos sem PR também exigem ≥1 subagente registrado pelo runtime.
+      const algumRodou = Object.values(subagents ?? {}).some((n) => n > 0);
+      return algumRodou ? { success: true } : { success: false, reason: R.PIPELINE_CONTRACT_MISSING };
+    }
+
+    const ran = (name: string): boolean => (subagents?.[name] ?? 0) > 0;
+    if (!subagents || !ran('reviewer') || !ran('implementer')) {
+      return { success: false, reason: R.PIPELINE_CONTRACT_MISSING };
+    }
+
+    const pr = verified.pr;
+    const prVerificado =
+      pr !== null &&
+      pr !== undefined &&
+      verified.prOpenedBy === 'pipeline' &&
+      verified.pushed === true &&
+      typeof verified.headSha === 'string' &&
+      pr.headRefOid.toLowerCase() === verified.headSha.toLowerCase();
+    if (!prVerificado) return { success: false, reason: R.PR_NOT_CREATED };
+
+    return { success: true };
+  }
+
+  /**
+   * Grava em `this.dados` o resultado da esteira (ADR-V2-083): `git`
+   * (headAfter/commitsAhead/pushed/baseBranch), `pullRequest` (PR VERIFICADO
+   * pelo agente) e `pipeline` (declarado + verificado + decisão + motivo).
+   * Entra no MESMO `JSON.stringify(this.dados)` do UPDATE CAS de
+   * {@link registrarOutcome}. No-op quando o callback não traz `pipeline`.
+   *
+   * @param callback - Bloco `pipeline` do callback
+   * @param reason - Motivo canônico da política (se rebaixou)
+   * @param nowIso - Timestamp do desfecho
+   */
+  private _aplicarResultadoEsteira(
+    callback: IPipelineCallback | null,
+    reason: string | undefined,
+    nowIso: string,
+  ): void {
+    if (!callback) return;
+    const verified = callback.verified ?? null;
+    const declared = callback.declared ?? null;
+
+    if (verified) {
+      this.dados.git = {
+        ...(this.dados.git ?? {}),
+        ...(verified.headSha ? { headAfter: verified.headSha } : {}),
+        ...(verified.baseBranch ? { baseBranch: verified.baseBranch } : {}),
+        ...(typeof verified.commitsAhead === 'number' ? { commitsAhead: verified.commitsAhead } : {}),
+        pushed: verified.pushed === true,
+        ...(verified.pushed === true ? { pushedAt: nowIso } : {}),
+      };
+      if (verified.pr) {
+        this.dados.pullRequest = {
+          ...(this.dados.pullRequest ?? {}),
+          url: verified.pr.url,
+          number: verified.pr.number,
+          state: verified.pr.state,
+          isDraft: verified.pr.isDraft,
+          baseRefName: verified.pr.baseRefName,
+          headRefOid: verified.pr.headRefOid,
+          ...(verified.prOpenedBy ? { openedBy: verified.prOpenedBy } : {}),
+          openedAt: this.dados.pullRequest?.openedAt ?? nowIso,
+        };
+      }
+    }
+
+    const requisitos: IExecucaoPipeline = this.dados.pipeline ?? {
+      required: false,
+      prRequired: false,
+    };
+    this.dados.pipeline = {
+      ...requisitos,
+      mode: callback.mode,
+      declared,
+      verified,
+      decision: declared?.decision ?? null,
+      reviewScore: declared?.reviewScore ?? null,
+      reason: reason ?? null,
+      evaluatedAt: nowIso,
+    };
   }
 
   /**
@@ -830,6 +1042,7 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
    * @param params.chave DPedido.chave
    * @param params.busyAttempt Tentativa atual (1-based)
    * @param params.nextAttemptAt ISO do próximo dispatch
+   * @param params.firstBusyAt ISO do 1º 409 (espera por tempo — ADR-V2-083)
    * @returns true se a execução voltou para QUEUED
    *
    * @example
@@ -841,12 +1054,15 @@ export default class OperacaoExecucaoClaude extends OperacaoPedido {
     chave: bigint;
     busyAttempt: number;
     nextAttemptAt: string;
+    /** ISO do 1º 409 — base da espera por tempo (ADR-V2-083 / P4). */
+    firstBusyAt?: string;
   }): Promise<boolean> {
     this.chcriacao = params.chave;
     const dispatch = {
       busyAttempts: params.busyAttempt,
       nextAttemptAt: params.nextAttemptAt,
       lastErrorCode: 'PROJECT_BUSY',
+      ...(params.firstBusyAt ? { firstBusyAt: params.firstBusyAt } : {}),
     };
     const rows = await this._database.$queryRaw<Array<{ chave: bigint }>>(Prisma.sql`
       UPDATE "DPedido"
@@ -1054,6 +1270,14 @@ export interface RegistrarOutcomeResult {
   applied: boolean;
   /** recordedAt do outcome gravado (ou do existente quando !applied). */
   persistedAt: string;
+  /**
+   * Desfecho FINAL após a política da esteira (ADR-V2-083). Pode diferir do
+   * `success` reportado pelo agente (rebaixado para FAILED). Callers (task,
+   * eventos) DEVEM usar este valor, não o do DTO.
+   */
+  success: boolean;
+  /** Motivo canônico quando a política rebaixou (PIPELINE_* / PR_NOT_CREATED). */
+  reason?: string;
   /** Desfecho sintético substituído (no máximo 1 vez por execução). */
   superseded?: { reason?: string; recordedAt?: string };
 }

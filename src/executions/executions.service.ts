@@ -22,20 +22,35 @@ import { ExecutionResponseDto, serializeExecution } from './dto/execution-respon
 import OperacaoExecucaoClaude from '../engine/lib/operacao/OperacaoExecucaoClaude';
 import {
   EXECUTION_DEFAULT_TIMEOUT_SEC,
+  executionBranchName,
+  ExecutionLifecycleConfig,
   executionTaskLockKey,
   NON_TERMINAL_STATUS_CODES,
+  PIPELINE_CONTRACT_VERSION,
+  PIPELINE_PR_REQUIRED_TASK_TYPES,
+  resolveExecutionLifecycleConfig,
   resolveExecutionTimeoutSec,
+  resolvePipelineTimeoutSec,
   toActiveExecutionStatus,
 } from './constants/execution-lifecycle.const';
+import { IExecucaoData } from '../engine/lib/interfaces/IExecucaoData';
 
 const PROJECT_MEMBERSHIP_CLASSES = [BigInt(-170), BigInt(-171), BigInt(-172), BigInt(-173)];
 
 /**
  * Timeout do placeholder estruturado de `command` no modo PROMPT.
- * ADR-V2-082: coerente com a fonte única (`dados.timeoutSec` = 1800s) —
- * some a incoerência antiga 600000 ms (placeholder) × 1800 s (processor).
+ * ESPELHO/legado: o `CommandValidatorService` limita `timeoutMs` a 1h, então o
+ * placeholder fica em 1800 s. A fonte única continua sendo `dados.timeoutSec`
+ * (ADR-V2-082), que no modo esteira vale 4h/teto 6h (ADR-V2-083) — o
+ * placeholder NÃO é usado para calcular o timeout do modo esteira.
  */
 const DEFAULT_PROMPT_MODE_TIMEOUT_MS = EXECUTION_DEFAULT_TIMEOUT_SEC * 1000;
+
+/**
+ * Nome de branch aceito como base do PR (`DProject.dados.automation.remoteBranch`).
+ * Sem espaços, sem `..`, não começa com `-` (defesa contra injeção de argumento no git).
+ */
+const SAFE_GIT_REF_RE = /^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]{1,200}$/;
 
 /**
  * `code` do 409 de execução duplicada (ADR-V2-082). Exportado para os
@@ -100,6 +115,8 @@ const PROMPT_MODE_COMMAND_PLACEHOLDER = 'task-built-prompt-placeholder';
 @Injectable()
 export class ExecutionsService {
   private readonly logger = new Logger(ExecutionsService.name);
+  /** Limites de tempo efetivos (constantes + overrides de env) — ADR-V2-082/083. */
+  private readonly lifecycle: ExecutionLifecycleConfig = resolveExecutionLifecycleConfig();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -193,10 +210,24 @@ export class ExecutionsService {
       const taskId = dto.taskId;
       return this.withTaskLock(taskId, async () => {
         await this.assertNoActiveExecutionForTask(taskId);
-        return this.createExecution(projectId, dto, userId, userEntidadeId, idempotencyKey);
+        return this.createExecution(
+          projectId,
+          dto,
+          userId,
+          userEntidadeId,
+          idempotencyKey,
+          project.dados,
+        );
       });
     }
-    return this.createExecution(projectId, dto, userId, userEntidadeId, idempotencyKey);
+    return this.createExecution(
+      projectId,
+      dto,
+      userId,
+      userEntidadeId,
+      idempotencyKey,
+      project.dados,
+    );
   }
 
   /**
@@ -224,6 +255,8 @@ export class ExecutionsService {
   /**
    * Monta o command/prompt, roda o Engine (calcula + grava) e enfileira LOW.
    * Extraído de `execute` para poder rodar sob {@link withTaskLock}.
+   *
+   * @param projectDados - `DProject.dados` já carregado em `execute` (base do PR — ADR-V2-083)
    */
   private async createExecution(
     projectId: string,
@@ -231,6 +264,7 @@ export class ExecutionsService {
     userId: string,
     userEntidadeId: bigint,
     idempotencyKey?: string,
+    projectDados?: unknown,
   ): Promise<ExecutionResponseDto> {
     const correlationId = randomUUID();
 
@@ -277,6 +311,20 @@ export class ExecutionsService {
     await op.nova();
     op.pedidoCab.setPessoa(userEntidadeId);
     op.pedidoCab.setLocEscritu(BigInt(projectId));
+
+    // ADR-V2-083: modo PROMPT (task → envelope do PromptBuilder) roda pela
+    // esteira do repo, para TODOS os tipos de task (decisão CEO P1). COMMAND e
+    // HÍBRIDO seguem no modo simples (contrato F13 legado / debug).
+    const pipelineMode = mode === 'prompt';
+    const pipelineData = pipelineMode
+      ? this.buildPipelineData(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          String((op as any).chcriacao),
+          builtTaskType,
+          projectDados,
+        )
+      : {};
+
     op.setExecucaoData({
       command,
       idempotency: idempotencyKey
@@ -285,7 +333,11 @@ export class ExecutionsService {
       rollbackOnFailure: dto.rollbackOnFailure === true,
       // ADR-V2-082: fonte ÚNICA de timeout — gravada uma vez, na criação.
       // Lida pelo processor (→ agente) e pelo sweeper de RUNNING (deadline).
-      timeoutSec: resolveExecutionTimeoutSec(structuredCommand),
+      // ADR-V2-083: modo esteira = 4h (teto 6h); modo simples = 30 min (teto 1h).
+      timeoutSec: pipelineMode
+        ? resolvePipelineTimeoutSec(this.lifecycle.pipelineDefaultTimeoutSec)
+        : resolveExecutionTimeoutSec(structuredCommand, this.lifecycle.defaultTimeoutSec),
+      ...pipelineData,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
     await op.calcula();
@@ -498,6 +550,46 @@ export class ExecutionsService {
       builtPrompt: built.prompt,
       builtTaskType: built.taskType,
       mode: 'prompt',
+    };
+  }
+
+  /**
+   * Exigências do MODO ESTEIRA gravadas na criação (ADR-V2-083):
+   *  - `git.branch` = `scrumban/exec-<chave>` — o BACKEND decide a branch;
+   *  - `git.baseBranch` = `DProject.dados.automation.remoteBranch` (se válido)
+   *    ou `null` ⇒ o agente usa o default do repo (`origin/HEAD`). Fim do `main` fixo;
+   *  - `pipeline.required=true` para todos os tipos (P1); `prRequired` só para
+   *    `code`/`docs` (os demais podem terminar sem PR).
+   *
+   * @param executionId - DPedido.chave (gerada por `op.nova()`)
+   * @param taskType - Tipo resolvido pelo PromptBuilder
+   * @param projectDados - `DProject.dados`
+   * @returns Fragmento de `IExecucaoData` (`git` + `pipeline`)
+   */
+  private buildPipelineData(
+    executionId: string,
+    taskType: string | undefined,
+    projectDados: unknown,
+  ): Pick<IExecucaoData, 'git' | 'pipeline'> {
+    const automation = (
+      projectDados && typeof projectDados === 'object'
+        ? (projectDados as Record<string, unknown>).automation
+        : undefined
+    ) as Record<string, unknown> | undefined;
+    const remoteBranch = automation?.remoteBranch;
+    const baseBranch =
+      typeof remoteBranch === 'string' && SAFE_GIT_REF_RE.test(remoteBranch.trim())
+        ? remoteBranch.trim()
+        : null;
+    const type = taskType ?? 'other';
+    return {
+      git: { branch: executionBranchName(executionId), baseBranch },
+      pipeline: {
+        required: true,
+        prRequired: PIPELINE_PR_REQUIRED_TASK_TYPES.includes(type),
+        taskType: type,
+        contractVersion: PIPELINE_CONTRACT_VERSION,
+      },
     };
   }
 

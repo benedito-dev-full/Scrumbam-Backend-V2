@@ -6,7 +6,10 @@
  *
  *  - resolveProjectPath (slug → cwd via CLAUDE.md global) — IGUAL
  *  - validateWorkspace (allowlist + realpath) — IGUAL
- *  - leitura do CLAUDE.md global → systemPrompt — IGUAL
+ *  - flags de sessão do modo esteira (`--append-system-prompt` com o
+ *    contrato fixo + `--json-schema` + `--exclude-dynamic-system-prompt-sections`)
+ *    — IGUAL (ADR-V2-083 re-baselinou a paridade da ADR-V2-046; o CLAUDE.md
+ *    global NÃO é mais lido: o CLI carrega o CLAUDE.md do repo no cwd)
  *  - buildClaudeArgs — IGUAL (paridade do prefixo cacheado)
  *  - execFile direto — sem wrapper `runClaudeCode` (timeout próprio)
  *  - SEM mutex por slug — warms de projetos diferentes não conflitam
@@ -23,12 +26,16 @@
  * via dependency injection (execFile + readFile).**
  */
 import { execFile, type ExecFileException } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
 import type { Logger } from 'pino';
 import { AllowlistError, validateWorkspace } from '../claude-code/allowlist';
-import { buildClaudeArgs } from '../claude-code/command-builder';
+import { buildClaudeArgs, pipelineSessionFlags } from '../claude-code/command-builder';
+import {
+  PIPELINE_APPEND_SYSTEM_PROMPT,
+  PIPELINE_RESULT_SCHEMA_JSON,
+} from '../claude-code/pipeline-contract';
 import { IdentityResolverError, resolveProjectPath } from '../claude-code/identity-resolver';
 import type { AgentConfig, CacheWarmerConfig } from '../config/schema';
+import { buildRedactor } from '../security/redact';
 
 const CLAUDE_BINARY = 'claude';
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024; // 10MB
@@ -95,10 +102,10 @@ export interface WarmCacheDeps {
   resolveImpl?: typeof resolveProjectPath;
   /** Override do allowlist (testes). Default: validateWorkspace. */
   validateImpl?: typeof validateWorkspace;
-  /** Override de readFile (testes). Default: `fs/promises.readFile`. */
-  readFileImpl?: (path: string, enc: BufferEncoding) => Promise<string>;
   /** Override de Date.now (testes). Default: `Date.now`. */
   clockImpl?: () => number;
+  /** Ambiente lido pelo redator de segredos (Ciclo 3 / N4). Default: `process.env`. */
+  env?: NodeJS.ProcessEnv;
 }
 
 /**
@@ -118,9 +125,12 @@ export async function warmCache(
     execFileImpl = execFile,
     resolveImpl = resolveProjectPath,
     validateImpl = validateWorkspace,
-    readFileImpl = (p, e) => readFile(p, e),
     clockImpl = Date.now,
+    env = process.env,
   } = deps;
+  // Ciclo 3 / N4: stderr/stdout do CLI podem ecoar segredos do ambiente — redigir
+  // ANTES de cortar/logar/devolver.
+  const redact = buildRedactor(env, [config.agentApiKey, config.agentCommandSecret]);
 
   const log = logger.child({
     component: 'warm-cache',
@@ -166,27 +176,15 @@ export async function warmCache(
     );
   }
 
-  // ─── 3. Lê CLAUDE.md → systemPrompt ──────────────────────────────────────
-  // Mesmo padrão do handler real: ausência NÃO impede o warm (apenas warn).
-  // Mas se ausente, o warmer aquece um cache DIFERENTE do que tasks reais
-  // usam (que SEMPRE têm CLAUDE.md). Por isso a ausência é um alerta sério.
-  let systemPrompt: string | undefined;
-  try {
-    const content = await readFileImpl(config.claudeMdPath, 'utf-8');
-    if (content.trim() !== '') {
-      systemPrompt = content;
-    }
-  } catch {
-    log.warn(
-      { path: config.claudeMdPath },
-      'CLAUDE.md global ausente — warm sem --system-prompt (paridade comprometida)',
-    );
-  }
-
-  // ─── 4. buildClaudeArgs — paridade byte-a-byte com runner real ───────────
+  // ─── 3+4. buildClaudeArgs — paridade com a task real do MODO ESTEIRA ───────
+  // Mesmas flags de sessão (contrato fixo + schema) ⇒ mesmo prefixo cacheável
+  // (tools + system prompt padrão + CLAUDE.md do repo + contrato) — ADR-V2-083.
   const { args } = buildClaudeArgs({
     prompt: cacheWarmerConfig.warmupPrompt,
-    systemPrompt,
+    ...pipelineSessionFlags({
+      appendSystemPrompt: PIPELINE_APPEND_SYSTEM_PROMPT,
+      jsonSchema: PIPELINE_RESULT_SCHEMA_JSON,
+    }),
     extraFlags: cacheWarmerConfig.claudeFlags,
   });
 
@@ -266,7 +264,7 @@ export async function warmCache(
     runResult.spawnErr &&
     (runResult.spawnErr.code === 'ENOENT' || /not found/i.test(runResult.stderr))
   ) {
-    log.error({ stderr: runResult.stderr }, 'binario claude ausente');
+    log.error({ stderr: truncate(redact(runResult.stderr), 500) }, 'binario claude ausente');
     return {
       projectSlug: input.projectSlug,
       startedAt,
@@ -280,7 +278,7 @@ export async function warmCache(
       outputTokens: 0,
       costUsd: 0,
       errorCode: 'CLAUDE_BINARY_MISSING',
-      errorMessage: truncate(runResult.stderr, 500),
+      errorMessage: truncate(redact(runResult.stderr), 500),
     };
   }
 
@@ -288,7 +286,7 @@ export async function warmCache(
   const parsed = parseWarmOutput(runResult.stdout);
   if (parsed === null) {
     log.warn(
-      { exitCode: runResult.exitCode, stdoutPreview: runResult.stdout.slice(0, 300) },
+      { exitCode: runResult.exitCode, stdoutPreview: redact(runResult.stdout).slice(0, 300) },
       'output JSON malformado',
     );
     return {
@@ -304,13 +302,20 @@ export async function warmCache(
       outputTokens: 0,
       costUsd: 0,
       errorCode: 'CLAUDE_OUTPUT_PARSE_FAILED',
-      errorMessage: truncate(runResult.stderr, 500),
+      errorMessage: truncate(redact(runResult.stderr), 500),
     };
   }
 
   const isError = parsed.isError === true;
   const exitOk = runResult.exitCode === 0;
-  const success = exitOk && !isError;
+  // ADR-V2-083: com `--json-schema` + `--max-turns=1` o CLI encerra com
+  // `error_max_turns` (exit 1) ANTES de emitir a saída estruturada — mas o
+  // prefixo JÁ foi enviado e cacheado (verificado: cache_creation > 0). Para o
+  // warmer isso é sucesso: o objetivo é o cache, não a resposta.
+  const warmedByMaxTurns =
+    parsed.subtype === 'error_max_turns' &&
+    parsed.cacheCreationTokens + parsed.cacheReadTokens > 0;
+  const success = (exitOk && !isError) || warmedByMaxTurns;
 
   if (!success) {
     log.warn({ exitCode: runResult.exitCode, isError }, 'warm reportou erro');
@@ -349,6 +354,7 @@ export async function warmCache(
 interface ParsedWarmOutput {
   sessionId: string | null;
   isError: boolean;
+  subtype: string | null;
   cacheCreationTokens: number;
   cacheReadTokens: number;
   inputTokens: number;
@@ -383,6 +389,7 @@ function parseWarmOutput(stdout: string): ParsedWarmOutput | null {
     return {
       sessionId,
       isError,
+      subtype: typeof parsed.subtype === 'string' ? parsed.subtype : null,
       cacheCreationTokens,
       cacheReadTokens,
       inputTokens,

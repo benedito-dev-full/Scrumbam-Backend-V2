@@ -20,8 +20,41 @@ describe('ExecutionResponseDto.outcome (Ciclo 3)', () => {
         'QUEUE_STALE',
         'TIMEOUT_NO_CALLBACK',
         'TUNNEL_UNAVAILABLE',
+        // ADR-V2-083 (esteira headless) — aditivos; frontend tem fallback genérico
+        'PIPELINE_NOT_INSTALLED',
+        'PIPELINE_PRECONDITION_FAILED',
+        'PIPELINE_CONTRACT_MISSING',
+        'PIPELINE_NOT_APPROVED',
+        'PR_NOT_CREATED',
       ].sort(),
     );
+  });
+
+  it('ADR-V2-083: desfecho do AGENTE expõe motivo da política da esteira (e só ele)', () => {
+    for (const code of [
+      'PIPELINE_NOT_INSTALLED',
+      'PIPELINE_PRECONDITION_FAILED',
+      'PIPELINE_CONTRACT_MISSING',
+      'PIPELINE_NOT_APPROVED',
+      'PR_NOT_CREATED',
+    ]) {
+      expect(toOutcome({ success: false, source: 'agent', reason: code })).toEqual({
+        reason: code,
+        source: 'agent',
+      });
+    }
+    // motivo sistêmico com source agent continua oculto
+    expect(toOutcome({ source: 'agent', reason: 'QUEUE_STALE' })).toEqual({
+      reason: null,
+      source: 'agent',
+    });
+  });
+
+  it('ADR-V2-083: 422 do preflight (source system) expõe PIPELINE_NOT_INSTALLED', () => {
+    expect(toOutcome({ source: 'system', reason: 'PIPELINE_NOT_INSTALLED' })).toEqual({
+      reason: 'PIPELINE_NOT_INSTALLED',
+      source: 'system',
+    });
   });
 
   it('sem desfecho (fila/rodando) → { reason:null, source:null }', () => {

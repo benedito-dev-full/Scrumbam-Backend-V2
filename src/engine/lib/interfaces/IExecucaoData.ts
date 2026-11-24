@@ -31,6 +31,7 @@ export interface IExecucaoData {
    * Gravado UMA vez por `ExecutionsService.execute` (clamp 30..3600, default 1800)
    * e lido pelo processor (enviado ao agente) e pelo sweeper de RUNNING (deadline).
    * Ausente em execuções legadas → fallback 1800.
+   * ADR-V2-083: modo esteira grava default 14400 (4h), teto 21600 (6h).
    */
   timeoutSec?: number;
 
@@ -42,6 +43,8 @@ export interface IExecucaoData {
     busyAttempts: number;
     nextAttemptAt: string; // ISO 8601
     lastErrorCode: string;
+    /** ISO do 1º 409 PROJECT_BUSY — base da espera POR TEMPO (ADR-V2-083 / P4). */
+    firstBusyAt?: string;
   };
 
   /** Marcas de runtime gravadas pelo processor/sweeper (startedAt/finishedAt). */
@@ -140,24 +143,49 @@ export interface IExecucaoData {
     durationMs?: number;
   };
 
-  /** Git workflow — preenchido após sucesso do Claude (exitCode=0 + mudanças detectadas) */
+  /**
+   * Git workflow. ADR-V2-083: `branch` e `baseBranch` são decididos pelo
+   * BACKEND na criação (modo esteira); `headAfter`/`commitsAhead`/`pushed`
+   * vêm da verificação INDEPENDENTE do agente no callback.
+   */
   git?: {
     headBefore?: string; // commit hash antes
-    headAfter?: string; // commit hash após
-    branch?: string; // scrumban/auto-<chave>
+    headAfter?: string; // commit hash após (HEAD da branch verificado pelo agente)
+    branch?: string; // scrumban/exec-<chave> (modo esteira)
+    /** Branch base do PR: `DProject.dados.automation.remoteBranch` ou default do repo (null = agente resolve). */
+    baseBranch?: string | null;
+    /** Commits da branch à frente da base (`git rev-list --count base..branch`). */
+    commitsAhead?: number;
+    /** Branch existe no remoto com o mesmo SHA (`git ls-remote`). */
+    pushed?: boolean;
     commitMessage?: string;
     pushedAt?: string; // ISO 8601
     filesChanged?: number;
   };
 
-  /** PR auto-open — preenchido pelo script DVFS chave=7 (pr-auto-open) */
+  /**
+   * Pull Request. ADR-V2-083: preenchido pelo callback com o PR VERIFICADO pelo
+   * agente via `gh pr list` (não pela palavra do modelo). DVFS chave=7
+   * (pr-auto-open) segue inerte no caminho do callback.
+   */
   pullRequest?: {
     url?: string;
     number?: number;
+    /** OPEN | CLOSED | MERGED (GitHub). */
+    state?: string;
+    /** PR em rascunho (P3: esteira não aprovada ⇒ rascunho). */
+    isDraft?: boolean;
+    /** Quem abriu: a esteira (`pipeline`) ou a rede de segurança do agente (`agent-fallback`). */
+    openedBy?: 'pipeline' | 'agent-fallback';
+    baseRefName?: string;
+    headRefOid?: string;
     openedAt?: string; // ISO 8601
     rolledBackAt?: string; // ISO 8601 (se rollback)
     rollbackRef?: string; // commit hash do rollback
   };
+
+  /** Modo esteira (ADR-V2-083) — exigências na criação + resultado no callback. */
+  pipeline?: IExecucaoPipeline;
 
   /** Vínculo task (opcional — se execution foi disparada a partir de uma task) */
   task?: {
@@ -184,6 +212,81 @@ export interface IExecucaoData {
   };
 }
 
+/** Etapa declarada pela esteira (strategist|implementer|reviewer|documenter…). */
+export interface IPipelineStage {
+  name: string;
+  status: 'done' | 'skipped' | 'failed';
+}
+
+/** Saída estruturada declarada pelo modelo (`structured_output`, contrato v1). */
+export interface IPipelineDeclared {
+  contractVersion: number;
+  decision: 'APPROVED' | 'NEEDS_CHANGES' | 'REJECTED' | 'NO_CHANGES' | 'ABORTED';
+  reviewScore: number | null;
+  reviewFile?: string | null;
+  stages: IPipelineStage[];
+  branch: string | null;
+  commit: string | null;
+  prUrl: string | null;
+  summary: string;
+}
+
+/** PR encontrado pelo agente via `gh pr list --head <branch>`. */
+export interface IPipelineVerifiedPr {
+  url: string;
+  number: number;
+  state: string;
+  isDraft: boolean;
+  baseRefName: string;
+  headRefOid: string;
+}
+
+/** Verificação INDEPENDENTE feita pelo agente (git + gh + subagent_stats do runtime). */
+export interface IPipelineVerified {
+  branchExists: boolean;
+  pushed: boolean;
+  commitsAhead: number | null;
+  headSha: string | null;
+  baseBranch: string | null;
+  pr: IPipelineVerifiedPr | null;
+  prOpenedBy: 'pipeline' | 'agent-fallback' | null;
+  /** `subagent_stats.by_type` do JSON final do CLI (null = runtime não reportou). */
+  subagents: Record<string, number> | null;
+  contractValid: boolean;
+  contractError?: string | null;
+  verifyError?: string | null;
+}
+
+/** Bloco `pipeline` do callback (ADR-V2-083). */
+export interface IPipelineCallback {
+  mode: 'pipeline' | 'simple';
+  declared: IPipelineDeclared | null;
+  verified: IPipelineVerified | null;
+}
+
+/**
+ * `DPedido.dados.pipeline` (ADR-V2-083). Exigências gravadas na criação
+ * (`required`, `prRequired`, `taskType`, `contractVersion`) + resultado
+ * gravado pelo Engine no callback (`mode`, `declared`, `verified`, `decision`,
+ * `reviewScore`, `reason`, `evaluatedAt`).
+ */
+export interface IExecucaoPipeline {
+  /** true = execução roda pela esteira do repo (`/scrumban-executar`). */
+  required: boolean;
+  /** true = sucesso exige PR verificado + APPROVED (taskType code/docs). */
+  prRequired: boolean;
+  taskType?: string;
+  contractVersion?: number;
+  mode?: 'pipeline' | 'simple';
+  declared?: IPipelineDeclared | null;
+  verified?: IPipelineVerified | null;
+  decision?: IPipelineDeclared['decision'] | null;
+  reviewScore?: number | null;
+  /** Motivo canônico quando a política rebaixou o desfecho. */
+  reason?: string | null;
+  evaluatedAt?: string;
+}
+
 /**
  * Desfecho terminal de uma execução (ADR-V2-082).
  */
@@ -192,7 +295,11 @@ export interface IExecucaoOutcome {
   recordedAt: string; // ISO 8601
   /** Quem gravou: callback real do agente ou o próprio sistema (sweeper/dispatch/backfill). */
   source?: 'agent' | 'system';
-  /** Motivo (apenas `source='system'`): TIMEOUT_NO_CALLBACK, AGENT_RESTARTED, ... */
+  /**
+   * Motivo canônico (EXECUTION_FAILURE_REASONS). `source='system'`: TIMEOUT_NO_CALLBACK,
+   * AGENT_RESTARTED, ... `source='agent'`: só motivos da política da esteira
+   * (PIPELINE_* / PR_NOT_CREATED — ADR-V2-083).
+   */
   reason?: string;
   /** Desfecho sintético substituído pelo callback tardio (no máximo 1 vez). */
   supersedes?: { reason?: string; recordedAt?: string };

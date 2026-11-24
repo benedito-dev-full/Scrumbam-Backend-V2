@@ -1,5 +1,7 @@
 # scrumban-agent
 
+**Versão 0.2.0 — modo esteira headless (ADR-V2-083).** Ver seção "Esteira headless (0.2.0 — ADR-V2-083)" abaixo.
+
 Binário cliente Node.js+TypeScript que roda na **VPS do CEO**. **Executor passivo** do lado cliente da F13 (Automation Claude Code): recebe comandos do backend Scrumban-Backend-V2 via HTTP+HMAC sobre reverse tunnel SSH (autossh) e invoca `claude -p` no host.
 
 **Princípio:** zero persistência local de domínio. Toda gravação acontece no backend via Engine `OperacaoExecucaoClaude` (DPedido idClasse=-300..-303). O agente só guarda config em `/etc/scrumban-agent/config.json` (modo 0600).
@@ -497,6 +499,32 @@ acumulado do dia operacional atinge o cap. Reset automático na virada do dia
 UTC. Defende contra (a) bug de intervalo zero, (b) desvio de pricing Anthropic.
 
 ---
+
+## Esteira headless (0.2.0 — ADR-V2-083)
+
+Payload `RUN_CLAUDE_CODE` com `pipeline.required` + `git.branch` ⇒ **modo esteira**:
+
+```
+preflight síncrono (repo tem .claude/commands/scrumban-executar.md?) ─ não ─► 422 PIPELINE_NOT_INSTALLED
+   │ sim → ACK 200
+   ▼
+gh + GITHUB_TOKEN + origin ─► base (config | origin/HEAD) ─► stash de sobras ─► checkout -B scrumban/exec-<id>
+   ▼
+claude -p "/scrumban-executar CONTROLE-SCRUMBAN v1 {json}\n\n<envelope>"
+       --append-system-prompt <contrato fixo> --json-schema <schema v1> --exclude-dynamic-system-prompt-sections
+   ▼
+verificação independente: HEAD, commits à frente, push (ls-remote), PR (gh pr list), subagent_stats
+   ▼
+rede de segurança: commits sem PR ⇒ PR RASCUNHO; não aprovado ⇒ gh pr ready --undo
+   ▼
+callback com bloco `pipeline` (retry ~8 min) — o BACKEND decide sucesso/falha
+```
+
+- Sem `pipeline` no payload ⇒ **modo simples** (legado), agora sem `--system-prompt` e com a base = default do repo.
+- Processo `claude` roda em **grupo próprio** (`spawn detached`); timeout/término matam o grupo inteiro (L6).
+- Config nova (opcional): `pipelineTimeoutMaxSec` (21600), `maxBudgetUsd` (ausente = desligado), `prFallback` (true).
+- Template do comando + schema: `agent/templates/` (copiar para o Devari-Core).
+- Requisito na VPS: `gh` instalado e `GITHUB_TOKEN` no ambiente do serviço.
 
 ## Limitações conhecidas (will not have no MVP)
 

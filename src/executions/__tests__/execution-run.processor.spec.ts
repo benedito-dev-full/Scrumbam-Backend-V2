@@ -51,7 +51,11 @@ interface Scenario {
   executeImpl?: jest.Mock;
   taskStatus?: string;
   busyAttempt?: number;
+  /** ISO do 1º 409 no job (ADR-V2-083 — espera por tempo). */
+  busySince?: string;
   enqueueRetryImpl?: jest.Mock;
+  /** metaDados do vínculo PROJECT_AGENT (slug provisionado na VPS). null = sem vínculo. */
+  linkMeta?: Record<string, unknown> | null;
 }
 
 function build(sc: Scenario = {}) {
@@ -101,6 +105,11 @@ function build(sc: Scenario = {}) {
             ? null
             : { chave: BigInt(20), dados: sc.project ?? { slug: 'scrumban-backend-v2' } },
         ),
+    },
+    dVincula: {
+      findFirst: jest
+        .fn()
+        .mockResolvedValue(sc.linkMeta === undefined || sc.linkMeta === null ? null : { metaDados: sc.linkMeta }),
     },
     dEntidade: {
       findFirst: jest.fn().mockResolvedValue({
@@ -154,6 +163,7 @@ function build(sc: Scenario = {}) {
       agentId: '30',
       enqueuedAt: new Date().toISOString(),
       ...(sc.busyAttempt !== undefined ? { busyAttempt: sc.busyAttempt } : {}),
+      ...(sc.busySince !== undefined ? { busySince: sc.busySince } : {}),
     },
   } as Job<ExecutionRunJobData>;
 
@@ -337,6 +347,78 @@ describe('ExecutionRunProcessor — dispatch OK e ordem da task', () => {
   });
 });
 
+describe('ExecutionRunProcessor — ADR-V2-083 (slug do vínculo + payload da esteira)', () => {
+  const pipelineDados = {
+    statusCode: '-514',
+    prompt: 'ENVELOPE SCRUMBAN v1',
+    timeoutSec: 14400,
+    task: { id: '55' },
+    taskType: 'code',
+    git: { branch: 'scrumban/exec-123', baseBranch: 'develop' },
+    pipeline: { required: true, prRequired: true, taskType: 'code', contractVersion: 1 },
+    audit: { projectId: '20', agentId: '30', correlationId: 'corr' },
+  };
+
+  it('slug do DVincula (provisionado na VPS) vence DProject.dados.slug (colisão foo × foo-2)', async () => {
+    const t = build({ project: { slug: 'foo-2' }, linkMeta: { projectSlug: 'foo-2-vps' } });
+
+    await t.processor.process(t.job);
+
+    expect(t.prisma.dVincula.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ idLocEscritu: BigInt(20), idEntidade: BigInt(30), excluido: false }),
+      }),
+    );
+    expect(t.remoteClient.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ projectSlug: 'foo-2-vps' }),
+    );
+  });
+
+  it('vínculo sem projectSlug válido → fallback DProject.dados.slug', async () => {
+    const t = build({ project: { slug: 'foo' }, linkMeta: { projectSlug: 'Invalido Com Espaço' } });
+
+    await t.processor.process(t.job);
+
+    expect(t.remoteClient.execute).toHaveBeenCalledWith(expect.objectContaining({ projectSlug: 'foo' }));
+  });
+
+  it('modo esteira: payload leva git {branch, baseBranch} + pipeline {required, prRequired, taskType}', async () => {
+    const t = build({ pedidoDados: pipelineDados });
+
+    await t.processor.process(t.job);
+
+    expect(t.remoteClient.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        timeoutSec: 14400,
+        git: { branch: 'scrumban/exec-123', baseBranch: 'develop' },
+        pipeline: { required: true, prRequired: true, taskType: 'code' },
+      }),
+    );
+  });
+
+  it('modo simples (sem dados.pipeline) → payload SEM git/pipeline (agente legado intacto)', async () => {
+    const t = build();
+
+    await t.processor.process(t.job);
+
+    const req = t.remoteClient.execute.mock.calls[0][0];
+    expect(req.git).toBeUndefined();
+    expect(req.pipeline).toBeUndefined();
+  });
+
+  it('modo esteira com branch inválida → FAILED DISPATCH_FAILED (nunca manda ref insegura)', async () => {
+    const t = build({
+      pedidoDados: { ...pipelineDados, git: { branch: '--upload-pack=x', baseBranch: null } },
+    });
+
+    await t.processor.process(t.job);
+
+    expect(t.remoteClient.execute).not.toHaveBeenCalled();
+    const [sql] = callsOf(t.prisma.$queryRaw, 'encerrar');
+    expect(sql.values).toContain('DISPATCH_FAILED');
+  });
+});
+
 describe('ExecutionRunProcessor — markRunning reforçado (CAS)', () => {
   it('SQL exige outcome ausente e nenhuma OUTRA RUNNING da mesma task', async () => {
     const t = build();
@@ -395,14 +477,19 @@ describe('ExecutionRunProcessor — 409 PROJECT_BUSY → retry com backoff', () 
     expect(devolver.sql).toContain("dados->>'statusCode' = '-518'");
     expect(devolver.sql).toContain("- 'startedAt'");
     expect(t.executionQueue.enqueueRetry).toHaveBeenCalledWith(
-      { executionId: '123', projectId: '20', agentId: '30' },
+      { executionId: '123', projectId: '20', agentId: '30', busySince: expect.any(String) },
       { attempt: 1, delayMs: 30000 },
     );
+    // ADR-V2-083 (P4): 1º 409 grava firstBusyAt em dados.dispatch (base da espera por tempo).
+    expect(devolver.values.some((v) => typeof v === 'string' && v.includes('firstBusyAt'))).toBe(true);
     expect(t.tasksService.updateStatus).not.toHaveBeenCalled();
     expect(eventTypes(t.eventProducer)).not.toContain('execution.failed');
     expect(callsOf(t.prisma.$queryRaw, 'encerrar')).toHaveLength(0);
     expect(t.logService.recordSystem).toHaveBeenCalledWith(
-      expect.objectContaining({ code: 'PROJECT_BUSY', line: 'PROJECT_BUSY retry 1/10 em 30s' }),
+      expect.objectContaining({
+        code: 'PROJECT_BUSY',
+        line: expect.stringMatching(/^PROJECT_BUSY retry 1 em 30s \(aguardando ha 0s de ate 21900s\)$/),
+      }),
     );
   });
 
@@ -422,8 +509,49 @@ describe('ExecutionRunProcessor — 409 PROJECT_BUSY → retry com backoff', () 
     });
   });
 
-  it('409 após a 10ª tentativa → FAILED PROJECT_BUSY_EXHAUSTED, sem novo retry', async () => {
-    const t = build({ executeImpl: busy(), busyAttempt: 10 });
+  it('P4 (ADR-V2-083): 10ª tentativa DENTRO da janela de ~6h → NÃO desiste (re-enfileira)', async () => {
+    const t = build({
+      executeImpl: busy(),
+      busyAttempt: 10,
+      busySince: new Date(Date.now() - 41 * 60 * 1000).toISOString(), // 41 min (antigo limite)
+    });
+
+    await t.processor.process(t.job);
+
+    expect(callsOf(t.prisma.$queryRaw, 'encerrar')).toHaveLength(0);
+    expect(t.executionQueue.enqueueRetry).toHaveBeenCalledWith(
+      expect.objectContaining({ busySince: expect.any(String) }),
+      { attempt: 11, delayMs: 300000 },
+    );
+  });
+
+  it('P4: job pré-deploy sem busySince usa dados.dispatch.firstBusyAt como base', async () => {
+    const firstBusyAt = new Date(Date.now() - 7 * 3600 * 1000).toISOString();
+    const t = build({
+      executeImpl: busy(),
+      busyAttempt: 3,
+      pedidoDados: {
+        statusCode: '-514',
+        prompt: 'p',
+        timeoutSec: 600,
+        dispatch: { busyAttempts: 3, nextAttemptAt: 'x', lastErrorCode: 'PROJECT_BUSY', firstBusyAt },
+        audit: { projectId: '20', agentId: '30', correlationId: 'corr' },
+      },
+    });
+
+    await t.processor.process(t.job);
+
+    expect(t.executionQueue.enqueueRetry).not.toHaveBeenCalled();
+    const [sql] = callsOf(t.prisma.$queryRaw, 'encerrar');
+    expect(sql.values).toContain('PROJECT_BUSY_EXHAUSTED');
+  });
+
+  it('409 após a janela de espera (~6h05) → FAILED PROJECT_BUSY_EXHAUSTED, sem novo retry', async () => {
+    const t = build({
+      executeImpl: busy(),
+      busyAttempt: 80,
+      busySince: new Date(Date.now() - 22_000 * 1000).toISOString(),
+    });
 
     await t.processor.process(t.job);
 
@@ -530,7 +658,29 @@ describe('ExecutionRunProcessor — Ciclo 3: TODA falha sistêmica grava código
       { executeImpl: jest.fn().mockRejectedValue(new RemoteAgentHttpError(500, 'X', 'HTTP 500')) },
       'DISPATCH_FAILED',
     ],
-    ['409 esgotado', { executeImpl: busy(), busyAttempt: 10 }, 'PROJECT_BUSY_EXHAUSTED'],
+    [
+      '409 esgotado (janela de tempo)',
+      { executeImpl: busy(), busyAttempt: 80, busySince: '2020-01-01T00:00:00.000Z' },
+      'PROJECT_BUSY_EXHAUSTED',
+    ],
+    [
+      'repo sem a esteira (422 PIPELINE_NOT_INSTALLED do preflight)',
+      {
+        executeImpl: jest
+          .fn()
+          .mockRejectedValue(new RemoteAgentHttpError(422, 'PIPELINE_NOT_INSTALLED', 'HTTP 422')),
+      },
+      'PIPELINE_NOT_INSTALLED',
+    ],
+    [
+      'branch base inexistente no preflight (422 BASE_BRANCH_NOT_FOUND)',
+      {
+        executeImpl: jest
+          .fn()
+          .mockRejectedValue(new RemoteAgentHttpError(422, 'BASE_BRANCH_NOT_FOUND', 'HTTP 422')),
+      },
+      'PIPELINE_PRECONDITION_FAILED',
+    ],
     [
       'falha ao re-enfileirar após 409',
       { executeImpl: busy(), enqueueRetryImpl: jest.fn().mockRejectedValue(new Error('redis')) },

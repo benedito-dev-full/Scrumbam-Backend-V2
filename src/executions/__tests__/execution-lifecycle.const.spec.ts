@@ -5,6 +5,12 @@ import {
   resolveExecutionLifecycleConfig,
   resolveExecutionTimeoutSec,
   toActiveExecutionStatus,
+  EXECUTION_BUSY_MAX_WAIT_SEC,
+  EXECUTION_FAILURE_REASON_CODES,
+  EXECUTION_PIPELINE_REASON_CODES,
+  executionBranchName,
+  isBusyWaitExhausted,
+  resolvePipelineTimeoutSec,
 } from '../constants/execution-lifecycle.const';
 
 /**
@@ -80,5 +86,51 @@ describe('execution-lifecycle.const', () => {
     expect(toActiveExecutionStatus('-515')).toBe('awaiting_approval');
     expect(toActiveExecutionStatus('-514')).toBe('queued');
     expect(toActiveExecutionStatus('-516')).toBe('queued');
+  });
+
+  describe('ADR-V2-083 — modo esteira', () => {
+    it('resolvePipelineTimeoutSec: default 4h, teto 6h, mínimo 30s (P2)', () => {
+      expect(resolvePipelineTimeoutSec()).toBe(14400);
+      expect(resolvePipelineTimeoutSec(21600)).toBe(21600);
+      expect(resolvePipelineTimeoutSec(99999)).toBe(21600);
+      expect(resolvePipelineTimeoutSec(5)).toBe(30);
+      expect(resolvePipelineTimeoutSec(Number.NaN)).toBe(14400);
+    });
+
+    it('override de env do default do modo esteira e da janela de busy', () => {
+      const cfg = resolveExecutionLifecycleConfig({
+        EXECUTION_PIPELINE_DEFAULT_TIMEOUT_SEC: '7200',
+        EXECUTION_BUSY_MAX_WAIT_SEC: '600',
+      });
+      expect(cfg.pipelineDefaultTimeoutSec).toBe(7200);
+      expect(cfg.busyMaxWaitSec).toBe(600);
+      const def = resolveExecutionLifecycleConfig({});
+      expect(def.pipelineDefaultTimeoutSec).toBe(14400);
+      expect(def.busyMaxWaitSec).toBe(EXECUTION_BUSY_MAX_WAIT_SEC);
+    });
+
+    it('P4: janela de espera do 409 = teto da esteira (6h) + margem (300s) = 21900s', () => {
+      expect(EXECUTION_BUSY_MAX_WAIT_SEC).toBe(21900);
+    });
+
+    it('isBusyWaitExhausted: por TEMPO, não por contagem', () => {
+      const t0 = Date.parse('2026-11-23T00:00:00.000Z');
+      expect(isBusyWaitExhausted('2026-11-23T00:00:00.000Z', t0 + 41 * 60_000)).toBe(false);
+      expect(isBusyWaitExhausted('2026-11-23T00:00:00.000Z', t0 + 21_900_000)).toBe(false);
+      expect(isBusyWaitExhausted('2026-11-23T00:00:00.000Z', t0 + 21_900_001)).toBe(true);
+      expect(isBusyWaitExhausted(undefined, t0)).toBe(false);
+      expect(isBusyWaitExhausted('lixo', t0)).toBe(false);
+    });
+
+    it('executionBranchName = scrumban/exec-<id>', () => {
+      expect(executionBranchName('4815')).toBe('scrumban/exec-4815');
+    });
+
+    it('motivos da esteira ⊂ lista canônica (13 códigos, 5 novos aditivos)', () => {
+      expect(EXECUTION_FAILURE_REASON_CODES).toHaveLength(13);
+      for (const c of EXECUTION_PIPELINE_REASON_CODES) {
+        expect(EXECUTION_FAILURE_REASON_CODES).toContain(c);
+      }
+    });
   });
 });

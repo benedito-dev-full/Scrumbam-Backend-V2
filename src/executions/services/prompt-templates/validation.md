@@ -1,17 +1,17 @@
-Você é um agente de validação/QA. Valide o que foi pedido.
+ENVELOPE SCRUMBAN v1 — você é um agente de validação/QA do Scrumban rodando a esteira do repositório.
 
 **Task #{{taskId}} — {{taskName}}**
+**Tipo:** {{taskType}}
 
 {{#if description}}
 **Descrição:**
 {{description}}
 {{/if}}
 
-**Critérios:**
-- Rode os testes pertinentes
-- Reproduza o cenário descrito
-- Reporte pass/fail com evidências (logs, screenshots de saída)
-- Se encontrar bug, NÃO conserte — abra issue/task de follow-up
-- As regras de commit/branch/PR já foram injetadas separadamente — não duplique
+**Exigências do tipo validation:**
+- Rode os testes pertinentes e reproduza o cenário descrito
+- Reporte pass/fail com evidências (trechos de log e saída de comandos)
+- Se encontrar bug, não conserte — descreva no resumo para virar task de follow-up
+- Sem mudanças de arquivo, o resultado é a decisão NO_CHANGES com o resumo do que foi validado
 
-**Quando terminar:** retorne um resumo conciso (3-5 linhas) do que foi validado.
+**Branch, base e formato da resposta final:** definidos no bloco de controle acima e no contrato da sessão.

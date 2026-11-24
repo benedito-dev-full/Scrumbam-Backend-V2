@@ -1,42 +1,55 @@
 /**
- * Spawn de `claude -p "<prompt>" --output-format json [--resume <id>]`.
+ * Spawn de `claude -p "<prompt>" --output-format json …` com controle do
+ * GRUPO DE PROCESSOS (ADR-V2-083, L6).
  *
- * **Por que `execFile` (não `exec` nem `spawn` shell):**
- *  - `exec` invoca shell → vulnerável a shell injection se o prompt
- *    contiver `$()`, backticks, redirects, etc. Mesmo "confiável", evitamos.
- *  - `execFile` passa argumentos diretamente ao processo, sem shell. O
- *    prompt vai como argv[N] — não é interpretado.
+ * **Por que `spawn(detached)` e não mais `execFile`:**
+ *  - A esteira roda `npm run build`, jest, hooks, `gh`, às vezes um dev server.
+ *    Com `execFile`, o callback só dispara no `close` dos pipes; um NETO vivo
+ *    (que herdou o stdout) segura o pipe ⇒ callback nunca chega ⇒ o mutex do
+ *    slug fica preso para sempre (todo dispatch do projeto vira 409).
+ *  - `detached: true` faz o `claude` liderar um grupo de processos próprio;
+ *    o kill vai para o GRUPO (`process.kill(-pid, sig)`), alcançando os netos.
+ *  - Resolve no `exit` do líder + dreno de até {@link DRAIN_MS} para o `close`
+ *    dos pipes; logo após o `exit`, o grupo restante recebe SIGKILL (nenhum neto
+ *    sobrevive à execução).
+ *  - `stdio[0]='ignore'`: stdin fechado (antes o CLI esperava 3s por stdin).
+ *  - Sem shell: argumentos vão direto no argv (sem injeção).
  *
- * O CLI `claude` aceita `-p "<prompt>"` como argumento. Em versões recentes
- * (≥2.1.139 confirmado no spike do CEO), o output JSON tem o shape:
- * `{ type: "result", session_id, result, is_error, duration_ms, ... }`.
+ * **Timeout:** SIGTERM no grupo; se não sair em {@link KILL_GRACE_MS}, SIGKILL
+ * no grupo (ADR-V2-082). `timedOut=true` em ambos.
  *
- * **Timeout:** vem do payload (`timeoutSec`, default 30min — fonte única é
- * `DPedido.dados.timeoutSec` no backend, ADR-V2-082). `execFile` com
- * `timeout` envia APENAS SIGTERM (`killSignal`). Um `claude` que ignora
- * SIGTERM seguraria o mutex do slug para sempre (todo dispatch do projeto
- * viraria 409 PROJECT_BUSY). Por isso há escalonamento próprio: se o processo
- * não sair em `KILL_GRACE_MS` (15s) após o SIGTERM, recebe SIGKILL — o
- * callback do execFile dispara, `runAndReport` chega ao `finally` e libera o
- * mutex. `timedOut=true` em ambos os casos. Captura o que houver em
- * `stdout`/`stderr` mesmo no abort.
+ * **Buffer:** até {@link MAX_BUFFER_BYTES} por stream (cabeça preservada).
  *
- * **maxBuffer:** 10MB. Output JSON do Claude Code tem `usage.iterations`
- * que pode crescer, mas 10MB é folga gigante. Se estourar, `execFile`
- * rejeita com `ERR_CHILD_PROCESS_STDIO_MAXBUFFER` — handler reporta.
- *
- * @see ADR-V2-032 (contrato run-claude-code)
+ * @see ADR-V2-032 (contrato run-claude-code), ADR-V2-082, ADR-V2-083
  */
-import { execFile, type ExecFileException } from 'node:child_process';
-import { buildClaudeArgs } from './command-builder';
+import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { buildClaudeArgs, type BuildClaudeArgsInput } from './command-builder';
 
-const DEFAULT_TIMEOUT_SEC = 30 * 60; // 30min
+const DEFAULT_TIMEOUT_SEC = 30 * 60; // 30min (modo simples)
 /** Tolerância entre SIGTERM (timeout) e SIGKILL forçado (ADR-V2-082). */
 export const KILL_GRACE_MS = 15_000;
-const MAX_BUFFER_BYTES = 10 * 1024 * 1024; // 10MB
+/** Espera pelo `close` dos pipes depois do `exit` do líder (ADR-V2-083). */
+export const DRAIN_MS = 5_000;
+/** Teto de captura por stream. */
+export const MAX_BUFFER_BYTES = 10 * 1024 * 1024; // 10MB
 const CLAUDE_BINARY = 'claude';
 
-export interface RunnerInput {
+/** Assinatura mínima de `spawn` usada aqui (injetável em testes). */
+export type SpawnImpl = (file: string, args: string[], opts: SpawnOptions) => ChildProcess;
+
+/** Envia sinal ao GRUPO do processo (injetável em testes). */
+export type KillGroupImpl = (pid: number, signal: NodeJS.Signals) => void;
+
+/** Kill de grupo real: `-pid` = grupo inteiro (o líder foi criado com `detached`). */
+export const defaultKillGroup: KillGroupImpl = (pid, signal) => {
+  process.kill(-pid, signal);
+};
+
+export interface RunnerInput
+  extends Pick<
+    BuildClaudeArgsInput,
+    'appendSystemPrompt' | 'jsonSchema' | 'excludeDynamicSections' | 'maxBudgetUsd'
+  > {
   /** Prompt completo enviado ao Claude Code. Vai como `-p <prompt>` (argv). */
   prompt: string;
   /** Diretório de trabalho. Já canonicalizado e validado pelo allowlist. */
@@ -45,174 +58,206 @@ export interface RunnerInput {
   resumeSessionId?: string | null;
   /** Timeout em segundos. Default 30min. */
   timeoutSec?: number;
-  /**
-   * Se presente e não-vazio, passa `--system-prompt <conteúdo>` ao CLI.
-   * Usado para injetar regras globais (ex: ~/.claude/CLAUDE.md) sem poluir
-   * o `prompt` da tarefa — o histórico de intenções fica limpo.
-   */
-  systemPrompt?: string;
-  /** Override do execFile (testes). Default: `child_process.execFile`. */
-  execFileImpl?: typeof execFile;
-  /** Override do grace SIGTERM→SIGKILL em ms (testes). Default {@link KILL_GRACE_MS}. */
+  /** Override do spawn (testes). */
+  spawnImpl?: SpawnImpl;
+  /** Override do kill de grupo (testes). */
+  killGroupImpl?: KillGroupImpl;
+  /** Override do grace SIGTERM→SIGKILL em ms (testes). */
   killGraceMs?: number;
+  /** Override do dreno pós-exit em ms (testes). */
+  drainMs?: number;
 }
 
 export interface RunnerResult {
-  /** Stdout completo (até maxBuffer). Pode conter JSON do Claude Code. */
+  /** Stdout (até o teto). Pode conter JSON do Claude Code. */
   stdout: string;
-  /** Stderr completo (até maxBuffer). */
+  /** Stderr (até o teto). */
   stderr: string;
-  /**
-   * Exit code do processo. `0` em sucesso. `null` se o processo foi
-   * killado por sinal sem código (raro com timeout — execFile retorna
-   * `1` na maioria das vezes).
-   */
+  /** Exit code. `0` em sucesso; `null` se morto por sinal. */
   exitCode: number | null;
-  /** Sinal que terminou o processo (ex: 'SIGTERM' em timeout) ou null. */
+  /** Sinal que terminou o processo ou null. */
   signal: string | null;
-  /**
-   * True se o processo foi encerrado por timeout — SIGTERM do `execFile`
-   * (killed=true) ou SIGKILL forçado após o grace.
-   */
+  /** True se encerrado pelo timeout (SIGTERM ou SIGKILL forçado). */
   timedOut: boolean;
-  /** Duração medida no agente (Date.now diff), em ms. */
+  /** Duração medida no agente, em ms. */
   durationMs: number;
 }
 
+/** Entrada genérica do executor de grupo (exportado para teste com processo real). */
+export interface SpawnGroupInput {
+  binary: string;
+  args: string[];
+  cwd: string;
+  timeoutMs: number;
+  spawnImpl?: SpawnImpl;
+  killGroupImpl?: KillGroupImpl;
+  killGraceMs?: number;
+  drainMs?: number;
+  maxBufferBytes?: number;
+}
+
 /**
- * Executa o CLI `claude` e retorna stdout/stderr/exitCode. Nunca lança —
- * exceções do `execFile` são capturadas e mapeadas em `RunnerResult` com
- * `exitCode != 0`. Caller decide o que fazer.
+ * Executa um binário num grupo de processos próprio, com timeout, kill de
+ * grupo e dreno. Nunca lança.
  *
- * **Decisão de captura:** mesmo em erro (`execFile` callback recebe `Error`),
- * `stdout`/`stderr` são preservados (Node anexa em `err.stdout`/`err.stderr`).
- * Aproveitamos — é exatamente o que precisamos pra parsear sessão mesmo
- * com exit≠0.
+ * @param input - Binário, argv, cwd, timeout e overrides
+ * @returns Resultado (stdout/stderr/exitCode/signal/timedOut/durationMs)
+ */
+export async function spawnInProcessGroup(input: SpawnGroupInput): Promise<RunnerResult> {
+  const spawnFn: SpawnImpl = input.spawnImpl ?? (spawn as unknown as SpawnImpl);
+  const killGroup = input.killGroupImpl ?? defaultKillGroup;
+  const killGraceMs =
+    input.killGraceMs !== undefined && input.killGraceMs >= 0 ? input.killGraceMs : KILL_GRACE_MS;
+  const drainMs = input.drainMs !== undefined && input.drainMs >= 0 ? input.drainMs : DRAIN_MS;
+  const cap = input.maxBufferBytes ?? MAX_BUFFER_BYTES;
+  const startMs = Date.now();
+
+  return await new Promise<RunnerResult>((resolve) => {
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    let outBytes = 0;
+    let errBytes = 0;
+    let settled = false;
+    let timedOut = false;
+    let exitCode: number | null = null;
+    let exitSignal: string | null = null;
+    let timeoutTimer: NodeJS.Timeout | undefined;
+    let killTimer: NodeJS.Timeout | undefined;
+    let drainTimer: NodeJS.Timeout | undefined;
+
+    let child: ChildProcess;
+    try {
+      child = spawnFn(input.binary, input.args, {
+        cwd: input.cwd,
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+    } catch (e) {
+      resolve({
+        stdout: '',
+        stderr: e instanceof Error ? e.message : String(e),
+        exitCode: -1,
+        signal: null,
+        timedOut: false,
+        durationMs: Date.now() - startMs,
+      });
+      return;
+    }
+
+    const signalGroup = (signal: NodeJS.Signals): void => {
+      const pid = child.pid;
+      if (typeof pid !== 'number') return;
+      try {
+        killGroup(pid, signal);
+      } catch {
+        // ESRCH: grupo já vazio. Fallback: só o líder (se ainda vivo).
+        try {
+          child.kill(signal);
+        } catch {
+          /* processo já saiu */
+        }
+      }
+    };
+
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      if (killTimer) clearTimeout(killTimer);
+      if (drainTimer) clearTimeout(drainTimer);
+      child.stdout?.removeAllListeners('data');
+      child.stderr?.removeAllListeners('data');
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      resolve({
+        stdout: Buffer.concat(out).toString('utf8'),
+        stderr: Buffer.concat(err).toString('utf8'),
+        exitCode,
+        signal: exitSignal,
+        timedOut,
+        durationMs: Date.now() - startMs,
+      });
+    };
+
+    child.stdout?.on('data', (chunk: Buffer) => {
+      if (outBytes >= cap) return;
+      const slice = chunk.subarray(0, cap - outBytes);
+      out.push(slice);
+      outBytes += slice.length;
+    });
+    child.stderr?.on('data', (chunk: Buffer) => {
+      if (errBytes >= cap) return;
+      const slice = chunk.subarray(0, cap - errBytes);
+      err.push(slice);
+      errBytes += slice.length;
+    });
+
+    child.on('error', (e: NodeJS.ErrnoException) => {
+      // ENOENT (binário ausente) etc. — não houve processo útil.
+      if (exitCode === null) exitCode = -1;
+      err.push(Buffer.from(String(e.message ?? e)));
+      finish();
+    });
+
+    child.on('exit', (code, signal) => {
+      exitCode = typeof code === 'number' ? code : null;
+      exitSignal = signal ?? null;
+      // Ciclo 2 / M4: o líder saiu — o timeout não pode mais disparar durante o
+      // dreno (marcaria timedOut=true indevido e mandaria SIGTERM a um pgid morto).
+      // O SIGKILL do grace também perde o sentido (o grupo leva SIGKILL abaixo).
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      if (killTimer) clearTimeout(killTimer);
+      // L6: o líder saiu — qualquer neto restante no grupo é encerrado já,
+      // para soltar os pipes e não sobreviver à execução.
+      signalGroup('SIGKILL');
+      drainTimer = setTimeout(finish, drainMs);
+    });
+
+    child.on('close', () => finish());
+
+    timeoutTimer = setTimeout(() => {
+      if (settled) return;
+      timedOut = true;
+      signalGroup('SIGTERM');
+      killTimer = setTimeout(() => {
+        if (settled) return;
+        signalGroup('SIGKILL');
+      }, killGraceMs);
+    }, input.timeoutMs);
+  });
+}
+
+/**
+ * Executa o CLI `claude` e retorna stdout/stderr/exitCode. Nunca lança.
  *
  * @example
- *   const r = await runClaudeCode({
- *     prompt: 'list files',
- *     cwd: '/home/dev/projetos/foo',
- *   });
+ *   const r = await runClaudeCode({ prompt: 'list files', cwd: '/home/dev/projetos/foo' });
  *   if (r.exitCode !== 0) reportError(r.stderr);
  */
 export async function runClaudeCode(input: RunnerInput): Promise<RunnerResult> {
   const timeoutSec =
     input.timeoutSec && input.timeoutSec > 0 ? input.timeoutSec : DEFAULT_TIMEOUT_SEC;
-  const execFn = input.execFileImpl ?? execFile;
 
-  // Montagem do argv DELEGADA a `buildClaudeArgs` (ADR-V2-046) — único
-  // call-site no codebase. O Cache Warmer (`warm-cache.handler.ts`) chama
-  // a MESMA função para garantir paridade byte-a-byte do prefixo cacheável
-  // do Anthropic API (sem o que warmer não aquece o cache certo).
-  //
-  // Comentários longos sobre `--dangerously-skip-permissions` e
-  // `--system-prompt` agora vivem em `command-builder.ts` — fonte única.
+  // Montagem do argv DELEGADA a `buildClaudeArgs` (ADR-V2-046) — mesma função
+  // do Cache Warmer (paridade do prefixo cacheável).
   const { args } = buildClaudeArgs({
     prompt: input.prompt,
-    systemPrompt: input.systemPrompt,
+    appendSystemPrompt: input.appendSystemPrompt,
+    jsonSchema: input.jsonSchema,
+    excludeDynamicSections: input.excludeDynamicSections,
+    maxBudgetUsd: input.maxBudgetUsd,
     resumeSessionId: input.resumeSessionId,
   });
 
-  const startMs = Date.now();
-  const timeoutMs = timeoutSec * 1000;
-  const killGraceMs =
-    input.killGraceMs !== undefined && input.killGraceMs >= 0 ? input.killGraceMs : KILL_GRACE_MS;
-
-  return await new Promise<RunnerResult>((resolve) => {
-    let settled = false;
-    let forcedKill = false;
-    let timeoutTimer: NodeJS.Timeout | undefined;
-    let killTimer: NodeJS.Timeout | undefined;
-
-    const clearTimers = (): void => {
-      if (timeoutTimer) clearTimeout(timeoutTimer);
-      if (killTimer) clearTimeout(killTimer);
-    };
-
-    const child = execFn(
-      CLAUDE_BINARY,
-      args,
-      {
-        cwd: input.cwd,
-        timeout: timeoutMs,
-        maxBuffer: MAX_BUFFER_BYTES,
-        // O CLI deve respeitar locale básico; nada de shell.
-        windowsHide: true,
-      },
-      (err, stdout, stderr) => {
-        if (settled) return;
-        settled = true;
-        clearTimers();
-        const durationMs = Date.now() - startMs;
-        const e = err as (ExecFileException & { stdout?: string; stderr?: string }) | null;
-
-        if (e === null) {
-          resolve({
-            stdout: toString(stdout),
-            stderr: toString(stderr),
-            exitCode: 0,
-            signal: null,
-            timedOut: false,
-            durationMs,
-          });
-          return;
-        }
-
-        // Captura stdout/stderr mesmo em erro (Node preserva no err).
-        const capturedOut = toString(e.stdout ?? stdout);
-        const capturedErr = toString(e.stderr ?? stderr);
-
-        // execFile com timeout: `killed=true` e `signal='SIGTERM'`.
-        // Escalonamento próprio: SIGKILL forçado após o grace.
-        const timedOut =
-          forcedKill || e.killed === true || e.signal === 'SIGTERM' || e.signal === 'SIGKILL';
-        const exitCode = typeof e.code === 'number' ? e.code : timedOut ? null : 1;
-
-        resolve({
-          stdout: capturedOut,
-          stderr: capturedErr,
-          exitCode,
-          signal: typeof e.signal === 'string' ? e.signal : forcedKill ? 'SIGKILL' : null,
-          timedOut,
-          durationMs,
-        });
-      },
-    );
-
-    // ADR-V2-082: o `timeout` do execFile só manda SIGTERM. Agenda nosso
-    // próprio relógio: no estouro, reforça o SIGTERM (idempotente) e arma o
-    // SIGKILL para `killGraceMs` depois, caso o processo ignore o SIGTERM.
-    timeoutTimer = setTimeout(() => {
-      if (settled) return;
-      try {
-        child.kill('SIGTERM');
-      } catch {
-        /* processo já saiu */
-      }
-      killTimer = setTimeout(() => {
-        if (settled) return;
-        forcedKill = true;
-        try {
-          child.kill('SIGKILL');
-        } catch {
-          /* processo já saiu */
-        }
-      }, killGraceMs);
-    }, timeoutMs);
-
-    // Defesa: se o child falhar pre-spawn (ENOENT do binário), o callback
-    // ainda é invocado pelo Node — não precisamos de listener extra.
-    // Apenas evitamos crash silencioso se o child emitir 'error' sem
-    // callback (não deveria com execFile, mas defensivo).
-    child.on('error', () => {
-      /* engolido — callback do execFile já trata. */
-    });
+  return spawnInProcessGroup({
+    binary: CLAUDE_BINARY,
+    args,
+    cwd: input.cwd,
+    timeoutMs: timeoutSec * 1000,
+    spawnImpl: input.spawnImpl,
+    killGroupImpl: input.killGroupImpl,
+    killGraceMs: input.killGraceMs,
+    drainMs: input.drainMs,
   });
-}
-
-function toString(v: string | Buffer | undefined | null): string {
-  if (v === undefined || v === null) return '';
-  if (typeof v === 'string') return v;
-  return v.toString('utf8');
 }

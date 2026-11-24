@@ -13,6 +13,11 @@ export interface ExecutionRunJobData {
    * Preenchido por `enqueueRetry`.
    */
   busyAttempt?: number;
+  /**
+   * ISO do 1º 409 PROJECT_BUSY desta execução — base da espera POR TEMPO
+   * (ADR-V2-083, decisão CEO P4). Preenchido por `enqueueRetry`.
+   */
+  busySince?: string;
 }
 
 @Injectable()
@@ -52,7 +57,7 @@ export class ExecutionQueueService {
    * original `executionId` fica retido por `removeOnComplete` e deduplicaria
    * o retry). Sem `:` (BullMQ rejeita `:` em custom id).
    *
-   * @param input - Dados do job (executionId/projectId/agentId)
+   * @param input - Dados do job (executionId/projectId/agentId/busySince)
    * @param opts.attempt - Tentativa (1-based) que gerou o retry
    * @param opts.delayMs - Atraso até o próximo dispatch
    * @returns Dados do job enfileirado

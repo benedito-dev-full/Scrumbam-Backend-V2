@@ -1,87 +1,114 @@
 /**
  * Único call-site da montagem do argv para o CLI `claude`.
  *
- * **Por que existe:** o Cache Warmer depende de PARIDADE BYTE-A-BYTE
- * do prefixo do prompt entre uma execução real (`run-claude-code.handler.ts`)
- * e um warm (`warm-cache.handler.ts`). Sem isso, o warmer aquece um prefixo
- * diferente do que as tasks reais usam → cache da Anthropic (TTL=1h) é por
- * prefixo, então prefixo divergente = warmer vira teatro (zero cache_read em
- * tasks subsequentes).
+ * **Por que existe:** o Cache Warmer depende de PARIDADE do prefixo cacheável
+ * entre uma execução real (`run-claude-code.handler.ts`) e um warm
+ * (`warm-cache.handler.ts`). Ambos chamam ESTA função com as MESMAS flags de
+ * sessão ({@link pipelineSessionFlags}); specs de snapshot em
+ * `command-builder.spec.ts` validam a ordem.
  *
- * **Garantia técnica:** ambos os handlers chamam ESTA função para montar o
- * argv. Specs de snapshot em `command-builder.spec.ts` validam byte-a-byte
- * os 4 primeiros argumentos (`--system-prompt`, CLAUDE.md, `-p`, prompt) —
- * são eles que formam o prefixo cacheável do Anthropic API.
+ * **ADR-V2-083 (re-baseline da ADR-V2-046):**
+ *  - `--system-prompt` SAIU. Ele SUBSTITUÍA o prompt padrão do Claude Code pelo
+ *    CLAUDE.md global (mapa de slugs). Em `-p` o CLI já carrega o CLAUDE.md do
+ *    REPO, as rules ancestrais, `~/.claude/CLAUDE.md` e os `.claude/agents`
+ *    (verificado no CLI 2.1.330). O prefixo cacheável passa a ser
+ *    "prompt padrão + CLAUDE.md do repo + contrato fixo" — varia por projeto,
+ *    o que o warmer já respeita (aquece por slug, no cwd do projeto).
+ *  - `--append-system-prompt <contrato curto fixo>` + `--json-schema <schema>`
+ *    + `--exclude-dynamic-system-prompt-sections` (melhora o reuso do cache).
+ *  - NUNCA `--bare`: pula hooks E CLAUDE.md (mataria a esteira).
  *
- * **Função pura, ZERO side-effects.** Recebe input, retorna argv. Sem leitura
- * de arquivo, sem env, sem clock. Testável com snapshot determinístico.
+ * **Função pura, ZERO side-effects.**
  */
 
-/**
- * Input do builder. Subset estável das opções que afetam o argv do CLI.
- * Adicionar campos novos aqui exige bumping cuidadoso — qualquer mudança
- * de ordem ou nome de flag invalida o cache do Anthropic.
- */
+/** Input do builder. Subset estável das opções que afetam o argv do CLI. */
 export interface BuildClaudeArgsInput {
   /** Prompt da tarefa (vai como `-p <prompt>`). Obrigatório. */
   prompt: string;
   /**
-   * Conteúdo do CLAUDE.md global (vai como `--system-prompt <conteúdo>`).
-   * Se undefined OR vazio (após trim), a flag NÃO é adicionada. Mesma
-   * semântica do legado em `runner.ts` antes do refactor.
+   * Texto anexado ao system prompt padrão (`--append-system-prompt`).
+   * Undefined/vazio ⇒ flag omitida (modo simples/legado).
    */
-  systemPrompt?: string;
-  /**
-   * Session id para continuar conversa anterior (vai como `--resume <id>`).
-   * Se undefined OR vazio, flag NÃO é adicionada. Warmer NUNCA passa este
-   * campo (cada warm cria uma sessão nova efêmera).
-   */
+  appendSystemPrompt?: string;
+  /** JSON Schema serializado (`--json-schema`). Undefined/vazio ⇒ omitida. */
+  jsonSchema?: string;
+  /** Adiciona `--exclude-dynamic-system-prompt-sections` (reuso de cache). */
+  excludeDynamicSections?: boolean;
+  /** Teto de custo da sessão (`--max-budget-usd`). Undefined ⇒ sem teto (P2: desligado no início). */
+  maxBudgetUsd?: number;
+  /** Session id para `--resume <id>`. Warmer NUNCA passa. */
   resumeSessionId?: string | null;
-  /**
-   * Flags adicionais inseridas APÓS as flags-base do prefixo cacheável
-   * (`--system-prompt`, `-p`, `--output-format json`, `--dangerously-skip-permissions`).
-   * Usadas pelo warmer para `--permission-mode=plan --max-turns=1` sem
-   * poluir o handler real.
-   *
-   * **Crítico:** estas flags vão DEPOIS do prefixo cacheável — não afetam
-   * o cache do system-prompt (que é o ganho de ~58k tokens). Cache do
-   * Anthropic é por PREFIXO; flags no final são "sufixo variável" e o
-   * cache continua válido para a parte de cima.
-   */
+  /** Flags extras no FINAL do argv (warmer: `--permission-mode=plan --max-turns=1`). */
   extraFlags?: string[];
 }
 
 export interface BuildClaudeArgsResult {
-  /** Argv pronto para passar a `execFile(CLAUDE_BINARY, args, ...)`. */
+  /** Argv pronto para `spawn(CLAUDE_BINARY, args, ...)`. */
   args: string[];
 }
 
 /**
- * Constrói o argv canônico do CLI `claude`. Ordem dos argumentos é
- * deliberada — qualquer mudança quebra paridade com tasks já cacheadas.
+ * Flags de SESSÃO do modo esteira — as mesmas para task real e warm
+ * (paridade ADR-V2-046 re-baselinada pela ADR-V2-083).
+ *
+ * @param contract - `{ appendSystemPrompt, jsonSchema }` do `pipeline-contract`
+ * @returns Fragmento de {@link BuildClaudeArgsInput}
+ */
+export function pipelineSessionFlags(contract: {
+  appendSystemPrompt: string;
+  jsonSchema: string;
+}): Pick<BuildClaudeArgsInput, 'appendSystemPrompt' | 'jsonSchema' | 'excludeDynamicSections'> {
+  return {
+    appendSystemPrompt: contract.appendSystemPrompt,
+    jsonSchema: contract.jsonSchema,
+    excludeDynamicSections: true,
+  };
+}
+
+/**
+ * Constrói o argv canônico do CLI `claude`.
  *
  * **Ordem garantida (snapshot-tested):**
- *   1. `--system-prompt <conteúdo>`  (se systemPrompt presente e não-vazio)
- *   2. `-p <prompt>`
- *   3. `--output-format json`
- *   4. `--dangerously-skip-permissions`
- *   5. `--resume <id>`               (se resumeSessionId presente e não-vazio)
- *   6. ...extraFlags                 (se array presente; itens na ordem fornecida)
+ *   1. `--append-system-prompt <texto>`              (se presente)
+ *   2. `--json-schema <schema>`                       (se presente)
+ *   3. `--exclude-dynamic-system-prompt-sections`     (se true)
+ *   4. `-p <prompt>`
+ *   5. `--output-format json`
+ *   6. `--dangerously-skip-permissions`
+ *   7. `--max-budget-usd <n>`                         (se > 0)
+ *   8. `--resume <id>`                                (se presente)
+ *   9. ...extraFlags
  *
- * **Por que `--dangerously-skip-permissions`:** comentário longo no
- * `runner.ts` original — em modo `-p` (headless), o CLI recusa Edit/Write
- * sem confirmação. Risk Gate + Approval Flow já filtraram, então o
- * agente assume aprovação prévia. Container roda sem root, allowlist
- * delimita blast radius.
+ * **Por que `--dangerously-skip-permissions`:** em `-p` (headless) o CLI recusa
+ * Edit/Write sem confirmação. Risk Gate + Approval Flow já filtraram; o
+ * serviço roda sem root (systemd) e o allowlist delimita o blast radius.
+ * Hooks do repo continuam rodando sob bypass (verificado).
+ *
+ * @example
+ *   buildClaudeArgs({ prompt: 'x', ...pipelineSessionFlags(contract) }).args
  */
 export function buildClaudeArgs(input: BuildClaudeArgsInput): BuildClaudeArgsResult {
   const args: string[] = [];
 
-  if (input.systemPrompt !== undefined && input.systemPrompt.trim() !== '') {
-    args.push('--system-prompt', input.systemPrompt);
+  if (input.appendSystemPrompt !== undefined && input.appendSystemPrompt.trim() !== '') {
+    args.push('--append-system-prompt', input.appendSystemPrompt);
+  }
+  if (input.jsonSchema !== undefined && input.jsonSchema.trim() !== '') {
+    args.push('--json-schema', input.jsonSchema);
+  }
+  if (input.excludeDynamicSections === true) {
+    args.push('--exclude-dynamic-system-prompt-sections');
   }
 
   args.push('-p', input.prompt, '--output-format', 'json', '--dangerously-skip-permissions');
+
+  if (
+    typeof input.maxBudgetUsd === 'number' &&
+    Number.isFinite(input.maxBudgetUsd) &&
+    input.maxBudgetUsd > 0
+  ) {
+    args.push('--max-budget-usd', String(input.maxBudgetUsd));
+  }
 
   if (
     input.resumeSessionId !== undefined &&

@@ -1,11 +1,16 @@
 // Jest Snapshot v1, https://goo.gl/fbAQLP
 
-exports[`buildClaudeArgs paridade task real vs warm (ADR-V2-045/039) snapshot do argv de um warm (referência de paridade) 1`] = `
+exports[`buildClaudeArgs paridade task real vs warm snapshot do argv de um warm (referência de paridade) 1`] = `
 [
-  "--system-prompt",
-  "# Padrões Backend Devari
-
-... 58k tokens ...",
+  "--append-system-prompt",
+  "[Scrumban VPS — execução headless, sem humano na sessão]
+- Nunca faça perguntas nem espere confirmação: decida com bom senso e registre a decisão no resumo.
+- Trabalhe somente na branch indicada no bloco de controle; não troque de branch, não faça merge e não reescreva histórico.
+- Rode cada subagente em primeiro plano (foreground) e aguarde o término antes de seguir.
+- Ao final, responda somente com a saída estruturada do contrato (contractVersion 1).",
+  "--json-schema",
+  "{"type":"object","additionalProperties":false,"required":["contractVersion","decision","reviewScore","stages","branch","commit","prUrl","summary"],"properties":{"contractVersion":{"type":"integer","const":1},"decision":{"type":"string","enum":["APPROVED","NEEDS_CHANGES","REJECTED","NO_CHANGES","ABORTED"]},"reviewScore":{"type":["number","null"],"minimum":0,"maximum":10},"reviewFile":{"type":["string","null"],"maxLength":300},"stages":{"type":"array","maxItems":10,"items":{"type":"object","additionalProperties":false,"required":["name","status"],"properties":{"name":{"type":"string","maxLength":40},"status":{"type":"string","enum":["done","skipped","failed"]}}}},"branch":{"type":["string","null"],"maxLength":200},"commit":{"type":["string","null"],"maxLength":64},"prUrl":{"type":["string","null"],"maxLength":500},"summary":{"type":"string","maxLength":2000}}}",
+  "--exclude-dynamic-system-prompt-sections",
   "-p",
   "responda apenas ok. nao use ferramentas.",
   "--output-format",
@@ -16,32 +21,21 @@ exports[`buildClaudeArgs paridade task real vs warm (ADR-V2-045/039) snapshot do
 ]
 `;
 
-exports[`buildClaudeArgs paridade task real vs warm (ADR-V2-045/039) snapshot do argv de uma task real (referência de paridade) 1`] = `
+exports[`buildClaudeArgs paridade task real vs warm snapshot do argv de uma task real (referência de paridade) 1`] = `
 [
-  "--system-prompt",
-  "# Padrões Backend Devari
-
-... 58k tokens ...",
+  "--append-system-prompt",
+  "[Scrumban VPS — execução headless, sem humano na sessão]
+- Nunca faça perguntas nem espere confirmação: decida com bom senso e registre a decisão no resumo.
+- Trabalhe somente na branch indicada no bloco de controle; não troque de branch, não faça merge e não reescreva histórico.
+- Rode cada subagente em primeiro plano (foreground) e aguarde o término antes de seguir.
+- Ao final, responda somente com a saída estruturada do contrato (contractVersion 1).",
+  "--json-schema",
+  "{"type":"object","additionalProperties":false,"required":["contractVersion","decision","reviewScore","stages","branch","commit","prUrl","summary"],"properties":{"contractVersion":{"type":"integer","const":1},"decision":{"type":"string","enum":["APPROVED","NEEDS_CHANGES","REJECTED","NO_CHANGES","ABORTED"]},"reviewScore":{"type":["number","null"],"minimum":0,"maximum":10},"reviewFile":{"type":["string","null"],"maxLength":300},"stages":{"type":"array","maxItems":10,"items":{"type":"object","additionalProperties":false,"required":["name","status"],"properties":{"name":{"type":"string","maxLength":40},"status":{"type":"string","enum":["done","skipped","failed"]}}}},"branch":{"type":["string","null"],"maxLength":200},"commit":{"type":["string","null"],"maxLength":64},"prUrl":{"type":["string","null"],"maxLength":500},"summary":{"type":"string","maxLength":2000}}}",
+  "--exclude-dynamic-system-prompt-sections",
   "-p",
-  "You are an Implementer. Faça X.",
+  "/scrumban-executar CONTROLE-SCRUMBAN v1 ...",
   "--output-format",
   "json",
   "--dangerously-skip-permissions",
-]
-`;
-
-exports[`buildClaudeArgs paridade task real vs warm (ADR-V2-045/039) snapshot do argv de uma task real COM resume (referência) 1`] = `
-[
-  "--system-prompt",
-  "# Padrões Backend Devari
-
-... 58k tokens ...",
-  "-p",
-  "You are an Implementer. Faça X.",
-  "--output-format",
-  "json",
-  "--dangerously-skip-permissions",
-  "--resume",
-  "session-uuid-here",
 ]
 `;

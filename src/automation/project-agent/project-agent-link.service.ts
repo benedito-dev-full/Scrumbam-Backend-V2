@@ -44,7 +44,14 @@ const PROJECT_SLUG_MAX_LENGTH = 64;
 const PROJECT_SLUG_REGEX = /^[a-z0-9-]{1,64}$/;
 
 /**
- * Converte um nome arbitrario de projeto em projectSlug canonico.
+ * FALLBACK de projectSlug a partir do nome (projeto legado sem `dados.slug`).
+ *
+ * ADR-V2-083: a fonte canonica do slug de um vinculo NOVO e `DProject.dados.slug`
+ * (unico — `ProjectsService.deriveUniqueSlug`, com sufixo de colisao). Antes,
+ * este slugify (sem sufixo) fazia dois projetos homonimos receberem o MESMO
+ * `projectSlug` ⇒ o 2º provisionamento sobrescrevia a secao `## <slug>` do
+ * CLAUDE.md da VPS ⇒ execucao no clone do outro cliente. So e usado quando o
+ * projeto nao tem `dados.slug` valido.
  *
  * Regras (plan-2026-05-13 §5 + ADR-V2-035):
  * - Normaliza acentos (NFD + strip diacritics).
@@ -88,6 +95,22 @@ export class ProjectAgentLinkService {
     private readonly remoteClient: RemoteExecutionClient,
   ) {}
 
+  /**
+   * Vincula um agente VPS a um projeto (DVincula `PROJECT_AGENT`), com slug fixo.
+   *
+   * ADR-V2-083 (P-slug): vínculo novo usa `DProject.dados.slug` (único, com sufixo
+   * de colisão) como `projectSlug`; vínculo existente mantém o slug já provisionado
+   * na VPS. Fallback do nome só para projeto legado sem `dados.slug`. Dispatch usa
+   * o `projectSlug` gravado no vínculo (o que a VPS conhece).
+   *
+   * @param projectId - DProject.chave
+   * @param agentId - DEntidade do agente (idClasse AGENT)
+   * @param tipo - Tipo de vínculo do agente (normalizado por `normalizeTipo`)
+   * @param userEntidadeId - Usuário que solicita (precisa ser gestor do projeto ou admin da org)
+   * @returns `LinkAgentResponseDto` do vínculo criado ou atualizado
+   * @throws NotFoundException se projeto ou agente não existir (ou já foi removido)
+   * @throws erro de permissão se o usuário não for gestor do projeto nem admin da org
+   */
   async linkAgent(
     projectId: bigint,
     agentId: bigint,
@@ -122,7 +145,7 @@ export class ProjectAgentLinkService {
 
       const project = await tx.dProject.findUnique({
         where: { chave: projectId },
-        select: { nome: true },
+        select: { nome: true, dados: true },
       });
       if (!project) {
         throw new NotFoundException(`Projeto ${projectId} nao encontrado`);
@@ -157,7 +180,15 @@ export class ProjectAgentLinkService {
         PROJECT_SLUG_REGEX.test(existingMeta.projectSlug)
           ? (existingMeta.projectSlug as string)
           : null;
-      const projectSlug = existingSlug ?? slugifyProjectName(project.nome, projectId);
+      // ADR-V2-083: vinculo existente mantem o slug ja provisionado na VPS;
+      // vinculo novo usa o slug UNICO do projeto (fallback: slugify do nome).
+      const projectDadosSlug = (project.dados as Record<string, unknown> | null)?.slug;
+      const canonicalSlug =
+        typeof projectDadosSlug === 'string' && PROJECT_SLUG_REGEX.test(projectDadosSlug)
+          ? projectDadosSlug
+          : null;
+      const projectSlug =
+        existingSlug ?? canonicalSlug ?? slugifyProjectName(project.nome, projectId);
 
       const now = new Date().toISOString();
       if (existing) {

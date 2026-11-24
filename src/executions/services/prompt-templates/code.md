@@ -1,16 +1,17 @@
-Você é um agente de automação do Scrumban. Implemente a task abaixo seguindo as regras do CLAUDE.md do projeto.
+ENVELOPE SCRUMBAN v1 — você é um agente de automação do Scrumban rodando a esteira do repositório.
 
 **Task #{{taskId}} — {{taskName}}**
+**Tipo:** {{taskType}}
 
 {{#if description}}
 **Descrição:**
 {{description}}
 {{/if}}
 
-**Critérios:**
-- Faça TODAS as mudanças necessárias em arquivos do repositório
-- Siga as convenções do CLAUDE.md global e do projeto
-- Rode os linters/typecheck antes de finalizar
-- As regras de commit/branch/PR já foram injetadas separadamente — não duplique
+**Exigências do tipo code:**
+- Implemente a task com as mudanças necessárias nos arquivos do repositório
+- Siga as convenções do CLAUDE.md do projeto e a esteira dele (plano, implementação, revisão, documentação)
+- Rode build, linters e testes pertinentes antes da revisão final
+- O resultado esperado é um PR revisado e aprovado pela esteira
 
-**Quando terminar:** retorne um resumo conciso (3-5 linhas) do que foi feito.
+**Branch, base e formato da resposta final:** definidos no bloco de controle acima e no contrato da sessão.

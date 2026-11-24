@@ -72,7 +72,49 @@ export interface ExecutionResultPayload {
   stdoutTruncated: string;
   stderrTruncated: string;
   errorCode?: string;
+  /**
+   * Resultado da esteira headless (ADR-V2-083) — aditivo/opcional. Backend
+   * antigo REJEITA (forbidNonWhitelisted → 400): o backend sobe ANTES do agente.
+   */
+  pipeline?: ExecutionPipelinePayload;
 }
+
+/** PR verificado via `gh pr list`. */
+export interface PipelineVerifiedPrPayload {
+  url: string;
+  number: number;
+  state: 'OPEN' | 'CLOSED' | 'MERGED';
+  isDraft: boolean;
+  baseRefName: string;
+  headRefOid: string;
+}
+
+/** Bloco `pipeline` do callback — espelho de `ExecutionPipelineResultDto` (backend). */
+export interface ExecutionPipelinePayload {
+  mode: 'pipeline' | 'simple';
+  declared: import('../claude-code/pipeline-contract').PipelineDeclared | null;
+  verified: {
+    branchExists: boolean;
+    pushed: boolean;
+    commitsAhead: number | null;
+    headSha: string | null;
+    baseBranch: string | null;
+    pr: PipelineVerifiedPrPayload | null;
+    prOpenedBy: 'pipeline' | 'agent-fallback' | null;
+    subagents: Record<string, number> | null;
+    contractValid: boolean;
+    contractError?: string | null;
+    verifyError?: string | null;
+  } | null;
+}
+
+/**
+ * Retry do execution-result (ADR-V2-083): o resultado pode representar HORAS
+ * de esteira — uma queda curta do túnel não pode perdê-lo. 12 tentativas,
+ * base 2s, teto 60s ⇒ ~7 min de backoff (+ timeouts por request ≈ 8–9 min).
+ * 4xx continua sem retry.
+ */
+export const EXECUTION_RESULT_RETRY = { maxAttempts: 12, baseDelayMs: 2_000, maxDelayMs: 60_000 };
 
 /**
  * Erro de transporte usado para distinguir 4xx (sem retry) de 5xx/rede (com retry).
@@ -173,6 +215,7 @@ export function createBackendClient(
     path: string,
     body: unknown,
     contextLog: Record<string, unknown>,
+    retry: { maxAttempts: number; baseDelayMs: number; maxDelayMs: number } = opts,
   ): Promise<void> {
     const serialized = body === undefined ? '' : JSON.stringify(body);
     const url = `${baseUrl}${path}`;
@@ -180,7 +223,7 @@ export function createBackendClient(
     let attempt = 0;
     let lastError: unknown = null;
 
-    while (attempt < opts.maxAttempts) {
+    while (attempt < retry.maxAttempts) {
       attempt += 1;
 
       // Re-assinar a cada tentativa: timestamp/nonce mudam, evita
@@ -255,8 +298,8 @@ export function createBackendClient(
         );
       }
 
-      if (attempt < opts.maxAttempts) {
-        const delay = computeBackoffDelay(attempt, opts.baseDelayMs, opts.maxDelayMs);
+      if (attempt < retry.maxAttempts) {
+        const delay = computeBackoffDelay(attempt, retry.baseDelayMs, retry.maxDelayMs);
         await opts.sleep(delay);
       }
     }
@@ -283,10 +326,19 @@ export function createBackendClient(
 
     async sendExecutionResult(payload: ExecutionResultPayload): Promise<void> {
       const path = `/agents/${encodeURIComponent(config.agentId)}/execution-result`;
-      await send('POST', path, payload, {
-        stage: 'execution-result',
-        executionId: payload.executionId,
-      });
+      // ADR-V2-083: janela maior (~8 min) — salvo override explícito (testes).
+      const retry = {
+        maxAttempts: options.maxAttempts ?? EXECUTION_RESULT_RETRY.maxAttempts,
+        baseDelayMs: options.baseDelayMs ?? EXECUTION_RESULT_RETRY.baseDelayMs,
+        maxDelayMs: options.maxDelayMs ?? EXECUTION_RESULT_RETRY.maxDelayMs,
+      };
+      await send(
+        'POST',
+        path,
+        payload,
+        { stage: 'execution-result', executionId: payload.executionId },
+        retry,
+      );
     },
   };
 }

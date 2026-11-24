@@ -34,6 +34,8 @@ const BASE_CONFIG: AgentConfig = {
   claudeMdPath: '/tmp/.claude/CLAUDE.md',
   agentSshKeyPath: '/tmp/keys/id_ed25519',
   logLevel: 'error',
+  pipelineTimeoutMaxSec: 21_600,
+  prFallback: true,
 };
 
 function silentLogger() {

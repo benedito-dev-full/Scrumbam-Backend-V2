@@ -548,4 +548,131 @@ describe('AgentsService.recordExecutionResult', () => {
       expect(tasksService.updateStatus).not.toHaveBeenCalled();
     });
   });
+
+  describe('ADR-V2-083 — esteira headless (política do Engine decide o desfecho)', () => {
+    const SHA = 'a1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8c9d0';
+    const pipelineDados = () =>
+      buildDadosExecucao({
+        task: { id: '55' },
+        git: { branch: 'scrumban/exec-4815', baseBranch: null },
+        pipeline: { required: true, prRequired: true, taskType: 'code', contractVersion: 1 },
+      });
+    const pipelineBlock = (decision: 'APPROVED' | 'NEEDS_CHANGES' = 'APPROVED') => ({
+      mode: 'pipeline' as const,
+      declared: {
+        contractVersion: 1,
+        decision,
+        reviewScore: decision === 'APPROVED' ? 9 : 7,
+        stages: [{ name: 'reviewer', status: 'done' as const }],
+        branch: 'scrumban/exec-4815',
+        commit: SHA.slice(0, 7),
+        prUrl: 'https://github.com/acme/api/pull/42',
+        summary: 'ok',
+      },
+      verified: {
+        branchExists: true,
+        pushed: true,
+        commitsAhead: 2,
+        headSha: SHA,
+        baseBranch: 'main',
+        pr: {
+          url: 'https://github.com/acme/api/pull/42',
+          number: 42,
+          state: 'OPEN' as const,
+          isDraft: decision !== 'APPROVED',
+          baseRefName: 'main',
+          headRefOid: SHA,
+        },
+        prOpenedBy: 'pipeline' as const,
+        subagents: { strategist: 1, implementer: 1, reviewer: 1, documenter: 1 },
+        contractValid: true,
+      },
+    });
+
+    it('exit 0 mas esteira NÃO aprovou → task FAILED (não DONE), agent.execution.failed + execution.failed com reason', async () => {
+      const { service, casMock, eventProducer, tasksService } = buildService({
+        findFirstResult: {
+          chave: BigInt(4815),
+          idClasse: BigInt(-301),
+          dados: pipelineDados(),
+        },
+      });
+
+      await service.recordExecutionResult({
+        agentId: AGENT_ID,
+        agentEntity: authenticatedAgent,
+        dto: { ...baseDtoValid, pipeline: pipelineBlock('NEEDS_CHANGES') },
+      });
+
+      expect(casDados(casMock).statusCode).toBe('-520');
+      expect(tasksService.updateStatus).toHaveBeenCalledWith('55', { status: 'FAILED' });
+      expect(eventProducer.addInternalEvent).toHaveBeenCalledWith(
+        'agent.execution.failed',
+        expect.objectContaining({
+          prUrl: 'https://github.com/acme/api/pull/42',
+          branch: 'scrumban/exec-4815',
+          decision: 'NEEDS_CHANGES',
+          reviewScore: 7,
+          pipelineReason: 'PIPELINE_NOT_APPROVED',
+          errorCode: 'PIPELINE_NOT_APPROVED',
+        }),
+        CORRELATION_ID,
+        expect.anything(),
+      );
+      expect(eventProducer.addInternalEvent).toHaveBeenCalledWith(
+        'execution.failed',
+        expect.objectContaining({ executionId: '4815', taskId: '55', reason: 'PIPELINE_NOT_APPROVED' }),
+        CORRELATION_ID,
+        expect.anything(),
+      );
+    });
+
+    it('APPROVED + PR verificado → task DONE, execution.succeeded com prUrl (após persistir)', async () => {
+      const { service, casMock, eventProducer, tasksService } = buildService({
+        findFirstResult: { chave: BigInt(4815), idClasse: BigInt(-301), dados: pipelineDados() },
+      });
+
+      await service.recordExecutionResult({
+        agentId: AGENT_ID,
+        agentEntity: authenticatedAgent,
+        dto: { ...baseDtoValid, pipeline: pipelineBlock('APPROVED') },
+      });
+
+      expect(casDados(casMock).pullRequest.url).toBe('https://github.com/acme/api/pull/42');
+      expect(tasksService.updateStatus).toHaveBeenCalledWith('55', { status: 'DONE' });
+      const types = eventProducer.addInternalEvent.mock.calls.map((c: unknown[]) => c[0]);
+      expect(types).toEqual(
+        expect.arrayContaining(['agent.execution.finished', 'execution.succeeded']),
+      );
+      expect(types).not.toContain('execution.failed');
+      // Padrão #7: CAS (persistência) antes do 1º evento
+      expect(casMock.mock.invocationCallOrder[0]).toBeLessThan(
+        eventProducer.addInternalEvent.mock.invocationCallOrder[0],
+      );
+      expect(eventProducer.addInternalEvent).toHaveBeenCalledWith(
+        'execution.succeeded',
+        expect.objectContaining({ prUrl: 'https://github.com/acme/api/pull/42', reviewScore: 9 }),
+        CORRELATION_ID,
+        expect.anything(),
+      );
+    });
+
+    it('agente 0.1.x (sem bloco pipeline) numa execução de esteira → regra legada (compat), sem eventos novos', async () => {
+      const { service, casMock, eventProducer, tasksService } = buildService({
+        findFirstResult: { chave: BigInt(4815), idClasse: BigInt(-301), dados: pipelineDados() },
+      });
+
+      await service.recordExecutionResult({
+        agentId: AGENT_ID,
+        agentEntity: authenticatedAgent,
+        dto: baseDtoValid,
+      });
+
+      expect(casDados(casMock).statusCode).toBe('-519');
+      expect(tasksService.updateStatus).toHaveBeenCalledWith('55', { status: 'DONE' });
+      const types = eventProducer.addInternalEvent.mock.calls.map((c: unknown[]) => c[0]);
+      expect(types).not.toContain('execution.succeeded');
+      expect(types).not.toContain('execution.failed');
+    });
+  });
 });

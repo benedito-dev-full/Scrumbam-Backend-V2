@@ -55,7 +55,10 @@ túnel caído, `claude` travado). A DTask vinculada ficava EXECUTING (somente le
    `TIMEOUT_NO_CALLBACK`; `lastSeen − uptime > startedAt + 60s` (heartbeat) → `AGENT_RESTARTED`.
 6. **409 PROJECT_BUSY (P2):** `RemoteAgentHttpError` (subclasse de `ServiceUnavailableException`) preserva
    `httpStatus` + `errorCode`; o processor devolve para QUEUED e re-enfileira (`jobId=<id>-busy-<n>`) com backoff
-   30s·2ⁿ⁻¹ até 300s; após 10 tentativas → FAILED `PROJECT_BUSY_EXHAUSTED`. A task só vai a EXECUTING **depois do ACK**
+   30s·2ⁿ⁻¹ até 300s; após 10 tentativas → FAILED `PROJECT_BUSY_EXHAUSTED`.
+   **Emenda ADR-V2-083 (decisão CEO P4, 2026-11-23):** a desistência passou a ser POR TEMPO — re-enfileira
+   enquanto `now − firstBusyAt ≤ EXECUTION_BUSY_MAX_WAIT_SEC` (21900 s ≈ 6h05 = teto do modo esteira + margem);
+   `EXECUTION_BUSY_MAX_RETRIES` fica deprecated. `QUEUE_STALE` segue seguro (cada retry regrava `nextAttemptAt`). A task só vai a EXECUTING **depois do ACK**
    e somente se a execução ainda estiver RUNNING.
 7. **Anti-duplicata em todas as entradas:** `ExecutionsService.execute` recusa task com execução não-terminal
    (409 `code:EXECUTION_IN_PROGRESS`, `details:{reason:'execution_in_progress', executionId, status}`); MCP/Nexus mapeiam

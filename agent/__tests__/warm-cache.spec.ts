@@ -8,10 +8,12 @@
  *  4. Binário claude ausente (ENOENT) → CLAUDE_BINARY_MISSING
  *  5. Timeout do execFile → WARM_TIMEOUT
  *  6. JSON output malformado → CLAUDE_OUTPUT_PARSE_FAILED, métricas zero
- *  7. CLAUDE.md ausente → continua sem --system-prompt (warn log), success=true
+ *  7. (ADR-V2-083) argv com as MESMAS flags de sessão da task real do modo
+ *     esteira; CLAUDE.md global NÃO é mais lido; `error_max_turns` com cache
+ *     criado conta como warm bem-sucedido
  *  8. is_error:true no JSON → success=false, errorCode=CLAUDE_IS_ERROR
  *
- * Estratégia: mockar execFileImpl, resolveImpl, validateImpl, readFileImpl,
+ * Estratégia: mockar execFileImpl, resolveImpl, validateImpl,
  * clockImpl. Sem filesystem real.
  */
 import pino from 'pino';
@@ -19,6 +21,10 @@ import { AllowlistError } from '../src/claude-code/allowlist';
 import { IdentityResolverError } from '../src/claude-code/identity-resolver';
 import type { AgentConfig, CacheWarmerConfig } from '../src/config/schema';
 import { warmCache, type WarmCacheDeps } from '../src/handlers/warm-cache.handler';
+import {
+  PIPELINE_APPEND_SYSTEM_PROMPT,
+  PIPELINE_RESULT_SCHEMA_JSON,
+} from '../src/claude-code/pipeline-contract';
 
 const TEST_CONFIG: AgentConfig = {
   agentId: 'agent-warm-test',
@@ -33,6 +39,8 @@ const TEST_CONFIG: AgentConfig = {
   claudeMdPath: '/home/dev/.claude/CLAUDE.md',
   agentSshKeyPath: '/etc/scrumban-agent/ssh_key',
   logLevel: 'error',
+  pipelineTimeoutMaxSec: 21_600,
+  prFallback: true,
 };
 
 const WARMER_CONFIG: CacheWarmerConfig = {
@@ -60,7 +68,6 @@ function makeDeps(overrides?: Partial<WarmCacheDeps>): WarmCacheDeps {
     }) as never,
     resolveImpl: () => '/home/dev/projetos/my-proj',
     validateImpl: () => '/home/dev/projetos/my-proj',
-    readFileImpl: async () => '# CLAUDE.md content (~58k tokens)',
     clockImpl: () => 1700000000000, // fixed
     ...overrides,
   };
@@ -157,10 +164,17 @@ describe('warmCache', () => {
     expect(result.errorCode).toBeUndefined();
     expect(result.projectSlug).toBe('my-proj');
 
-    // Paridade — primeiro arg passado ao execFile deve ser '--system-prompt'.
-    expect(captured.args?.[0]).toBe('--system-prompt');
-    expect(captured.args?.[2]).toBe('-p');
-    expect(captured.args?.[3]).toBe('responda apenas ok. nao use ferramentas.');
+    // Paridade (ADR-V2-083): mesmas flags de sessão da task real do modo esteira.
+    expect(captured.args?.slice(0, 5)).toEqual([
+      '--append-system-prompt',
+      PIPELINE_APPEND_SYSTEM_PROMPT,
+      '--json-schema',
+      PIPELINE_RESULT_SCHEMA_JSON,
+      '--exclude-dynamic-system-prompt-sections',
+    ]);
+    expect(captured.args).not.toContain('--system-prompt');
+    expect(captured.args?.[5]).toBe('-p');
+    expect(captured.args?.[6]).toBe('responda apenas ok. nao use ferramentas.');
     expect(captured.args).toContain('--permission-mode=plan');
     expect(captured.args).toContain('--max-turns=1');
     expect(captured.cwd).toBe('/home/dev/projetos/my-proj');
@@ -252,35 +266,84 @@ describe('warmCache', () => {
     expect(result.claudeSessionId).toBeNull();
   });
 
-  it('7) CLAUDE.md ausente → continua sem --system-prompt, success=true', async () => {
-    const captured: { args?: string[] } = {};
+  it('7) error_max_turns (json-schema + max-turns=1) COM cache criado → warm bem-sucedido', async () => {
+    // Verificado no CLI 2.1.330: com --json-schema e --max-turns=1 o CLI sai com
+    // exit 1 / subtype error_max_turns, mas o prefixo já foi cacheado.
+    const maxTurnsJson = JSON.stringify({
+      type: 'result',
+      subtype: 'error_max_turns',
+      is_error: true,
+      session_id: '22df17ba-7d3d-4c0c-ad5d-234a9ad4b03d',
+      total_cost_usd: 0.0036,
+      usage: {
+        input_tokens: 2,
+        output_tokens: 10,
+        cache_creation_input_tokens: 17446,
+        cache_read_input_tokens: 12235,
+      },
+    });
     const exec = ((
       _bin: string,
-      args: string[],
+      _args: string[],
       _opts: unknown,
-      cb: (e: null, stdout: string, stderr: string) => void,
+      cb: (e: Error | null, stdout: string, stderr: string) => void,
     ) => {
-      captured.args = args;
-      setImmediate(() => cb(null, VALID_WARM_JSON, ''));
+      const err = Object.assign(new Error('exit 1'), { code: 1, stdout: maxTurnsJson, stderr: '' });
+      setImmediate(() => cb(err, maxTurnsJson, ''));
+      return { on: () => undefined } as never;
+    }) as never;
+
+    const result = await warmCache({ projectSlug: 'my-proj' }, makeDeps({ execFileImpl: exec }));
+
+    expect(result.success).toBe(true);
+    expect(result.cacheCreationTokens).toBe(17446);
+    expect(result.errorCode).toBeUndefined();
+  });
+
+  it('7b) error_max_turns SEM cache (0 tokens) continua sendo falha', async () => {
+    const noCache = JSON.stringify({
+      type: 'result',
+      subtype: 'error_max_turns',
+      is_error: true,
+      session_id: '22df17ba-7d3d-4c0c-ad5d-234a9ad4b03d',
+      usage: { cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+    });
+    const exec = ((
+      _bin: string,
+      _args: string[],
+      _opts: unknown,
+      cb: (e: Error | null, stdout: string, stderr: string) => void,
+    ) => {
+      setImmediate(() => cb(Object.assign(new Error('x'), { code: 1, stdout: noCache }), noCache, ''));
+      return { on: () => undefined } as never;
+    }) as never;
+
+    const result = await warmCache({ projectSlug: 'my-proj' }, makeDeps({ execFileImpl: exec }));
+
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe('CLAUDE_IS_ERROR');
+  });
+
+  it('N4: stderr do CLI com segredo do ambiente → errorMessage redigido', async () => {
+    const SECRET = 'sk-ant-WARM-SEGREDO-123456';
+    const exec = ((
+      _bin: string,
+      _args: string[],
+      _opts: unknown,
+      cb: (e: Error | null, stdout: string, stderr: string) => void,
+    ) => {
+      const err = Object.assign(new Error('exit 1'), { code: 1, stdout: 'nao-json', stderr: `auth falhou key=${SECRET}` });
+      setImmediate(() => cb(err, 'nao-json', `auth falhou key=${SECRET}`));
       return { on: () => undefined } as never;
     }) as never;
 
     const result = await warmCache(
       { projectSlug: 'my-proj' },
-      makeDeps({
-        execFileImpl: exec,
-        readFileImpl: async () => {
-          const err = new Error('ENOENT: no such file') as NodeJS.ErrnoException;
-          err.code = 'ENOENT';
-          throw err;
-        },
-      }),
+      makeDeps({ execFileImpl: exec, env: { ANTHROPIC_API_KEY: SECRET } }),
     );
 
-    expect(result.success).toBe(true);
-    // Sem CLAUDE.md, primeiro arg deve ser `-p` (não `--system-prompt`).
-    expect(captured.args?.[0]).toBe('-p');
-    expect(captured.args?.[1]).toBe('responda apenas ok. nao use ferramentas.');
+    expect(result.errorCode).toBe('CLAUDE_OUTPUT_PARSE_FAILED');
+    expect(result.errorMessage).toBe('auth falhou key=[REDACTED]');
   });
 
   it('8) is_error=true no JSON → success=false, errorCode=CLAUDE_IS_ERROR', async () => {

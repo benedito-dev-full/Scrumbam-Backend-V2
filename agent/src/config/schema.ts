@@ -66,6 +66,26 @@ export const AgentConfigSchema = z.object({
   logLevel: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
 
   /**
+   * Teto LOCAL (s) do timeout do modo esteira (ADR-V2-083, decisão CEO P2).
+   * O backend manda `timeoutSec` (default 4h); o agente aplica
+   * `min(timeoutSec, pipelineTimeoutMaxSec)`. Default 6h.
+   */
+  pipelineTimeoutMaxSec: z.number().int().min(60).max(21_600).default(21_600),
+
+  /**
+   * Teto de custo por execução da esteira (`--max-budget-usd`). AUSENTE =
+   * desligado (decisão CEO P2: ligar só após medir 5–10 execuções reais).
+   */
+  maxBudgetUsd: z.number().positive().optional(),
+
+  /**
+   * Rede de segurança de PR (ADR-V2-083, decisão CEO P3): commits na branch sem
+   * PR ⇒ o agente publica e abre PR em RASCUNHO (`prOpenedBy='agent-fallback'`);
+   * a execução continua FAILED (`PR_NOT_CREATED`). Default ligado.
+   */
+  prFallback: z.boolean().default(true),
+
+  /**
    * Configuração opcional do Cache Warmer.
    *
    * Quando habilitado, o agente dispara periodicamente sessões fantasma

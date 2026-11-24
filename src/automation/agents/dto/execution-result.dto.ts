@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
   IsBoolean,
   IsEnum,
@@ -9,7 +10,9 @@ import {
   Matches,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
+import { ExecutionPipelineResultDto } from './execution-pipeline-result.dto';
 
 /**
  * Códigos de erro categorizados que o agente V2 pode reportar no callback
@@ -20,6 +23,9 @@ import {
  * - `TIMEOUT` — execução excedeu `timeoutSec`
  * - `CLAUDE_CLI_MISSING` — binário `claude` não encontrado no PATH do agente
  * - `UNKNOWN` — categoria não classificada (fallback)
+ * - `PIPELINE_NOT_INSTALLED` — repo sem `.claude/commands/scrumban-executar.md` (ADR-V2-083)
+ * - `PIPELINE_PRECONDITION_FAILED` — `gh`/`GITHUB_TOKEN` ausentes ou preparo do git falhou (ADR-V2-083)
+ * - `BASE_BRANCH_NOT_FOUND` — branch base do PR não existe no remoto (ADR-V2-083)
  *
  * @see ADR-V2-033 (callback contract)
  */
@@ -29,6 +35,9 @@ export type ExecutionResultErrorCode =
   | 'TIMEOUT'
   | 'CLAUDE_CLI_MISSING'
   | 'GIT_PULL_FAILED'
+  | 'PIPELINE_NOT_INSTALLED'
+  | 'PIPELINE_PRECONDITION_FAILED'
+  | 'BASE_BRANCH_NOT_FOUND'
   | 'UNKNOWN';
 
 const EXECUTION_RESULT_ERROR_CODES: ExecutionResultErrorCode[] = [
@@ -37,6 +46,9 @@ const EXECUTION_RESULT_ERROR_CODES: ExecutionResultErrorCode[] = [
   'TIMEOUT',
   'CLAUDE_CLI_MISSING',
   'GIT_PULL_FAILED',
+  'PIPELINE_NOT_INSTALLED',
+  'PIPELINE_PRECONDITION_FAILED',
+  'BASE_BRANCH_NOT_FOUND',
   'UNKNOWN',
 ];
 
@@ -225,6 +237,17 @@ export class ExecutionResultDto {
     message: `errorCode deve ser um de: ${EXECUTION_RESULT_ERROR_CODES.join(', ')}`,
   })
   errorCode?: ExecutionResultErrorCode;
+
+  /**
+   * Resultado da esteira headless (ADR-V2-083) — OPCIONAL e aditivo.
+   * Ausente (agente 0.1.x) ⇒ regra legada (exit 0). Presente ⇒ o Engine aplica
+   * a política `avaliarDesfechoEsteira` e grava `dados.git`/`pullRequest`/`pipeline`.
+   */
+  @ApiPropertyOptional({ type: ExecutionPipelineResultDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ExecutionPipelineResultDto)
+  pipeline?: ExecutionPipelineResultDto;
 }
 
 /**

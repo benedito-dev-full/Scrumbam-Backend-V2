@@ -17,12 +17,12 @@
  * 12. Mutex: 2ª request mesmo slug enquanto 1ª roda → 409 PROJECT_BUSY
  * 13. Mutex liberado após exception no runner
  * 14. Timeout reportado (timedOut=true → success=false)
- * 15. readFileImpl retorna conteúdo → runner recebe systemPrompt
- * 16. readFileImpl lança ENOENT → runner chamado sem systemPrompt, success=true
- * 17. readFileImpl retorna string vazia → runner chamado sem systemPrompt
+ * 15-17. (ADR-V2-083) modo simples NÃO injeta mais o CLAUDE.md global como
+ *        `--system-prompt` (o CLI carrega o CLAUDE.md do repo sozinho) nem as
+ *        flags do modo esteira
  *
  * Estratégia: mockar `runImpl`, `resolveImpl`, `validateImpl`, `snapshotImpl`,
- * `fallbackImpl`, `readFileImpl` no handler — não precisamos de filesystem real.
+ * `fallbackImpl`, `gitExecImpl` no handler — não precisamos de filesystem real.
  */
 import express from 'express';
 import pino from 'pino';
@@ -37,6 +37,7 @@ import {
   type ProjectMutex,
 } from '../src/handlers/run-claude-code.handler';
 import type { BackendClient, ExecutionResultPayload } from '../src/outbound/backend-client';
+import type { GitExec } from '../src/git/pipeline-git';
 
 const TEST_CONFIG: AgentConfig = {
   agentId: 'agent-test-1',
@@ -51,6 +52,8 @@ const TEST_CONFIG: AgentConfig = {
   claudeMdPath: '/home/dev/.claude/CLAUDE.md',
   agentSshKeyPath: '/etc/scrumban-agent/ssh_key',
   logLevel: 'error',
+  pipelineTimeoutMaxSec: 21_600,
+  prFallback: true,
 };
 
 const VALID_SESSION_ID = '22df17ba-7d3d-4c0c-ad5d-234a9ad4b03d';
@@ -131,8 +134,8 @@ function buildApp(deps: {
   runImpl?: () => Promise<RunnerResult>;
   snapshotImpl?: () => string[];
   fallbackImpl?: () => string | null;
-  /** Default: lê string vazia (nenhum system-prompt injetado). */
-  readFileImpl?: (path: string, enc: BufferEncoding) => Promise<string>;
+  /** Default: executor git que falha (diretório "não é repo") — modo simples segue. */
+  gitExecImpl?: GitExec;
 }) {
   const app = express();
   app.use(express.json());
@@ -146,7 +149,11 @@ function buildApp(deps: {
     runImpl: deps.runImpl as never,
     snapshotImpl: deps.snapshotImpl as never,
     fallbackImpl: deps.fallbackImpl as never,
-    readFileImpl: deps.readFileImpl ?? (async () => ''),
+    gitExecImpl:
+      deps.gitExecImpl ??
+      (async () => {
+        throw new Error('not a git repository');
+      }),
   });
   app.post('/v1/execute', handler);
   return app;
@@ -554,50 +561,16 @@ describe('RUN_CLAUDE_CODE handler (Sub-tarefa 4)', () => {
     expect(reported.exitCode).toBe(-1); // null mapeado para -1
   });
 
-  it('15) readFileImpl retorna conteúdo → runner recebe systemPrompt', async () => {
+  it('15-17) modo simples: runner SEM systemPrompt/appendSystemPrompt/jsonSchema (ADR-V2-083)', async () => {
     const backend = mockBackendClient();
-    let capturedSystemPrompt: string | undefined;
-    const CLAUDE_MD_CONTENT = '# Regras\n- Sempre criar branch antes de commitar';
+    let captured: Record<string, unknown> = {};
     const app = buildApp({
       backendClient: backend.client,
       resolveImpl: () => '/home/dev/projetos/x',
       validateImpl: () => '/home/dev/projetos/x',
       snapshotImpl: () => [],
-      readFileImpl: async () => CLAUDE_MD_CONTENT,
-      runImpl: (async (input: { systemPrompt?: string }): Promise<RunnerResult> => {
-        capturedSystemPrompt = input.systemPrompt;
-        return {
-          stdout: buildClaudeJson(),
-          stderr: '',
-          exitCode: 0,
-          signal: null,
-          timedOut: false,
-          durationMs: 100,
-        };
-      }) as never,
-    });
-
-    const res = await request(app).post('/v1/execute').send(BASE_PAYLOAD);
-
-    expect(res.status).toBe(200);
-    await backend.waitForFirstCall();
-    expect(capturedSystemPrompt).toBe(CLAUDE_MD_CONTENT);
-  });
-
-  it('16) readFileImpl lança ENOENT → runner chamado sem systemPrompt, success=true', async () => {
-    const backend = mockBackendClient();
-    let capturedSystemPrompt: string | undefined = 'sentinel';
-    const enoent = Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' });
-    const app = buildApp({
-      backendClient: backend.client,
-      resolveImpl: () => '/home/dev/projetos/x',
-      validateImpl: () => '/home/dev/projetos/x',
-      snapshotImpl: () => [],
-      readFileImpl: async () => {
-        throw enoent;
-      },
-      runImpl: (async (input: { systemPrompt?: string }): Promise<RunnerResult> => {
-        capturedSystemPrompt = input.systemPrompt;
+      runImpl: (async (input: Record<string, unknown>): Promise<RunnerResult> => {
+        captured = input;
         return {
           stdout: buildClaudeJson(),
           stderr: '',
@@ -613,37 +586,70 @@ describe('RUN_CLAUDE_CODE handler (Sub-tarefa 4)', () => {
 
     expect(res.status).toBe(200);
     const reported = await backend.waitForFirstCall();
-    expect(capturedSystemPrompt).toBeUndefined();
     expect(reported.success).toBe(true);
+    expect(reported.pipeline).toBeUndefined();
+    expect(captured.systemPrompt).toBeUndefined();
+    expect(captured.appendSystemPrompt).toBeUndefined();
+    expect(captured.jsonSchema).toBeUndefined();
   });
 
-  it('17) readFileImpl retorna string vazia → runner chamado sem systemPrompt', async () => {
+  it('modo simples: base do PR = default do repo (origin/HEAD), não main fixo', async () => {
     const backend = mockBackendClient();
-    let capturedSystemPrompt: string | undefined = 'sentinel';
+    let prompt = '';
+    const calls: string[][] = [];
+    const gitExecImpl: GitExec = async (_f, args) => {
+      calls.push(args);
+      if (args[0] === 'symbolic-ref') return { stdout: 'origin/develop\n', stderr: '' };
+      return { stdout: '', stderr: '' };
+    };
     const app = buildApp({
       backendClient: backend.client,
       resolveImpl: () => '/home/dev/projetos/x',
       validateImpl: () => '/home/dev/projetos/x',
       snapshotImpl: () => [],
-      readFileImpl: async () => '   \n   ',
-      runImpl: (async (input: { systemPrompt?: string }): Promise<RunnerResult> => {
-        capturedSystemPrompt = input.systemPrompt;
-        return {
-          stdout: buildClaudeJson(),
-          stderr: '',
-          exitCode: 0,
-          signal: null,
-          timedOut: false,
-          durationMs: 100,
-        };
+      gitExecImpl,
+      runImpl: (async (input: { prompt: string }): Promise<RunnerResult> => {
+        prompt = input.prompt;
+        return { stdout: buildClaudeJson(), stderr: '', exitCode: 0, signal: null, timedOut: false, durationMs: 1 };
       }) as never,
     });
 
-    const res = await request(app).post('/v1/execute').send(BASE_PAYLOAD);
-
-    expect(res.status).toBe(200);
+    await request(app).post('/v1/execute').send(BASE_PAYLOAD);
     await backend.waitForFirstCall();
-    expect(capturedSystemPrompt).toBeUndefined();
+
+    expect(calls).toContainEqual(['checkout', 'develop']);
+    expect(calls).not.toContainEqual(['checkout', 'main']);
+    expect(prompt).toContain('--base develop');
+  });
+
+  it('M3 (modo simples): token do ambiente/agentApiKey viram [REDACTED] antes de truncar e enviar', async () => {
+    const backend = mockBackendClient();
+    const GH = 'ghp_SIMPLES_SEGREDO_123456';
+    const prev = process.env.GITHUB_TOKEN;
+    process.env.GITHUB_TOKEN = GH;
+    try {
+      const app = buildApp({
+        backendClient: backend.client,
+        resolveImpl: () => '/home/dev/projetos/x',
+        validateImpl: () => '/home/dev/projetos/x',
+        snapshotImpl: () => [],
+        runImpl: async () => ({
+          stdout: buildClaudeJson({ result: `token ${GH} e api ${TEST_CONFIG.agentApiKey}xx` }),
+          stderr: `GH_TOKEN=${GH}`,
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          durationMs: 1,
+        }),
+      });
+      await request(app).post('/v1/execute').send(BASE_PAYLOAD);
+      const reported = await backend.waitForFirstCall();
+      expect(JSON.stringify(reported)).not.toContain(GH);
+      expect(reported.stderrTruncated).toBe('GH_TOKEN=[REDACTED]');
+    } finally {
+      if (prev === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = prev;
+    }
   });
 
   describe('payload validation', () => {

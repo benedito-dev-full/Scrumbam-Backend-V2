@@ -1,6 +1,34 @@
 # Workflow Status — Scrumban-Backend-V2 Orchestrator
 
-**Ultima atualizacao:** 2026-11-23 (Task 2 Execuções presas em RUNNING COMPLETA — score 9.0, ciclo 3 outcome no DTO)
+**Ultima atualizacao:** 2026-11-23 (Task 3 Esteira headless na VPS COMPLETA — score 9.1; Fase 0 e smoke pendentes)
+
+---
+
+## Esteira multi-agent headless na VPS com contrato verificável (ADR-V2-083) — Task 3 — COMPLETE
+
+**Module:** executions + agent/ 0.2.0
+**Status:** COMPLETA (Fase 0 na VPS e smoke PENDENTES)
+**Completed:** 2026-11-23
+**Quality Score:** 9.1/10 (APPROVED após 3 ciclos: 8.6 → 8.9 → 9.1; gate 8.5)
+
+**Pilares:**
+- Pilar 1 (Engine): desfecho via `OperacaoExecucaoClaude.avaliarDesfechoEsteira` + `registrarOutcome` (CAS)
+- Pilar 2 (Endpoints): callback aditivo `pipeline`; sem controller novo
+- Pilar 3 (Seed): zero DClasse, zero tabela, zero migration
+
+**Deliverables:**
+- [x] Comando `scrumban-executar.md` (backend, frontend, template no agente)
+- [x] Envelope com nonce + contrato v1; preflight; verificação independente; rede de segurança P3
+- [x] 5 motivos de falha novos (total 13); `outcome.reason` com `source=agent`
+- [x] Timeout 4h/6h; busy por tempo (P4); slug do dispatch via vínculo
+- [x] Agente 0.2.0 (L6 kill do grupo, redação de segredos, paridade de aprovação)
+- [ ] Fase 0 na VPS e smoke Task 3 (pendentes)
+- [ ] `maxBudgetUsd` após medir 5–10 execuções
+
+**Metrics:**
+- agent: 312/312; backend jest 676/677 (pré-existente); TypeScript 67 = baseline
+
+**ADRs:** ADR-V2-083 (Aceito), ADR-V2-082 (emenda P4)
 
 ---
 
